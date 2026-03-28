@@ -1,0 +1,2819 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>PRMCE Break Sign-Up</title>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --teal:       #0b7070;
+  --teal-dk:    #084f4f;
+  --teal-lt:    #e4f3f3;
+  --teal-mid:   #b8dcdc;
+  --day:        #d97706;
+  --day-lt:     #fef3e2;
+  --noc:        #3b6cb7;
+  --noc-lt:     #eaf0fb;
+  --red:        #c94040;
+  --red-lt:     #fdeaea;
+  --green:      #2b7a48;
+  --green-lt:   #e6f4ed;
+  --bg:         #f0f5f5;
+  --card:       #ffffff;
+  --border:     #cde0e0;
+  --text:       #192b2b;
+  --muted:      #5a7878;
+  --nav-h:      54px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min-height:100vh}
+
+/* ── Navigation ── */
+.nav{position:sticky;top:0;z-index:200;background:var(--teal-dk);height:var(--nav-h);display:flex;align-items:stretch;box-shadow:0 2px 10px rgba(0,0,0,.2)}
+.nav-brand{padding:0 18px;display:flex;align-items:center;gap:10px;border-right:1px solid rgba(255,255,255,.12);flex-shrink:0}
+.nav-brand svg{width:22px;height:22px;fill:rgba(255,255,255,.7)}
+.nav-brand span{font-size:.8rem;font-weight:700;letter-spacing:.06em;color:white;white-space:nowrap}
+.nav-tabs{display:flex}
+.nav-tab{padding:0 22px;background:none;border:none;border-bottom:3px solid transparent;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.875rem;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all .15s;white-space:nowrap}
+.nav-tab:hover{color:white;background:rgba(255,255,255,.06)}
+.nav-tab.active{color:white;border-bottom-color:var(--day)}
+.nav-time{margin-left:auto;padding:0 16px;display:flex;align-items:center;font-family:'DM Mono',monospace;font-size:.8rem;color:rgba(255,255,255,.5)}
+
+/* ── Tabs ── */
+.tab{display:none;padding:20px 16px 60px;max-width:800px;margin:0 auto}
+.tab.active{display:block}
+
+/* ── Cards ── */
+.card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:14px}
+.card-label{font-size:.7rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);margin-bottom:11px}
+
+/* ── Form elements ── */
+input[type=text],input[type=password]{width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.95rem;color:var(--text);background:var(--bg);outline:none;transition:border-color .15s}
+input[type=text]:focus,input[type=password]:focus{border-color:var(--teal);background:white}
+input::placeholder{color:var(--muted)}
+input[type=date]{padding:8px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.875rem;background:white;color:var(--text);outline:none;cursor:pointer}
+input[type=date]:focus{border-color:var(--teal)}
+select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-family:'DM Sans',sans-serif;font-size:.9rem;color:var(--text);background:white;outline:none;cursor:pointer;width:100%}
+
+/* ── Buttons ── */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:9px 18px;border-radius:9px;border:none;font-family:'DM Sans',sans-serif;font-size:.875rem;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
+.btn-primary{background:var(--teal);color:white}.btn-primary:hover{background:var(--teal-dk)}
+.btn-danger{background:var(--red-lt);color:var(--red)}.btn-danger:hover{background:#f8d0d0}
+.btn-ghost{background:transparent;border:1.5px solid var(--border);color:var(--muted)}.btn-ghost:hover{border-color:var(--teal);color:var(--teal)}
+.btn-success{background:var(--green);color:white}.btn-success:hover{background:#1f5c36}
+.btn-sm{padding:5px 12px;font-size:.78rem;border-radius:7px}
+.btn:disabled{opacity:.4;cursor:not-allowed;pointer-events:none}
+
+/* ── Unit grid ── */
+.unit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:8px}
+.unit-btn{padding:10px 4px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);font-family:'DM Mono',monospace;font-size:.875rem;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
+.unit-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-lt)}
+.unit-btn.active{background:var(--teal);border-color:var(--teal);color:white;font-weight:700}
+
+/* ── Shift badge ── */
+.shift-pill{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:99px;font-size:.875rem;font-weight:600}
+.shift-day{background:var(--day-lt);color:var(--day);border:1.5px solid #f5c060}
+.shift-noc{background:var(--noc-lt);color:var(--noc);border:1.5px solid #a0b8e0}
+
+/* ── Toggle buttons ── */
+.toggle-row{display:flex;gap:8px}
+.toggle-opt{flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);text-align:center;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s}
+.toggle-opt:hover{border-color:var(--teal);color:var(--teal)}
+.toggle-opt.active{background:var(--teal);border-color:var(--teal);color:white}
+
+/* ── Slot list ── */
+.slot-row{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:white;margin-bottom:7px;transition:all .15s}
+.slot-row.open:hover{border-color:var(--teal);box-shadow:0 2px 10px rgba(11,112,112,.1);transform:translateY(-1px)}
+.slot-row.mine{background:var(--teal-lt);border-color:var(--teal)}
+.slot-row.taken{background:var(--red-lt);border-color:#e8b0b0}
+.slot-row.past{opacity:.38;pointer-events:none}
+.slot-row.locked{opacity:.5;cursor:not-allowed;background:#f8f8f8}
+.slot-row.bn-break{background:#fef9ec;border-color:#f0c040;cursor:not-allowed}
+.slot-row.confirmed{background:var(--green-lt);border-color:var(--green)}
+.slot-row.confirmed .slot-time{color:var(--green)}
+
+/* Reports */
+.rpt-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px;margin-bottom:16px}
+.rpt-card{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+.rpt-card .rpt-val{font-size:1.8rem;font-weight:700;color:var(--teal-dk);font-family:'DM Mono',monospace;line-height:1}
+.rpt-card .rpt-lbl{font-size:.7rem;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-top:4px}
+.rpt-card .rpt-sub{font-size:.75rem;color:var(--muted);margin-top:2px}
+.rpt-bar-wrap{background:var(--bg);border-radius:99px;height:8px;overflow:hidden;margin-top:8px}
+.rpt-bar{height:100%;background:var(--teal);border-radius:99px;transition:width .4s}
+.rpt-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border)}
+.rpt-row:last-child{border-bottom:none}
+.rpt-row-lbl{flex:1;font-size:.875rem;font-weight:500}
+.rpt-row-val{font-family:'DM Mono',monospace;font-size:.875rem;font-weight:600;color:var(--teal-dk)}
+.rpt-row-pct{font-size:.75rem;color:var(--muted);min-width:40px;text-align:right}
+.range-btn{padding:6px 14px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
+.range-btn:hover{border-color:var(--teal);color:var(--teal)}
+.range-btn.active{background:var(--teal);border-color:var(--teal);color:white}
+.slot-row.bn-break .slot-time{color:#b07800}
+.slot-time{font-family:'DM Mono',monospace;font-size:.95rem;font-weight:500;color:var(--teal-dk)}
+.slot-row.taken .slot-time{color:var(--red)}
+.slot-name{font-size:.875rem;color:var(--muted)}
+.slot-name.filled{color:var(--text);font-weight:500}
+
+/* ── Summary ── */
+.summ-row{display:grid;grid-template-columns:80px 52px 1fr 110px;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:7px}
+.summ-time{font-family:'DM Mono',monospace;font-size:.9rem;font-weight:500;color:var(--teal-dk)}
+.summ-unit{background:var(--teal-lt);color:var(--teal-dk);padding:3px 7px;border-radius:5px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;text-align:center}
+.summ-nurse{font-size:.875rem;font-weight:500}
+.summ-bn{font-size:.75rem;color:var(--muted);font-style:italic}
+
+/* ── Filter pills ── */
+.filter-row{display:flex;flex-wrap:wrap;gap:7px;margin-bottom:14px}
+.pill{padding:5px 13px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Mono',monospace}
+.pill:hover{border-color:var(--teal);color:var(--teal)}
+.pill.active{background:var(--teal);border-color:var(--teal);color:white}
+
+/* ── Admin ── */
+.roster-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;background:var(--bg);margin-bottom:6px}
+.sched-card{padding:12px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:8px}
+.sched-card-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.unit-tags{display:flex;flex-wrap:wrap;gap:5px}
+.tag{padding:2px 8px;border-radius:4px;font-size:.7rem;font-weight:700;background:var(--teal-lt);color:var(--teal-dk);font-family:'DM Mono',monospace}
+
+/* ── Unit check (admin) ── */
+.unit-check-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px}
+.uc{padding:7px 4px;border-radius:8px;border:1.5px solid var(--border);background:var(--bg);text-align:center;font-family:'DM Mono',monospace;font-size:.8rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s;user-select:none}
+.uc:hover{border-color:var(--teal);color:var(--teal)}
+.uc.on{background:var(--teal-lt);border-color:var(--teal);color:var(--teal-dk);font-weight:700}
+
+/* ── States ── */
+.empty{text-align:center;padding:30px 20px;color:var(--muted);font-size:.875rem;line-height:1.6}
+.spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.info-bar{font-size:.75rem;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
+.divider{height:1px;background:var(--border);margin:14px 0}
+
+/* ── Toast ── */
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--teal-dk);color:white;padding:10px 24px;border-radius:99px;font-size:.875rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.2);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none}
+.toast.show{transform:translateX(-50%) translateY(0)}
+.toast.err{background:var(--red)}
+
+/* ── PW gate ── */
+.pw-gate{max-width:360px;margin:40px auto;text-align:center;padding:32px 24px;background:white;border-radius:16px;border:1px solid var(--border)}
+.pw-gate h2{font-size:1.1rem;color:var(--teal-dk);margin-bottom:6px}
+.pw-gate p{font-size:.85rem;color:var(--muted);margin-bottom:20px}
+.pw-gate input{margin-bottom:10px}
+.row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+.field{flex:1;min-width:120px}
+.field label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
+
+@media(max-width:500px){
+  .nav-brand span{display:none}
+  .tab{padding:14px 12px 60px}
+  .slot-row{grid-template-columns:78px 1fr auto}
+  .summ-row{grid-template-columns:70px 44px 1fr}
+  .summ-bn{display:none}
+}
+</style>
+</head>
+<body>
+
+<!-- ═══════════ NAV ═══════════ -->
+<nav class="nav">
+  <div class="nav-brand">
+    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20A10 10 0 0012 2zm1 14h-2v-4H7l5-7 5 7h-4v4z"/></svg>
+    <span>PRMCE BREAKS</span>
+  </div>
+  <div class="nav-tabs">
+    <button class="nav-tab active" id="nt-staff"   onclick="showTab('staff',this)">🏥 Sign-Up</button>
+    <button class="nav-tab"        id="nt-summary" onclick="showTab('summary',this)">📋 Schedule</button>
+    <button class="nav-tab"        id="nt-bn"      onclick="showTab('bn',this)">🔑 My Breaks</button>
+    <button class="nav-tab"        id="nt-reports" onclick="showTab('reports',this)">📊 Reports</button>
+    <button class="nav-tab"        id="nt-admin"   onclick="showTab('admin',this)">⚙️ Admin</button>
+  </div>
+  <div class="nav-time" id="navClock"></div>
+</nav>
+
+<!-- ═══════════ STAFF TAB ═══════════ -->
+<div id="tab-staff" class="tab active">
+
+  <div class="card">
+    <div class="card-label">Your Name &amp; Extension</div>
+    <div class="row">
+      <div class="field">
+        <label>First Name</label>
+        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" oninput="if(S.unit)loadSlots()"/>
+      </div>
+      <div class="field" style="max-width:150px">
+        <label>Spectra Ext</label>
+        <input type="text" id="nurseExt" placeholder="5-digit ext" maxlength="5" autocomplete="off" inputmode="numeric" pattern="[0-9]{5}" oninput="validateExt(this);if(S.unit)loadSlots()"/>
+      </div>
+    </div>
+    <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
+      ⚠ Both first name and a 5-digit Spectra extension are required.
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="card-label">Your Unit</div>
+    <div class="unit-grid" id="unitGrid"></div>
+  </div>
+
+  <div class="card" id="shiftCard" style="display:none">
+    <div class="card-label">Current Shift</div>
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+      <div id="shiftPill"></div>
+      <button class="btn btn-ghost btn-sm" onclick="flipShift()">Switch shift</button>
+    </div>
+  </div>
+
+  <div id="slotsWrap" style="display:none">
+    <div class="card">
+      <div class="info-bar">
+        <span id="slotsMeta"></span>
+        <span id="slotsLoader" style="display:none"><div class="spinner"></div></span>
+      </div>
+      <div id="slotsList"></div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ═══════════ SUMMARY TAB ═══════════ -->
+<div id="tab-summary" class="tab">
+
+  <div class="card">
+    <div class="row">
+      <div class="field">
+        <label>Date</label>
+        <input type="date" id="summDate" onchange="loadSummary()"/>
+      </div>
+      <div class="field">
+        <label>Shift</label>
+        <div class="toggle-row">
+          <div class="toggle-opt active" id="sDay" onclick="setSummShift('Day')">☀️ Day</div>
+          <div class="toggle-opt"        id="sNoc" onclick="setSummShift('Noc')">🌙 Noc</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card-label" style="padding:0 4px;margin-bottom:8px">Filter by Unit</div>
+  <div class="filter-row" id="summFilter"></div>
+  <div id="summList"><div class="empty"><div class="spinner"></div></div></div>
+
+</div>
+
+<!-- ═══════════ BREAK NURSE TAB ═══════════ -->
+<div id="tab-bn" class="tab">
+
+  <!-- Password gate -->
+  <div id="bnGate">
+    <div class="pw-gate">
+      <div style="font-size:2rem;margin-bottom:10px">🔑</div>
+      <h2>Break Nurse Access</h2>
+      <p>Enter your password to manage your break times</p>
+      <input type="password" id="bnPwInput" placeholder="Password"
+        onkeydown="if(event.key==='Enter')unlockBN()"/>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockBN()">Unlock</button>
+      <div id="bnPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
+    </div>
+  </div>
+
+  <!-- Break nurse panel (shown after unlock) -->
+  <div id="bnPanel" style="display:none">
+
+    <div class="card">
+      <div class="card-label">Select Your Name</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+        <select id="bnNameSelect" style="flex:1">
+          <option value="">— Select your name —</option>
+        </select>
+        <button class="btn btn-primary" onclick="loadBNView()">View My Schedule</button>
+      </div>
+      <div style="margin-top:8px;font-size:.75rem;color:var(--muted)">
+        Names are pulled from the imported UKG schedule. If your name is missing, ask your manager to import the schedule.
+      </div>
+    </div>
+
+    <div id="bnShiftWrap" style="display:none">
+      <div class="card">
+        <div class="row">
+          <div class="field">
+            <label>Date</label>
+            <input type="date" id="bnDate" onchange="onBNDateChange()"/>
+          </div>
+          <div class="field">
+            <label>Your Shift</label>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+              <div id="bnShiftPill"></div>
+              <button class="btn btn-ghost btn-sm" onclick="flipBNShift()">Switch</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="info-bar">
+          <span id="bnMeta" style="font-size:.8rem;color:var(--muted)"></span>
+          <span id="bnLoader" style="display:none"><div class="spinner"></div></span>
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
+          Tap any slot to mark it as <strong>your break</strong>. These will be blocked for floor nurses. No limit on how many you select.
+        </p>
+        <div id="bnSlotsList"></div>
+      </div>
+    </div>
+
+    <!-- Confirm staff breaks -->
+    <div id="bnConfirmWrap" style="display:none">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="card-label" style="margin:0">✅ Confirm Staff Breaks</div>
+          <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
+          Mark each staff nurse break as completed after you return from covering them.
+        </p>
+        <div id="bnConfirmList"></div>
+      </div>
+    </div>
+
+    <div id="bnNoSched" style="display:none">
+      <div class="card">
+        <div class="empty">No assignments found for your name on today's shift.<br><br>Check with your manager or try switching the shift above.</div>
+      </div>
+    </div>
+
+  </div><!-- /bnPanel -->
+</div>
+
+<!-- ═══════════ REPORTS TAB ═══════════ -->
+<div id="tab-reports" class="tab">
+
+  <!-- Password gate -->
+  <div id="rptGate">
+    <div class="pw-gate">
+      <div style="font-size:2rem;margin-bottom:10px">📊</div>
+      <h2>Reports</h2>
+      <p>Enter your admin or break nurse password</p>
+      <input type="password" id="rptPwInput" placeholder="Password"
+        onkeydown="if(event.key==='Enter')unlockReports()"/>
+      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockReports()">Unlock</button>
+      <div id="rptPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
+    </div>
+  </div>
+
+  <div id="rptPanel" style="display:none">
+
+    <!-- Date range selector -->
+    <div class="card">
+      <div class="card-label">Date Range</div>
+      <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="range-btn active" id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
+        <button class="range-btn"        id="rb-month" onclick="setRange('month',this)">This Month</button>
+        <button class="range-btn"        id="rb-ytd"  onclick="setRange('ytd',this)">Year to Date</button>
+        <button class="range-btn"        id="rb-cum"  onclick="setRange('cum',this)">All Time</button>
+        <button class="range-btn"        id="rb-cust" onclick="setRange('cust',this)">Custom</button>
+      </div>
+      <div id="customRange" style="display:none">
+        <div class="row" style="margin-top:6px">
+          <div class="field"><label>From</label><input type="date" id="rptFrom" onchange="loadReports()"/></div>
+          <div class="field"><label>To</label><input type="date" id="rptTo" onchange="loadReports()"/></div>
+        </div>
+      </div>
+      <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
+    </div>
+
+    <!-- KPI cards -->
+    <div class="rpt-grid" id="rptKPIs">
+      <div class="empty"><div class="spinner"></div></div>
+    </div>
+
+    <!-- Coverage rate bar -->
+    <div class="card" id="rptCovCard" style="display:none">
+      <div class="card-label">Break Coverage Rate</div>
+      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
+        <span id="rptCovPct" style="font-size:2.2rem;font-weight:700;font-family:'DM Mono',monospace;color:var(--teal-dk)">—</span>
+        <span style="font-size:.8rem;color:var(--muted)">of available slots were claimed</span>
+      </div>
+      <div class="rpt-bar-wrap"><div class="rpt-bar" id="rptCovBar" style="width:0%"></div></div>
+      <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);margin-top:6px">
+        <span id="rptCovClaimed"></span>
+        <span id="rptCovAvail"></span>
+      </div>
+    </div>
+
+    <!-- Breaks by unit -->
+    <div class="card" id="rptUnitCard" style="display:none">
+      <div class="card-label">Breaks by Unit</div>
+      <div id="rptUnitList"></div>
+    </div>
+
+    <!-- Popular time slots -->
+    <div class="card" id="rptTimeCard" style="display:none">
+      <div class="card-label">Most In-Demand Break Times</div>
+      <div id="rptTimeList"></div>
+    </div>
+
+    <!-- Break nurse workload -->
+    <div class="card" id="rptBNCard" style="display:none">
+      <div class="card-label">Break Nurse Workload</div>
+      <div id="rptBNList"></div>
+    </div>
+
+    <!-- Shift breakdown -->
+    <div class="card" id="rptShiftCard" style="display:none">
+      <div class="card-label">Day vs Noc Breakdown</div>
+      <div id="rptShiftList"></div>
+    </div>
+
+  </div><!-- /rptPanel -->
+</div>
+
+<!-- ═══════════ ADMIN TAB ═══════════ -->
+<div id="tab-admin" class="tab">
+
+  <!-- Password gate -->
+  <div id="adminGate">
+    <div class="pw-gate">
+      <div style="font-size:2rem;margin-bottom:10px">🔒</div>
+      <h2>Admin Access</h2>
+      <p>Break Nurse Manager portal</p>
+      <input type="password" id="pwInput" placeholder="Password" onkeydown="if(event.key==='Enter')unlock()"/>
+      <button class="btn btn-primary" style="width:100%" onclick="unlock()">Unlock</button>
+      <div id="pwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
+    </div>
+  </div>
+
+  <!-- Admin panel (hidden until unlocked) -->
+  <div id="adminPanel" style="display:none">
+
+    <!-- Imported names display -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="card-label" style="margin:0">Break Nurses (from imported schedule)</div>
+        <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">+ Add manually</button>
+      </div>
+      <div id="importedNamesList"><div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div></div>
+      <div id="manualNameRow" style="display:none;margin-top:10px">
+        <div class="row">
+          <input type="text" id="manualNurseInput" placeholder="Full name (e.g. Smith, Jane)" style="flex:1"/>
+          <button class="btn btn-success btn-sm" onclick="addManualName()">Add</button>
+          <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">✕</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Import Schedule -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+        <div class="card-label" style="margin:0">📸 Import Schedule from UKG</div>
+        <span style="font-size:.7rem;color:var(--muted)">AI-powered</span>
+      </div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:14px;line-height:1.5">Upload a UKG Pro schedule screenshot. The AI will extract break nurse names, dates, and shifts automatically.</p>
+
+      <div id="dropZone" onclick="document.getElementById('schedFile').click()"
+        style="border:2px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg)"
+        ondragover="event.preventDefault();this.style.borderColor='var(--teal)'"
+        ondragleave="this.style.borderColor='var(--border)'"
+        ondrop="handleDrop(event)">
+        <div style="font-size:2rem;margin-bottom:6px">🖼️</div>
+        <div style="font-size:.875rem;font-weight:600;color:var(--teal-dk)">Click or drag image here</div>
+        <div style="font-size:.75rem;color:var(--muted);margin-top:4px">PNG, JPG, or screenshot from any device</div>
+      </div>
+      <input type="file" id="schedFile" accept="image/*" style="display:none" onchange="handleFileSelect(event)"/>
+
+      <div id="importPreview" style="display:none;margin-top:12px">
+        <img id="previewImg" style="max-width:100%;border-radius:10px;border:1px solid var(--border);margin-bottom:12px"/>
+        <button class="btn btn-primary" style="width:100%" onclick="runImport()">
+          <span id="importBtnTxt">✨ Extract Schedule with AI</span>
+          <span id="importSpinner" style="display:none"><div class="spinner" style="border-top-color:white;width:16px;height:16px;display:inline-block"></div></span>
+        </button>
+      </div>
+
+      <div id="importResults" style="display:none;margin-top:14px">
+        <div style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:8px">Extracted — Review &amp; Assign Units</div>
+        <div id="importRows"></div>
+        <div style="margin-top:10px;font-size:.75rem;color:var(--muted)">💡 Review each entry, assign units, then save. You can also use Manual Assignment below.</div>
+      </div>
+    </div>
+
+    <!-- Imported schedule summary -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <div class="card-label" style="margin:0">📅 Imported Schedule Entries</div>
+        <button class="btn btn-danger btn-sm" onclick="clearAllImportedEntries()">Clear All</button>
+      </div>
+      <div id="importedEntriesSummary" style="font-size:.8rem;color:var(--muted)">Loading...</div>
+    </div>
+
+    <!-- Assign coverage -->
+    <div class="card">
+      <div class="card-label">Assign Break Coverage Manually</div>
+
+      <div style="margin-bottom:12px">
+        <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Break Nurse</label>
+        <select id="aNurse" onchange="syncNurseInput(this.value)" style="margin-bottom:6px"><option value="">— Select from imported schedule —</option></select>
+        <input type="text" id="aNurseText" placeholder="Or type a name manually" autocomplete="off" oninput="document.getElementById('aNurse').value=''" style="font-size:.875rem"/>
+      </div>
+
+      <div class="row" style="margin-bottom:12px">
+        <div class="field">
+          <label>Date</label>
+          <input type="date" id="aDate" onchange="populateNurseDropdown()"/>
+        </div>
+        <div class="field">
+          <label>Shift</label>
+          <div class="toggle-row">
+            <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')">☀️ Day</div>
+            <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')">🌙 Noc</div>
+          </div>
+        </div>
+      </div>
+
+      <div style="margin-bottom:14px">
+        <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:7px">Units to Cover</label>
+        <div class="unit-check-grid" id="aUnits"></div>
+      </div>
+
+      <button class="btn btn-primary" style="width:100%" onclick="saveAssign()">Save Assignment</button>
+    </div>
+
+    <!-- View / remove assignments -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:11px">
+        <div class="card-label" style="margin:0">Scheduled Assignments</div>
+        <input type="date" id="viewDate" onchange="loadAssignments()"/>
+      </div>
+      <div id="assignList"><div class="empty">Select a date to view assignments.</div></div>
+      <div style="margin-top:10px">
+        <button class="btn btn-ghost btn-sm" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
+      </div>
+    </div>
+
+    <!-- API Key -->
+    <div class="card">
+      <div class="card-label">Anthropic API Key (for AI Schedule Import)</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">Required once for the AI import feature. Your key is stored only in this browser and never sent anywhere except Anthropic.</p>
+      <div class="row">
+        <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1;font-family:'DM Mono',monospace;font-size:.8rem"/>
+        <button class="btn btn-success btn-sm" onclick="saveApiKey()">Save Key</button>
+      </div>
+      <div id="apiKeyStatus" style="font-size:.75rem;margin-top:7px;display:none"></div>
+    </div>
+
+    <!-- Sim mode controls (only visible in simulation mode) -->
+    <div class="card" id="simControls" style="display:none;border-color:#e8a020;background:#fef9ec">
+      <div class="card-label" style="color:#b07800">🧪 Simulation Mode Controls</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">You are running in local simulation mode. Data is stored in your browser only. When ready to go live, set SIM_MODE = false in the code.</p>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="exportSimData()">📥 Export sim data</button>
+        <button class="btn btn-danger btn-sm" onclick="clearSimData()">🗑 Clear all sim data</button>
+      </div>
+    </div>
+
+    <!-- Change passwords -->
+    <div class="card">
+      <div class="card-label">Change Admin Password</div>
+      <div class="row">
+        <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
+        <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
+        <button class="btn btn-ghost btn-sm" onclick="changePw()">Update</button>
+      </div>
+      <div id="pwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
+    </div>
+
+    <div class="card">
+      <div class="card-label">Change Break Nurse Password</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">This password is for the 🔑 My Breaks tab used by break nurses.</p>
+      <div class="row">
+        <input type="password" id="bnpw1" placeholder="New password" style="flex:1"/>
+        <input type="password" id="bnpw2" placeholder="Confirm" style="flex:1"/>
+        <button class="btn btn-ghost btn-sm" onclick="changeBNPw()">Update</button>
+      </div>
+      <div id="bnpwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
+    </div>
+
+  </div><!-- /adminPanel -->
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ═══════════════════════════════════════════════════════
+// CONFIG
+// ═══════════════════════════════════════════════════════
+const UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
+const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings'};
+
+// Slot constants
+// Day:  first slot 08:35, last 20:15 (ends 20:30). 36 slots × 20 min = 700 min span.
+// Noc:  first slot 20:35, last 08:15 next day (ends 08:30). Same 36 slots.
+const FIRST_DAY  = 8*60+35;   // 515 min
+const FIRST_NOC  = 20*60+35;  // 1235 min
+const SLOT_IV    = 20;         // interval (15 min break + 5 min gap)
+const NUM_SLOTS  = 36;
+const MAX_SLOTS  = 3;
+
+// ═══════════════════════════════════════════════════════
+// STATE
+// ═══════════════════════════════════════════════════════
+const S = {
+  shift:       null,   // 'Day' | 'Noc'
+  unit:        null,
+  adminOk:     false,
+  pw:          localStorage.getItem('bnPw') || 'breaker',
+  summShift:   'Day',
+  summUnit:    'All',
+  aShift:      'Day',
+  aUnits:      [],
+  refreshTmr:  null
+};
+
+// ═══════════════════════════════════════════════════════
+// DATA LAYER — toggle SIM_MODE to switch between
+// local simulation and live SharePoint
+// ═══════════════════════════════════════════════════════
+
+// ── Set to false when deployed to SharePoint ──────────
+const SIM_MODE = false;
+// ─────────────────────────────────────────────────────
+
+// ── SharePoint site URL ────────────────────────────────
+// When hosted on GitHub Pages, set this to your full SharePoint site URL.
+// When hosted directly on SharePoint, set to '' (empty) to use relative URLs.
+const SP_BASE = 'https://providence4.sharepoint.com/sites/TowerCentral';
+// ─────────────────────────────────────────────────────
+
+// ── Simulated in-browser database ────────────────────
+const DB = {
+  BNSchedule: JSON.parse(localStorage.getItem('sim_BNSchedule') || '[]'),
+  BNBookings:  JSON.parse(localStorage.getItem('sim_BNBookings')  || '[]')
+};
+let _simIdCounter = parseInt(localStorage.getItem('sim_idCounter') || '1000');
+
+function simSave(list){
+  localStorage.setItem(`sim_${list}`, JSON.stringify(DB[list]));
+}
+
+function simNextId(){
+  _simIdCounter++;
+  localStorage.setItem('sim_idCounter', _simIdCounter);
+  return _simIdCounter;
+}
+
+// Simple OData-style filter parser for simulation
+function simFilter(items, filter){
+  if (!filter) return items;
+  return items.filter(item => {
+    // Split on ' and ' (case-insensitive)
+    const clauses = filter.split(/ and /i);
+    return clauses.every(clause => {
+      clause = clause.trim();
+      // eq operator
+      const eqMatch = clause.match(/(\w+)\s+eq\s+'([^']*)'/);
+      if (eqMatch) {
+        const [, field, val] = eqMatch;
+        return String(item[field]||'') === val;
+      }
+      // eq numeric
+      const eqNum = clause.match(/(\w+)\s+eq\s+(\d+)/);
+      if (eqNum) {
+        const [, field, val] = eqNum;
+        return Number(item[field]||0) === Number(val);
+      }
+      // ge operator (>=)
+      const geMatch = clause.match(/(\w+)\s+ge\s+'([^']*)'/);
+      if (geMatch) {
+        const [, field, val] = geMatch;
+        return String(item[field]||'') >= val;
+      }
+      // le operator (<=)
+      const leMatch = clause.match(/(\w+)\s+le\s+'([^']*)'/);
+      if (leMatch) {
+        const [, field, val] = leMatch;
+        return String(item[field]||'') <= val;
+      }
+      return true; // unknown clause — pass through
+    });
+  });
+}
+
+// Simulated SP functions
+async function spGet(list, filter='', select='', orderby=''){
+  if (!SIM_MODE) return _spGetReal(list, filter, select, orderby);
+  await new Promise(r => setTimeout(r, 50)); // tiny delay to feel realistic
+  const items = simFilter(DB[list] || [], filter);
+  return JSON.parse(JSON.stringify(items)); // deep clone
+}
+
+async function spPost(list, data){
+  if (!SIM_MODE) return _spPostReal(list, data);
+  await new Promise(r => setTimeout(r, 50));
+  const item = {
+    ...data,
+    Id: simNextId(),
+    Created: new Date().toISOString(),
+    Modified: new Date().toISOString()
+  };
+  if (!DB[list]) DB[list] = [];
+  DB[list].push(item);
+  simSave(list);
+  return { d: item };
+}
+
+async function spDel(list, id){
+  if (!SIM_MODE) return _spDelReal(list, id);
+  await new Promise(r => setTimeout(r, 50));
+  DB[list] = (DB[list] || []).filter(i => i.Id !== id);
+  simSave(list);
+}
+
+// PATCH for IsCompleted confirmation
+async function spPatch(list, id, data){
+  if (!SIM_MODE) return _spPatchReal(list, id, data);
+  await new Promise(r => setTimeout(r, 50));
+  const item = (DB[list] || []).find(i => i.Id === id);
+  if (item) Object.assign(item, data);
+  simSave(list);
+}
+
+// ── Real SharePoint functions (used when SIM_MODE=false) ──
+let _digest = null, _digestExp = 0;
+
+async function _digestReal() {
+  if (_digest && Date.now() < _digestExp) return _digest;
+  const r = await fetch(`${SP_BASE}/_api/contextinfo`, {
+    method:'POST',
+    credentials:'include',
+    headers:{'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'}
+  });
+  const d = await r.json();
+  _digest    = d.d.GetContextWebInformation.FormDigestValue;
+  _digestExp = Date.now() + (d.d.GetContextWebInformation.FormDigestTimeoutSeconds - 60)*1000;
+  return _digest;
+}
+
+async function _spGetReal(list, filter='', select='', orderby='') {
+  let url = `${SP_BASE}/_api/web/lists/getbytitle('${list}')/items?$top=5000`;
+  if (filter)  url += `&$filter=${encodeURIComponent(filter)}`;
+  if (select)  url += `&$select=${select}`;
+  if (orderby) url += `&$orderby=${orderby}`;
+  const r = await fetch(url, {credentials:'include', headers:{'Accept':'application/json;odata=verbose'}});
+  if (!r.ok) throw new Error(`Cannot reach list "${list}". Is SharePoint set up?`);
+  return (await r.json()).d.results;
+}
+
+async function _spPostReal(list, data) {
+  const dg = await _digestReal();
+  const type = `SP.Data.${list}ListItem`;
+  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items`, {
+    method:'POST',
+    credentials:'include',
+    headers:{
+      'Accept':'application/json;odata=verbose',
+      'Content-Type':'application/json;odata=verbose',
+      'X-RequestDigest':dg
+    },
+    body: JSON.stringify({__metadata:{type}, ...data})
+  });
+  if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message?.value||'Save failed'); }
+  return r.json();
+}
+
+async function _spDelReal(list, id) {
+  const dg = await _digestReal();
+  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items(${id})`, {
+    method:'DELETE',
+    credentials:'include',
+    headers:{'Accept':'application/json;odata=verbose','X-RequestDigest':dg,'IF-MATCH':'*'}
+  });
+  if (!r.ok && r.status !== 204) throw new Error('Delete failed');
+}
+
+async function _spPatchReal(list, id, data) {
+  const dg = await _digestReal();
+  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items(${id})`, {
+    method: 'PATCH',
+    credentials:'include',
+    headers: {
+      'Accept': 'application/json;odata=verbose',
+      'Content-Type': 'application/json;odata=verbose',
+      'X-RequestDigest': dg,
+      'IF-MATCH': '*',
+      'X-HTTP-Method': 'MERGE'
+    },
+    body: JSON.stringify({
+      __metadata: { type: `SP.Data.${list}ListItem` },
+      ...data
+    })
+  });
+  if (!r.ok && r.status !== 204) throw new Error('Update failed');
+}
+
+function esc(s){ return (s||'').replace(/'/g,"''"); }
+
+// ── Sim mode indicator ────────────────────────────────
+function showSimBanner(){
+  if (!SIM_MODE) return;
+  const b = document.createElement('div');
+  b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#e8a020;color:white;text-align:center;font-size:.75rem;font-weight:700;padding:4px;z-index:9999;letter-spacing:.06em';
+  b.textContent = '🧪 SIMULATION MODE — data is stored locally, not on SharePoint';
+  document.body.appendChild(b);
+}
+
+// ═══════════════════════════════════════════════════════
+// UTILITIES
+// ═══════════════════════════════════════════════════════
+function today(){ return new Date().toISOString().split('T')[0]; }
+
+function nowMin(){
+  const n = new Date();
+  return n.getHours()*60 + n.getMinutes();
+}
+
+function detectShift(){
+  const m = nowMin();
+  // Day: 06:30 (390) to 18:59 (1139); Noc: otherwise
+  return (m >= 390 && m < 1140) ? 'Day' : 'Noc';
+}
+
+function toMin(hhmm){
+  return parseInt(hhmm.slice(0,2))*60 + parseInt(hhmm.slice(2,4));
+}
+
+function fromMin(m){
+  const mm = ((m%1440)+1440)%1440;
+  return String(Math.floor(mm/60)).padStart(2,'0') + String(mm%60).padStart(2,'0');
+}
+
+function fmt12(hhmm){
+  const h = parseInt(hhmm.slice(0,2));
+  const m = hhmm.slice(2,4);
+  return `${h%12||12}:${m} ${h<12?'AM':'PM'}`;
+}
+
+// Sort key: for Noc, slots before noon are "next day"
+function sortKey(hhmm, shift){
+  const m = toMin(hhmm);
+  return (shift==='Noc' && m < 720) ? m+1440 : m;
+}
+
+function nowKey(shift){
+  const m = nowMin();
+  return (shift==='Noc' && m < 720) ? m+1440 : m;
+}
+
+function generateSlots(shift){
+  const first = shift==='Day' ? FIRST_DAY : FIRST_NOC;
+  return Array.from({length:NUM_SLOTS}, (_,i) => fromMin(first + i*SLOT_IV));
+}
+
+function isPast(hhmm, shift){
+  // Slot is past as soon as its start time has passed
+  return sortKey(hhmm, shift) < nowKey(shift);
+}
+
+// ═══════════════════════════════════════════════════════
+// INIT
+// ═══════════════════════════════════════════════════════
+function init(){
+  // Staff unit grid
+  const ug = document.getElementById('unitGrid');
+  UNITS.forEach(u=>{
+    const b=document.createElement('button');
+    b.className='unit-btn'; b.textContent=u; b.id=`ub-${u}`;
+    b.onclick=()=>pickUnit(u); ug.appendChild(b);
+  });
+
+  // Admin unit check grid
+  const ag = document.getElementById('aUnits');
+  UNITS.forEach(u=>{
+    const d=document.createElement('div');
+    d.className='uc'; d.textContent=u; d.id=`au-${u}`;
+    d.onclick=()=>{
+      d.classList.toggle('on');
+      const i=S.aUnits.indexOf(u);
+      i<0 ? S.aUnits.push(u) : S.aUnits.splice(i,1);
+    };
+    ag.appendChild(d);
+  });
+
+  // Summary unit filter
+  const sf=document.getElementById('summFilter');
+  const all=pill('All Units','All',true); sf.appendChild(all);
+  UNITS.forEach(u=>sf.appendChild(pill(u,u,false)));
+
+  // Shift detection
+  S.shift = detectShift();
+  renderShiftPill();
+
+  // Set today's date on all pickers
+  const t=today();
+  document.getElementById('summDate').value=t;
+  document.getElementById('aDate').value=t;
+  document.getElementById('viewDate').value=t;
+
+  // Summary default shift
+  S.summShift=S.shift;
+  hiShift('sDay','sNoc', S.summShift);
+
+  // Clock
+  updateClock();
+  setInterval(updateClock, 10000);
+
+  // Show simulation banner if in sim mode
+  showSimBanner();
+}
+
+function pill(label, key, active){
+  const d=document.createElement('div');
+  d.className='pill'+(active?' active':''); d.textContent=label; d.id=`fp-${key}`;
+  d.onclick=()=>{
+    S.summUnit=key;
+    document.querySelectorAll('.pill').forEach(p=>p.classList.remove('active'));
+    d.classList.add('active');
+    loadSummary();
+  };
+  return d;
+}
+
+function validateExt(input){
+  // Strip non-numeric characters as they type
+  input.value = input.value.replace(/[^0-9]/g, '').slice(0, 5);
+  const valid = /^[0-9]{5}$/.test(input.value);
+  input.style.borderColor = input.value.length > 0 && !valid ? 'var(--red)' : '';
+  // Hide hint once valid
+  if(valid && document.getElementById('nurseName').value.trim()){
+    document.getElementById('nameExtHint').style.display = 'none';
+  }
+}
+
+function updateClock(){
+  const now=new Date();
+  document.getElementById('navClock').textContent=
+    now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+}
+
+// ═══════════════════════════════════════════════════════
+// TAB NAVIGATION
+// ═══════════════════════════════════════════════════════
+function showTab(name, btn){
+  document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
+  document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
+  document.getElementById(`tab-${name}`).classList.add('active');
+  (btn||document.getElementById(`nt-${name}`)).classList.add('active');
+  if(name==='summary') loadSummary();
+  if(name==='admin'){
+    // Auto-unlock if already authenticated this session
+    if(S.adminOk){
+      document.getElementById('adminGate').style.display='none';
+      document.getElementById('adminPanel').style.display='block';
+      loadAdminData();
+      renderImportedNamesList();
+      populateNurseDropdown();
+      renderImportedEntriesSummary();
+      if(SIM_MODE) document.getElementById('simControls').style.display='block';
+    }
+  }
+  if(name==='bn'){
+    if(BNS.unlocked){
+      document.getElementById('bnGate').style.display='none';
+      document.getElementById('bnPanel').style.display='block';
+      populateBNDropdown();
+    }
+  }
+  if(name==='reports'){
+    if(RPT.unlocked){
+      document.getElementById('rptGate').style.display='none';
+      document.getElementById('rptPanel').style.display='block';
+      loadReports();
+    }
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// STAFF TAB
+// ═══════════════════════════════════════════════════════
+function pickUnit(u){
+  S.unit=u;
+  document.querySelectorAll('.unit-btn').forEach(b=>b.classList.remove('active'));
+  document.getElementById(`ub-${u}`).classList.add('active');
+  document.getElementById('shiftCard').style.display='block';
+  document.getElementById('slotsWrap').style.display='block';
+  loadSlots();
+}
+
+function renderShiftPill(){
+  const p=document.getElementById('shiftPill');
+  p.className=`shift-pill shift-${S.shift==='Day'?'day':'noc'}`;
+  p.textContent= S.shift==='Day' ? '☀️ Day Shift (0630–1900)' : '🌙 Noc Shift (1830–0700)';
+}
+
+function flipShift(){
+  S.shift = S.shift==='Day' ? 'Noc' : 'Day';
+  renderShiftPill();
+  if(S.unit) loadSlots();
+}
+
+async function loadSlots(){
+  if(!S.unit) return;
+  const loader=document.getElementById('slotsLoader');
+  const list=document.getElementById('slotsList');
+  const meta=document.getElementById('slotsMeta');
+  loader.style.display='inline-block';
+  list.innerHTML='';
+
+  try {
+    const dt=today(), shift=S.shift;
+
+    // Get coverage for this unit today
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+    const covering = scheds.filter(s=>{
+      try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{return false;}
+    });
+
+    if(!covering.length){
+      list.innerHTML=`<div class="empty">No break coverage is scheduled for <strong>${S.unit}</strong> on the ${shift} shift today.<br><br>Please check with your charge nurse.</div>`;
+      loader.style.display='none';
+      return;
+    }
+
+    // Only show break nurse(s) assigned to THIS specific unit
+    const unitBNNames = [...new Set(
+      covering
+        .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
+        .map(c => c.BreakNurseName)
+    )].join(', ');
+    const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
+    const firstName = document.getElementById('nurseName').value.trim();
+    const nurseExt  = document.getElementById('nurseExt').value.trim();
+    const nurseName = firstName && nurseExt ? `${firstName} (${nurseExt})` : '';
+
+    // Overlap: Day staff can use Noc BN slots 0635–0755; Noc staff can use Day BN slots 1835–1955
+    const oppShift = shift === 'Day' ? 'Noc' : 'Day';
+    // Overlap window in minutes from midnight (handles wrap for Noc)
+    const overlapRange = shift === 'Day'
+      ? { min: 6*60+30, max: 8*60+0 }    // 0630–0800 → Noc BN covers Day staff early breaks
+      : { min: 18*60+30, max: 20*60+0 };  // 1830–2000 → Day BN covers Noc staff early breaks
+
+    // Check if opposite shift BN covers this unit today
+    const oppScheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${oppShift}'`);
+    const oppCovering = oppScheds.filter(s => {
+      try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
+    });
+
+    // Generate main shift slots + overlap slots from opposite shift
+    const mainSlots = generateSlots(shift);
+    let overlapSlots = [];
+    if (oppCovering.length) {
+      const oppSlots = generateSlots(oppShift);
+      overlapSlots = oppSlots.filter(s => {
+        const m = toMin(s);
+        return m >= overlapRange.min && m < overlapRange.max;
+      });
+    }
+
+    // Merge and sort all slots by time-of-day (handling midnight wrap for Noc)
+    const allSlots = [...new Set([...overlapSlots, ...mainSlots])];
+    allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
+
+    // Fetch bookings for both shifts on this unit (covers overlap slots)
+    const bookings = await spGet(LISTS.bookings,
+      `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
+
+    const bMap    = {};
+    bookings.forEach(b => { if (!b.IsBNBreak) bMap[b.SlotTime] = b; });
+
+    // Block slots where ANY BN covering this unit has marked their own break
+    // regardless of which unit they marked it on — a BN on break can't cover anywhere
+    const allBNNames = [
+      ...new Set([...covering, ...oppCovering].map(c => c.BreakNurseName))
+    ];
+    const allBNBreaks = await spGet(LISTS.bookings,
+      `SlotDate eq '${dt}' and IsBNBreak eq 1`);
+    const bnBreaks = new Set(
+      allBNBreaks
+        .filter(b => allBNNames.includes(b.NurseName))
+        .map(b => b.SlotTime)
+    );
+
+    // Fetch THIS nurse's bookings (to enforce max 3, both shifts combined)
+    const myBookings = nurseName
+      ? bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak)
+      : [];
+    const myTimes = myBookings.map(b=>b.SlotTime);
+    const canClaimMore = myTimes.length < MAX_SLOTS;
+
+    // Build BN name label (include opposite shift BN if covering overlap)
+    const oppBNNames = [...new Set(oppCovering.map(c=>c.BreakNurseName))].join(', ');
+    const bnLabel = bnNames + (oppBNNames ? ` · Overlap: ${oppBNNames}` : '');
+    meta.textContent=`Break nurse for ${S.unit}: ${bnNames}  ·  Slots are 15 min — claim up to 3 per shift`;
+
+    const future = allSlots.filter(s => !isPast(s, shift));
+    if(!future.length){
+      list.innerHTML='<div class="empty">No more break slots available for the remainder of this shift.</div>';
+      loader.style.display='none';
+      return;
+    }
+
+    let html='';
+    future.forEach(slot=>{
+      const booking=bMap[slot];
+      const isMine = booking && booking.NurseName===nurseName && nurseName;
+      const isTaken= booking && !isMine;
+
+      // Determine if this is an overlap slot (covered by opposite shift BN)
+      const slotMin = toMin(slot);
+      const isOverlap = (shift==='Day' && slotMin >= 6*60+30 && slotMin < 8*60+0) ||
+                        (shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0);
+
+      // BN break blocks this slot entirely
+      if (bnBreaks.has(slot)) {
+        html+=`<div class="slot-row bn-break">
+          <div class="slot-time">${fmt12(slot)}</div>
+          <div class="slot-name filled">Break nurse on break</div>
+          <div></div>
+        </div>`;
+        return;
+      }
+
+      let canClaim=false, lockReason='';
+      if(!isTaken && !isMine){
+        if(!nurseName)        { canClaim=false; lockReason='Enter name + ext above'; }
+        else if(!canClaimMore){ canClaim=false; lockReason='Max 3 slots reached'; }
+        else                  { canClaim=true; }
+      }
+
+      const cls = isMine?'mine':isTaken?'taken':canClaim?'open':'locked';
+
+      html+=`<div class="slot-row ${cls}">
+        <div class="slot-time">${fmt12(slot)}${isOverlap?'<span style="font-size:.6rem;font-weight:700;margin-left:5px;color:var(--noc);opacity:.7">OVERLAP</span>':''}</div>
+        <div class="slot-name ${booking?'filled':''}">${
+          booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
+        }</div>
+        <div>
+          ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="cancelSlot('${booking.Id}')">✕ Cancel</button>` : ''}
+          ${canClaim? `<button class="btn btn-primary btn-sm" onclick="claimSlot('${slot}')">+ Claim</button>` : ''}
+        </div>
+      </div>`;
+    });
+    list.innerHTML=html;
+
+    // Auto-refresh
+    clearInterval(S.refreshTmr);
+    S.refreshTmr=setInterval(loadSlots,10000);
+
+  } catch(e){
+    list.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}</div>`;
+  }
+  loader.style.display='none';
+}
+
+async function claimSlot(slotTime){
+  const firstName = document.getElementById('nurseName').value.trim();
+  const nurseExt  = document.getElementById('nurseExt').value.trim();
+  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+    document.getElementById('nameExtHint').style.display = 'block';
+    toast('Please enter your first name and a 5-digit Spectra extension.', true);
+    return;
+  }
+  document.getElementById('nameExtHint').style.display = 'none';
+  const name = `${firstName} (${nurseExt})`;
+  const dt=today();
+
+  // Determine correct shift for this slot (overlap slots belong to opposite shift's BN)
+  const slotMin = toMin(slotTime);
+  const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < 8*60+0;
+  const isOverlapNoc = S.shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0;
+  const slotShift = (isOverlapDay || isOverlapNoc) ? (S.shift==='Day'?'Noc':'Day') : S.shift;
+
+  try{
+    // Double-check total slots claimed across both shifts today on this unit
+    const mine=await spGet(LISTS.bookings,
+      `NurseName eq '${esc(name)}' and Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
+    const staffMine = mine.filter(b=>!b.IsBNBreak);
+    if(staffMine.length>=MAX_SLOTS){ toast(`Max ${MAX_SLOTS} slots per shift.`,true); return; }
+
+    // Race condition check — verify slot is still unclaimed right now
+    const existing = await spGet(LISTS.bookings,
+      `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}' and SlotTime eq '${slotTime}' and ShiftType eq '${slotShift}'`);
+    const taken = existing.find(b => !b.IsBNBreak);
+    if(taken){
+      toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true);
+      loadSlots();
+      return;
+    }
+
+    await spPost(LISTS.bookings,{
+      Title:`${S.unit}-${dt}-${slotTime}`,
+      NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift
+    });
+    toast(`✓ ${fmt12(slotTime)} claimed for ${name}!`);
+    loadSlots();
+  }catch(e){ toast(e.message,true); }
+}
+
+async function cancelSlot(id){
+  try{
+    await spDel(LISTS.bookings,id);
+    toast('Break cancelled.');
+    loadSlots();
+  }catch(e){ toast(e.message,true); }
+}
+
+// ═══════════════════════════════════════════════════════
+// SUMMARY TAB
+// ═══════════════════════════════════════════════════════
+function setSummShift(sh){
+  S.summShift=sh;
+  hiShift('sDay','sNoc',sh);
+  loadSummary();
+}
+
+function hiShift(dayId, nocId, sh){
+  document.getElementById(dayId).classList.toggle('active',sh==='Day');
+  document.getElementById(nocId).classList.toggle('active',sh==='Noc');
+}
+
+async function loadSummary(){
+  const dt=document.getElementById('summDate').value;
+  const shift=S.summShift;
+  const unit=S.summUnit;
+  const el=document.getElementById('summList');
+  el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
+
+  try{
+    let filter=`SlotDate eq '${dt}' and ShiftType eq '${shift}'`;
+    if(unit!=='All') filter+=` and Unit eq '${esc(unit)}'`;
+    const bookings=await spGet(LISTS.bookings,filter);
+
+    // Get assignments for break nurse names
+    const scheds=await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+    const unitBN={};
+    scheds.forEach(s=>{
+      try{ JSON.parse(s.Units||'[]').forEach(u=>{ unitBN[u]=s.BreakNurseName; }); }catch{}
+    });
+
+    const staffBookings = bookings.filter(b => !b.IsBNBreak);
+    const bnOwnBreaks   = bookings.filter(b =>  b.IsBNBreak);
+
+    if(!staffBookings.length && !bnOwnBreaks.length){
+      el.innerHTML=`<div class="empty">No breaks signed up yet for ${shift} shift on ${dt}${unit!=='All'?' · '+unit:''}.</div>`;
+      return;
+    }
+
+    staffBookings.sort((a,b)=>sortKey(a.SlotTime,shift)-sortKey(b.SlotTime,shift));
+    bnOwnBreaks.sort((a,b)=>sortKey(a.SlotTime,shift)-sortKey(b.SlotTime,shift));
+
+    let html=`<div class="info-bar"><span>${staffBookings.length} staff break${staffBookings.length!==1?'s':''} &nbsp;·&nbsp; ${bnOwnBreaks.length} BN break${bnOwnBreaks.length!==1?'s':''} blocked</span></div>`;
+
+    staffBookings.forEach(b=>{
+      html+=`<div class="summ-row">
+        <div class="summ-time">${fmt12(b.SlotTime)}</div>
+        <div class="summ-unit">${b.Unit}</div>
+        <div class="summ-nurse">${b.NurseName}</div>
+        <div class="summ-bn">${unitBN[b.Unit]||''}</div>
+      </div>`;
+    });
+
+    if(bnOwnBreaks.length){
+      html+=`<div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px;padding:0 2px">🔒 Break Nurse Own Breaks (blocked for staff)</div>`;
+      bnOwnBreaks.forEach(b=>{
+        html+=`<div class="summ-row" style="background:#fef9ec;border-color:#f0c040">
+          <div class="summ-time" style="color:#b07800">${fmt12(b.SlotTime)}</div>
+          <div class="summ-unit">${b.Unit}</div>
+          <div class="summ-nurse" style="color:var(--muted);font-style:italic">${b.NurseName}</div>
+          <div class="summ-bn" style="color:var(--muted)">BN break</div>
+        </div>`;
+      });
+    }
+    el.innerHTML=html;
+  }catch(e){
+    el.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// ADMIN TAB
+// ═══════════════════════════════════════════════════════
+function unlock(){
+  if(document.getElementById('pwInput').value===S.pw){
+    S.adminOk=true;
+    document.getElementById('adminGate').style.display='none';
+    document.getElementById('adminPanel').style.display='block';
+    loadAdminData();
+    showApiKeyStatus();
+    renderImportedNamesList();
+    populateNurseDropdown();
+    renderImportedEntriesSummary();
+    if (SIM_MODE) document.getElementById('simControls').style.display = 'block'; // will filter by today's date + current shift
+  } else {
+    document.getElementById('pwErr').style.display='block';
+    document.getElementById('pwInput').value='';
+  }
+}
+
+function loadAdminData(){ loadAssignments(); }
+
+function setAShift(sh){
+  S.aShift=sh;
+  document.getElementById('aDay').classList.toggle('active',sh==='Day');
+  document.getElementById('aNoc').classList.toggle('active',sh==='Noc');
+  populateNurseDropdown();
+}
+
+async function saveAssign(){
+  const nurse=(document.getElementById('aNurseText').value.trim()) ||
+             document.getElementById('aNurse').value;
+  const dt=document.getElementById('aDate').value;
+  const shift=S.aShift;
+  const units=S.aUnits;
+  if(!nurse)  { toast('Select a break nurse.',true); return; }
+  if(!dt)     { toast('Select a date.',true); return; }
+  if(!units.length){ toast('Select at least one unit.',true); return; }
+  try{
+    // Upsert — update if exists, create if not
+    const existing = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
+    if(existing.length > 0){
+      await spPatch(LISTS.schedule, existing[0].Id, {
+        Units: JSON.stringify(units),
+        Title: `${nurse}-${dt}-${shift}`
+      });
+      for(let j=1;j<existing.length;j++) await spDel(LISTS.schedule, existing[j].Id);
+      toast(`Coverage updated for ${nurse}!`);
+    } else {
+      await spPost(LISTS.schedule,{
+        Title:`${nurse}-${dt}-${shift}`,
+        BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
+        Units:JSON.stringify(units)
+      });
+      toast(`Coverage saved for ${nurse}!`);
+    }
+    S.aUnits=[];
+    document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
+    loadAssignments();
+  }catch(e){ toast(e.message,true); }
+}
+
+let _viewRange = 'week';
+
+function setViewRange(range, btn){
+  _viewRange = range;
+  document.querySelectorAll('#va-week,#va-all').forEach(b => b && b.classList.remove('active'));
+  if(btn) btn.classList.add('active');
+  loadAssignments();
+}
+
+async function loadAssignments(){
+  const el = document.getElementById('assignList');
+  el.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
+  const t = today();
+  let filter;
+
+  if(_viewRange === 'day'){
+    const dt = document.getElementById('viewDate').value;
+    if(!dt){ el.innerHTML='<div class="empty">Select a date.</div>'; return; }
+    filter = `ShiftDate eq '${dt}'`;
+  } else if(_viewRange === 'week'){
+    const now = new Date();
+    const day = now.getDay() || 7;
+    const mon = new Date(now); mon.setDate(now.getDate() - day + 1);
+    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
+    filter = `ShiftDate ge '${mon.toISOString().split('T')[0]}' and ShiftDate le '${sun.toISOString().split('T')[0]}'`;
+  } else {
+    filter = `ShiftDate ge '${t}'`;
+  }
+
+  try{
+    const scheds = await spGet(LISTS.schedule, filter);
+    if(!scheds.length){ el.innerHTML='<div class="empty">No assignments found.</div>'; return; }
+
+    scheds.sort((a,b) =>
+      a.ShiftDate.localeCompare(b.ShiftDate) ||
+      a.ShiftType.localeCompare(b.ShiftType) ||
+      a.BreakNurseName.localeCompare(b.BreakNurseName)
+    );
+
+    const byDate = {};
+    scheds.forEach(s => { if(!byDate[s.ShiftDate]) byDate[s.ShiftDate]=[]; byDate[s.ShiftDate].push(s); });
+
+    const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+    el.innerHTML = Object.entries(byDate).map(([date, items]) => {
+      const d = new Date(date + 'T12:00:00');
+      const label = date===t ? 'Today' : `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+      return `<div style="margin-bottom:14px">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
+        ${items.map(s => {
+          let units=[]; try{ units=JSON.parse(s.Units||'[]'); }catch{}
+          const icon=s.ShiftType==='Day'?'☀️':'🌙';
+          return `<div class="sched-card">
+            <div class="sched-card-hd">
+              <span><strong>${s.BreakNurseName}</strong>&nbsp;
+                <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
+              </span>
+              <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
+            </div>
+            <div class="unit-tags">${units.map(u=>`<span class="tag">${u}</span>`).join('')}</div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }).join('');
+  }catch(e){
+    el.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+async function delAssign(id){
+  if(!confirm('Remove this assignment?')) return;
+  try{ await spDel(LISTS.schedule,id); toast('Assignment removed.'); loadAssignments(); }
+  catch(e){ toast(e.message,true); }
+}
+
+async function dedupAssignments(){
+  const dt = document.getElementById('viewDate').value || today();
+  try {
+    const all = await spGet(LISTS.schedule, `ShiftDate ge '2020-01-01'`);
+    // Group by nurse+date+shift
+    const groups = {};
+    all.forEach(s => {
+      const key = `${s.BreakNurseName}|${s.ShiftDate}|${s.ShiftType}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(s);
+    });
+    // Delete all but the most recent in each group
+    let deleted = 0;
+    for (const [key, items] of Object.entries(groups)) {
+      if (items.length <= 1) continue;
+      // Keep the one with the most units (most complete)
+      items.sort((a,b) => {
+        try { return JSON.parse(b.Units||'[]').length - JSON.parse(a.Units||'[]').length; }
+        catch { return 0; }
+      });
+      for (let i = 1; i < items.length; i++) {
+        await spDel(LISTS.schedule, items[i].Id);
+        deleted++;
+      }
+    }
+    toast(deleted > 0 ? `🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}` : 'No duplicates found');
+    loadAssignments();
+  } catch(e) { toast(e.message, true); }
+}
+
+// ── Sim helpers ──────────────────────────────────────
+function exportSimData(){
+  const data = {
+    BNSchedule: DB.BNSchedule,
+    BNBookings:  DB.BNBookings,
+    exported: new Date().toISOString()
+  };
+  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'prmce_sim_data.json';
+  a.click();
+  toast('Sim data exported!');
+}
+
+function clearSimData(){
+  if (!confirm('Clear ALL simulation data? This cannot be undone.')) return;
+  DB.BNSchedule = []; DB.BNBookings = [];
+  localStorage.removeItem('sim_BNSchedule');
+  localStorage.removeItem('sim_BNBookings');
+  localStorage.removeItem('sim_idCounter');
+  _simIdCounter = 1000;
+  // Also clear nurse rotation history
+  Object.keys(localStorage).filter(k => k.startsWith('bnNurseHistory_'))
+    .forEach(k => localStorage.removeItem(k));
+  toast('Simulation data cleared.');
+  loadAssignments();
+}
+
+function changePw(){
+  const p1=document.getElementById('pw1').value;
+  const p2=document.getElementById('pw2').value;
+  const msg=document.getElementById('pwMsg');
+  if(!p1||p1!==p2){
+    msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
+  }
+  S.pw=p1; localStorage.setItem('bnPw',p1);
+  document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
+  msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Password updated ✓';
+  setTimeout(()=>msg.style.display='none',3000);
+}
+
+function changeBNPw(){
+  const p1=document.getElementById('bnpw1').value;
+  const p2=document.getElementById('bnpw2').value;
+  const msg=document.getElementById('bnpwMsg');
+  if(!p1||p1!==p2){
+    msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
+  }
+  localStorage.setItem('bnBreakPw',p1);
+  document.getElementById('bnpw1').value=''; document.getElementById('bnpw2').value='';
+  msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Break nurse password updated ✓';
+  setTimeout(()=>msg.style.display='none',3000);
+}
+
+// ═══════════════════════════════════════════════════════
+// TOAST
+// ═══════════════════════════════════════════════════════
+let _toastT;
+function toast(msg,err=false){
+  const t=document.getElementById('toast');
+  t.textContent=msg; t.className='toast'+(err?' err':'');
+  t.classList.add('show');
+  clearTimeout(_toastT);
+  _toastT=setTimeout(()=>t.classList.remove('show'),3200);
+}
+
+// ═══════════════════════════════════════════════════════
+// AI SCHEDULE IMPORT
+// ═══════════════════════════════════════════════════════
+let importImageB64 = null;
+let importImageType = null;
+
+function handleDrop(e){
+  e.preventDefault();
+  document.getElementById('dropZone').style.borderColor = 'var(--border)';
+  const file = e.dataTransfer.files[0];
+  if (file && file.type.startsWith('image/')) loadImportFile(file);
+}
+
+function handleFileSelect(e){
+  const file = e.target.files[0];
+  if (file) loadImportFile(file);
+}
+
+function loadImportFile(file){
+  importImageType = file.type;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    importImageB64 = e.target.result.split(',')[1];
+    document.getElementById('previewImg').src = e.target.result;
+    document.getElementById('importPreview').style.display = 'block';
+    document.getElementById('importResults').style.display = 'none';
+    document.getElementById('importRows').innerHTML = '';
+  };
+  reader.readAsDataURL(file);
+}
+
+async function runImport(){
+  if (!importImageB64) return;
+
+  // Warn if there are unsaved unit selections
+  const unsavedCount = Object.keys(importUnitSel).filter(i => {
+    const saved = document.getElementById(`saved-${i}`);
+    return saved && saved.style.display === 'none' && (importUnitSel[i]||[]).length > 0;
+  }).length;
+
+  if (unsavedCount > 0) {
+    const go = confirm(
+      `You have ${unsavedCount} unsaved assignment${unsavedCount!==1?'s':''} from the previous import.\n\n` +
+      `Import anyway and lose these selections?\n\n` +
+      `Click Cancel to go back and save them first.`
+    );
+    if (!go) return;
+  }
+
+  // Reset selections for new import
+  Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+
+  const btn = document.getElementById('importBtnTxt');
+  const spin = document.getElementById('importSpinner');
+  btn.style.display = 'none'; spin.style.display = 'inline-block';
+
+  try {
+    const apiKey = localStorage.getItem('bnApiKey') || '';
+    if (!apiKey) {
+      toast('No API key saved. Add it in the API Key section below.', true);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-20250514',
+        max_tokens: 4000,
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: importImageType, data: importImageB64 }
+            },
+            {
+              type: 'text',
+              text: `This is a UKG Pro nursing schedule screenshot from UKG Pro Workforce Management.
+
+Extract every nurse name and each day they are scheduled. Return ONLY a raw JSON array, nothing else.
+
+CRITICAL — HOW TO DETERMINE SHIFT TYPE:
+These are BREAK NURSE shifts. Read ONLY the START time of each shift block, then apply:
+
+  Day break nurse window:  08:00 – 19:59  →  shift = "Day"
+  Noc break nurse window:  20:00 – 07:59  →  shift = "Noc"
+
+Examples:
+  "08:00 - 20:30"  → starts 08:00 → Day
+  "20:00 - 08:30"  → starts 20:00 → Noc
+  "13:00 - 17:00"  → starts 13:00 → Day  (partial, still Day window)
+  "19:00 - 23:00"  → starts 19:00 → Day  (before 20:00 cutoff)
+  "20:30 - 00:30"  → starts 20:30 → Noc
+  "22:00 - 02:00"  → starts 22:00 → Noc
+
+DO NOT use end time. DO NOT guess based on length. START TIME ONLY determines Day vs Noc.
+
+HOW TO READ NAMES:
+- Copy exactly from the Name column (e.g. "Canoy, Anna Leah O")
+- If a row says "My Schedule", use "Reyes, Tomas" instead
+
+HOW TO READ DATES:
+- Column headers like "Sun 3/22" = 2026-03-22, "Mon 3/23" = 2026-03-23, etc.
+- Only include a row+date if a colored shift block is present — skip blank cells
+- One entry per person per date
+
+OUTPUT — return ONLY a raw JSON array, no markdown, no explanation:
+[
+  { "name": "Canoy, Anna Leah O", "date": "2026-03-24", "shift": "Day" },
+  { "name": "Rivera, Christlyne J", "date": "2026-03-22", "shift": "Noc" }
+]
+
+- Return ONLY the JSON array. Nothing else.`
+            }
+          ]
+        }]
+      })
+    });
+
+    const data = await response.json();
+
+    // Check for API-level errors first
+    if (data.error) {
+      toast('API error: ' + (data.error.message || JSON.stringify(data.error)), true);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+
+    // Pull all text out of the response blocks
+    const raw = (data.content || []).map(c => c.text || '').join('');
+    console.log('AI raw response:', raw); // debug — visible in browser console
+
+    if (!raw.trim()) {
+      toast('AI returned an empty response. Check your API key and try again.', true);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+
+    // Strip markdown fences
+    const clean = raw.replace(/```json|```/g, '').trim();
+
+    // Try to grab the first [...] array found anywhere in the response
+    const arrMatch = clean.match(/\[[\s\S]*?\]/s);
+    if (!arrMatch) {
+      // Show the raw AI text in a readable error so we can diagnose
+      const preview = clean.length > 200 ? clean.slice(0,200) + '...' : clean;
+      document.getElementById('importRows').innerHTML =
+        '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:.8rem;word-break:break-word">' +
+        '<strong>AI responded but returned no JSON array.</strong><br><br>' +
+        'Raw response:<br><pre style="white-space:pre-wrap;margin-top:6px">' + preview + '</pre>' +
+        '<br>Try uploading a screenshot that shows only the schedule grid with names and dates visible.' +
+        '</div>';
+      document.getElementById('importResults').style.display = 'block';
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+
+    let entries;
+    try {
+      entries = JSON.parse(arrMatch[0]);
+    } catch(parseErr) {
+      toast('Could not parse AI response. Check browser console for details.', true);
+      console.error('Parse error:', parseErr, 'Raw:', clean);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+
+    if (!Array.isArray(entries) || entries.length === 0) {
+      toast('No schedule entries found in that image. Try a less cropped screenshot.', true);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
+
+    renderImportRows(entries);
+
+  } catch(e) {
+    toast('AI extraction failed: ' + e.message, true);
+    console.error('Import exception:', e);
+  }
+
+  btn.style.display = 'inline'; spin.style.display = 'none';
+}
+
+// Store extracted entries so shift can be toggled after render
+let importEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+
+async function renderImportRows(entries){
+  // Merge new entries with existing — don't wipe previous weeks
+  const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+
+  // Deduplicate: key = name|date|shift
+  const existingKeys = new Set(existingEntries.map(e => `${e.name}|${e.date}|${e.shift}`));
+  const newEntries = entries.filter(e => !existingKeys.has(`${e.name}|${e.date}|${e.shift}`));
+  const skipped = entries.length - newEntries.length;
+
+  importEntries = [...existingEntries, ...newEntries.map(e => Object.assign({}, e))];
+  importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
+  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
+
+  if (skipped > 0) toast(`✓ Added ${newEntries.length} new entries · ${skipped} already existed`);
+
+  // Auto-populate the name roster from extracted entries
+  const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
+  addNamesToRoster(extractedNames);
+
+  // Only process the NEW entries for suggestions (not the whole history)
+  const entriesToProcess = newEntries.length > 0 ? newEntries : entries;
+
+  const wrap = document.getElementById('importRows');
+  if (!entries.length) {
+    wrap.innerHTML = '<div class="empty">No schedule entries found. Try a clearer screenshot.</div>';
+    document.getElementById('importResults').style.display = 'block';
+    return;
+  }
+
+  // Run fairness algorithm only on new entries
+  const byDateShift = {};
+  entriesToProcess.forEach(e => {
+    const key = `${e.date}|${e.shift}`;
+    if(!byDateShift[key]) byDateShift[key] = [];
+    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+  });
+
+  const allSuggestions = {};
+  for(const [key, nurses] of Object.entries(byDateShift)){
+    const [date, shift] = key.split('|');
+    const suggestions = await suggestAssignments(nurses, shift, date);
+    for(const [name, units] of Object.entries(suggestions)){
+      allSuggestions[`${name}|${date}|${shift}`] = units;
+    }
+  }
+
+  // Pre-populate importUnitSel with suggestions for new entries only
+  for(let i = 0; i < entriesToProcess.length; i++){
+    const e = entriesToProcess[i];
+    const key = `${e.name}|${e.date}|${e.shift}`;
+    importUnitSel[i] = allSuggestions[key] || [];
+  }
+
+  wrap.innerHTML = entriesToProcess.map((e, i) => {
+    const suggested = importUnitSel[i] || [];
+    const uPerN = unitsPerNurse(e.shift,
+      entriesToProcess.filter(x => x.date===e.date && x.shift===e.shift).length);
+    return `
+    <div style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-weight:600;font-size:.9rem">${e.name}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        <div style="display:flex;gap:5px;margin-left:auto">
+          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
+            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
+            onclick="setImportShift(${i},'Day')">☀️ Day</div>
+          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}"
+            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
+            onclick="setImportShift(${i},'Noc')">🌙 Noc</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
+        <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
+          ✨ ${suggestedSlotCount(suggested)} suggested · target ${uPerN}
+          <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
+            onclick="clearImportSel(${i})">Clear</button>
+          <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
+            onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
+        ${UNITS.map(u => `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" onclick="toggleIU(${i},'${u}',this)">${u}</div>`).join('')}
+      </div>
+      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="saveImportRow(${i})">✓ Save</button>
+      <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
+    </div>`;
+  }).join('');
+
+  document.getElementById('importResults').style.display = 'block';
+  renderImportedEntriesSummary(); // refresh summary after import
+}
+
+function setImportShift(i, sh){
+  importEntries[i].shift = sh;
+  document.getElementById(`isd-${i}`).classList.toggle('active', sh==='Day');
+  document.getElementById(`isn-${i}`).classList.toggle('active', sh==='Noc');
+}
+
+const importUnitSel = {}; // { rowIndex: [units] }
+
+function toggleIU(i, u, el){
+  if (!importUnitSel[i]) importUnitSel[i] = [];
+  const arr = importUnitSel[i];
+  const idx = arr.indexOf(u);
+  if (idx < 0) { arr.push(u); el.classList.add('on'); }
+  else          { arr.splice(idx,1); el.classList.remove('on'); }
+}
+
+// Count suggested units as slots (3C+4C = 1 slot)
+function suggestedSlotCount(units){
+  if(!units || !units.length) return 0;
+  const has3C = units.includes('3C');
+  const has4C = units.includes('4C');
+  const cPairCount = (has3C || has4C) ? 1 : 0;
+  const otherCount = units.filter(u => u!=='3C' && u!=='4C').length;
+  return cPairCount + otherCount;
+}
+
+// Imported entries management
+function renderImportedEntriesSummary(){
+  const el = document.getElementById('importedEntriesSummary');
+  if (!el) return;
+  const entries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+  if (!entries.length){
+    el.innerHTML = 'No schedule entries imported yet.';
+    return;
+  }
+  // Group by week
+  const byWeek = {};
+  entries.forEach(e => {
+    const d = new Date(e.date + 'T12:00:00');
+    const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
+    const wk = mon.toISOString().split('T')[0];
+    if (!byWeek[wk]) byWeek[wk] = [];
+    byWeek[wk].push(e);
+  });
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  el.innerHTML = Object.entries(byWeek).sort().map(([wk, wEntries]) => {
+    const d = new Date(wk + 'T12:00:00');
+    const end = new Date(d); end.setDate(d.getDate() + 6);
+    const label = `${months[d.getMonth()]} ${d.getDate()} – ${months[end.getMonth()]} ${end.getDate()}`;
+    const nurses = [...new Set(wEntries.map(e=>e.name))].length;
+    const shifts = wEntries.length;
+    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+      <span style="font-weight:500">${label}</span>
+      <span style="color:var(--muted);font-size:.75rem">${nurses} nurses · ${shifts} shifts</span>
+      <button class="btn btn-ghost btn-sm" onclick="clearWeekEntries('${wk}')">Remove week</button>
+    </div>`;
+  }).join('') + `<div style="margin-top:8px;font-size:.75rem;color:var(--muted)">${entries.length} total entries across ${Object.keys(byWeek).length} week(s)</div>`;
+}
+
+function clearWeekEntries(weekStart){
+  const d = new Date(weekStart + 'T12:00:00');
+  const end = new Date(d); end.setDate(d.getDate() + 6);
+  const endStr = end.toISOString().split('T')[0];
+  importEntries = importEntries.filter(e => e.date < weekStart || e.date > endStr);
+  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
+  renderImportedEntriesSummary();
+  populateNurseDropdown();
+  toast('Week removed.');
+}
+
+function clearAllImportedEntries(){
+  if (!confirm('Remove ALL imported schedule entries? This cannot be undone.')) return;
+  importEntries = [];
+  localStorage.removeItem('bnImportedEntries');
+  renderImportedEntriesSummary();
+  populateNurseDropdown();
+  toast('All imported entries cleared.');
+}
+
+function clearImportSel(i){
+  importUnitSel[i] = [];
+  UNITS.forEach(u => {
+    const el = document.getElementById(`iu-${i}-${u}`);
+    if(el) el.classList.remove('on');
+  });
+}
+
+async function rerunSuggest(i, name, date, shift){
+  // Re-run algorithm for just this nurse's shift group
+  const nurses = importEntries
+    .filter(e => e.date===date && e.shift===shift)
+    .map(e => e.name);
+  const suggestions = await suggestAssignments(nurses, shift, date);
+  const units = suggestions[name] || [];
+
+  // Find the row index for each nurse in this shift and update their selections
+  importEntries.forEach((e, idx) => {
+    if(e.date===date && e.shift===shift){
+      const newUnits = suggestions[e.name] || [];
+      importUnitSel[idx] = newUnits;
+      UNITS.forEach(u => {
+        const el = document.getElementById(`iu-${idx}-${u}`);
+        if(el) el.classList.toggle('on', newUnits.includes(u));
+      });
+    }
+  });
+  toast(`↺ Suggestions refreshed for ${shift} on ${date}`);
+}
+
+async function saveImportRow(i){
+  const entry = importEntries[i];
+  const { name, date, shift } = entry;
+  const units = importUnitSel[i] || [];
+  if (!units.length) { toast('Select at least one unit for ' + name, true); return; }
+  try {
+    // Check if assignment already exists for this nurse/date/shift — update if so
+    const existing = await spGet(LISTS.schedule,
+      `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+
+    if (existing.length > 0) {
+      // Update first match, delete any extras
+      await spPatch(LISTS.schedule, existing[0].Id, {
+        Units: JSON.stringify(units),
+        Title: `${name}-${date}-${shift}`
+      });
+      // Delete any duplicates beyond the first
+      for (let j = 1; j < existing.length; j++) {
+        await spDel(LISTS.schedule, existing[j].Id);
+      }
+      toast(`✓ ${name} updated for ${shift} on ${date}`);
+    } else {
+      await spPost(LISTS.schedule, {
+        Title: `${name}-${date}-${shift}`,
+        BreakNurseName: name,
+        ShiftDate: date,
+        ShiftType: shift,
+        Units: JSON.stringify(units)
+      });
+      toast(`✓ ${name} saved for ${shift} on ${date}`);
+    }
+    document.getElementById(`saved-${i}`).style.display = 'inline';
+    document.getElementById(`savebtn-${i}`).disabled = true;
+    loadAssignments();
+  } catch(e) { toast(e.message, true); }
+}
+
+// ═══════════════════════════════════════════════════════
+// BREAK NURSE OWN-BREAK TAB
+// ═══════════════════════════════════════════════════════
+const BNS = { shift: null, name: '', date: '', unlocked: false };
+
+function unlockBN(){
+  const entered = document.getElementById('bnPwInput').value;
+  const bnPw = localStorage.getItem('bnBreakPw') || 'breaknurse';
+  const adminPw = localStorage.getItem('bnPw') || 'breaker';
+  if (entered === bnPw || entered === adminPw) {
+    BNS.unlocked = true;
+    document.getElementById('bnGate').style.display  = 'none';
+    document.getElementById('bnPanel').style.display = 'block';
+    populateBNDropdown();
+  } else {
+    document.getElementById('bnPwErr').style.display = 'block';
+    document.getElementById('bnPwInput').value = '';
+  }
+}
+
+function populateBNDropdown(){
+  const sel = document.getElementById('bnNameSelect');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Select your name —</option>' +
+    importedNames.map(n => `<option value="${n}">${n}</option>`).join('');
+}
+
+function loadBNView(){
+  const name = document.getElementById('bnNameSelect').value.trim();
+  if (!name) { toast('Select your name first.', true); return; }
+  BNS.name  = name;
+  BNS.shift = detectShift();
+  BNS.date  = today();
+  // Set date picker to today
+  const dp = document.getElementById('bnDate');
+  if (dp) dp.value = BNS.date;
+  renderBNShiftPill();
+  document.getElementById('bnShiftWrap').style.display = 'block';
+  document.getElementById('bnNoSched').style.display   = 'none';
+  loadBNSlots();
+}
+
+function onBNDateChange(){
+  const dp = document.getElementById('bnDate');
+  if (!dp || !dp.value) return;
+  BNS.date = dp.value;
+  // Auto-detect shift based on imported entries for this date
+  const entry = importEntries.find(e => e.name === BNS.name && e.date === BNS.date);
+  if (entry) {
+    BNS.shift = entry.shift;
+    renderBNShiftPill();
+  }
+  loadBNSlots();
+}
+
+// renderBNShiftPill defined below
+
+function flipBNShift(){
+  BNS.shift = BNS.shift==='Day' ? 'Noc' : 'Day';
+  renderBNShiftPill();
+  loadBNSlots();
+}
+
+function renderBNShiftPill(){
+  const p = document.getElementById('bnShiftPill');
+  if (!p) return;
+  p.className = `shift-pill shift-${BNS.shift==='Day'?'day':'noc'}`;
+  p.textContent = BNS.shift==='Day' ? '☀️ Day (0800–2030)' : '🌙 Noc (2000–0830)';
+}
+
+async function loadBNSlots(){
+  const loader = document.getElementById('bnLoader');
+  const list   = document.getElementById('bnSlotsList');
+  const meta   = document.getElementById('bnMeta');
+  loader.style.display = 'inline-block';
+  list.innerHTML = '';
+
+  try {
+    const dt = BNS.date || today(), shift = BNS.shift;
+    const isToday = dt === today();
+
+    // Check this break nurse has an assignment on this date
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+
+    if (!scheds.length){
+      document.getElementById('bnNoSched').style.display = 'block';
+      loader.style.display = 'none';
+      list.innerHTML = '';
+      return;
+    }
+    document.getElementById('bnNoSched').style.display = 'none';
+
+    // Get all units this BN covers on this date
+    const units = [];
+    scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
+    const dateLabel = isToday ? 'today' : dt;
+    meta.textContent = `${dateLabel}  ·  Covering: ${units.join(', ')}  ·  Tap slots to block for your break`;
+
+    const slots = generateSlots(shift);
+    // For future dates show all slots; for today only show future slots
+    const displaySlots = isToday ? slots.filter(s => !isPast(s, shift)) : slots;
+
+    // Fetch existing BN breaks for this nurse on this date
+    const bnBreaks = await spGet(LISTS.bookings,
+      `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+    const bnBreakTimes = new Set(bnBreaks.map(b => b.SlotTime));
+    const bnBreakIds   = {};
+    bnBreaks.forEach(b => { bnBreakIds[b.SlotTime] = b.Id; });
+
+    if (!displaySlots.length){
+      list.innerHTML = '<div class="empty">No slots available for this date/shift.</div>';
+      loader.style.display = 'none';
+      return;
+    }
+
+    // Render — one row per slot across all covered units
+    let html = '';
+    units.forEach(unit => {
+      html += `<div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:12px 0 6px">${unit}</div>`;
+      displaySlots.forEach(slot => {
+        const isMyBreak = bnBreakTimes.has(slot);
+        const cls = isMyBreak ? 'bn-break mine' : 'open';
+        html += `<div class="slot-row ${cls}" style="margin-bottom:6px">
+          <div class="slot-time">${fmt12(slot)}</div>
+          <div class="slot-name ${isMyBreak?'filled':''}">${isMyBreak ? '🔒 Your break' : 'Available'}</div>
+          <div>
+            ${isMyBreak
+              ? `<button class="btn btn-danger btn-sm" onclick="cancelBNBreak('${bnBreakIds[slot]}','${slot}','${unit}')">✕ Unblock</button>`
+              : `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="claimBNBreak('${slot}','${unit}')">+ My Break</button>`
+            }
+          </div>
+        </div>`;
+      });
+    });
+    list.innerHTML = html;
+
+  } catch(e) {
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+  }
+  loader.style.display = 'none';
+  loadBNConfirm();
+}
+
+async function claimBNBreak(slotTime, unit){
+  const dt = BNS.date || today(), shift = BNS.shift;
+  try {
+    await spPost(LISTS.bookings, {
+      Title: `BN-${BNS.name}-${unit}-${dt}-${slotTime}`,
+      NurseName: BNS.name,
+      Unit: unit,
+      SlotTime: slotTime,
+      SlotDate: dt,
+      ShiftType: shift,
+      IsBNBreak: 1
+    });
+    toast(`🔒 ${fmt12(slotTime)} blocked for your break on ${unit}`);
+    loadBNSlots();
+  } catch(e) { toast(e.message, true); }
+}
+
+async function cancelBNBreak(id, slotTime, unit){
+  try {
+    await spDel(LISTS.bookings, id);
+    toast(`${fmt12(slotTime)} unblocked on ${unit}.`);
+    loadBNSlots();
+  } catch(e) { toast(e.message, true); }
+}
+
+// ═══════════════════════════════════════════════════════
+// BREAK CONFIRMATION (BN confirms staff breaks)
+// ═══════════════════════════════════════════════════════
+async function loadBNConfirm(){
+  const wrap = document.getElementById('bnConfirmWrap');
+  const list = document.getElementById('bnConfirmList');
+  const loader = document.getElementById('bnConfirmLoader');
+  if (!wrap || !BNS.name) return;
+
+  loader.style.display = 'inline-block';
+  const dt = BNS.date || today(), shift = BNS.shift;
+
+  try {
+    // Get units this BN covers
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
+
+    const units = [];
+    scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
+
+    // Get all staff bookings on those units for this date/shift
+    const allBookings = await spGet(LISTS.bookings,
+      `SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
+    const staffBookings = allBookings.filter(b =>
+      !b.IsBNBreak && units.includes(b.Unit)
+    );
+
+    if (!staffBookings.length) {
+      list.innerHTML = '<div class="empty" style="padding:8px 0">No staff breaks claimed yet for your units on this shift.</div>';
+      wrap.style.display = 'block';
+      loader.style.display = 'none';
+      return;
+    }
+
+    staffBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
+
+    list.innerHTML = staffBookings.map(b => {
+      const done = b.IsCompleted == 1;
+      const past = isPast(b.SlotTime, shift);
+      return `<div class="slot-row ${done ? 'confirmed' : past ? 'open' : 'open'}" style="margin-bottom:6px">
+        <div class="slot-time">${fmt12(b.SlotTime)}</div>
+        <div class="slot-name filled">${b.NurseName} · ${b.Unit}</div>
+        <div>
+          ${done
+            ? '<span style="font-size:.75rem;color:var(--green);font-weight:600">✓ Done</span>'
+            : `<button class="btn btn-success btn-sm" onclick="confirmBreak(${b.Id})">✓ Confirm</button>`
+          }
+        </div>
+      </div>`;
+    }).join('');
+
+    wrap.style.display = 'block';
+  } catch(e) {
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    wrap.style.display = 'block';
+  }
+  loader.style.display = 'none';
+}
+
+async function confirmBreak(id){
+  try {
+    await spPatch(LISTS.bookings, id, { IsCompleted: 1 });
+    toast('✓ Break confirmed!');
+    loadBNConfirm();
+  } catch(e) { toast(e.message, true); }
+}
+
+// ═══════════════════════════════════════════════════════
+// REPORTS TAB
+// ═══════════════════════════════════════════════════════
+const RPT = { range: 'mtd', from: '', to: '', unlocked: false };
+
+function unlockReports(){
+  const entered = document.getElementById('rptPwInput').value;
+  const adminPw  = localStorage.getItem('bnPw')      || 'breaker';
+  const bnPw     = localStorage.getItem('bnBreakPw') || 'breaknurse';
+  if (entered === adminPw || entered === bnPw) {
+    RPT.unlocked = true;
+    document.getElementById('rptGate').style.display  = 'none';
+    document.getElementById('rptPanel').style.display = 'block';
+    setRange('mtd', document.getElementById('rb-mtd'));
+  } else {
+    document.getElementById('rptPwErr').style.display = 'block';
+    document.getElementById('rptPwInput').value = '';
+  }
+}
+
+function setRange(key, btn){
+  RPT.range = key;
+  document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
+  if (btn) btn.classList.add('active');
+  const cust = document.getElementById('customRange');
+  cust.style.display = key === 'cust' ? 'block' : 'none';
+  if (key !== 'cust') loadReports();
+}
+
+function getRangeDates(){
+  const t = today();
+  const now = new Date();
+  switch(RPT.range){
+    case 'mtd':
+    case 'month': {
+      const f = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
+      return { from: f, to: t };
+    }
+    case 'ytd': return { from: `${now.getFullYear()}-01-01`, to: t };
+    case 'cum': return { from: '2000-01-01', to: t };
+    case 'cust': return {
+      from: document.getElementById('rptFrom').value || t,
+      to:   document.getElementById('rptTo').value   || t
+    };
+    default: return { from: t, to: t };
+  }
+}
+
+function fmtDateRange(from, to){
+  const opts = { month:'short', day:'numeric', year:'numeric' };
+  const f = new Date(from+'T12:00:00').toLocaleDateString('en-US', opts);
+  const t = new Date(to  +'T12:00:00').toLocaleDateString('en-US', opts);
+  return from === to ? f : `${f} – ${t}`;
+}
+
+async function loadReports(){
+  if (!RPT.unlocked) return;
+  const { from, to } = getRangeDates();
+  document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
+
+  const kpis = document.getElementById('rptKPIs');
+  kpis.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
+  ['rptCovCard','rptUnitCard','rptTimeCard','rptBNCard','rptShiftCard']
+    .forEach(id => document.getElementById(id).style.display = 'none');
+
+  try {
+    // Fetch all bookings in range
+    const bookings = await spGet(LISTS.bookings,
+      `SlotDate ge '${from}' and SlotDate le '${to}'`);
+    const staffBookings   = bookings.filter(b => !b.IsBNBreak);
+    const confirmedBookings = staffBookings.filter(b => b.IsCompleted == 1);
+
+    // Fetch all schedule assignments in range (for available slots calc)
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${from}' and ShiftDate le '${to}'`);
+
+    // Available slots = each assignment covers NUM_SLOTS slots
+    const availableSlots = scheds.length * NUM_SLOTS;
+
+    // ── KPI Cards ──────────────────────────────────────
+    const covRate = availableSlots > 0
+      ? Math.round((confirmedBookings.length / availableSlots) * 100) : 0;
+    const claimRate = availableSlots > 0
+      ? Math.round((staffBookings.length / availableSlots) * 100) : 0;
+
+    kpis.innerHTML = [
+      { val: confirmedBookings.length, lbl: 'Confirmed Breaks', sub: 'actually taken' },
+      { val: staffBookings.length,     lbl: 'Claimed Breaks',   sub: 'signed up' },
+      { val: availableSlots,           lbl: 'Available Slots',  sub: `${scheds.length} assignments` },
+      { val: covRate + '%',            lbl: 'Completion Rate',  sub: 'confirmed / available' },
+      { val: (availableSlots - staffBookings.length), lbl: 'Unclaimed Slots', sub: 'never signed up' },
+      { val: (staffBookings.length - confirmedBookings.length), lbl: 'Unconfirmed', sub: 'claimed, not confirmed' }
+    ].map(k => `
+      <div class="rpt-card">
+        <div class="rpt-val">${k.val}</div>
+        <div class="rpt-lbl">${k.lbl}</div>
+        <div class="rpt-sub">${k.sub}</div>
+      </div>
+    `).join('');
+
+    // ── Coverage Rate Bar ──────────────────────────────
+    document.getElementById('rptCovPct').textContent = covRate + '%';
+    document.getElementById('rptCovBar').style.width  = Math.min(covRate,100) + '%';
+    document.getElementById('rptCovClaimed').textContent = `${confirmedBookings.length} confirmed`;
+    document.getElementById('rptCovAvail').textContent   = `${availableSlots} available`;
+    document.getElementById('rptCovCard').style.display  = 'block';
+
+    // ── Breaks by Unit ─────────────────────────────────
+    const byUnit = {};
+    confirmedBookings.forEach(b => { byUnit[b.Unit] = (byUnit[b.Unit]||0) + 1; });
+    const maxUnit = Math.max(1, ...Object.values(byUnit));
+    const unitsSorted = Object.entries(byUnit).sort((a,b) => b[1]-a[1]);
+
+    if (unitsSorted.length) {
+      document.getElementById('rptUnitList').innerHTML = unitsSorted.map(([u,n]) => `
+        <div class="rpt-row">
+          <div class="rpt-row-lbl">${u}</div>
+          <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(n/maxUnit*100)}%"></div></div></div>
+          <div class="rpt-row-val" style="min-width:30px;text-align:right">${n}</div>
+        </div>`).join('');
+      document.getElementById('rptUnitCard').style.display = 'block';
+    }
+
+    // ── Slot Demand — avg minutes after shift start when claimed ──
+    // Lower avg = nurses grabbed it sooner = more in demand
+    // Shift start: Day=06:30, Noc=18:30 (in minutes from midnight)
+    const shiftStartMin = { Day: 6*60+30, Noc: 18*60+30 };
+
+    const slotClaimTimes = {}; // slotTime → [minutesAfterShiftStart, ...]
+    staffBookings.forEach(b => {
+      if (!b.Created) return;
+      const created = new Date(b.Created);
+      const claimedMin = created.getHours()*60 + created.getMinutes();
+      const shiftStart = shiftStartMin[b.ShiftType] || shiftStartMin.Day;
+
+      // Handle midnight wrap for Noc (if claimed before midnight, add 1440)
+      let minsAfter = claimedMin - shiftStart;
+      if (b.ShiftType === 'Noc' && claimedMin < shiftStart) minsAfter += 1440;
+      if (minsAfter < 0) minsAfter = 0; // claimed before shift start counts as 0
+
+      if (!slotClaimTimes[b.SlotTime]) slotClaimTimes[b.SlotTime] = [];
+      slotClaimTimes[b.SlotTime].push(minsAfter);
+    });
+
+    // Calculate avg minutes after shift start per slot, sort ascending (soonest first)
+    const slotDemand = Object.entries(slotClaimTimes).map(([slotTime, times]) => ({
+      slotTime,
+      avgMins: Math.round(times.reduce((a,b) => a+b, 0) / times.length),
+      count: times.length
+    })).sort((a,b) => a.avgMins - b.avgMins);
+
+    const maxMins = Math.max(1, ...slotDemand.map(s => s.avgMins));
+
+    function fmtMins(m){
+      if (m < 60) return `${m}m after shift start`;
+      return `${Math.floor(m/60)}h ${m%60}m after shift start`;
+    }
+
+    if (slotDemand.length) {
+      document.getElementById('rptTimeList').innerHTML =
+        '<div style="font-size:.75rem;color:var(--muted);margin-bottom:10px">Sorted by how quickly nurses claim each slot — top = grabbed soonest after shift start</div>' +
+        slotDemand.map((s, idx) => `
+        <div class="rpt-row">
+          <div style="min-width:22px;font-size:.75rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
+          <div class="rpt-row-lbl" style="font-family:'DM Mono',monospace;font-size:.85rem">${fmt12(s.slotTime)}</div>
+          <div style="flex:2">
+            <div class="rpt-bar-wrap">
+              <div class="rpt-bar" style="width:${Math.round((1 - s.avgMins/maxMins)*100)}%;background:${idx<3?'var(--teal)':'var(--teal-mid)'}"></div>
+            </div>
+          </div>
+          <div style="text-align:right">
+            <div class="rpt-row-val">${fmtMins(s.avgMins)}</div>
+            <div style="font-size:.7rem;color:var(--muted)">${s.count} claim${s.count!==1?'s':''}</div>
+          </div>
+        </div>`).join('');
+      document.getElementById('rptTimeCard').style.display = 'block';
+    }
+
+    // ── Break Nurse Workload ───────────────────────────
+    // Match confirmed bookings to their assigned BN via schedule
+    const schedMap = {};
+    scheds.forEach(s => {
+      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+      units.forEach(u => {
+        const key = `${s.ShiftDate}|${s.ShiftType}|${u}`;
+        schedMap[key] = s.BreakNurseName;
+      });
+    });
+
+    const byBN = {};
+    confirmedBookings.forEach(b => {
+      const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
+      const bn  = schedMap[key] || 'Unknown';
+      byBN[bn] = (byBN[bn]||0) + 1;
+    });
+    const bnSorted = Object.entries(byBN).sort((a,b) => b[1]-a[1]);
+    const maxBN = Math.max(1, ...Object.values(byBN));
+
+    if (bnSorted.length) {
+      document.getElementById('rptBNList').innerHTML = bnSorted.map(([bn,n]) => `
+        <div class="rpt-row">
+          <div class="rpt-row-lbl">${bn}</div>
+          <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(n/maxBN*100)}%"></div></div></div>
+          <div class="rpt-row-val" style="min-width:30px;text-align:right">${n}</div>
+        </div>`).join('');
+      document.getElementById('rptBNCard').style.display = 'block';
+    }
+
+    // ── Day vs Noc breakdown ───────────────────────────
+    const byShift = { Day: 0, Noc: 0 };
+    confirmedBookings.forEach(b => { byShift[b.ShiftType] = (byShift[b.ShiftType]||0) + 1; });
+    const total = byShift.Day + byShift.Noc || 1;
+
+    document.getElementById('rptShiftList').innerHTML = [
+      { sh: 'Day', icon: '☀️', color: 'var(--day)' },
+      { sh: 'Noc', icon: '🌙', color: 'var(--noc)' }
+    ].map(({sh, icon, color}) => `
+      <div class="rpt-row">
+        <div class="rpt-row-lbl">${icon} ${sh}</div>
+        <div style="flex:2"><div class="rpt-bar-wrap">
+          <div class="rpt-bar" style="width:${Math.round(byShift[sh]/total*100)}%;background:${color}"></div>
+        </div></div>
+        <div class="rpt-row-val" style="min-width:30px;text-align:right">${byShift[sh]}</div>
+        <div class="rpt-row-pct">${Math.round(byShift[sh]/total*100)}%</div>
+      </div>`).join('');
+    document.getElementById('rptShiftCard').style.display = 'block';
+
+  } catch(e) {
+    kpis.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// UNIT CONFIGURATION & FAIRNESS ALGORITHM
+// ═══════════════════════════════════════════════════════
+
+// ── Wing & floor configuration ───────────────────────
+// A Wing and D Wing are separate physical wings — NEVER pair cross-wing
+const WING_A      = ['3A','4A','5A','6A','7A'];
+const WING_C_PAIR = ['3C','4C']; // always together, adjacent to A wing low floors
+const WING_D      = ['6N','7N','8N','8S','9N','9S','10N','10S'];
+
+// D wing floor zones — ensure upper floors get coverage
+const D_ZONES = {
+  'D_LOW':  ['6N','7N'],
+  'D_MID':  ['8N','8S','9N','9S'],
+  'D_HIGH': ['10N','10S']
+};
+
+// N/S floor pairs in D wing (prefer to assign together)
+const D_FLOOR_PAIRS = [['6N','7N'],['8N','8S'],['9N','9S'],['10N','10S']];
+
+// All assignable slots (3C/4C = 1 slot = 14 total)
+const ALL_COVERAGE_SLOTS = [...WING_A, 'C_PAIR', ...WING_D];
+
+// Wing of a slot
+function getWing(slot){
+  if(slot === 'C_PAIR' || WING_A.includes(slot) || WING_C_PAIR.includes(slot)) return 'A';
+  if(WING_D.includes(slot)) return 'D';
+  return '?';
+}
+
+// Floor within wing — used ONLY for same-wing proximity
+const WING_FLOOR = {
+  '3A':3,'4A':4,'5A':5,'6A':6,'7A':7,
+  '3C':3,'4C':4,
+  '6N':6,'7N':7,'8N':8,'8S':8,'9N':9,'9S':9,'10N':10,'10S':10
+};
+
+// Proximity score — returns 999 (never pair) if different wings
+function proximityScore(a, b){
+  if(getWing(a) !== getWing(b)) return 999;
+  const ua = a === 'C_PAIR' ? '3C' : a;
+  const ub = b === 'C_PAIR' ? '3C' : b;
+  return Math.abs((WING_FLOOR[ua]||0) - (WING_FLOOR[ub]||0));
+}
+
+// D zone of a slot
+function getDZone(slot){
+  for(const [zone, units] of Object.entries(D_ZONES)){
+    if(units.includes(slot)) return zone;
+  }
+  return null;
+}
+
+// Units per nurse
+function unitsPerNurse(shift, nurseCount){
+  if(shift === 'Day') return nurseCount <= 2 ? 3 : 2;
+  return nurseCount === 1 ? 4 : 3;
+}
+
+// History window for fairness tracking
+function getHistoryWindow(){
+  const now = new Date();
+  const dayOfWeek = now.getDay() || 7;
+  const prevMonday = new Date(now);
+  prevMonday.setDate(now.getDate() - dayOfWeek - 6);
+  const from = prevMonday.toISOString().split('T')[0];
+  const futureDates = importEntries.map(e => e.date).filter(Boolean).sort();
+  const to = futureDates.length ? futureDates[futureDates.length-1] : today();
+  return { from, to };
+}
+
+// Coverage counts per slot in history window
+async function getUnitCoverageCounts(shift){
+  const { from, to } = getHistoryWindow();
+  const counts = {};
+  ALL_COVERAGE_SLOTS.forEach(s => counts[s] = 0);
+  try {
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${from}' and ShiftDate le '${to}' and ShiftType eq '${shift}'`);
+    scheds.forEach(s => {
+      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+      const hasC = units.includes('3C') || units.includes('4C');
+      if(hasC) counts['C_PAIR'] = (counts['C_PAIR']||0) + 1;
+      units.forEach(u => {
+        if(u !== '3C' && u !== '4C' && counts[u] !== undefined)
+          counts[u] = (counts[u]||0) + 1;
+      });
+    });
+  } catch(e) { /* return zeros on error */ }
+  return counts;
+}
+
+// Per-nurse recent coverage history
+function getNurseRecentSlots(nurseName, shift){
+  return JSON.parse(localStorage.getItem(`bnNurseHistory_${nurseName}_${shift}`) || '[]');
+}
+function saveNurseRecentSlots(nurseName, shift, slots){
+  localStorage.setItem(`bnNurseHistory_${nurseName}_${shift}`, JSON.stringify(slots));
+}
+
+// ── Main fairness algorithm ───────────────────────────
+// Strategy:
+// 1. Split slots into A-cluster (A+C) and D-cluster (D_LOW, D_MID, D_HIGH)
+// 2. For each nurse, assign ONE wing cluster — never mix A and D
+// 3. Within cluster, pick least-covered slots with floor proximity preference
+// 4. Rotate wing assignment day-to-day using date seed + nurse history
+async function suggestAssignments(nurses, shift, date){
+  if(!nurses.length) return {};
+
+  const counts = await getUnitCoverageCounts(shift);
+  const uPerNurse = unitsPerNurse(shift, nurses.length);
+  const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0);
+
+  // Build slot pool
+  const pool = ALL_COVERAGE_SLOTS.map(s => ({
+    slot: s,
+    units: s === 'C_PAIR' ? ['3C','4C'] : [s],
+    globalCount: counts[s] || 0,
+    wing: getWing(s),
+    floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0,
+    dzone: getDZone(s)
+  }));
+
+  const aPool = pool.filter(s => s.wing === 'A'); // A wing + C_PAIR
+  const dPool = pool.filter(s => s.wing === 'D'); // all D wing
+
+  // Sort each pool by coverage count (least covered first)
+  // Tiebreak with date+name seed for rotation
+  function sortPool(p, nurseName){
+    const recent = getNurseRecentSlots(nurseName, shift);
+    return [...p].sort((a,b) => {
+      const ra = recent.includes(a.slot) ? 50 : 0;
+      const rb = recent.includes(b.slot) ? 50 : 0;
+      const diff = (a.globalCount + ra) - (b.globalCount + rb);
+      if(diff !== 0) return diff;
+      return ((a.slot.charCodeAt(0) + dateSeed) % 7) -
+             ((b.slot.charCodeAt(0) + dateSeed) % 7);
+    });
+  }
+
+  // Decide wing assignment per nurse
+  // Goal: distribute nurses across both wings fairly
+  // With 3 Day nurses: 2 on A wing, 1 on D wing  OR  1 on A, 2 on D
+  // With 2 Day nurses: 1 A, 1 D
+  // With 2 Noc nurses: 1 A, 1 D
+  // With 1 Noc nurse: covers both wings (uPerNurse=4, pick 2 A + 2 D)
+  const n = nurses.length;
+
+  // Count how many times each nurse has been on each wing recently
+  function nurseWingCount(nurseName, wing){
+    return getNurseRecentSlots(nurseName, shift)
+      .filter(s => getWing(s) === wing).length;
+  }
+
+  // Sort nurses by who needs D wing most (least recent D coverage)
+  const nursesByDNeed = [...nurses].sort((a,b) =>
+    nurseWingCount(a,'D') - nurseWingCount(b,'D') ||
+    ((a.charCodeAt(0) + dateSeed) % 11) - ((b.charCodeAt(0) + dateSeed) % 11)
+  );
+
+  // Assign wings to nurses
+  let dNurseCount = n === 1 ? 0 : Math.floor(n / 2); // half on D, half on A
+  if(n === 3) dNurseCount = 1; // 3 nurses: 2 A, 1 D (A wing has more units)
+  const dNurses = new Set(nursesByDNeed.slice(0, dNurseCount).map(x=>x));
+  // Single nurse covers both wings
+  const singleNurse = n === 1;
+
+  const assignments = {};
+  const assignedGlobal = new Set();
+
+  for(const nurse of nurses){
+    const nurseAssigned = [];
+    const recent = getNurseRecentSlots(nurse, shift);
+    let myPool;
+
+    if(singleNurse){
+      // Single nurse: pick 2 from A, 2 from D (or split based on uPerNurse)
+      const aCount = Math.ceil(uPerNurse / 2);
+      const dCount = Math.floor(uPerNurse / 2);
+      const aSorted = sortPool(aPool.filter(s=>!assignedGlobal.has(s.slot)), nurse);
+      const dSorted = sortPool(dPool.filter(s=>!assignedGlobal.has(s.slot)), nurse);
+      // Ensure D wing zone variety — try to get one from each zone
+      const dPicked = pickWithZoneVariety(dSorted, dCount, assignedGlobal);
+      const aPicked = aSorted.filter(s=>!assignedGlobal.has(s.slot)).slice(0, aCount);
+      myPool = [...aPicked, ...dPicked];
+    } else if(dNurses.has(nurse)){
+      // D wing nurse — pick from D pool with zone variety (ensure upper floors)
+      const dSorted = sortPool(dPool.filter(s=>!assignedGlobal.has(s.slot)), nurse);
+      myPool = pickWithZoneVariety(dSorted, uPerNurse, assignedGlobal);
+    } else {
+      // A wing nurse — pick from A pool with floor proximity
+      myPool = pickAWing(sortPool(aPool.filter(s=>!assignedGlobal.has(s.slot)), nurse), uPerNurse, assignedGlobal);
+    }
+
+    for(const pick of myPool){
+      if(!assignedGlobal.has(pick.slot)){
+        nurseAssigned.push(pick);
+        assignedGlobal.add(pick.slot);
+      }
+    }
+
+    // Save history
+    const newHistory = [...new Set([...nurseAssigned.map(s=>s.slot), ...recent])].slice(0,28);
+    saveNurseRecentSlots(nurse, shift, newHistory);
+    assignments[nurse] = nurseAssigned.flatMap(s => s.units);
+  }
+
+  return assignments;
+}
+
+// Pick D wing slots ensuring zone variety (low/mid/high all get represented)
+function pickWithZoneVariety(dSorted, count, assignedGlobal){
+  const picked = [];
+  const usedZones = new Set();
+
+  // First pass: pick one from each zone (LOW, MID_8, MID_9, HIGH) in coverage order
+  const zones = ['D_LOW','D_MID','D_HIGH'];
+  for(const zone of zones){
+    if(picked.length >= count) break;
+    const zoneSlots = dSorted.filter(s =>
+      !assignedGlobal.has(s.slot) &&
+      !picked.find(p=>p.slot===s.slot) &&
+      D_ZONES[zone] && D_ZONES[zone].includes(s.slot)
+    );
+    if(zoneSlots.length){
+      // Within zone, prefer N/S pairs
+      const pair = D_FLOOR_PAIRS.find(p =>
+        p.includes(zoneSlots[0].slot) &&
+        picked.some(pk => p.includes(pk.slot))
+      );
+      const pick = pair
+        ? dSorted.find(s => pair.includes(s.slot) && !assignedGlobal.has(s.slot) && !picked.find(p=>p.slot===s.slot))
+        : zoneSlots[0];
+      if(pick){ picked.push(pick); usedZones.add(zone); }
+    }
+  }
+
+  // Second pass: fill remaining from least-covered
+  if(picked.length < count){
+    for(const s of dSorted){
+      if(picked.length >= count) break;
+      if(!assignedGlobal.has(s.slot) && !picked.find(p=>p.slot===s.slot))
+        picked.push(s);
+    }
+  }
+  return picked;
+}
+
+// Pick A wing slots with floor proximity preference
+function pickAWing(aSorted, count, assignedGlobal){
+  if(!aSorted.length) return [];
+  const picked = [aSorted[0]]; // first = least covered
+  for(let i = 1; i < count; i++){
+    const remaining = aSorted.filter(s =>
+      !assignedGlobal.has(s.slot) && !picked.find(p=>p.slot===s.slot)
+    );
+    if(!remaining.length) break;
+    // Prefer proximate to first pick
+    const proximate = remaining.filter(s => proximityScore(s.slot, picked[0].slot) <= 1);
+    picked.push(proximate.length ? proximate[0] : remaining[0]);
+  }
+  return picked;
+}
+
+// ─── Imported names roster (replaces SharePoint BNRoster) ───
+let importedNames = JSON.parse(localStorage.getItem('bnImportedNames') || '[]');
+
+function saveImportedNames(){
+  localStorage.setItem('bnImportedNames', JSON.stringify(importedNames));
+}
+
+function populateNurseDropdown(){
+  const sel = document.getElementById('aNurse');
+  if (!sel) return;
+  const prev = sel.value;
+
+  const date  = (document.getElementById('aDate')  || {}).value || '';
+  const shift = document.getElementById('aDay') && document.getElementById('aDay').classList.contains('active')
+                ? 'Day' : 'Noc';
+
+  // Filter importEntries to only nurses scheduled on this date+shift
+  let filtered = [];
+  if (date && importEntries.length) {
+    filtered = [...new Set(
+      importEntries
+        .filter(e => e.date === date && e.shift === shift)
+        .map(e => e.name)
+        .filter(Boolean)
+    )].sort();
+  }
+
+  if (filtered.length) {
+    sel.innerHTML = '<option value="">— Select break nurse —</option>' +
+      filtered.map(n => `<option value="${n}">${n}</option>`).join('');
+  } else if (date) {
+    sel.innerHTML = '<option value="">No break nurses scheduled for this date/shift</option>';
+  } else {
+    sel.innerHTML = '<option value="">— Select a date first —</option>';
+  }
+
+  if (prev && filtered.includes(prev)) sel.value = prev;
+}
+
+function renderImportedNamesList(){
+  const el = document.getElementById('importedNamesList');
+  if (!el) return;
+  if (!importedNames.length){
+    el.innerHTML = '<div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div>';
+    return;
+  }
+  el.innerHTML = importedNames.map(n =>
+    `<div class="roster-row">
+      <span style="font-weight:500">${n}</span>
+      <button class="btn btn-danger btn-sm" onclick="removeImportedName('${n.replace(/'/g,"\'")}')">Remove</button>
+    </div>`
+  ).join('');
+}
+
+function removeImportedName(name){
+  importedNames = importedNames.filter(n => n !== name);
+  saveImportedNames();
+  renderImportedNamesList();
+  populateNurseDropdown();
+}
+
+function addNamesToRoster(names){
+  // Merge new names in, avoid duplicates
+  names.forEach(n => { if (n && !importedNames.includes(n)) importedNames.push(n); });
+  importedNames.sort();
+  saveImportedNames();
+  renderImportedNamesList();
+  populateNurseDropdown();
+  if (BNS.unlocked) populateBNDropdown(); // refresh BN tab if open
+}
+
+function syncNurseInput(val){
+  document.getElementById('aNurseText').value = '';
+}
+
+function toggleManualName(){
+  const row = document.getElementById('manualNameRow');
+  row.style.display = row.style.display === 'none' ? 'block' : 'none';
+  if (row.style.display === 'block') document.getElementById('manualNurseInput').focus();
+}
+
+function addManualName(){
+  const val = document.getElementById('manualNurseInput').value.trim();
+  if (!val) return;
+  addNamesToRoster([val]);
+  document.getElementById('manualNurseInput').value = '';
+  toggleManualName();
+  toast(`${val} added.`);
+}
+
+// ─── API Key management ───────────────────────────────
+function saveApiKey(){
+  const key = document.getElementById('apiKeyInput').value.trim();
+  const status = document.getElementById('apiKeyStatus');
+  if (!key.startsWith('sk-ant-')) {
+    status.style.display = 'block';
+    status.style.color = 'var(--red)';
+    status.textContent = "⚠ That doesn't look like a valid Anthropic key (should start with sk-ant-).";
+    return;
+  }
+  localStorage.setItem('bnApiKey', key);
+  document.getElementById('apiKeyInput').value = '';
+  status.style.display = 'block';
+  status.style.color = 'var(--green)';
+  status.textContent = '✓ API key saved. AI import is ready to use.';
+  setTimeout(() => status.style.display = 'none', 4000);
+}
+
+function showApiKeyStatus(){
+  const key = localStorage.getItem('bnApiKey');
+  const status = document.getElementById('apiKeyStatus');
+  if (key) {
+    status.style.display = 'block';
+    status.style.color = 'var(--green)';
+    status.textContent = '✓ API key is saved (' + key.slice(0,12) + '...). AI import is ready.';
+  }
+}
+
+// ═══════════════════════════════════════════════════════
+// START
+// ═══════════════════════════════════════════════════════
+init();
+</script>
+</body>
+</html>
