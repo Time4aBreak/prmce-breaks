@@ -626,18 +626,15 @@ const S = {
 };
 
 // ═══════════════════════════════════════════════════════
-// DATA LAYER — toggle SIM_MODE to switch between
-// local simulation and live SharePoint
+// DATA LAYER — Google Sheets backend via Apps Script
 // ═══════════════════════════════════════════════════════
 
-// ── Set to false when deployed to SharePoint ──────────
+// ── Set to true to use local simulation instead ────────
 const SIM_MODE = false;
 // ─────────────────────────────────────────────────────
 
-// ── SharePoint site URL ────────────────────────────────
-// When hosted on GitHub Pages, set this to your full SharePoint site URL.
-// When hosted directly on SharePoint, set to '' (empty) to use relative URLs.
-const SP_BASE = 'https://providence4.sharepoint.com/sites/TowerCentral';
+// ── Google Apps Script Web App URL ────────────────────
+const GAS_URL = 'https://script.google.com/macros/s/AKfycbwgqdIOwBVsdhJclYv8lT4tNSr2BToZI9xrV3Hk_DmFXFJlIiMICz_nWfEcgERhTT_XRg/exec';
 // ─────────────────────────────────────────────────────
 
 // ── Simulated in-browser database ────────────────────
@@ -733,77 +730,49 @@ async function spPatch(list, id, data){
   simSave(list);
 }
 
-// ── Real SharePoint functions (used when SIM_MODE=false) ──
-let _digest = null, _digestExp = 0;
-
-async function _digestReal() {
-  if (_digest && Date.now() < _digestExp) return _digest;
-  const r = await fetch(`${SP_BASE}/_api/contextinfo`, {
-    method:'POST',
-    credentials:'include',
-    headers:{'Accept':'application/json;odata=verbose','Content-Type':'application/json;odata=verbose'}
-  });
+// ── Google Sheets API functions (used when SIM_MODE=false) ──
+async function _spGetReal(list, filter=''){
+  const params = new URLSearchParams({ action:'get', sheet:list });
+  if(filter) params.append('filter', filter);
+  const r = await fetch(`${GAS_URL}?${params}`);
+  if(!r.ok) throw new Error(`Cannot reach data API for "${list}"`);
   const d = await r.json();
-  _digest    = d.d.GetContextWebInformation.FormDigestValue;
-  _digestExp = Date.now() + (d.d.GetContextWebInformation.FormDigestTimeoutSeconds - 60)*1000;
-  return _digest;
+  if(d.error) throw new Error(d.error);
+  return d.items || [];
 }
 
-async function _spGetReal(list, filter='', select='', orderby='') {
-  let url = `${SP_BASE}/_api/web/lists/getbytitle('${list}')/items?$top=5000`;
-  if (filter)  url += `&$filter=${encodeURIComponent(filter)}`;
-  if (select)  url += `&$select=${select}`;
-  if (orderby) url += `&$orderby=${orderby}`;
-  const r = await fetch(url, {credentials:'include', headers:{'Accept':'application/json;odata=verbose'}});
-  if (!r.ok) throw new Error(`Cannot reach list "${list}". Is SharePoint set up?`);
-  return (await r.json()).d.results;
-}
-
-async function _spPostReal(list, data) {
-  const dg = await _digestReal();
-  const type = `SP.Data.${list}ListItem`;
-  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items`, {
+async function _spPostReal(list, data){
+  const r = await fetch(`${GAS_URL}?action=post&sheet=${list}`, {
     method:'POST',
-    credentials:'include',
-    headers:{
-      'Accept':'application/json;odata=verbose',
-      'Content-Type':'application/json;odata=verbose',
-      'X-RequestDigest':dg
-    },
-    body: JSON.stringify({__metadata:{type}, ...data})
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(data)
   });
-  if (!r.ok) { const e = await r.json(); throw new Error(e.error?.message?.value||'Save failed'); }
-  return r.json();
+  if(!r.ok) throw new Error('Save failed');
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
+  return d.item;
 }
 
-async function _spDelReal(list, id) {
-  const dg = await _digestReal();
-  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items(${id})`, {
-    method:'DELETE',
-    credentials:'include',
-    headers:{'Accept':'application/json;odata=verbose','X-RequestDigest':dg,'IF-MATCH':'*'}
+async function _spDelReal(list, id){
+  const r = await fetch(`${GAS_URL}?action=delete&sheet=${list}&id=${id}`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({})
   });
-  if (!r.ok && r.status !== 204) throw new Error('Delete failed');
+  if(!r.ok) throw new Error('Delete failed');
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
 }
 
-async function _spPatchReal(list, id, data) {
-  const dg = await _digestReal();
-  const r = await fetch(`${SP_BASE}/_api/web/lists/getbytitle('${list}')/items(${id})`, {
-    method: 'PATCH',
-    credentials:'include',
-    headers: {
-      'Accept': 'application/json;odata=verbose',
-      'Content-Type': 'application/json;odata=verbose',
-      'X-RequestDigest': dg,
-      'IF-MATCH': '*',
-      'X-HTTP-Method': 'MERGE'
-    },
-    body: JSON.stringify({
-      __metadata: { type: `SP.Data.${list}ListItem` },
-      ...data
-    })
+async function _spPatchReal(list, id, data){
+  const r = await fetch(`${GAS_URL}?action=patch&sheet=${list}&id=${id}`, {
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify(data)
   });
-  if (!r.ok && r.status !== 204) throw new Error('Update failed');
+  if(!r.ok) throw new Error('Update failed');
+  const d = await r.json();
+  if(d.error) throw new Error(d.error);
 }
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
