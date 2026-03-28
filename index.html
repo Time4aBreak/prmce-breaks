@@ -730,49 +730,43 @@ async function spPatch(list, id, data){
   simSave(list);
 }
 
-// ── Google Sheets API functions (used when SIM_MODE=false) ──
-async function _spGetReal(list, filter=''){
-  const params = new URLSearchParams({ action:'get', sheet:list });
-  if(filter) params.append('filter', filter);
-  const r = await fetch(`${GAS_URL}?${params}`);
-  if(!r.ok) throw new Error(`Cannot reach data API for "${list}"`);
+// ── Google Sheets API functions — all GET to avoid CORS ──
+async function gasCall(params){
+  const url = GAS_URL + '?' + new URLSearchParams(params).toString();
+  const r = await fetch(url);
+  if(!r.ok) throw new Error('API call failed: ' + r.status);
   const d = await r.json();
   if(d.error) throw new Error(d.error);
+  return d;
+}
+
+async function _spGetReal(list, filter=''){
+  const p = { action:'get', sheet:list };
+  if(filter) p.filter = filter;
+  const d = await gasCall(p);
   return d.items || [];
 }
 
 async function _spPostReal(list, data){
-  const r = await fetch(`${GAS_URL}?action=post&sheet=${list}`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(data)
+  const d = await gasCall({
+    action: 'post',
+    sheet: list,
+    data: encodeURIComponent(JSON.stringify(data))
   });
-  if(!r.ok) throw new Error('Save failed');
-  const d = await r.json();
-  if(d.error) throw new Error(d.error);
   return d.item;
 }
 
 async function _spDelReal(list, id){
-  const r = await fetch(`${GAS_URL}?action=delete&sheet=${list}&id=${id}`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({})
-  });
-  if(!r.ok) throw new Error('Delete failed');
-  const d = await r.json();
-  if(d.error) throw new Error(d.error);
+  await gasCall({ action:'delete', sheet:list, id:String(id) });
 }
 
 async function _spPatchReal(list, id, data){
-  const r = await fetch(`${GAS_URL}?action=patch&sheet=${list}&id=${id}`, {
-    method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify(data)
+  await gasCall({
+    action: 'patch',
+    sheet: list,
+    id: String(id),
+    data: encodeURIComponent(JSON.stringify(data))
   });
-  if(!r.ok) throw new Error('Update failed');
-  const d = await r.json();
-  if(d.error) throw new Error(d.error);
 }
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
