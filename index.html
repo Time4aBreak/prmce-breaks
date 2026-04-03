@@ -401,11 +401,16 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </p>
         <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
         <div id="bnSlotsList"></div>
+        <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
+          <input type="time" id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
+          <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
+        </div>
         <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="clearBNBreaks()">Clear All My Breaks</button>
           <button class="btn btn-ghost btn-sm" onclick="resetShiftToDefault()">Reset this shift to default</button>
           <button class="btn btn-ghost btn-sm" onclick="resetAllToDefault()">Reset all upcoming shifts to default</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="markSelfUnavailable()">🏠 Mark myself unavailable</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="toggleSelfAvailability()">🏠 Mark myself unavailable</button>
         </div>
       </div>
 
@@ -722,6 +727,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+    <!-- SharePoint Connectivity Test -->
+    <div class="card" style="border-color:var(--teal-dk)">
+      <div class="card-label" style="margin-bottom:8px">🔌 SharePoint Connectivity Test</div>
+      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">Tests whether this browser can reach the TowerCentral SharePoint lists. Run this from the work desktop while logged into your hospital account.</p>
+      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" onclick="testSharePointConnectivity()">▶ Run Test</button>
+        <span id="spTestSpinner" style="display:none"><div class="spinner"></div></span>
+      </div>
+      <div id="spTestResults" style="margin-top:12px;font-size:.82rem;line-height:1.7"></div>
+    </div>
+
     <!-- Sim mode controls (only visible in simulation mode) -->
     <div class="card" id="simControls" style="display:none;border-color:#e8a020;background:#fef9ec">
       <div class="card-label" style="color:#b07800">🧪 Simulation Mode Controls</div>
@@ -771,24 +787,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     </div>
 
     <!-- API Key — collapsible, closed by default, at bottom of admin -->
-    <div class="card" id="apiKeyCard">
-      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleApiKeySection()">
-        <div class="card-label" style="margin:0">🔑 Anthropic API Key</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <span id="apiKeyBadge" style="font-size:.72rem;color:var(--green);display:none">✓ Saved</span>
-          <span id="apiKeyChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
-        </div>
-      </div>
-      <div id="apiKeyBody" style="display:none;margin-top:12px">
-        <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">
-          Required once for the AI schedule import feature. Your key is stored securely and never shared.
-        </p>
-        <div class="row">
-          <input type="password" id="apiKeyInput" placeholder="sk-ant-..." style="flex:1;font-family:'DM Mono',monospace;font-size:.8rem"/>
-          <button class="btn btn-success btn-sm" onclick="saveApiKey()">Save Key</button>
-        </div>
-        <div id="apiKeyStatus" style="font-size:.75rem;margin-top:7px;display:none"></div>
-      </div>
+    <div class="card" id="apiKeyCard" style="display:none">
+      <!-- API key is now stored in Apps Script server-side — no longer needed in browser -->
     </div>
 
     <!-- Break Nurses (from imported schedule) — collapsible, bottom of admin -->
@@ -991,7 +991,7 @@ async function spPost(list, data){
 async function spDel(list, id){
   if (!SIM_MODE) return _spDelReal(list, id);
   await new Promise(r => setTimeout(r, 50));
-  DB[list] = (DB[list] || []).filter(i => i.Id !== id);
+  DB[list] = (DB[list] || []).filter(i => String(i.Id) !== String(id));
   simSave(list);
 }
 
@@ -999,7 +999,7 @@ async function spDel(list, id){
 async function spPatch(list, id, data){
   if (!SIM_MODE) return _spPatchReal(list, id, data);
   await new Promise(r => setTimeout(r, 50));
-  const item = (DB[list] || []).find(i => i.Id === id);
+  const item = (DB[list] || []).find(i => String(i.Id) === String(id));
   if (item) Object.assign(item, data);
   simSave(list);
 }
@@ -1113,7 +1113,13 @@ function showSimBanner(){
 // ═══════════════════════════════════════════════════════
 // UTILITIES
 // ═══════════════════════════════════════════════════════
-function today(){ return new Date().toISOString().split('T')[0]; }
+function today(){
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+function localDate(d){
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
 
 // Returns the correct shift date — for Noc shift after midnight, the shift started yesterday
 function shiftDate(shift){
@@ -1123,7 +1129,7 @@ function shiftDate(shift){
   if(shift === 'Noc' && h < 9){
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
-    return yesterday.toISOString().split('T')[0];
+    return `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
   }
   return today();
 }
@@ -1507,7 +1513,24 @@ function pickUnit(u){
   document.getElementById('shiftCard').style.display='block';
   document.getElementById('slotsWrap').style.display='block';
   updateCoverageBanner();
+  checkWrongUnit(u);
   loadSlots();
+}
+
+async function checkWrongUnit(selectedUnit){
+  const firstName = document.getElementById('nurseName').value.trim();
+  const nurseExt  = document.getElementById('nurseExt').value.trim();
+  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)) return;
+  const name = `${firstName} (${nurseExt})`;
+  const dt = shiftDate(S.shift);
+  try {
+    const mine = await spGet(LISTS.bookings,
+      `NurseName eq '${esc(name)}' and SlotDate eq '${dt}' and ShiftType eq '${S.shift}'`);
+    const otherUnits = [...new Set(mine.filter(b => !b.IsBNBreak && b.Unit !== selectedUnit).map(b => b.Unit))];
+    if(otherUnits.length){
+      toast(`⚠️ You have breaks booked on ${otherUnits.join(', ')} — are you on the right unit?`, true);
+    }
+  } catch(e){ /* non-critical, fail silently */ }
 }
 
 function renderShiftPill(){
@@ -1853,7 +1876,7 @@ async function loadSlots(silent=false){
   // Don't clear DOM immediately on silent refresh — preserve existing content
   // until we have verified new content to replace it with
   const prevHtml = list.innerHTML;
-  if(!silent) list.innerHTML='';
+  if(!silent) { list.innerHTML=''; list.dataset.lastHtml=''; }
 
   try {
     const dt=shiftDate(S.shift), shift=S.shift;
@@ -1958,10 +1981,21 @@ async function loadSlots(silent=false){
     meta.textContent=`Break nurse for ${S.unit}: ${bnNames}  ·  Slots are 15 min — claim up to 3 per shift`;
 
     // Filter slots: must be future, not hard-blocked, and if rotation exists, must be this unit's turn
+    // Also respect each covering BN's start time — hide slots before they arrive
+    const bnStartMins = {};
+    [...covering, ...oppCovering].forEach(c => {
+      const key = `bnStart_${c.BreakNurseName}_${dt}_${c.ShiftType}`;
+      const val = localStorage.getItem(key);
+      if(val){ const [h,m]=val.split(':').map(Number); bnStartMins[c.BreakNurseName]=h*60+m; }
+    });
+    const earliestBNStart = Object.values(bnStartMins).length
+      ? Math.min(...Object.values(bnStartMins)) : null;
+
     const future = allSlots.filter(s => {
       if(isPast(s, shift)) return false;
       if(getSlotTier(s, shift) === 'hardBlocked') return false;
       if(hasAnyRotation && unitRotationSlots.size > 0 && !unitRotationSlots.has(s)) return false;
+      if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
     if(!future.length){
@@ -2222,18 +2256,79 @@ async function markBNUnavailable(schedId, bnName, date, shift){
   await processBNUnavailability(schedId, bnName, date, shift);
 }
 
-// Mark self unavailable from Breakers tab
-async function markSelfUnavailable(){
+async function markBNAvailable(schedId, bnName){
+  if(!confirm(`Mark ${bnName} as available again?\n\nThis will reactivate their assignment — staff can sign up for breaks as normal.`)) return;
+  try {
+    await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
+    toast(`${bnName} is back on — assignment reactivated.`);
+    loadAssignments();
+  } catch(e){ toast(e.message, true); }
+}
+
+function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
+function getBNStartMin(){
+  const val = localStorage.getItem(getBNStartKey());
+  if(!val) return null;
+  const [h,m] = val.split(':').map(Number);
+  return h*60+m;
+}
+function onBNStartTimeChange(){
+  const val = document.getElementById('bnStartTime').value;
+  if(val) localStorage.setItem(getBNStartKey(), val);
+  else localStorage.removeItem(getBNStartKey());
+  loadBNSlots();
+  toast(val ? `Start time set to ${val} — early slots hidden from staff` : 'Start time cleared');
+}
+function clearBNStartTime(){
+  localStorage.removeItem(getBNStartKey());
+  document.getElementById('bnStartTime').value = '';
+  loadBNSlots();
+  toast('Start time cleared');
+}
+function restoreBNStartTimeUI(){
+  const val = localStorage.getItem(getBNStartKey()) || '';
+  const el = document.getElementById('bnStartTime');
+  if(el) el.value = val;
+}
+
+async function toggleSelfAvailability(){
   const dt = BNS.date || today(), shift = BNS.shift;
   if(!BNS.name){ toast('Select your name first', true); return; }
 
   const scheds = await spGet(LISTS.schedule,
     `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
-  const active = scheds.filter(s => s.Status !== 'inactive' && !s.IsSupplemental);
-  if(!active.length){ toast('No active assignment found for this shift', true); return; }
+  const inactive = scheds.find(s => s.Status === 'inactive' && !s.IsSupplemental);
+  const active   = scheds.find(s => s.Status !== 'inactive' && !s.IsSupplemental);
 
-  if(!confirm(`Mark yourself as unavailable for the ${shift} shift on ${dt}?`)) return;
-  await processBNUnavailability(active[0].Id, BNS.name, dt, shift);
+  if(inactive){
+    // Reactivate
+    if(!confirm(`Mark yourself as available again?\n\nThis will reactivate your assignment — staff can sign up for breaks as normal.`)) return;
+    try {
+      await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
+      toast('You\'re back on — assignment reactivated.');
+      loadBNSlots();
+      updateSelfAvailBtn(false);
+    } catch(e){ toast(e.message, true); }
+  } else if(active){
+    // Mark unavailable
+    if(!confirm(`Mark yourself as unavailable for the ${shift} shift on ${dt}?`)) return;
+    await processBNUnavailability(active.Id, BNS.name, dt, shift);
+    updateSelfAvailBtn(true);
+  } else {
+    toast('No active assignment found for this shift', true);
+  }
+}
+
+function updateSelfAvailBtn(isInactive){
+  const btn = document.getElementById('selfUnavailBtn');
+  if(!btn) return;
+  if(isInactive){
+    btn.textContent = '✅ Mark myself available';
+    btn.style.color = 'var(--teal-dk)';
+  } else {
+    btn.textContent = '🏠 Mark myself unavailable';
+    btn.style.color = 'var(--red)';
+  }
 }
 
 async function processBNUnavailability(schedId, bnName, date, shift){
@@ -2252,7 +2347,7 @@ async function processBNUnavailability(schedId, bnName, date, shift){
     });
 
     // Get future uncovered claimed breaks for BN-A's units
-    const now = toMin(fmt24(new Date()));
+    const now = nowMin();
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
 
@@ -2503,7 +2598,7 @@ async function updateCoverageBanner(){
 
 function onNameExtInput(){
   if(S.unit) {
-    loadSlots();
+    loadSlots(true); // silent — preserves slot list while typing
     updateCoverageBanner();
   }
 }
@@ -2677,6 +2772,22 @@ async function saveAssign(){
   if(!dt)     { toast('Select a date.',true); return; }
   if(!units.length){ toast('Select at least one unit.',true); return; }
   try{
+    // Check if any selected units are already assigned to a different BN on this date/shift
+    const allScheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+    const conflicts = [];
+    allScheds
+      .filter(s => s.BreakNurseName !== nurse && s.Status !== 'inactive')
+      .forEach(s => {
+        let sUnits = []; try { sUnits = JSON.parse(s.Units||'[]'); } catch{}
+        const overlap = units.filter(u => sUnits.includes(u));
+        if(overlap.length) conflicts.push({ bn: s.BreakNurseName, units: overlap });
+      });
+    if(conflicts.length){
+      const lines = conflicts.map(c => `• ${c.bn} already covers ${c.units.join(', ')}`).join('\n');
+      if(!confirm(`⚠️ Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift. Continue?`)) return;
+    }
+
     // Upsert — update if exists, create if not
     const existing = await spGet(LISTS.schedule,
       `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
@@ -2732,7 +2843,7 @@ async function loadAssignments(){
     const day = now.getDay() || 7;
     const mon = new Date(now); mon.setDate(now.getDate() - day + 1);
     const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    filter = `ShiftDate ge '${mon.toISOString().split('T')[0]}' and ShiftDate le '${sun.toISOString().split('T')[0]}'`;
+    filter = `ShiftDate ge '${localDate(mon)}' and ShiftDate le '${localDate(sun)}'`;
   } else {
     filter = `ShiftDate ge '${t}'`;
   }
@@ -2753,12 +2864,9 @@ async function loadAssignments(){
     const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-    // "Today" applies to today's date AND the Noc shift date (which may be tomorrow)
-    const todayDates = new Set([t, shiftDate('Day'), shiftDate('Noc')]);
-
     el.innerHTML = Object.entries(byDate).map(([date, items]) => {
       const d = new Date(date + 'T12:00:00');
-      const label = todayDates.has(date) ? 'Today' : `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+      const label = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
       return `<div style="margin-bottom:14px">
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
         ${items.map(s => {
@@ -2776,10 +2884,15 @@ async function loadAssignments(){
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${!isInactive ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
                 ${!isInactive && !s.IsSupplemental ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
               </div>
             </div>
-            <div class="unit-tags">${units.map(u=>`<span class="tag">${u}</span>`).join('')}</div>
+            <div class="unit-tags">${units.map(u=>
+              !isInactive
+                ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
+                : `<span class="tag">${u}</span>`
+            ).join('')}</div>
           </div>`;
         }).join('')}
       </div>`;
@@ -2796,19 +2909,208 @@ async function delAssign(id){
     if(!scheds.length){ if(!confirm('Remove this assignment?')) return; await spDel(LISTS.schedule,id); toast('Assignment removed.'); loadAssignments(); return; }
     const s = scheds[0];
     let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+
+    // Find all active staff bookings on this assignment's units
     const bookings = await spGet(LISTS.bookings, `SlotDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    const confirmed = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && isConfirmed(b));
-    const msg = confirmed.length > 0
-      ? `${confirmed.length} confirmed break${confirmed.length!==1?'s':''} exist for this assignment. Removing it will affect records. Proceed?`
-      : 'Remove this assignment?';
-    if(!confirm(msg)) return;
-    await spDel(LISTS.schedule,id);
-    toast('Assignment removed.');
-    loadAssignments();
+    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit));
+
+    if(!affected.length){
+      if(!confirm(`Remove assignment for ${s.BreakNurseName} (${s.ShiftType} · ${s.ShiftDate})?`)) return;
+      await spDel(LISTS.schedule, id);
+      toast('Assignment removed.');
+      loadAssignments();
+      return;
+    }
+
+    // There are claimed breaks — offer reassignment
+    const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
+    const otherBNs = allScheds.filter(s2 => String(s2.Id) !== String(id) && s2.Status !== 'inactive');
+
+    showReassignModal({
+      deletingAssign: s,
+      units,
+      affected,
+      otherBNs,
+      onReassign: async (targetId) => {
+        const target = otherBNs.find(b => String(b.Id) === String(targetId));
+        if(!target) return;
+        let targetUnits = []; try { targetUnits = JSON.parse(target.Units||'[]'); } catch{}
+        const merged = [...new Set([...targetUnits, ...units])];
+        await spPatch(LISTS.schedule, target.Id, { Units: JSON.stringify(merged) });
+        await spDel(LISTS.schedule, id);
+        toast(`Reassigned to ${target.BreakNurseName} — ${affected.length} booking${affected.length!==1?'s':''} carried over.`);
+        loadAssignments();
+      },
+      onCancelAndDelete: async () => {
+        for(const b of affected) await spDel(LISTS.bookings, b.Id);
+        await spDel(LISTS.schedule, id);
+        toast(`Assignment removed · ${affected.length} booking${affected.length!==1?'s':''} cancelled.`);
+        loadAssignments();
+      }
+    });
   } catch(e){ toast(e.message,true); }
 }
 
+function showReassignModal({ deletingAssign, units, affected, otherBNs, onReassign, onCancelAndDelete }){
+  const existing = document.getElementById('reassignModal');
+  if(existing) existing.remove();
 
+  const nurseList = [...new Set(affected.map(b => b.NurseName))];
+  const affectedHtml = nurseList.map(n => {
+    const slots = affected.filter(b => b.NurseName === n).map(b => fmt12(b.SlotTime)).join(', ');
+    return `<div style="font-size:.82rem;color:var(--text)">• ${n} — ${slots}</div>`;
+  }).join('');
+
+  const bnOptions = otherBNs.length
+    ? otherBNs.map(b => `<option value="${b.Id}">${b.BreakNurseName}</option>`).join('')
+    : '<option disabled>No other BNs on this shift</option>';
+
+  const modal = document.createElement('div');
+  modal.id = 'reassignModal';
+  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px`;
+  modal.innerHTML = `
+    <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+      <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Remove Assignment</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${deletingAssign.BreakNurseName} · ${deletingAssign.ShiftType} · ${deletingAssign.ShiftDate}</div>
+      <div style="font-size:.82rem;font-weight:600;margin-bottom:6px;color:var(--text)">⚠️ ${affected.length} claimed break${affected.length!==1?'s':''} will be affected:</div>
+      <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:120px;overflow-y:auto">${affectedHtml}</div>
+      <div style="margin-bottom:16px">
+        <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:6px">Reassign coverage to:</label>
+        <select id="reassignTarget" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem">
+          <option value="">— Cancel all bookings and delete —</option>
+          ${bnOptions}
+        </select>
+      </div>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reassignModal').remove()">Back</button>
+        <button class="btn btn-danger btn-sm" onclick="handleReassignConfirm()">Confirm</button>
+      </div>
+    </div>`;
+  document.body.appendChild(modal);
+
+  window._reassignHandlers = { onReassign, onCancelAndDelete, affected, otherBNs, deletingAssign };
+}
+
+async function handleReassignConfirm(){
+  const modal = document.getElementById('reassignModal');
+  const targetId = document.getElementById('reassignTarget').value;
+  const { onReassign, onCancelAndDelete, affected, otherBNs, deletingAssign } = window._reassignHandlers || {};
+
+  if(!targetId){
+    modal.remove();
+    if(onCancelAndDelete) await onCancelAndDelete();
+    return;
+  }
+
+  // Check new BN's existing bookings for slot conflicts
+  const target = otherBNs.find(b => String(b.Id) === String(targetId));
+  if(target){
+    const existingBookings = await spGet(LISTS.bookings,
+      `SlotDate eq '${deletingAssign.ShiftDate}' and ShiftType eq '${deletingAssign.ShiftType}'`);
+    let targetUnits = []; try { targetUnits = JSON.parse(target.Units||'[]'); } catch{}
+    const targetTakenSlots = new Set(
+      existingBookings
+        .filter(b => !b.IsBNBreak && targetUnits.includes(b.Unit))
+        .map(b => b.SlotTime)
+    );
+    const conflicts = affected.filter(b => targetTakenSlots.has(b.SlotTime));
+    if(conflicts.length){
+      const lines = conflicts.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
+      const proceed = confirm(
+        `⚠️ ${target.BreakNurseName} already has staff booked at these times:\n\n${lines}\n\nThese conflicting bookings will be cancelled. Continue?`
+      );
+      if(!proceed) return;
+      // Cancel the conflicting bookings from the new BN's existing staff
+      for(const b of existingBookings.filter(b => !b.IsBNBreak && targetUnits.includes(b.Unit) && targetTakenSlots.has(b.SlotTime))){
+        await spDel(LISTS.bookings, b.Id);
+      }
+    }
+  }
+
+  modal.remove();
+  if(onReassign) await onReassign(targetId);
+}
+
+
+async function closeUnit(schedId, unit, bnName, date, shift){
+  try {
+    // Get future claimed bookings on this unit
+    const now = nowMin();
+    const bookings = await spGet(LISTS.bookings,
+      `Unit eq '${esc(unit)}' and SlotDate eq '${date}' and ShiftType eq '${shift}'`);
+    const future = bookings.filter(b => !b.IsBNBreak && toMin(b.SlotTime) > now);
+
+    // Get this BN's other units on this assignment
+    const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
+    if(!scheds.length){ toast('Assignment not found', true); return; }
+    let units = []; try { units = JSON.parse(scheds[0].Units||'[]'); } catch{}
+    const remaining = units.filter(u => u !== unit);
+
+    // Build modal content
+    const bookingHtml = future.length
+      ? future.map(b => `<div style="font-size:.82rem">• ${b.NurseName} at ${fmt12(b.SlotTime)}</div>`).join('')
+      : '<div style="font-size:.82rem;color:var(--muted)">No pending bookings on this unit.</div>';
+
+    const redirectOptions = remaining.length
+      ? remaining.map(u => `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}" checked> ${u}</label>`).join('')
+      : '<div style="font-size:.82rem;color:var(--muted)">No other units on this assignment.</div>';
+
+    const existing = document.getElementById('closeUnitModal');
+    if(existing) existing.remove();
+
+    const modal = document.createElement('div');
+    modal.id = 'closeUnitModal';
+    modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px`;
+    modal.innerHTML = `
+      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Close Unit: ${unit}</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${bnName} · ${shift} · ${date}</div>
+        ${future.length ? `
+          <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">⚠️ ${future.length} pending booking${future.length!==1?'s':''} will be cancelled:</div>
+          <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto">${bookingHtml}</div>
+        ` : `<div style="margin-bottom:14px">${bookingHtml}</div>`}
+        ${remaining.length ? `
+          <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Redirect extra coverage to:</div>
+          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px">${redirectOptions}</div>
+        ` : ''}
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('closeUnitModal').remove()">Cancel</button>
+          <button class="btn btn-danger btn-sm" onclick="confirmCloseUnit(${schedId},'${unit}','${date}','${shift}')">Close Unit</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    window._closeUnitData = { future, units, remaining };
+  } catch(e){ toast(e.message, true); }
+}
+
+async function confirmCloseUnit(schedId, unit, date, shift){
+  const modal = document.getElementById('closeUnitModal');
+  const { future, units } = window._closeUnitData || {};
+
+  // Get checked redirect units
+  const checkboxes = modal.querySelectorAll('#redirectUnits input[type=checkbox]');
+  const redirectTo = [...checkboxes].filter(c => c.checked).map(c => c.value);
+
+  modal.remove();
+
+  try {
+    // Cancel future bookings on closed unit
+    for(const b of future) await spDel(LISTS.bookings, b.Id);
+
+    // Remove closed unit from assignment, optionally add redirect units
+    const newUnits = units.filter(u => u !== unit);
+    // Redirect units are already in remaining — just ensure they're included
+    await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+
+    const cancelled = future.length;
+    const msg = cancelled
+      ? `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled${redirectTo.length ? ` · coverage redirected to ${redirectTo.join(', ')}` : ''}`
+      : `${unit} closed`;
+    toast(msg);
+    loadAssignments();
+  } catch(e){ toast(e.message, true); }
+}
 async function recalculateAllRotations(){
   if(!confirm('Recalculate rotations for all upcoming assignments? This updates slot distributions based on the current algorithm.')) return;
 
@@ -2833,6 +3135,63 @@ async function recalculateAllRotations(){
 
   if(failed > 0) toast(`↺ ${done} recalculated · ${failed} failed`, true);
   else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated`);
+}
+
+async function testSharePointConnectivity(){
+  const SP_SITE = 'https://providence4.sharepoint.com/sites/TowerCentral';
+  const results = document.getElementById('spTestResults');
+  const spinner = document.getElementById('spTestSpinner');
+  spinner.style.display = 'inline-block';
+  results.innerHTML = '';
+
+  const tests = [
+    {
+      label: 'BNSchedule list (GET)',
+      url: `${SP_SITE}/_api/web/lists/getbytitle('BNSchedule')/items?$top=1&$select=Id`,
+    },
+    {
+      label: 'BNBookings list (GET)',
+      url: `${SP_SITE}/_api/web/lists/getbytitle('BNBookings')/items?$top=1&$select=Id`,
+    },
+    {
+      label: 'Request Digest (POST auth check)',
+      url: `${SP_SITE}/_api/contextinfo`,
+      method: 'POST'
+    }
+  ];
+
+  const rows = [];
+  for(const test of tests){
+    try {
+      const opts = {
+        method: test.method || 'GET',
+        headers: { 'Accept': 'application/json;odata=verbose' },
+        credentials: 'include'
+      };
+      const res = await Promise.race([
+        fetch(test.url, opts),
+        new Promise((_,reject) => setTimeout(() => reject(new Error('Timed out after 8s')), 8000))
+      ]);
+      if(res.ok || res.status === 200){
+        rows.push(`<div style="color:var(--green)">✅ ${test.label} — <strong>OK</strong> (${res.status})</div>`);
+      } else if(res.status === 401 || res.status === 403){
+        rows.push(`<div style="color:var(--red)">🔒 ${test.label} — <strong>Auth required</strong> (${res.status}) — make sure you're logged into your hospital account</div>`);
+      } else {
+        rows.push(`<div style="color:var(--red)">⚠️ ${test.label} — <strong>HTTP ${res.status}</strong></div>`);
+      }
+    } catch(e){
+      const isBlocked = e.message.includes('Failed to fetch') || e.message.includes('NetworkError');
+      rows.push(`<div style="color:var(--red)">${isBlocked ? '🚫' : '⚠️'} ${test.label} — <strong>${isBlocked ? 'Blocked by network or CORS' : e.message}</strong></div>`);
+    }
+  }
+
+  const allOk = rows.every(r => r.includes('✅'));
+  const summary = allOk
+    ? `<div style="margin-top:10px;padding:8px 12px;background:var(--teal-lt);border-radius:8px;color:var(--teal-dk);font-weight:600">✅ SharePoint is reachable — migration to SharePoint backend is feasible!</div>`
+    : `<div style="margin-top:10px;padding:8px 12px;background:var(--red-lt);border-radius:8px;color:var(--red);font-weight:600">⚠️ One or more tests failed — see details above. SharePoint backend may not work from this browser.</div>`;
+
+  results.innerHTML = rows.join('') + summary;
+  spinner.style.display = 'none';
 }
 
 async function dedupAssignments(){
@@ -2990,87 +3349,28 @@ async function runImport(){
   btn.style.display = 'none'; spin.style.display = 'inline-block';
 
   try {
-    const apiKey = localStorage.getItem('bnApiKey') || '';
-    if (!apiKey) {
-      toast('API key not found — please enter it once to get started.', true);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      openApiKeySection();
-      return;
-    }
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
+    // Route through Apps Script proxy — avoids hospital network blocking api.anthropic.com
+    const response = await fetch(API_URL + '?action=extractSchedule', {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-        'anthropic-dangerous-direct-browser-access': 'true'
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        model: 'claude-sonnet-4-20250514',
-        max_tokens: 4000,
-        messages: [{
-          role: 'user',
-          content: [
-            {
-              type: 'image',
-              source: { type: 'base64', media_type: importImageType, data: importImageB64 }
-            },
-            {
-              type: 'text',
-              text: `This is a UKG Pro nursing schedule screenshot from UKG Pro Workforce Management.
-
-Extract every nurse name and each day they are scheduled. Return ONLY a raw JSON array, nothing else.
-
-CRITICAL — HOW TO DETERMINE SHIFT TYPE:
-These are BREAK NURSE shifts. Read ONLY the START time of each shift block, then apply:
-
-  Day break nurse window:  08:00 – 19:59  →  shift = "Day"
-  Noc break nurse window:  20:00 – 07:59  →  shift = "Noc"
-
-Examples:
-  "08:00 - 20:30"  → starts 08:00 → Day
-  "20:00 - 08:30"  → starts 20:00 → Noc
-  "13:00 - 17:00"  → starts 13:00 → Day  (partial, still Day window)
-  "19:00 - 23:00"  → starts 19:00 → Day  (before 20:00 cutoff)
-  "20:30 - 00:30"  → starts 20:30 → Noc
-  "22:00 - 02:00"  → starts 22:00 → Noc
-
-DO NOT use end time. DO NOT guess based on length. START TIME ONLY determines Day vs Noc.
-
-HOW TO READ NAMES:
-- Copy exactly from the Name column (e.g. "Canoy, Anna Leah O")
-- If a row says "My Schedule", use "Reyes, Tomas" instead
-
-HOW TO READ DATES:
-- Column headers like "Sun 3/22" = 2026-03-22, "Mon 3/23" = 2026-03-23, etc.
-- Only include a row+date if a colored shift block is present — skip blank cells
-- One entry per person per date
-
-OUTPUT — return ONLY a raw JSON array, no markdown, no explanation:
-[
-  { "name": "Canoy, Anna Leah O", "date": "2026-03-24", "shift": "Day" },
-  { "name": "Rivera, Christlyne J", "date": "2026-03-22", "shift": "Noc" }
-]
-
-- Return ONLY the JSON array. Nothing else.`
-            }
-          ]
-        }]
+        imageData: importImageB64,
+        mediaType: importImageType
       })
     });
 
     const data = await response.json();
 
-    // Check for API-level errors first
+    // Check for proxy or API-level errors first
     if (data.error) {
-      toast('API error: ' + (data.error.message || JSON.stringify(data.error)), true);
+      toast('Extraction error: ' + (data.error.message || data.error || JSON.stringify(data.error)), true);
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
 
-    // Pull all text out of the response blocks
-    const raw = (data.content || []).map(c => c.text || '').join('');
-    console.log('AI raw response:', raw); // debug — visible in browser console
+    // Proxy returns { result: "raw json string" }
+    const raw = data.result || (data.content || []).map(c => c.text || '').join('');
+    console.log('AI raw response:', raw);
 
     if (!raw.trim()) {
       toast('AI returned an empty response. Check your API key and try again.', true);
@@ -3463,7 +3763,7 @@ function renderImportedEntriesSummary(){
   entries.forEach(e => {
     const d = new Date(e.date + 'T12:00:00');
     const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
-    const wk = mon.toISOString().split('T')[0];
+    const wk = localDate(mon);
     if (!byWeek[wk]) byWeek[wk] = [];
     byWeek[wk].push(e);
   });
@@ -3485,7 +3785,7 @@ function renderImportedEntriesSummary(){
 function clearWeekEntries(weekStart){
   const d = new Date(weekStart + 'T12:00:00');
   const end = new Date(d); end.setDate(d.getDate() + 6);
-  const endStr = end.toISOString().split('T')[0];
+  const endStr = localDate(end);
   importEntries = importEntries.filter(e => e.date < weekStart || e.date > endStr);
   localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
   renderImportedEntriesSummary();
@@ -3831,10 +4131,14 @@ async function loadBNSlots(){
   const countEl = document.getElementById('bnBreakCount');
   loader.style.display = 'inline-block';
   list.innerHTML = '';
+  restoreBNStartTimeUI();
 
   try {
     const dt = BNS.date || today(), shift = BNS.shift;
-    const isToday = dt === today();
+    const isToday = dt === shiftDate(shift);
+    const _months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    const _days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const dtFmt = (()=>{ const d=new Date(dt+'T12:00:00'); return `${_days[d.getDay()]} ${_months[d.getMonth()]} ${d.getDate()}`; })();
 
     // Check this break nurse has an assignment on this date
     const scheds = await spGet(LISTS.schedule,
@@ -3847,11 +4151,12 @@ async function loadBNSlots(){
       return;
     }
     document.getElementById('bnNoSched').style.display = 'none';
+    updateSelfAvailBtn(scheds.some(s => s.Status === 'inactive' && !s.IsSupplemental));
 
     // Get all units this BN covers on this date
     const units = [];
     scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
-    const dateLabel = isToday ? 'Today' : dt;
+    const dateLabel = dtFmt;
     meta.textContent = `${dateLabel}  ·  Covering: ${units.join(', ')}`;
 
     const slots = generateSlots(shift);
@@ -3929,7 +4234,7 @@ async function checkRotationConflicts(bnName, dt, shift, affectedSlots){
 
   const list = conflicts.map(c => `• ${c.name} on ${c.unit} at ${fmt12(c.time)}`).join('\n');
   const go = confirm(
-    `The following staff nurse${conflicts.length>1?'s have':' has'} already claimed a slot affected by this change:\n\n${list}\n\nIf you proceed, their booking will be cancelled. Please call them to let them know.\n\nProceed?`
+    `Adding this break shifts the coverage rotation. The following staff nurse${conflicts.length>1?'s have':' has'} a slot that would no longer be covered:\n\n${list}\n\nIf you proceed, their booking will be cancelled — please call them to let them know.\n\nProceed?`
   );
   if(!go) return false;
   for(const c of conflicts) await spDel(LISTS.bookings, c.id);
@@ -3949,19 +4254,30 @@ async function claimBNBreak(slotTime){
     }
 
     const units = await getBNUnits(BNS.name, dt, shift);
+
+    // Warn if staff nurses already have this slot on any unit this BN covers
+    const staffAtSlot = await spGet(LISTS.bookings,
+      `SlotDate eq '${dt}' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
+    const conflictingStaff = staffAtSlot.filter(b => !b.IsBNBreak && units.includes(b.Unit));
+    if(conflictingStaff.length){
+      const lines = conflictingStaff.map(b => {
+        const match = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
+        return match ? `  • ${match[1]} — Ext. ${match[2]} (${b.Unit})` : `  • ${b.NurseName} (${b.Unit})`;
+      }).join('\n');
+      const ok = confirm(
+        `⚠️ ${fmt12(slotTime)} has staff already booked:\n\n${lines}\n\n` +
+        `Confirm to cancel their break slot — please let them know!`
+      );
+      if(!ok) return;
+      // Cancel the conflicting staff bookings
+      for(const b of conflictingStaff){
+        await spDel(LISTS.bookings, b.Id);
+      }
+    }
+
     const allSlots = generateSlots(shift);
     const dateSeed = dt.split('-').reduce((a,b)=>a+parseInt(b),0) + BNS.name.charCodeAt(0);
-
-    // Compute which slots shift in the new rotation
-    const newBreakSlots = new Set([...uniqueTimes, slotTime]);
-    const oldRot = calculateBlockRotation(units, uniqueTimes,   allSlots, dateSeed);
-    const newRot = calculateBlockRotation(units, newBreakSlots, allSlots, dateSeed);
-    const affected = new Set(
-      Object.keys(oldRot).filter(s => oldRot[s] !== newRot[s])
-    );
-    affected.add(slotTime); // the break slot itself is always affected
-
-    if(!(await checkRotationConflicts(BNS.name, dt, shift, affected))) return;
+    const currentRot = calculateBlockRotation(units, uniqueTimes, allSlots, dateSeed);
 
     // Save BN break per unit
     for(const unit of units){
@@ -3972,8 +4288,9 @@ async function claimBNBreak(slotTime){
       });
     }
 
-    saveRotation(BNS.name, dt, shift, newRot);
-    toast(`🔒 ${fmt12(slotTime)} blocked — rotation updated`);
+    // Keep existing rotation unchanged — just block the break slot
+    saveRotation(BNS.name, dt, shift, currentRot);
+    toast(`🔒 ${fmt12(slotTime)} blocked`);
     loadBNSlots();
   } catch(e) { toast(e.message, true); }
 }
@@ -4104,6 +4421,45 @@ async function loadBNConfirm(){
     }).join('');
 
     wrap.style.display = 'block';
+
+    // Add manual break entry button
+    const addBtn = document.getElementById('bnManualAddWrap');
+    if(!addBtn){
+      const div = document.createElement('div');
+      div.id = 'bnManualAddWrap';
+      div.style.marginTop = '10px';
+      div.innerHTML = `
+        <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()" id="bnManualAddBtn">+ Add Manual Break</button>
+        <div id="bnManualForm" style="display:none;margin-top:10px;background:var(--bg);border-radius:10px;padding:12px;display:grid;gap:8px">
+          <div style="font-size:.8rem;font-weight:600;color:var(--muted)">MANUAL BREAK ENTRY</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+            <div>
+              <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
+              <input type="time" id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+            </div>
+            <div>
+              <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Unit</label>
+              <select id="manualUnit" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                <option value="">— select —</option>
+                ${['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'].map(u=>`<option value="${u}">${u}</option>`).join('')}
+              </select>
+            </div>
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Nurse First Name</label>
+            <input type="text" id="manualNurseName" placeholder="First name" maxlength="30" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+          </div>
+          <div>
+            <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Spectra Ext</label>
+            <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+          </div>
+          <div style="display:flex;gap:8px;justify-content:flex-end">
+            <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
+            <button class="btn btn-success btn-sm" onclick="saveManualBreak()">Save Break</button>
+          </div>
+        </div>`;
+      list.parentNode.appendChild(div);
+    }
   } catch(e) {
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     wrap.style.display = 'block';
@@ -4123,6 +4479,40 @@ async function undoBreakStatus(id){
     await spPatch(LISTS.bookings, id, { BreakStatus: null, IsCompleted: 0 });
     loadBNConfirm();
   } catch(e) { toast(e.message, true); }
+}
+
+function toggleManualBreakForm(){
+  const form = document.getElementById('bnManualForm');
+  if(!form) return;
+  const open = form.style.display !== 'none';
+  form.style.display = open ? 'none' : 'grid';
+  document.getElementById('bnManualAddBtn').textContent = open ? '+ Add Manual Break' : '✕ Cancel';
+}
+
+async function saveManualBreak(){
+  const slotTime = document.getElementById('manualSlotTime').value.replace(':','');
+  const unit     = document.getElementById('manualUnit').value;
+  const name     = document.getElementById('manualNurseName').value.trim();
+  const ext      = document.getElementById('manualNurseExt').value.trim();
+
+  if(!slotTime){ toast('Please enter a time', true); return; }
+  if(!unit)    { toast('Please select a unit', true); return; }
+  if(!name)    { toast('Please enter a nurse name', true); return; }
+  if(!/^\d{5}$/.test(ext)){ toast('Please enter a 5-digit extension', true); return; }
+
+  const nurseName = `${name} (${ext})`;
+  const dt = BNS.date || today(), shift = BNS.shift;
+
+  try {
+    await spPost(LISTS.bookings, {
+      Title: `MANUAL-${unit}-${dt}-${slotTime}`,
+      NurseName: nurseName, Unit: unit, SlotTime: slotTime,
+      SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
+    });
+    toast(`✓ Manual break saved for ${nurseName} at ${fmt12(slotTime)} on ${unit}`);
+    toggleManualBreakForm();
+    loadBNConfirm();
+  } catch(e){ toast(e.message, true); }
 }
 
 async function confirmBreak(id){
@@ -4537,6 +4927,10 @@ async function loadReports(){
       `SlotDate ge '${from}' and SlotDate le '${to}'`);
     const staffBookings   = bookings.filter(b => !b.IsBNBreak);
     const confirmedBookings = staffBookings.filter(b => isConfirmed(b));
+    const notTakenBookings  = staffBookings.filter(b => isNotTaken(b));
+    const cancelledCount    = bookings.filter(b => b.IsCancelled == 1 || b.BreakStatus === 'cancelled').length;
+    const noShowRate = staffBookings.length > 0
+      ? Math.round((notTakenBookings.length / staffBookings.length) * 100) : 0;
 
     // Fetch all schedule assignments in range (for available slots calc)
     const scheds = await spGet(LISTS.schedule,
@@ -4557,7 +4951,9 @@ async function loadReports(){
       { val: availableSlots,           lbl: 'Available Slots',  sub: `${scheds.length} assignments` },
       { val: covRate + '%',            lbl: 'Completion Rate',  sub: 'confirmed / available' },
       { val: (availableSlots - staffBookings.length), lbl: 'Unclaimed Slots', sub: 'never signed up' },
-      { val: (staffBookings.length - confirmedBookings.length), lbl: 'Unconfirmed', sub: 'claimed, not confirmed' }
+      { val: (staffBookings.length - confirmedBookings.length - notTakenBookings.length), lbl: 'Unconfirmed', sub: 'claimed, pending' },
+      { val: notTakenBookings.length,  lbl: 'Not Taken',        sub: `${noShowRate}% of claimed` },
+      { val: cancelledCount,           lbl: 'Cancelled',        sub: 'removed by BN or manager' }
     ].map(k => `
       <div class="rpt-card">
         <div class="rpt-val">${k.val}</div>
@@ -4793,7 +5189,7 @@ function getNurseWingHistory(nurseName, shift){
   // Prune to 60 days
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 60);
-  const cutStr = cutoff.toISOString().split('T')[0];
+  const cutStr = localDate(cutoff);
   return raw.filter(e => e.date >= cutStr);
 }
 
