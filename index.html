@@ -336,6 +336,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <option value="">— Select your name —</option>
         </select>
       </div>
+      <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+        <div style="flex:1">
+          <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">SPECTRA EXT</label>
+          <input type="text" id="bnExtInput" placeholder="5-digit ext" maxlength="5" inputmode="numeric"
+            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem"
+            oninput="validateExt(this);onBNExtInput()">
+        </div>
+      </div>
       <div style="margin-top:8px;font-size:.75rem;color:var(--muted)">
         Names are pulled from the imported UKG schedule. If your name is missing, ask your manager to import the schedule.
       </div>
@@ -425,6 +433,40 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             </div>
           </div>
           <div id="bnConfirmList"></div>
+          <!-- Manual break entry — persistent, not recreated on refresh -->
+          <div style="margin-top:10px">
+            <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()" id="bnManualAddBtn">+ Add Manual Break</button>
+            <div id="bnManualForm" style="display:none;margin-top:10px;background:var(--bg);border-radius:10px;padding:12px">
+              <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:8px">MANUAL BREAK ENTRY</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
+                <div>
+                  <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
+                  <input type="time" id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                </div>
+                <div>
+                  <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Unit</label>
+                  <select id="manualUnit" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                    <option value="">— select —</option>
+                    <option>3A</option><option>4A</option><option>5A</option><option>6A</option><option>7A</option>
+                    <option>3C</option><option>4C</option><option>6N</option><option>7N</option><option>8N</option>
+                    <option>8S</option><option>9N</option><option>9S</option><option>10N</option><option>10S</option>
+                  </select>
+                </div>
+              </div>
+              <div style="margin-bottom:8px">
+                <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Nurse First Name</label>
+                <input type="text" id="manualNurseName" placeholder="First name" maxlength="30" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+              </div>
+              <div style="margin-bottom:10px">
+                <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Spectra Ext</label>
+                <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+              </div>
+              <div style="display:flex;gap:8px;justify-content:flex-end">
+                <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
+                <button class="btn btn-success btn-sm" onclick="saveManualBreak()">Save Break</button>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -3350,7 +3392,7 @@ async function runImport(){
 
   try {
     // Route through Apps Script proxy — avoids hospital network blocking api.anthropic.com
-    const response = await fetch(API_URL + '?action=extractSchedule', {
+    const response = await fetch(GAS_URL + '?action=extractSchedule', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -4076,7 +4118,9 @@ function populateBNDropdown(){
 function loadBNView(){
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first.', true); return; }
+  const ext = document.getElementById('bnExtInput').value.trim();
   BNS.name  = name;
+  BNS.ext   = ext;
   BNS.shift = detectShift();
   BNS.date  = today();
   BNS.defaultShift = BNS.shift;
@@ -4084,6 +4128,21 @@ function loadBNView(){
   const dp = document.getElementById('bnDate');
   if (dp) dp.value = BNS.date;
   renderBNShiftPill();
+
+  // Restore saved ext for this BN if available
+  const savedExt = localStorage.getItem(`bnExt_${name}`);
+  if(savedExt && !ext){
+    document.getElementById('bnExtInput').value = savedExt;
+    BNS.ext = savedExt;
+  }
+
+function onBNExtInput(){
+  const ext = document.getElementById('bnExtInput').value.trim();
+  if(/^\d{5}$/.test(ext) && BNS.name){
+    BNS.ext = ext;
+    localStorage.setItem(`bnExt_${BNS.name}`, ext);
+  }
+}
 
   // Show default schedule section
   const defWrap = document.getElementById('bnDefaultWrap');
@@ -4395,16 +4454,16 @@ async function loadBNConfirm(){
     staffBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
 
     list.innerHTML = staffBookings.map(b => {
-      const isConfirmed  = isConfirmed(b);
-      const isNotTaken   = isNotTaken(b);
+      const bConfirmed  = isConfirmed(b);
+      const bNotTaken   = isNotTaken(b);
 
       let rowClass = 'open';
       let statusHtml = '';
-      if(isConfirmed){
+      if(bConfirmed){
         rowClass = 'confirmed';
         statusHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Confirmed</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
-      } else if(isNotTaken){
+      } else if(bNotTaken){
         rowClass = '';
         statusHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
@@ -4421,45 +4480,6 @@ async function loadBNConfirm(){
     }).join('');
 
     wrap.style.display = 'block';
-
-    // Add manual break entry button
-    const addBtn = document.getElementById('bnManualAddWrap');
-    if(!addBtn){
-      const div = document.createElement('div');
-      div.id = 'bnManualAddWrap';
-      div.style.marginTop = '10px';
-      div.innerHTML = `
-        <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()" id="bnManualAddBtn">+ Add Manual Break</button>
-        <div id="bnManualForm" style="display:none;margin-top:10px;background:var(--bg);border-radius:10px;padding:12px;display:grid;gap:8px">
-          <div style="font-size:.8rem;font-weight:600;color:var(--muted)">MANUAL BREAK ENTRY</div>
-          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
-            <div>
-              <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
-              <input type="time" id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-            </div>
-            <div>
-              <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Unit</label>
-              <select id="manualUnit" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-                <option value="">— select —</option>
-                ${['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'].map(u=>`<option value="${u}">${u}</option>`).join('')}
-              </select>
-            </div>
-          </div>
-          <div>
-            <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Nurse First Name</label>
-            <input type="text" id="manualNurseName" placeholder="First name" maxlength="30" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-          </div>
-          <div>
-            <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Spectra Ext</label>
-            <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-          </div>
-          <div style="display:flex;gap:8px;justify-content:flex-end">
-            <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
-            <button class="btn btn-success btn-sm" onclick="saveManualBreak()">Save Break</button>
-          </div>
-        </div>`;
-      list.parentNode.appendChild(div);
-    }
   } catch(e) {
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     wrap.style.display = 'block';
