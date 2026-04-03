@@ -3391,14 +3391,15 @@ async function runImport(){
   btn.style.display = 'none'; spin.style.display = 'inline-block';
 
   try {
-    // Route through Apps Script proxy — avoids hospital network blocking api.anthropic.com
-    const response = await fetch(GAS_URL + '?action=extractSchedule', {
+    // Route through Apps Script proxy — send as form-encoded to avoid CORS preflight
+    const response = await fetch(GAS_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        action: 'extractSchedule',
         imageData: importImageB64,
         mediaType: importImageType
-      })
+      }).toString()
     });
 
     const data = await response.json();
