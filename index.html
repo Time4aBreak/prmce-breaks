@@ -121,7 +121,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .slot-name.filled{color:var(--text);font-weight:500}
 
 /* ── Summary ── */
-.summ-row{display:grid;grid-template-columns:80px 52px 1fr 110px;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:7px}
+.summ-row{display:grid;grid-template-columns:80px 52px 1fr 110px auto;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:7px}
 .summ-time{font-family:'DM Mono',monospace;font-size:.9rem;font-weight:500;color:var(--teal-dk)}
 .summ-unit{background:var(--teal-lt);color:var(--teal-dk);padding:3px 7px;border-radius:5px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;text-align:center}
 .summ-nurse{font-size:.875rem;font-weight:500}
@@ -154,9 +154,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .divider{height:1px;background:var(--border);margin:14px 0}
 
 /* ── Toast ── */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:var(--teal-dk);color:white;padding:10px 24px;border-radius:99px;font-size:.875rem;font-weight:500;box-shadow:0 4px 20px rgba(0,0,0,.2);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
-.toast.err{background:var(--red)}
+.toast.err{background:#1a1a2e;border-left:4px solid #c94040;padding-left:22px}
 
 /* ── PW gate ── */
 .pw-gate{max-width:360px;margin:40px auto;text-align:center;padding:32px 24px;background:white;border-radius:16px;border:1px solid var(--border)}
@@ -171,10 +171,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .nav-brand span{display:none}
   .tab{padding:14px 12px 60px}
   .slot-row{grid-template-columns:78px 1fr auto}
-  .summ-row{grid-template-columns:70px 44px 1fr}
+  .summ-row{grid-template-columns:70px 44px 1fr auto}
   .summ-bn{display:none}
 
-  /* Breakers tab mobile */
+  /* My Shift tab mobile */
   .bn-slot-grid{grid-template-columns:repeat(auto-fill,minmax(68px,1fr)) !important}
   .bn-action-btns{flex-direction:column !important}
   .bn-action-btns .btn{width:100%;justify-content:center}
@@ -195,7 +195,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <span>PRMCE BREAKS</span>
   </div>
   <div class="nav-tabs">
-    <button class="nav-tab active" id="nt-staff"  onclick="showTab('staff',this)">🏥 Break Sign-Up</button>
+    <button class="nav-tab active" id="nt-staff"  onclick="showTab('staff',this)">🏥 Sign Up</button>
     <button class="nav-tab"        id="nt-portal" onclick="showTab('portal',this)">🔐 Breakers Portal</button>
   </div>
   <div class="nav-time" id="navClock"></div>
@@ -219,18 +219,21 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="row">
       <div class="field">
         <label>First Name</label>
-        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" oninput="onNameExtInput()"/>
+        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
       <div class="field" style="max-width:150px">
         <label>Spectra Ext</label>
-        <input type="text" id="nurseExt" placeholder="5-digit ext" maxlength="5" autocomplete="off" inputmode="numeric" pattern="[0-9]{5}" oninput="validateExt(this);onNameExtInput()"/>
+        <input type="text" id="nurseExt" placeholder="5-digit ext" maxlength="5" autocomplete="off" inputmode="numeric" pattern="[0-9]{5}" oninput="validateExt(this);onNameExtInput()" onblur="checkDuplicateExt()"/>
       </div>
     </div>
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
       ⚠ Both first name and a 5-digit Spectra extension are required.
     </div>
-    <div style="font-size:.72rem;color:var(--muted);margin-top:6px">
-      💡 The screen refreshes every 10 seconds to show the latest availability — your entered information is saved.
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
+      <div style="font-size:.72rem;color:var(--muted)">
+        💡 The screen refreshes every 10 seconds to show the latest availability — your entered information is saved.
+      </div>
+      <button class="btn btn-ghost btn-sm" style="font-size:.72rem;white-space:nowrap;margin-left:8px" onclick="clearNameExt()">✕ Clear</button>
     </div>
     <!-- Booking status after name+ext+unit entered -->
     <div id="myBookingStatus" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--teal-lt);border:1px solid var(--teal);font-size:.82rem"></div>
@@ -251,6 +254,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <span id="slotsLoader" style="display:none"><div class="spinner"></div></span>
       </div>
       <div id="slotsList"></div>
+      <!-- Submit bar — shown when nurse has pending selections -->
+      <div id="submitBar" style="display:none;margin-top:14px;padding:12px 14px;background:var(--teal-lt);border-radius:10px;border:1.5px solid var(--teal);display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+        <span id="submitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="clearPending()">Clear</button>
+          <button class="btn btn-primary" onclick="submitClaims()" id="submitBtn">Submit breaks</button>
+        </div>
+      </div>
     </div>
   </div>
 
@@ -278,10 +289,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <!-- Sub-tab nav -->
     <div style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
-      <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Covering</button>
-      <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 Breakers</button>
-      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)" id="st-reports-btn">📊 Analytics</button>
-      <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">⚙️ Admin</button>
+      <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
+      <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
+      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)" id="st-reports-btn">📊 Reports</button>
+      <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">⚙️ Schedule</button>
     </div>
 
     <!-- Sub-tab content -->
@@ -339,44 +350,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1">
           <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">SPECTRA EXT</label>
-          <input type="text" id="bnExtInput" placeholder="5-digit ext" maxlength="5" inputmode="numeric"
-            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem"
+          <input type="text" id="bnExtInput" placeholder="— — — — —" maxlength="5" inputmode="numeric"
+            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem;letter-spacing:.15em"
+            onfocus="if(this.value===''){this.style.letterSpacing='.05em'}"
+            onblur="if(this.value===''){this.style.letterSpacing='.15em'}"
             oninput="validateExt(this);onBNExtInput()">
         </div>
       </div>
-      <div style="margin-top:8px;font-size:.75rem;color:var(--muted)">
-        Names are pulled from the imported UKG schedule. If your name is missing, ask your manager to import the schedule.
-      </div>
+
     </div>
 
     <!-- My Default Schedule -->
-    <div id="bnDefaultWrap" style="display:none">
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div class="card-label" style="margin:0">⭐ My Default Break Schedule</div>
-          <span id="bnDefaultSaved" style="font-size:.75rem;color:var(--green);display:none">✓ Saved</span>
-        </div>
-        <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
-          Set your usual break times. This template will be auto-applied to all your upcoming shifts.
-        </p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <button class="btn btn-ghost btn-sm" id="bnDefaultDayBtn" onclick="loadDefaultGrid('Day')">☀️ Day</button>
-          <button class="btn btn-ghost btn-sm" id="bnDefaultNocBtn" onclick="loadDefaultGrid('Noc')">🌙 Noc</button>
-        </div>
-        <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
-        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="saveDefaultTemplate()">Save Default</button>
-          <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
-          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="applyDefaultToAll()" style="opacity:.5;cursor:not-allowed" disabled>
-            Apply default to all my upcoming shifts
-          </button>
-        </div>
-        <div id="bnApplyAllHint" style="font-size:.75rem;color:var(--muted);margin-top:6px;display:none">
-          You haven't set a default break schedule yet. Select your usual break times above to get started.
-        </div>
-      </div>
-    </div>
-
     <div id="bnShiftWrap" style="display:none">
       <div class="card">
         <div class="row">
@@ -397,7 +381,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <!-- Custom break schedule for this shift -->
       <div class="card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="card-label" style="margin:0">🗓 My Break Schedule</div>
+          <div class="card-label" style="margin:0">🗓 Breaker's Breaks</div>
           <div style="display:flex;align-items:center;gap:8px">
             <span id="bnBreakCount" style="font-size:.75rem;color:var(--muted)"></span>
             <span id="bnLoader" style="display:none"><div class="spinner"></div></span>
@@ -409,16 +393,26 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </p>
         <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
         <div id="bnSlotsList"></div>
+        <!-- BN break submit bar -->
+        <div id="bnSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--day-lt);border-radius:10px;border:1.5px solid var(--day);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <span id="bnSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--day)"></span>
+          <div style="display:flex;gap:8px">
+            <button class="btn btn-ghost btn-sm" onclick="clearBNPending()">Clear</button>
+            <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" onclick="submitBNBreaks()">Submit breaks</button>
+          </div>
+        </div>
         <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
-          <input type="time" id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
+          <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
+            <option value="">— full shift —</option>
+          </select>
           <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
         </div>
         <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" onclick="clearBNBreaks()">Clear All My Breaks</button>
           <button class="btn btn-ghost btn-sm" onclick="resetShiftToDefault()">Reset this shift to default</button>
           <button class="btn btn-ghost btn-sm" onclick="resetAllToDefault()">Reset all upcoming shifts to default</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="toggleSelfAvailability()">🏠 Mark myself unavailable</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="toggleSelfAvailability()">🏠 Mark unavailable</button>
         </div>
       </div>
 
@@ -438,20 +432,20 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()" id="bnManualAddBtn">+ Add Manual Break</button>
             <div id="bnManualForm" style="display:none;margin-top:10px;background:var(--bg);border-radius:10px;padding:12px">
               <div style="font-size:.8rem;font-weight:600;color:var(--muted);margin-bottom:8px">MANUAL BREAK ENTRY</div>
-              <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px">
-                <div>
-                  <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
-                  <input type="time" id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-                </div>
-                <div>
+              <div style="margin-bottom:8px">
                   <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Unit</label>
-                  <select id="manualUnit" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
-                    <option value="">— select —</option>
+                  <select id="manualUnit" onchange="populateManualSlots()" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                    <option value="">— select unit —</option>
                     <option>3A</option><option>4A</option><option>5A</option><option>6A</option><option>7A</option>
                     <option>3C</option><option>4C</option><option>6N</option><option>7N</option><option>8N</option>
                     <option>8S</option><option>9N</option><option>9S</option><option>10N</option><option>10S</option>
                   </select>
-                </div>
+              </div>
+              <div style="margin-bottom:8px">
+                  <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
+                  <select id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                    <option value="">— select unit first —</option>
+                  </select>
               </div>
               <div style="margin-bottom:8px">
                 <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Nurse First Name</label>
@@ -478,6 +472,33 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+    <div id="bnDefaultWrap" style="display:none">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="card-label" style="margin:0">⭐ My Normal Break Times</div>
+          <span id="bnDefaultSaved" style="font-size:.75rem;color:var(--green);display:none">✓ Saved</span>
+        </div>
+        <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
+          Set your usual break times. This template will be auto-applied to all your upcoming shifts.
+        </p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button class="btn btn-ghost btn-sm" id="bnDefaultDayBtn" onclick="loadDefaultGrid('Day')">☀️ Day</button>
+          <button class="btn btn-ghost btn-sm" id="bnDefaultNocBtn" onclick="loadDefaultGrid('Noc')">🌙 Noc</button>
+        </div>
+        <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+          <button class="btn btn-primary btn-sm" onclick="saveDefaultTemplate()">Save Default</button>
+          <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
+          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="applyDefaultToAll()" style="opacity:.5;cursor:not-allowed" disabled>
+            Apply default to all my upcoming shifts
+          </button>
+        </div>
+        <div id="bnApplyAllHint" style="font-size:.75rem;color:var(--muted);margin-top:6px;display:none">
+          You haven't set a default break schedule yet. Select your usual break times above to get started.
+        </div>
+      </div>
+    </div>
+
   </div><!-- /bnPanel -->
     </div><!-- /subtab-bn -->
 
@@ -490,7 +511,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   <div id="rptGate">
     <div class="pw-gate">
       <div style="font-size:2rem;margin-bottom:10px">📊</div>
-      <h2>Analytics</h2>
+      <h2>Reports</h2>
       <p>Enter your admin or break nurse password to access Analytics</p>
       <input type="password" id="rptPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockReports()"/>
@@ -621,7 +642,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   </div><!-- /rptPanel -->
     </div><!-- /subtab-reports -->
 
-<!-- ═══════════ ADMIN TAB ═══════════ -->
+<!-- ═══════════ SCHEDULE TAB ═══════════ -->
     <div id="subtab-admin" class="subtab" style="display:none">
 
 
@@ -629,8 +650,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   <div id="adminGate">
     <div class="pw-gate">
       <div style="font-size:2rem;margin-bottom:10px">🔒</div>
-      <h2>Admin Access</h2>
-      <p>Break Nurse Manager portal</p>
+      <h2>Schedule</h2>
+      <p>Schedule coordinator portal</p>
       <input type="password" id="pwInput" placeholder="Password" onkeydown="if(event.key==='Enter')unlock()"/>
       <button class="btn btn-primary" style="width:100%" onclick="unlock()">Unlock</button>
       <div id="pwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
@@ -691,22 +712,13 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
-    <!-- Imported schedule summary -->
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-label" style="margin:0">📅 Imported Schedule Entries</div>
-        <button class="btn btn-danger btn-sm" onclick="clearAllImportedEntries()">Clear All</button>
-      </div>
-      <div id="importedEntriesSummary" style="font-size:.8rem;color:var(--muted)">Loading...</div>
-    </div>
-
     <!-- Assign coverage — collapsible -->
-    <div class="card">
+    <div class="card" id="assignFormCard">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleAssignForm()">
         <div class="card-label" style="margin:0">Assign Break Coverage Manually</div>
         <span id="assignChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
       </div>
-      <div id="assignFormBody" style="margin-top:12px">
+      <div id="assignFormBody" style="margin-top:12px;display:none">
 
         <div class="row" style="margin-bottom:12px">
           <div class="field">
@@ -757,9 +769,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:11px">
         <div class="card-label" style="margin:0">Scheduled Assignments</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <button class="range-btn active" id="va-week" onclick="setViewRange('week',this)">This Week</button>
-          <button class="range-btn" id="va-all" onclick="setViewRange('all',this)">All Upcoming</button>
-          <input type="date" id="viewDate" onchange="setViewRange('day',null)" style="font-size:.8rem;padding:5px 8px"/>
+          <button class="range-btn active" id="va-all" onclick="setViewRange('all',this)">All Upcoming</button>
+          <input type="date" id="viewDateFrom" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
+          <span style="font-size:.8rem;color:var(--muted)">to</span>
+          <input type="date" id="viewDateTo" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
         </div>
       </div>
       <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
@@ -767,17 +780,6 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <button class="btn btn-ghost btn-sm" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
         <button class="btn btn-ghost btn-sm" onclick="recalculateAllRotations()">↺ Recalculate all rotations</button>
       </div>
-    </div>
-
-    <!-- SharePoint Connectivity Test -->
-    <div class="card" style="border-color:var(--teal-dk)">
-      <div class="card-label" style="margin-bottom:8px">🔌 SharePoint Connectivity Test</div>
-      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">Tests whether this browser can reach the TowerCentral SharePoint lists. Run this from the work desktop while logged into your hospital account.</p>
-      <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="testSharePointConnectivity()">▶ Run Test</button>
-        <span id="spTestSpinner" style="display:none"><div class="spinner"></div></span>
-      </div>
-      <div id="spTestResults" style="margin-top:12px;font-size:.82rem;line-height:1.7"></div>
     </div>
 
     <!-- Sim mode controls (only visible in simulation mode) -->
@@ -808,7 +810,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <!-- Change passwords -->
     <div class="card">
-      <div class="card-label">Change Admin Password</div>
+      <div class="card-label">Change Schedule Password</div>
       <div class="row">
         <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
         <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
@@ -854,6 +856,20 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+    <!-- Imported schedule summary — collapsible, at bottom -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleImportedEntries()">
+        <div class="card-label" style="margin:0">📅 Imported Schedule Entries</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();clearAllImportedEntries()" style="font-size:.72rem">Clear All</button>
+          <span id="importedEntriesChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
+        </div>
+      </div>
+      <div id="importedEntriesBody" style="display:none;margin-top:10px">
+        <div id="importedEntriesSummary" style="font-size:.8rem;color:var(--muted)">Loading...</div>
+      </div>
+    </div>
+
   </div><!-- /adminPanel -->
     </div><!-- /subtab-admin -->
 
@@ -861,6 +877,34 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 </div><!-- /tab-portal -->
 
 <div class="toast" id="toast"></div>
+
+<!-- Custom confirm modal -->
+<div id="customConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;padding:24px;max-width:500px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div id="customConfirmMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:20px;color:var(--text)"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
+      <button id="customConfirmOk" class="btn btn-primary" style="width:100%"></button>
+      <button id="customConfirmCancel" class="btn btn-ghost" style="width:100%"></button>
+    </div>
+  </div>
+</div>
+
+<!-- Restore cancelled breaks modal -->
+<div id="restoreModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;padding:22px;max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;display:flex;flex-direction:column">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Restore Cancelled Breaks?</div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Select which nurses to restore. Unselected slots will remain open.</div>
+    <div style="display:flex;gap:8px;margin-bottom:12px">
+      <button class="btn btn-ghost btn-sm" onclick="restoreModalSelectAll(true)">✓ Restore All</button>
+      <button class="btn btn-ghost btn-sm" onclick="restoreModalSelectAll(false)">✕ Cancel All</button>
+    </div>
+    <div id="restoreModalList" style="overflow-y:auto;flex:1;margin-bottom:14px"></div>
+    <div style="display:flex;gap:8px;justify-content:flex-end">
+      <button class="btn btn-ghost" onclick="restoreModalConfirm(false)">Leave all open</button>
+      <button class="btn btn-primary" onclick="restoreModalConfirm(true)">Confirm</button>
+    </div>
+  </div>
+</div>
 
 <script>
 // ═══════════════════════════════════════════════════════
@@ -872,15 +916,35 @@ const STAFF_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N'
 
 // ── 3C open/closed status ─────────────────────────────
 function get3CDefault(){ return localStorage.getItem('unit3CDefault') || 'closed'; }
-function set3CDefault(val){ localStorage.setItem('unit3CDefault', val); }
+function set3CDefault(val){
+  localStorage.setItem('unit3CDefault', val);
+  setState('unit3CDefault', val).catch(()=>{});
+}
 function get3CStatus(date, shift){
   const key = `unit3C_${date}_${shift}`;
   return localStorage.getItem(key) || get3CDefault();
 }
 function set3CStatus(date, shift, val){
-  localStorage.setItem(`unit3C_${date}_${shift}`, val);
+  const key = `unit3C_${date}_${shift}`;
+  localStorage.setItem(key, val);
+  setState(key, val).catch(()=>{});
 }
 function is3COpen(date, shift){ return get3CStatus(date, shift) === 'open'; }
+
+// Warm 3C status from backend for a given date/shift
+async function warm3CStatus(date, shift){
+  const key = `unit3C_${date}_${shift}`;
+  if(localStorage.getItem(key)) return;
+  try {
+    const remote = await getState(key);
+    if(remote !== null) localStorage.setItem(key, remote);
+    // Also warm default
+    if(!localStorage.getItem('unit3CDefault')){
+      const def = await getState('unit3CDefault');
+      if(def !== null) localStorage.setItem('unit3CDefault', def);
+    }
+  } catch(e){}
+}
 
 // Expand C_PAIR to actual units based on 3C status for a given date/shift
 function expandCPair(units, date, shift){
@@ -906,7 +970,7 @@ function unitCoveredBy(sched, unit, date, shift){
   if(unit === '4C') return units.includes('C_PAIR') || units.includes('4C');
   return false;
 }
-const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings'};
+const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings', state:'BNState'};
 
 // ── Booking status helpers — consistent across old (IsCompleted) and new (BreakStatus) data ──
 function isConfirmed(b)  { return b.BreakStatus === 'confirmed' || (b.IsCompleted == 1 && b.BreakStatus !== 'not_taken'); }
@@ -930,15 +994,17 @@ const MAX_SLOTS  = 3;
 const PORTAL = { unlocked: false, level: null }; // level: 'bn' or 'admin'
 
 const S = {
-  shift:       null,   // 'Day' | 'Noc'
-  unit:        null,
-  adminOk:     false,
-  pw:          localStorage.getItem('bnPw') || 'breaker',
-  summShift:   'Day',
-  summUnit:    'All',
-  aShift:      'Day',
-  aUnits:      [],
-  refreshTmr:  null
+  shift:           null,   // 'Day' | 'Noc'
+  unit:            null,
+  adminOk:         false,
+  pw:              localStorage.getItem('bnPw') || 'breaker',
+  summShift:       'Day',
+  summUnit:        'All',
+  aShift:          'Day',
+  aUnits:          [],
+  editingAssignId: null,
+  refreshTmr:      null,
+  pendingClaims:   new Set()  // slot times staged for submission
 };
 
 // ═══════════════════════════════════════════════════════
@@ -974,37 +1040,30 @@ function simNextId(){
 function simFilter(items, filter){
   if (!filter) return items;
   return items.filter(item => {
-    // Split on ' and ' (case-insensitive)
     const clauses = filter.split(/ and /i);
     return clauses.every(clause => {
       clause = clause.trim();
-      // eq operator
-      const eqMatch = clause.match(/(\w+)\s+eq\s+'([^']*)'/);
-      if (eqMatch) {
-        const [, field, val] = eqMatch;
-        return String(item[field]||'') === val;
+      // Handle (field eq 'val1' or field eq 'val2') OR groups
+      const orGroup = clause.match(/^\((.+)\)$/);
+      if(orGroup){
+        const orParts = orGroup[1].split(/ or /i).map(p => p.trim());
+        return orParts.some(part => simMatchClause(item, part));
       }
-      // eq numeric
-      const eqNum = clause.match(/(\w+)\s+eq\s+(\d+)/);
-      if (eqNum) {
-        const [, field, val] = eqNum;
-        return Number(item[field]||0) === Number(val);
-      }
-      // ge operator (>=)
-      const geMatch = clause.match(/(\w+)\s+ge\s+'([^']*)'/);
-      if (geMatch) {
-        const [, field, val] = geMatch;
-        return String(item[field]||'') >= val;
-      }
-      // le operator (<=)
-      const leMatch = clause.match(/(\w+)\s+le\s+'([^']*)'/);
-      if (leMatch) {
-        const [, field, val] = leMatch;
-        return String(item[field]||'') <= val;
-      }
-      return true; // unknown clause — pass through
+      return simMatchClause(item, clause);
     });
   });
+}
+
+function simMatchClause(item, clause){
+  const eqMatch = clause.match(/(\w+)\s+eq\s+'([^']*)'/);
+  if (eqMatch) return String(item[eqMatch[1]]||'') === eqMatch[2];
+  const eqNum = clause.match(/(\w+)\s+eq\s+(\d+)/);
+  if (eqNum) return Number(item[eqNum[1]]||0) === Number(eqNum[2]);
+  const geMatch = clause.match(/(\w+)\s+ge\s+'([^']*)'/);
+  if (geMatch) return String(item[geMatch[1]]||'') >= geMatch[2];
+  const leMatch = clause.match(/(\w+)\s+le\s+'([^']*)'/);
+  if (leMatch) return String(item[leMatch[1]]||'') <= leMatch[2];
+  return true;
 }
 
 // Simulated SP functions
@@ -1143,6 +1202,42 @@ async function _spPatchReal(list, id, data){
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
 
+// ── BNState helpers — cross-device persistent storage ──
+// Falls back to localStorage in SIM_MODE automatically via spGet/spPost/spPatch
+async function getState(key){
+  try {
+    const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+    if(items.length) return JSON.parse(items[0].Value || 'null');
+  } catch(e){ /* fall through */ }
+  // localStorage fallback for offline/error
+  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+}
+
+async function setState(key, value){
+  try {
+    const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+    const val = JSON.stringify(value);
+    if(items.length){
+      await spPatch(LISTS.state, items[0].Id, { Value: val, UpdatedAt: new Date().toISOString() });
+    } else {
+      await spPost(LISTS.state, { Title: key, Key: key, Value: val, UpdatedAt: new Date().toISOString() });
+    }
+    // Keep localStorage in sync as cache
+    localStorage.setItem(key, val);
+  } catch(e){
+    // Fall back to localStorage only
+    localStorage.setItem(key, JSON.stringify(value));
+  }
+}
+
+async function deleteState(key){
+  try {
+    const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+    for(const item of items) await spDel(LISTS.state, item.Id);
+  } catch(e){ /* non-critical */ }
+  localStorage.removeItem(key);
+}
+
 // ── Sim mode indicator ────────────────────────────────
 function showSimBanner(){
   if (!SIM_MODE) return;
@@ -1167,8 +1262,8 @@ function localDate(d){
 function shiftDate(shift){
   const now = new Date();
   const h = now.getHours();
-  // Noc shift runs ~2000-0829. If it's before 09:00 and we're on Noc, shift started yesterday
-  if(shift === 'Noc' && h < 9){
+  // Noc BN shift runs 2000-0830. If it's before 08:30, shift started yesterday
+  if(shift === 'Noc' && (h < 8 || (h === 8 && now.getMinutes() < 30))){
     const yesterday = new Date(now);
     yesterday.setDate(now.getDate() - 1);
     return `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
@@ -1224,15 +1319,44 @@ function generateSlots(shift){
 // Tiers from staff nurse perspective (affects rotation priority)
 // ── Hard-blocked slots ───────────────────────────────
 // These are never shown to staff regardless of rotation.
-// Subject to change — modify HARD_BLOCKED_SLOTS to update.
+// 0755 is only blocked on weekdays (huddle Mon-Fri); unblocked on weekends
 const HARD_BLOCKED_SLOTS = {
-  Noc: ['0635', '0655', '0755'], // shift change (0630) + pre-huddle
+  Noc: ['0635', '0655'], // shift change (0630) — 0755 added dynamically on weekdays
   Day: ['0635', '0655', '1835', '1855']  // shift change (0630) + shift change (1830)
 };
 
+// Slots the BN themselves cannot take as a break (separate from staff hard-blocks)
+function getBNHardBlocked(shift){
+  const dow = new Date().getDay();
+  const isWeekday = dow >= 1 && dow <= 5;
+  if(shift === 'Noc'){
+    // 0815 always blocked (break ends at 0830 = clock-out, no buffer)
+    // 0755 blocked weekdays only (required at huddle 0800)
+    return isWeekday ? ['0755', '0815'] : ['0815'];
+  } else {
+    // Day shift: 2015 always blocked (break ends at 2030 = clock-out, no buffer)
+    return ['2015'];
+  }
+}
+
+function getNocHardBlocked(){
+  const dow = new Date().getDay(); // 0=Sun, 6=Sat
+  const isWeekday = dow >= 1 && dow <= 5;
+  // Weekdays: block 0755 (huddle) and everything from 0755 up
+  // Weekends: block 0815 (ends at 0830 = clock-out, no buffer) and everything from 0815 up
+  return isWeekday ? [...HARD_BLOCKED_SLOTS.Noc, '0755'] : [...HARD_BLOCKED_SLOTS.Noc, '0815'];
+}
+
+// Day staff overlap window extends to 0815 on weekends (0815 slot blocked — last valid is 0755)
+function getDayOverlapMax(){
+  const dow = new Date().getDay();
+  const isWeekday = dow >= 1 && dow <= 5;
+  return isWeekday ? 8*60+0 : 8*60+15; // 0800 weekdays, 0815 weekends (0815 itself is blocked)
+}
+
 const SLOT_TIERS = {
   Noc: {
-    hardBlocked: s => HARD_BLOCKED_SLOTS.Noc.includes(s) || sortKey(s,'Noc') >= sortKey('0755','Noc') + 1440,
+    hardBlocked: s => getNocHardBlocked().includes(s) || sortKey(s,'Noc') >= sortKey(getNocHardBlocked().includes('0755') ? '0755' : '0815','Noc'),
     earlyLow:    s => { const m = sortKey(s,'Noc'); return m >= sortKey('2015','Noc') && m <= sortKey('2135','Noc'); },
     prime:       s => { const m = sortKey(s,'Noc'); return m > sortKey('2135','Noc') && m < sortKey('0515','Noc') + 1440; },
     lateLow:     s => { const m = sortKey(s,'Noc'); return m >= sortKey('0535','Noc') + 1440 && m <= sortKey('0615','Noc') + 1440; },
@@ -1384,8 +1508,19 @@ function init(){
     d.className='uc'; d.textContent=u==='C_PAIR'?'3C/4C':u; d.id=`au-${u}`;
     d.onclick=()=>{
       d.classList.toggle('on');
-      const i=S.aUnits.indexOf(u);
-      i<0 ? S.aUnits.push(u) : S.aUnits.splice(i,1);
+      if(u === 'C_PAIR'){
+        // Toggle both 3C and 4C
+        const has3C = S.aUnits.includes('3C');
+        if(has3C){
+          S.aUnits = S.aUnits.filter(x => x !== '3C' && x !== '4C' && x !== 'C_PAIR');
+        } else {
+          S.aUnits = S.aUnits.filter(x => x !== 'C_PAIR');
+          S.aUnits.push('3C', '4C');
+        }
+      } else {
+        const i = S.aUnits.indexOf(u);
+        i < 0 ? S.aUnits.push(u) : S.aUnits.splice(i, 1);
+      }
     };
     ag.appendChild(d);
   });
@@ -1403,7 +1538,8 @@ function init(){
   // Covering tab uses shiftDate so Noc after midnight shows the correct shift date
   const t=today();
   document.getElementById('summDate').value=shiftDate(S.shift);
-  document.getElementById('aDate').value=t;
+  document.getElementById('aDate').value=shiftDate(S.shift);
+  setAShift(S.shift);
   document.getElementById('viewDate').value=t;
 
   // Summary default shift
@@ -1498,7 +1634,15 @@ function showSubTab(name, btn){
   if(panel){ panel.style.display='block'; panel.classList.add('active'); }
   if(btn) btn.classList.add('active');
 
-  if(name==='summary') loadSummary();
+  if(name==='summary'){
+    // Auto-select current shift and date each time Covering tab is opened
+    const curShift = detectShift();
+    const curDate  = shiftDate(curShift);
+    S.summShift = curShift;
+    document.getElementById('summDate').value = curDate;
+    hiShift('sDay','sNoc', curShift);
+    loadSummary();
+  }
   if(name==='bn') populateBNDropdown();
   if(name==='reports'){
     // Auto-bypass reports gate if portal already unlocked
@@ -1512,6 +1656,10 @@ function showSubTab(name, btn){
     }
   }
   if(name==='admin'){
+    // Refresh assign form date/shift to current on each open
+    const curSh = detectShift();
+    document.getElementById('aDate').value = shiftDate(curSh);
+    setAShift(curSh);
     // Auto-bypass admin gate if portal was unlocked with admin password
     if(PORTAL.level === 'admin'){
       S.adminOk = true;
@@ -1550,6 +1698,8 @@ function showTab(name, btn){
 // ═══════════════════════════════════════════════════════
 function pickUnit(u){
   S.unit=u;
+  S.pendingClaims.clear();
+  updateSubmitBar();
   document.querySelectorAll('.unit-btn').forEach(b=>b.classList.remove('active'));
   document.getElementById(`ub-${u}`).classList.add('active');
   document.getElementById('shiftCard').style.display='block';
@@ -1563,7 +1713,7 @@ async function checkWrongUnit(selectedUnit){
   const firstName = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!firstName || !/^[0-9]{5}$/.test(nurseExt)) return;
-  const name = `${firstName} (${nurseExt})`;
+  const name = `${toTitleCase(firstName)} (${nurseExt})`;
   const dt = shiftDate(S.shift);
   try {
     const mine = await spGet(LISTS.bookings,
@@ -1583,6 +1733,8 @@ function renderShiftPill(){
 
 function flipShift(){
   S.shift = S.shift==='Day' ? 'Noc' : 'Day';
+  S.pendingClaims.clear();
+  updateSubmitBar();
   renderShiftPill();
   if(S.unit) loadSlots();
 }
@@ -1598,13 +1750,25 @@ function getDefaultTemplate(name, shift){
   try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
 }
 
+// Warm default template from backend if not cached
+async function warmDefaultTemplate(name, shift){
+  const key = `bnDefault_${name}_${shift}`;
+  if(localStorage.getItem(key)) return;
+  try {
+    const remote = await getState(key);
+    if(remote) localStorage.setItem(key, JSON.stringify(remote));
+  } catch(e){}
+}
+
 function saveDefaultTemplate(){
   const name = BNS.name;
   const shift = BNS.defaultShift || 'Day';
   if(!name){ toast('Select your name first', true); return; }
   const selected = [...document.querySelectorAll('.bn-default-slot.on')]
     .map(el => el.dataset.slot);
-  localStorage.setItem(`bnDefault_${name}_${shift}`, JSON.stringify(selected));
+  const key = `bnDefault_${name}_${shift}`;
+  localStorage.setItem(key, JSON.stringify(selected));
+  setState(key, selected).catch(()=>{});
   document.getElementById('bnDefaultSaved').style.display = 'inline';
   setTimeout(() => {
     const el = document.getElementById('bnDefaultSaved');
@@ -1618,7 +1782,9 @@ function clearDefaultTemplate(){
   const name = BNS.name;
   const shift = BNS.defaultShift || 'Day';
   if(!name) return;
-  localStorage.removeItem(`bnDefault_${name}_${shift}`);
+  const key = `bnDefault_${name}_${shift}`;
+  localStorage.removeItem(key);
+  deleteState(key).catch(()=>{});
   loadDefaultGrid(shift);
   updateApplyAllBtn();
   toast('Default break schedule cleared');
@@ -1689,7 +1855,7 @@ async function applyDefaultToAll(){
   // Get all upcoming assignments for this BN
   const scheds = await spGet(LISTS.schedule,
     `BreakNurseName eq '${esc(name)}'`);
-  const upcoming = scheds.filter(s => s.ShiftDate >= today());
+  const upcoming = scheds.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
 
   if(!upcoming.length){ toast('No upcoming shifts found', true); return; }
 
@@ -1701,6 +1867,13 @@ async function applyDefaultToAll(){
     applied++;
   }
   toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
+  // Show applied state on button
+  const applyBtn = document.getElementById('bnApplyAllBtn');
+  if(applyBtn){
+    applyBtn.textContent = '✓ Applied to all upcoming shifts';
+    applyBtn.style.background = 'var(--teal-dk)';
+    applyBtn.style.opacity = '1';
+  }
   loadBNSlots();
 }
 
@@ -1734,7 +1907,7 @@ async function resetShiftToDefault(){
   if(!def || !def.length){
     toast('No default schedule set for ' + shift + ' shift', true); return;
   }
-  if(!confirm('Reset this shift to your default break schedule?')) return;
+  if(!await customConfirm('Reset this shift to your default break schedule?','Reset','Cancel')) return;
   await applyDefaultToShift(name, dt, shift, def);
   toast('Shift reset to default');
   loadBNSlots();
@@ -1748,11 +1921,11 @@ async function resetAllToDefault(){
   if(!dayDef.length && !nocDef.length){
     toast('No default schedule set yet', true); return;
   }
-  if(!confirm('Reset ALL upcoming shifts to your default break schedule?')) return;
+  if(!await customConfirm('Reset ALL upcoming shifts to your default break schedule?','Reset All','Cancel')) return;
 
   const scheds = await spGet(LISTS.schedule,
     `BreakNurseName eq '${esc(name)}'`);
-  const upcoming = scheds.filter(s => s.ShiftDate >= today());
+  const upcoming = scheds.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
   let applied = 0;
   for(const sched of upcoming){
     const def = sched.ShiftType === 'Day' ? dayDef : nocDef;
@@ -1865,17 +2038,28 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
   return rotation;
 }
 
-// Store rotation for a BN to localStorage
+// Store rotation — writes to localStorage immediately and syncs to backend async
 function saveRotation(bnName, date, shift, rotation){
   const key = `bnRotation_${bnName}_${date}_${shift}`;
   localStorage.setItem(key, JSON.stringify(rotation));
+  setState(key, rotation).catch(()=>{});
 }
 
-// Load rotation for a BN
+// Load rotation — reads from localStorage cache (populated by warmRotationCache)
 function loadRotation(bnName, date, shift){
   const key = `bnRotation_${bnName}_${date}_${shift}`;
   try { return JSON.parse(localStorage.getItem(key) || 'null'); }
   catch { return null; }
+}
+
+// Warm rotation cache from backend for a BN — call once at shift start
+async function warmRotationCache(bnName, date, shift){
+  const key = `bnRotation_${bnName}_${date}_${shift}`;
+  if(localStorage.getItem(key)) return; // already cached
+  try {
+    const remote = await getState(key);
+    if(remote) localStorage.setItem(key, JSON.stringify(remote));
+  } catch(e){ /* use empty cache, rotation will be recalculated */ }
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
@@ -1926,11 +2110,12 @@ async function loadSlots(silent=false){
     // Get coverage for this unit today
     const scheds = await spGet(LISTS.schedule,
       `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
-    const covering = scheds.filter(s => unitCoveredBy(s, S.unit, dt, shift));
+    const covering = scheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, shift));
 
     if(!covering.length){
       // On silent refresh, preserve existing slots rather than flashing "no coverage"
       if(silent){ loader.style.display='none'; return; }
+      meta.textContent = '';
       list.innerHTML=`<div class="empty">No break coverage is scheduled for <strong>${S.unit}</strong> on the ${shift} shift today.</div>`;
       loader.style.display='none';
       return;
@@ -1945,11 +2130,16 @@ async function loadSlots(silent=false){
     const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
     const firstName = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = firstName && nurseExt ? `${firstName} (${nurseExt})` : '';
+    const nurseName = firstName && nurseExt ? `${toTitleCase(firstName)} (${nurseExt})` : '';
 
     // Load block rotation for each BN covering this unit
     // Merge all BN rotations — a slot is available to this unit if ANY BN has it assigned here
     const unitRotationSlots = new Set();
+    // Warm rotation cache from backend for covering BNs if not already cached
+    covering.forEach(sched => warmRotationCache(sched.BreakNurseName, dt, shift).catch(()=>{}));
+    // Warm 3C status
+    warm3CStatus(dt, shift).catch(()=>{});
+
     let hasAnyRotation = false;
     for(const sched of covering){
       const bnRot = loadRotation(sched.BreakNurseName, dt, shift);
@@ -1965,12 +2155,18 @@ async function loadSlots(silent=false){
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
     // Overlap window in minutes from midnight (handles wrap for Noc)
     const overlapRange = shift === 'Day'
-      ? { min: 6*60+30, max: 8*60+0 }    // 0630–0800 → Noc BN covers Day staff early breaks
-      : { min: 18*60+30, max: 20*60+0 };  // 1830–2000 → Day BN covers Noc staff early breaks
+      ? { min: 6*60+30, max: getDayOverlapMax() }  // 0630–0800 weekdays, 0630–0830 weekends
+      : { min: 18*60+30, max: 20*60+0 };           // 1830–2000 → Day BN covers Noc staff early breaks
 
-    // Check if opposite shift BN covers this unit today
+    // Opposite shift date: for Day staff morning overlap, the Noc BN started the previous day
+    // For Noc staff evening overlap, the Day BN started the same day
+    const oppDt = shift === 'Day'
+      ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
+      : dt;
+
+    // Check if opposite shift BN covers this unit
     const oppScheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${oppShift}'`);
+      `ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`);
     const oppCovering = oppScheds.filter(s => {
       try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
     });
@@ -2017,10 +2213,30 @@ async function loadSlots(silent=false){
     const myTimes = myBookings.map(b=>b.SlotTime);
     const canClaimMore = myTimes.length < MAX_SLOTS;
 
-    // Build BN name label (include opposite shift BN if covering overlap)
-    const oppBNNames = [...new Set(oppCovering.map(c=>c.BreakNurseName))].join(', ');
-    const bnLabel = bnNames + (oppBNNames ? ` · Overlap: ${oppBNNames}` : '');
-    meta.textContent=`Break nurse for ${S.unit}: ${bnNames}  ·  Slots are 15 min — claim up to 3 per shift`;
+    // Build BN name label — include both main and overlap BNs
+    // Look up BN extensions — from schedule record first, fall back to localStorage
+    const bnExtMap = {};
+    [...covering, ...oppCovering].forEach(s => {
+      const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+      if(ext) bnExtMap[s.BreakNurseName] = ext;
+    });
+    const formatBNName = (name) => bnExtMap[name] ? `${name} · Ext. ${bnExtMap[name]}` : name;
+
+    const mainBNNames = [...new Set(covering
+      .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
+      .map(c => formatBNName(c.BreakNurseName))
+    )];
+
+    // Only show opposite shift BN if we're currently within the overlap window
+    const nowM = nowKey(shift);
+    const inOverlapWindow = nowM >= overlapRange.min && nowM < overlapRange.max;
+    const oppBNNamesList = inOverlapWindow ? [...new Set(oppCovering
+      .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
+      .map(c => formatBNName(c.BreakNurseName))
+    )] : [];
+
+    const allBNDisplay = [...new Set([...mainBNNames, ...oppBNNamesList])].join(', ') || bnNames;
+    meta.textContent=`Break nurse for ${S.unit}: ${allBNDisplay}  ·  Slots are 15 min — claim up to 3 per shift`;
 
     // Filter slots: must be future, not hard-blocked, and if rotation exists, must be this unit's turn
     // Also respect each covering BN's start time — hide slots before they arrive
@@ -2036,7 +2252,11 @@ async function loadSlots(silent=false){
     const future = allSlots.filter(s => {
       if(isPast(s, shift)) return false;
       if(getSlotTier(s, shift) === 'hardBlocked') return false;
-      if(hasAnyRotation && unitRotationSlots.size > 0 && !unitRotationSlots.has(s)) return false;
+      // Always allow overlap slots through — they belong to the opposite shift BN's rotation
+      const slotMin = toMin(s);
+      const isOverlapSlot = (shift==='Noc' && slotMin >= overlapRange.min && slotMin < overlapRange.max) ||
+                            (shift==='Day' && slotMin >= overlapRange.min && slotMin < overlapRange.max);
+      if(!isOverlapSlot && hasAnyRotation && unitRotationSlots.size > 0 && !unitRotationSlots.has(s)) return false;
       if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
@@ -2055,18 +2275,11 @@ async function loadSlots(silent=false){
 
       // Determine if this is an overlap slot (covered by opposite shift BN)
       const slotMin = toMin(slot);
-      const isOverlap = (shift==='Day' && slotMin >= 6*60+30 && slotMin < 8*60+0) ||
+      const isOverlap = (shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax()) ||
                         (shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0);
 
-      // BN break blocks this slot entirely
-      if (bnBreaks.has(slot)) {
-        html+=`<div class="slot-row bn-break">
-          <div class="slot-time">${fmt12(slot)}</div>
-          <div class="slot-name filled">Break nurse on break</div>
-          <div></div>
-        </div>`;
-        return;
-      }
+      // BN break — slot is simply hidden from staff view
+      if (bnBreaks.has(slot)) return;
 
       let canClaim=false, lockReason='';
       if(!isTaken && !isMine){
@@ -2075,16 +2288,18 @@ async function loadSlots(silent=false){
         else                  { canClaim=true; }
       }
 
-      const cls = isMine?'mine':isTaken?'taken':canClaim?'open':'locked';
+      const isPending = S.pendingClaims.has(slot);
+      const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
 
-      html+=`<div class="slot-row ${cls}">
-        <div class="slot-time">${fmt12(slot)}${isOverlap?'<span style="font-size:.6rem;font-weight:700;margin-left:5px;color:var(--noc);opacity:.7">OVERLAP</span>':''}</div>
-        <div class="slot-name ${booking?'filled':''}">${
-          booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
+      html+=`<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':''}">
+        <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':''}">${fmt12(slot)}</div>
+        <div class="slot-name ${booking||isPending?'filled':''}">${
+          isMine ? booking.NurseName : isPending ? '\u2713 Selected' : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
         }</div>
         <div>
           ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="cancelSlot('${booking.Id}')">✕ Cancel</button>` : ''}
-          ${canClaim? `<button class="btn btn-primary btn-sm" onclick="claimSlot('${slot}')">+ Claim</button>` : ''}
+          ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
+          ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
         </div>
       </div>`;
     });
@@ -2147,7 +2362,7 @@ async function silentRefreshSlots(){
 
     const firstName = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = firstName && nurseExt ? `${firstName} (${nurseExt})` : '';
+    const nurseName = firstName && nurseExt ? `${toTitleCase(firstName)} (${nurseExt})` : '';
     const myTimes   = bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak).map(b => b.SlotTime);
 
     // Build fingerprint: slot:status pairs
@@ -2185,7 +2400,50 @@ async function silentRefreshSlots(){
   }
 }
 
-async function claimSlot(slotTime){
+// ── Pending claim basket (Submit flow) ───────────────
+function togglePending(slotTime){
+  if(S.pendingClaims.has(slotTime)){
+    S.pendingClaims.delete(slotTime);
+  } else {
+    // Check max slots before adding to pending
+    const firstName = document.getElementById('nurseName').value.trim();
+    const nurseExt  = document.getElementById('nurseExt').value.trim();
+    if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+      document.getElementById('nameExtHint').style.display = 'block';
+      toast('Please enter your first name and a 5-digit Spectra extension.', true);
+      return;
+    }
+    if(S.pendingClaims.size >= MAX_SLOTS){
+      toast(`Max ${MAX_SLOTS} slots per shift.`, true);
+      return;
+    }
+    S.pendingClaims.add(slotTime);
+  }
+  updateSubmitBar();
+  loadSlots(true); // silent re-render to show pending state
+}
+
+function clearPending(){
+  S.pendingClaims.clear();
+  updateSubmitBar();
+  loadSlots(true);
+}
+
+function updateSubmitBar(){
+  const bar = document.getElementById('submitBar');
+  const lbl = document.getElementById('submitBarLabel');
+  if(!bar) return;
+  const n = S.pendingClaims.size;
+  if(n === 0){
+    bar.style.display = 'none';
+  } else {
+    bar.style.display = 'flex';
+    const times = [...S.pendingClaims].sort((a,b) => sortKey(a,S.shift)-sortKey(b,S.shift)).map(fmt12).join(', ');
+    lbl.textContent = `${n} break${n!==1?'s':''} selected: ${times}`;
+  }
+}
+
+async function submitClaims(){
   const firstName = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
@@ -2193,40 +2451,137 @@ async function claimSlot(slotTime){
     toast('Please enter your first name and a 5-digit Spectra extension.', true);
     return;
   }
+  // Float check once before submitting the batch
+  const dt = shiftDate(S.shift);
+  const allBookingsToday = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+  const otherUnitBookings = allBookingsToday.filter(b => {
+    if(b.IsBNBreak) return false;
+    if(b.Unit === S.unit) return false;
+    const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
+    return m && m[1].trim().toLowerCase() === firstName.toLowerCase();
+  });
+  if(otherUnitBookings.length){
+    const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
+    const floated = await customConfirm(
+      `${toTitleCase(firstName)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
+      `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
+      `Go back to ${myOtherUnits.join(', ')}`
+    );
+    if(!floated){ pickUnit(myOtherUnits[0]); return; }
+    for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
+    for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
+    S.pendingClaims.clear(); updateSubmitBar();
+    const extEl = document.getElementById('nurseExt');
+    if(extEl) extEl.value = '';
+    loadSlots(true);
+    toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}.`);
+    return;
+  }
+  const btn = document.getElementById('submitBtn');
+  // Pause auto-refresh during batch to prevent race conditions
+  clearInterval(S.refreshTmr);
+  if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
+  const slots = [...S.pendingClaims].sort((a,b) => sortKey(a,S.shift)-sortKey(b,S.shift));
+  const results = { claimed: [], failed: [] };
+  for(const slot of slots){
+    const result = await claimSlot(slot, true); // silent=true, float check already done
+    if(result === 'ok') results.claimed.push(slot);
+    else results.failed.push({ slot, reason: result });
+  }
+  S.pendingClaims.clear();
+  updateSubmitBar();
+  if(btn){ btn.disabled = false; btn.textContent = 'Submit breaks'; }
+  // Show result summary
+  if(results.failed.length === 0){
+    toast(`✓ ${results.claimed.length} break${results.claimed.length!==1?'s':''} confirmed!`);
+  } else {
+    const ok = results.claimed.length ? `${results.claimed.length} confirmed. ` : '';
+    const fail = results.failed.map(f => `${fmt12(f.slot)}: ${f.reason}`).join(' | ');
+    toast(`${ok}${results.failed.length} couldn't be saved: ${fail}`, true);
+  }
+  // Resume auto-refresh
+  if(S.unit) S.refreshTmr = setInterval(() => loadSlots(true), 10000);
+  loadSlots();
+  if(document.getElementById('summList')) loadSummary();
+}
+
+async function claimSlot(slotTime, silent=false){
+  const firstName = document.getElementById('nurseName').value.trim();
+  const nurseExt  = document.getElementById('nurseExt').value.trim();
+  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Please enter your first name and a 5-digit Spectra extension.', true); }
+    return 'Name/ext missing';
+  }
   document.getElementById('nameExtHint').style.display = 'none';
-  const name = `${firstName} (${nurseExt})`;
+  const name = `${toTitleCase(firstName)} (${nurseExt})`;
   const dt=shiftDate(S.shift);
 
   // Determine correct shift for this slot (overlap slots belong to opposite shift's BN)
   const slotMin = toMin(slotTime);
-  const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < 8*60+0;
+  const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
   const isOverlapNoc = S.shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0;
   const slotShift = (isOverlapDay || isOverlapNoc) ? (S.shift==='Day'?'Noc':'Day') : S.shift;
 
   try{
-    // Double-check total slots claimed across both shifts today on this unit
+    // Float check — only on first slot of a submit batch (not silent) to avoid repeated modals
+    if(!silent){
+      const allBookingsToday = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+      const otherUnitBookings = allBookingsToday.filter(b => {
+        if(b.IsBNBreak) return false;
+        if(b.Unit === S.unit) return false;
+        const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
+        return m && m[1].trim().toLowerCase() === firstName.toLowerCase();
+      });
+      const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
+      if(myOtherUnits.length){
+        const floated = await customConfirm(
+          `${toTitleCase(firstName)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
+          `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
+          `Go back to ${myOtherUnits.join(', ')}`
+        );
+        if(!floated){ pickUnit(myOtherUnits[0]); return 'cancelled'; }
+        for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
+        S.pendingClaims.clear(); updateSubmitBar();
+        const extElF = document.getElementById('nurseExt');
+        if(extElF) extElF.value = '';
+        loadSlots(true);
+        toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}`);
+        return 'ext-cleared';
+      }
+    }
+
+    // Double-check total slots claimed
     const mine=await spGet(LISTS.bookings,
       `NurseName eq '${esc(name)}' and Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
     const staffMine = mine.filter(b=>!b.IsBNBreak);
-    if(staffMine.length>=MAX_SLOTS){ toast(`Max ${MAX_SLOTS} slots per shift.`,true); return; }
+    if(staffMine.length>=MAX_SLOTS){
+      if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`,true);
+      return `Max ${MAX_SLOTS} reached`;
+    }
 
-    // Race condition check — verify slot is still unclaimed right now
+    // Race condition check
     const existing = await spGet(LISTS.bookings,
       `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}' and SlotTime eq '${slotTime}' and ShiftType eq '${slotShift}'`);
     const taken = existing.find(b => !b.IsBNBreak);
     if(taken){
-      toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true);
-      loadSlots();
-      return;
+      if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true); loadSlots(); }
+      return `${fmt12(slotTime)} already taken`;
+    }
+
+    // BN break conflict check
+    const bnBreakConflict = existing.find(b => b.IsBNBreak);
+    if(bnBreakConflict){
+      if(!silent){ toast(`${fmt12(slotTime)} is blocked — break nurse is on break at this time.`, true); loadSlots(); }
+      return `${fmt12(slotTime)} BN on break`;
     }
 
     await spPost(LISTS.bookings,{
       Title:`${S.unit}-${dt}-${slotTime}`,
       NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift
     });
-    toast(`✓ ${fmt12(slotTime)} claimed for ${name}!`);
-    loadSlots();
-  }catch(e){ toast(e.message,true); }
+    if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(firstName)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
+    return 'ok';
+  }catch(e){ if(!silent) toast(e.message,true); return e.message; }
 }
 
 async function cancelSlot(id){
@@ -2234,6 +2589,7 @@ async function cancelSlot(id){
     await spDel(LISTS.bookings,id);
     toast('Break cancelled.');
     loadSlots();
+    if(document.getElementById('summList')) loadSummary();
   }catch(e){ toast(e.message,true); }
 }
 
@@ -2257,27 +2613,36 @@ async function editAssign(id){
     );
 
     if(confirmed.length > 0){
-      if(!confirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records. Proceed?`)) return;
+      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')) return;
     }
 
-    // Pre-fill the manual assignment form
+    // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
+    const allBNScheds = await spGet(LISTS.schedule,
+      `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}' and BreakNurseName eq '${esc(s.BreakNurseName)}'`);
+    const allUnits = [...new Set(allBNScheds.flatMap(r => {
+      try { return JSON.parse(r.Units||'[]'); } catch { return []; }
+    }))];
+
     document.getElementById('aNurseText').value = s.BreakNurseName;
     document.getElementById('aDate').value = s.ShiftDate;
     setAShift(s.ShiftType);
 
-    // Pre-select units
-    S.aUnits = [...units];
+    // Pre-select all consolidated units
+    S.aUnits = [...allUnits];
     document.querySelectorAll('.uc').forEach(c => {
       const u = c.id.replace('au-','');
-      c.classList.toggle('on', units.includes(u) || (u==='C_PAIR' && (units.includes('3C')||units.includes('4C'))));
+      c.classList.toggle('on', allUnits.includes(u) || (u==='C_PAIR' && (allUnits.includes('3C')||allUnits.includes('4C'))));
     });
 
-    // Scroll to assignment form
-    document.getElementById('aUnits').scrollIntoView({ behavior: 'smooth', block: 'center' });
-    toast(`Editing ${s.BreakNurseName} — modify units and click Save Assignment`);
+    // Store the ID being edited so saveAssign patches instead of posting new
+    S.editingAssignId = id;
 
-    // Delete old record so saveAssign creates fresh
-    await spDel(LISTS.schedule, id);
+    // Scroll to assign form card and expand it if collapsed
+    const assignCard = document.getElementById('assignFormCard');
+    if(assignCard) assignCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const body = document.getElementById('assignFormBody');
+    if(body && body.style.display === 'none') toggleAssignForm();
+    toast(`Editing ${s.BreakNurseName} — modify units and click Save Assignment`);
   } catch(e) { toast(e.message, true); }
 }
 
@@ -2294,15 +2659,45 @@ function getUnitWing(unit){
 
 // Mark a BN unavailable from Admin tab
 async function markBNUnavailable(schedId, bnName, date, shift){
-  if(!confirm(`Mark ${bnName} as unavailable for the ${shift} shift on ${date}?\n\nThe app will attempt to redistribute uncovered claimed breaks to other BNs on the same wing.`)) return;
-  await processBNUnavailability(schedId, bnName, date, shift);
+  const confirmed = await customConfirm(
+    `Mark ${firstName(bnName)} as unavailable for the ${shift} shift?`,
+    'Mark unavailable',
+    'Cancel'
+  );
+  if(!confirmed) return;
+  const redistribute = await customConfirm(
+    `What would you like to do with ${firstName(bnName)}'s uncovered breaks?`,
+    'Redistribute eligible slots',
+    'Cancel all slots'
+  );
+  await processBNUnavailability(schedId, bnName, date, shift, redistribute);
 }
 
 async function markBNAvailable(schedId, bnName){
-  if(!confirm(`Mark ${bnName} as available again?\n\nThis will reactivate their assignment — staff can sign up for breaks as normal.`)) return;
+  if(!await customConfirm(`Mark ${firstName(bnName)} as available again? This will reactivate their assignment.`,'Mark Available','Cancel')) return;
   try {
+    // Check for supplemental records created during redistribution
+    const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
+    if(sched.length){
+      const { ShiftDate, ShiftType } = sched[0];
+      const allScheds = await spGet(LISTS.schedule,
+        `ShiftDate eq '${ShiftDate}' and ShiftType eq '${ShiftType}'`);
+      const suppls = allScheds.filter(s => s.IsSupplemental && s.CoveredFrom === bnName);
+      if(suppls.length){
+        const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
+        const keepRedist = await customConfirm(
+          `${suppFirstNames} took over coverage while ${firstName(bnName)} was unavailable.\n\nKeep their coverage, or revert to ${firstName(bnName)}'s original assignment?`,
+          `Keep ${suppFirstNames}'s coverage`,
+          `Revert to ${firstName(bnName)}'s original`
+        );
+        if(!keepRedist){
+          for(const s of suppls) await spDel(LISTS.schedule, s.Id);
+        }
+      }
+    }
     await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
-    toast(`${bnName} is back on — assignment reactivated.`);
+    toast(`${firstName(bnName)} is back on — assignment reactivated.`);
+    await new Promise(r => setTimeout(r, 100));
     loadAssignments();
   } catch(e){ toast(e.message, true); }
 }
@@ -2314,23 +2709,35 @@ function getBNStartMin(){
   const [h,m] = val.split(':').map(Number);
   return h*60+m;
 }
+function populateBNStartTimeSlots(){
+  const el = document.getElementById('bnStartTime');
+  if(!el) return;
+  const shift = BNS.shift || detectShift();
+  const saved = localStorage.getItem(getBNStartKey()) || '';
+  // Future slots only — start time only makes sense going forward
+  const slots = generateSlots(shift)
+    .filter(s => getSlotTier(s, shift) !== 'hardBlocked')
+    .filter(s => sortKey(s, shift) > nowKey(shift));
+  el.innerHTML = '<option value="">— full shift —</option>' +
+    slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
+}
+
 function onBNStartTimeChange(){
   const val = document.getElementById('bnStartTime').value;
   if(val) localStorage.setItem(getBNStartKey(), val);
   else localStorage.removeItem(getBNStartKey());
   loadBNSlots();
-  toast(val ? `Start time set to ${val} — early slots hidden from staff` : 'Start time cleared');
+  toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
 }
 function clearBNStartTime(){
   localStorage.removeItem(getBNStartKey());
-  document.getElementById('bnStartTime').value = '';
+  const el = document.getElementById('bnStartTime');
+  if(el) el.value = '';
   loadBNSlots();
   toast('Start time cleared');
 }
 function restoreBNStartTimeUI(){
-  const val = localStorage.getItem(getBNStartKey()) || '';
-  const el = document.getElementById('bnStartTime');
-  if(el) el.value = val;
+  populateBNStartTimeSlots();
 }
 
 async function toggleSelfAvailability(){
@@ -2344,17 +2751,42 @@ async function toggleSelfAvailability(){
 
   if(inactive){
     // Reactivate
-    if(!confirm(`Mark yourself as available again?\n\nThis will reactivate your assignment — staff can sign up for breaks as normal.`)) return;
+    if(!await customConfirm(`Mark ${firstName(BNS.name)} as available again? This will reactivate your assignment.`,'Mark Available','Cancel')) return;
     try {
+      // Check for supplemental records created during redistribution
+      const allScheds2 = await spGet(LISTS.schedule,
+        `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+      const suppls = allScheds2.filter(s => s.IsSupplemental && s.CoveredFrom === BNS.name);
+      if(suppls.length){
+        const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
+        const keepRedist = await customConfirm(
+          `${suppFirstNames} took over while you were unavailable.\n\nKeep their coverage, or revert to yours?`,
+          `Keep ${suppFirstNames}'s coverage`,
+          `Revert to yours`
+        );
+        if(!keepRedist){
+          for(const s of suppls) await spDel(LISTS.schedule, s.Id);
+        }
+      }
       await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-      toast('You\'re back on — assignment reactivated.');
+      toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
       loadBNSlots();
       updateSelfAvailBtn(false);
     } catch(e){ toast(e.message, true); }
   } else if(active){
     // Mark unavailable
-    if(!confirm(`Mark yourself as unavailable for the ${shift} shift on ${dt}?`)) return;
-    await processBNUnavailability(active.Id, BNS.name, dt, shift);
+    const confirmedSelf = await customConfirm(
+      `Mark ${firstName(BNS.name)} as unavailable for the ${shift} shift?`,
+      'Mark unavailable',
+      'Cancel'
+    );
+    if(!confirmedSelf) return;
+    const redistributeSelf = await customConfirm(
+      `What would you like to do with your uncovered breaks?`,
+      'Redistribute eligible slots',
+      'Cancel all slots'
+    );
+    await processBNUnavailability(active.Id, BNS.name, dt, shift, redistributeSelf);
     updateSelfAvailBtn(true);
   } else {
     toast('No active assignment found for this shift', true);
@@ -2364,16 +2796,18 @@ async function toggleSelfAvailability(){
 function updateSelfAvailBtn(isInactive){
   const btn = document.getElementById('selfUnavailBtn');
   if(!btn) return;
+  const fn = BNS.name ? firstName(BNS.name) : '';
+  const label = fn ? ` ${fn}` : '';
   if(isInactive){
-    btn.textContent = '✅ Mark myself available';
+    btn.textContent = `✅ Mark${label} available`;
     btn.style.color = 'var(--teal-dk)';
   } else {
-    btn.textContent = '🏠 Mark myself unavailable';
+    btn.textContent = `🏠 Mark${label} unavailable`;
     btn.style.color = 'var(--red)';
   }
 }
 
-async function processBNUnavailability(schedId, bnName, date, shift){
+async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
   try {
     // Get BN-A's units and mark record inactive
     const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
@@ -2398,11 +2832,11 @@ async function processBNUnavailability(schedId, bnName, date, shift){
       !b.IsBNBreak &&
       bnAUnits.includes(b.Unit) &&
       !isConfirmed(b) &&
-      toMin(b.SlotTime) > now
+      sortKey(b.SlotTime, shift) > nowKey(shift)
     );
 
     if(!uncovered.length){
-      toast(`${bnName} marked unavailable. No uncovered future breaks to redistribute.`);
+      toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
       loadAssignments();
       return;
     }
@@ -2420,10 +2854,18 @@ async function processBNUnavailability(schedId, bnName, date, shift){
       return units.some(u => bnAWings.includes(getUnitWing(u)));
     });
 
+    // If cancel all chosen, skip redistribution entirely
+    if(!redistribute){
+      const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — please notify these nurses:\n\n${flagList}`);
+      loadAssignments();
+      return;
+    }
+
     if(!otherBNs.length){
       // No other BNs available — flag all
-      const flagged = uncovered.map(b => `• ${b.NurseName} on ${b.Unit} at ${fmt12(b.SlotTime)}`).join('\n');
-      alert(`${bnName} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify the affected nurses or their charge nurses.`);
+      const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify the affected nurses or their charge nurses.`);
       loadAssignments();
       return;
     }
@@ -2439,27 +2881,19 @@ async function processBNUnavailability(schedId, bnName, date, shift){
     }
     otherBNs.sort((a,b) => (bnClaimCounts[a.BreakNurseName]||0) - (bnClaimCounts[b.BreakNurseName]||0));
 
-    // Get each BN's open slots (not already claimed)
+    // Get each BN's open slots — any slot where they don't have a BN break
+    // Don't restrict by rotation since they may get new units via supplemental assignment
     const bnOpenSlots = {};
     for(const bn of otherBNs){
       const bnName2 = bn.BreakNurseName;
-      const rot = loadRotation(bnName2, date, shift);
       const bnBreaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bnName2).map(b => b.SlotTime);
-      const bnClaimed = allBookings.filter(b => !b.IsBNBreak).map(b => b.SlotTime);
-      if(rot){
-        // Open = in rotation for any unit, not a BN break, not already claimed by staff
-        bnOpenSlots[bnName2] = Object.keys(rot).filter(s =>
-          !bnBreaks.includes(s) && !bnClaimed.includes(s) && toMin(s) > now
-        );
-      } else {
-        const allSlots = generateSlots(shift);
-        bnOpenSlots[bnName2] = allSlots.filter(s =>
-          !bnBreaks.includes(s) && toMin(s) > now
-        );
-      }
+      const allSlots = generateSlots(shift);
+      bnOpenSlots[bnName2] = allSlots.filter(s =>
+        !bnBreaks.includes(s) && sortKey(s, shift) > nowKey(shift)
+      );
     }
 
-    // Group uncovered by unit, then find consecutive runs per unit
+    // Group uncovered by unit
     const byUnit = {};
     uncovered.forEach(b => {
       if(!byUnit[b.Unit]) byUnit[b.Unit] = [];
@@ -2469,8 +2903,21 @@ async function processBNUnavailability(schedId, bnName, date, shift){
     const absorbed = []; // {booking, bnName}
     const flaggedNurses = []; // bookings that couldn't be covered
 
+    // Helper: check if a BN has the next slot open or it's their own break
+    const bnHasNextSlotOpen = (bnName2, slotTime, bnBreakTimes) => {
+      const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
+      return bnOpenSlots[bnName2].includes(nextSlot) || bnBreakTimes.has(nextSlot);
+    };
+
+    // Pre-build BN break time sets
+    const bnBreakSets = {};
+    for(const bn of otherBNs){
+      const bnBreaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bn.BreakNurseName).map(b => b.SlotTime);
+      bnBreakSets[bn.BreakNurseName] = new Set(bnBreaks);
+    }
+
     for(const [unit, bookings] of Object.entries(byUnit)){
-      bookings.sort((a,b) => toMin(a.SlotTime) - toMin(b.SlotTime));
+      bookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
 
       // Group bookings by nurse
       const byNurse = {};
@@ -2479,64 +2926,89 @@ async function processBNUnavailability(schedId, bnName, date, shift){
         byNurse[b.NurseName].push(b);
       });
 
-      // Build ordered list of nurses with their slots
-      const nurseList = [];
-      const seen = new Set();
-      bookings.forEach(b => {
-        if(!seen.has(b.NurseName)){
-          seen.add(b.NurseName);
-          nurseList.push({ name: b.NurseName, slots: byNurse[b.NurseName] });
+      for(const [nurseName2, nurseBookings] of Object.entries(byNurse)){
+        nurseBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
+
+        // Split into consecutive runs (20-min intervals)
+        const runs = [];
+        let currentRun = [nurseBookings[0]];
+        for(let i = 1; i < nurseBookings.length; i++){
+          const prev = sortKey(nurseBookings[i-1].SlotTime, shift);
+          const curr = sortKey(nurseBookings[i].SlotTime, shift);
+          if(curr - prev === SLOT_IV){
+            currentRun.push(nurseBookings[i]);
+          } else {
+            runs.push(currentRun);
+            currentRun = [nurseBookings[i]];
+          }
         }
-      });
+        runs.push(currentRun);
 
-      // Process nurse by nurse
-      const absorbedSlots = new Set(); // slots absorbed so far on this unit
+        // Evaluate each run independently
+        for(const run of runs){
+          const runSlots = run.map(b => b.SlotTime);
+          const isLastInRun = (idx) => idx === runSlots.length - 1;
+          const isSingle = runSlots.length === 1;
 
-      for(let ni = 0; ni < nurseList.length; ni++){
-        const nurse = nurseList[ni];
-        const nurseSlotTimes = nurse.slots.map(b => b.SlotTime);
+          // Try to absorb each slot — can use different BNs per slot
+          // but each BN must have next slot open (or own break) unless it's the last in run
+          const runAssignments = []; // [{booking, bnName}]
+          let runFailed = false;
 
-        // Check if this nurse's slots can be absorbed by any BN
-        // For 1-slot nurses: must be consecutive with at least one already-absorbed slot
-        // For 2+ slot nurses: all slots must be available with one BN
-        let canAbsorb = false;
-        let absorbingBN = null;
+          // Track which open slots get used during this run evaluation
+          const tempUsed = {}; // bnName -> Set of slots used
 
-        if(nurseSlotTimes.length === 1){
-          const slotTime = nurseSlotTimes[0];
-          // Check if consecutive with an absorbed slot (exactly one slot interval apart)
-          // Use sortKey to handle Noc shift midnight wrap correctly
-          const hasConsecutive = [...absorbedSlots].some(s =>
-            Math.abs(sortKey(s, shift) - sortKey(slotTime, shift)) === SLOT_IV
-          );
+          for(let i = 0; i < run.length; i++){
+            const b = run[i];
+            const slotTime = b.SlotTime;
+            const isLast = isLastInRun(i);
+            let assigned = false;
 
-          if(hasConsecutive || absorbedSlots.size === 0 && ni === 0){
-            // Find BN that has this slot open
             for(const bn of otherBNs){
-              if(bnOpenSlots[bn.BreakNurseName] && bnOpenSlots[bn.BreakNurseName].includes(slotTime)){
-                canAbsorb = true; absorbingBN = bn.BreakNurseName; break;
+              const bnName2 = bn.BreakNurseName;
+              const used = tempUsed[bnName2] || new Set();
+              const available = bnOpenSlots[bnName2].filter(s => !used.has(s));
+
+              if(!available.includes(slotTime)) continue;
+
+            // If not last in run: next slot must be open or BN's own break
+            // If single slot: next slot must be available to BN (open, claimed, or BN's own break)
+            if(!isLast || isSingle){
+              const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
+              const nextIsBNBreak = bnBreakSets[bnName2].has(nextSlot);
+              if(isSingle){
+                // Next slot must exist and be available to this BN (not already used by BN elsewhere)
+                const nextAvailable = bnOpenSlots[bnName2].includes(nextSlot) || nextIsBNBreak;
+                if(!nextAvailable) continue;
+              } else {
+                // Non-last in run: next slot must be open for this BN or their own break
+                if(!bnHasNextSlotOpen(bnName2, slotTime, bnBreakSets[bnName2])){
+                  const nextUsedByThis = runAssignments.some(a => a.bnName === bnName2 && a.booking.SlotTime === nextSlot);
+                  if(!nextUsedByThis) continue;
+                }
               }
             }
-          }
-        } else {
-          // All slots must be open with one BN
-          for(const bn of otherBNs){
-            const openSet = new Set(bnOpenSlots[bn.BreakNurseName] || []);
-            if(nurseSlotTimes.every(s => openSet.has(s))){
-              canAbsorb = true; absorbingBN = bn.BreakNurseName; break;
-            }
-          }
-        }
 
-        if(canAbsorb && absorbingBN){
-          nurse.slots.forEach(b => {
-            absorbed.push({ booking: b, bnName: absorbingBN });
-            absorbedSlots.add(b.SlotTime);
-            // Remove from BN's open slots
-            bnOpenSlots[absorbingBN] = bnOpenSlots[absorbingBN].filter(s => s !== b.SlotTime);
-          });
-        } else {
-          nurse.slots.forEach(b => flaggedNurses.push(b));
+              // This BN can take this slot
+              if(!tempUsed[bnName2]) tempUsed[bnName2] = new Set();
+              tempUsed[bnName2].add(slotTime);
+              runAssignments.push({ booking: b, bnName: bnName2 });
+              assigned = true;
+              break;
+            }
+
+            if(!assigned){ runFailed = true; break; }
+          }
+
+          if(!runFailed && runAssignments.length === run.length){
+            // Commit this run — remove used slots from bnOpenSlots
+            runAssignments.forEach(({ booking, bnName: assignedBN }) => {
+              absorbed.push({ booking, bnName: assignedBN });
+              bnOpenSlots[assignedBN] = bnOpenSlots[assignedBN].filter(s => s !== booking.SlotTime);
+            });
+          } else {
+            run.forEach(b => flaggedNurses.push(b));
+          }
         }
       }
     }
@@ -2564,12 +3036,12 @@ async function processBNUnavailability(schedId, bnName, date, shift){
     }
 
     // Show results
-    let msg = `${bnName} marked unavailable.`;
+    let msg = `${firstName(bnName)} marked unavailable.`;
     if(absorbed.length) msg += `\n\n✓ ${absorbed.length} break${absorbed.length!==1?'s':''} redistributed.`;
     if(flaggedNurses.length){
-      const flagList = flaggedNurses.map(b => `• ${b.NurseName} on ${b.Unit} at ${fmt12(b.SlotTime)}`).join('\n');
+      const flagList = flaggedNurses.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       msg += `\n\n⚠️ The following breaks could not be covered — please notify these nurses or their charge nurses:\n\n${flagList}`;
-      alert(msg);
+      await showAlert(msg);
     } else {
       toast(msg.replace(/\n/g, ' '));
     }
@@ -2638,11 +3110,52 @@ async function updateCoverageBanner(){
   }
 }
 
+function onNameInput(){
+  // Clear ext whenever name is edited so duplicate check doesn't fire on stale ext
+  const extEl = document.getElementById('nurseExt');
+  if(extEl) extEl.value = '';
+  onNameExtInput();
+}
+
 function onNameExtInput(){
   if(S.unit) {
-    loadSlots(true); // silent — preserves slot list while typing
+    loadSlots(true);
     updateCoverageBanner();
   }
+}
+
+function clearExtOnNameChange(){
+  // Clear ext whenever name is edited so stale ext doesn't persist for next nurse
+  document.getElementById('nurseExt').value = '';
+  document.getElementById('nameExtHint').style.display = 'none';
+}
+
+function clearNameExt(){
+  document.getElementById('nurseName').value = '';
+  document.getElementById('nurseExt').value = '';
+  document.getElementById('nameExtHint').style.display = 'none';
+  document.getElementById('myBookingStatus').style.display = 'none';
+  if(S.unit) loadSlots(true);
+}
+
+async function checkDuplicateExt(){
+  const firstName = document.getElementById('nurseName').value.trim();
+  const nurseExt  = document.getElementById('nurseExt').value.trim();
+  if(!firstName || !/^\d{5}$/.test(nurseExt)) return;
+  const dt = shiftDate(S.shift);
+  try {
+    const scheds = await spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${S.shift}'`);
+    const conflict = scheds.find(s =>
+      s.Status !== 'inactive' && s.Ext === nurseExt &&
+      s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(firstName.toLowerCase())
+    );
+    if(conflict){
+      if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${conflict.BreakNurseName}.`,'Take over extension','Cancel')){
+        document.getElementById('nurseExt').value = '';
+        document.getElementById('nurseExt').focus();
+      }
+    }
+  } catch(e){ /* non-critical */ }
 }
 
 
@@ -2710,37 +3223,107 @@ async function loadSummary(){
 
   try{
     let filter=`SlotDate eq '${dt}' and ShiftType eq '${shift}'`;
-    if(unit!=='All') filter+=` and Unit eq '${esc(unit)}'`;
+    if(unit!=='All'){
+      if(unit==='C_PAIR') filter+=` and (Unit eq '3C' or Unit eq '4C')`;
+      else filter+=` and Unit eq '${esc(unit)}'`;
+    }
     const bookings=await spGet(LISTS.bookings,filter);
 
-    // Get assignments for break nurse names
-    const scheds=await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
-    const unitBN={};
-    scheds.forEach(s=>{
-      try{ JSON.parse(s.Units||'[]').forEach(u=>{ unitBN[u]=s.BreakNurseName; }); }catch{}
+    // Also fetch overlap bookings from opposite shift
+    const oppShift = shift === 'Day' ? 'Noc' : 'Day';
+    const overlapMin = shift === 'Day' ? 6*60+30 : 18*60+30;
+    const overlapMax = shift === 'Day' ? getDayOverlapMax() : 20*60+0;
+    // For Day shift morning overlap, Noc BN started previous day
+    const oppDt = shift === 'Day'
+      ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
+      : dt;
+    let oppFilter = `SlotDate eq '${oppDt}' and ShiftType eq '${oppShift}'`;
+    if(unit!=='All'){
+      if(unit==='C_PAIR') oppFilter+=` and (Unit eq '3C' or Unit eq '4C')`;
+      else oppFilter += ` and Unit eq '${esc(unit)}'`;
+    }
+
+    // Run all queries in parallel for speed
+    const [oppBookings, scheds, oppScheds] = await Promise.all([
+      spGet(LISTS.bookings, oppFilter),
+      spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`),
+      spGet(LISTS.schedule, `ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`)
+    ]);
+
+    const overlapBookings = oppBookings.filter(b => {
+      const m = toMin(b.SlotTime);
+      return m >= overlapMin && m < overlapMax;
     });
+    const allBookings = [...bookings, ...overlapBookings];
+
+    // Build separate BN maps — main shift and opp shift (for overlap attribution)
+    // Active records take priority over inactive
+    const unitBN={}, unitBNExt={}, oppUnitBN={}, oppUnitBNExt={};
+    scheds.forEach(s=>{
+      try{ JSON.parse(s.Units||'[]').forEach(u=>{
+        // Only overwrite if no active BN assigned yet, or this record is active
+        if(!unitBN[u] || s.Status !== 'inactive'){
+          unitBN[u] = s.BreakNurseName;
+          const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+          if(ext) unitBNExt[u] = ext;
+        }
+      }); }catch{}
+    });
+    oppScheds.forEach(s=>{
+      try{ JSON.parse(s.Units||'[]').forEach(u=>{
+        if(!oppUnitBN[u] || s.Status !== 'inactive'){
+          oppUnitBN[u] = s.BreakNurseName;
+          const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+          if(ext) oppUnitBNExt[u] = ext;
+        }
+      }); }catch{}
+    });
+
+    // Helper: get covering BN for a booking — overlap slots use opp BN map
+    const getBNForBooking = (b) => {
+      const m = toMin(b.SlotTime);
+      const isOverlap = m >= overlapMin && m < overlapMax;
+      return isOverlap ? (oppUnitBN[b.Unit] || unitBN[b.Unit]) : unitBN[b.Unit];
+    };
+    const getBNExtForBooking = (b) => {
+      const m = toMin(b.SlotTime);
+      const isOverlap = m >= overlapMin && m < overlapMax;
+      return isOverlap ? (oppUnitBNExt[b.Unit] || unitBNExt[b.Unit]) : unitBNExt[b.Unit];
+    };
 
     // Populate BN filter dropdown
     const bnSel = document.getElementById('summBNFilter');
     if(bnSel){
-      const bnNames = [...new Set(scheds.map(s => s.BreakNurseName).filter(Boolean))].sort();
+      const bnNames = [...new Set([...scheds,...oppScheds].map(s => s.BreakNurseName).filter(Boolean))].sort();
       const curVal = bnSel.value;
       bnSel.innerHTML = '<option value="All">All Break Nurses</option>' +
         bnNames.map(n => `<option value="${n}"${n===curVal?' selected':''}>${n}</option>`).join('');
     }
 
     // Filter by BN if selected
-    const filteredBookings = bnFilter === 'All' ? bookings : bookings.filter(b => {
-      const bn = unitBN[b.Unit] || b.NurseName;
+    const filteredBookings = bnFilter === 'All' ? allBookings : allBookings.filter(b => {
+      const bn = getBNForBooking(b) || b.NurseName;
       return bn === bnFilter;
     });
 
     const staffBookings = filteredBookings.filter(b => !b.IsBNBreak);
-    const bnOwnBreaks   = filteredBookings.filter(b =>  b.IsBNBreak);
+    // Deduplicate BN breaks by NurseName+SlotTime — stored once per unit but should display once
+    const bnBreakSeen = new Set();
+    const bnOwnBreaks = filteredBookings.filter(b => {
+      if(!b.IsBNBreak) return false;
+      const key = `${b.NurseName}|${b.SlotTime}`;
+      if(bnBreakSeen.has(key)) return false;
+      bnBreakSeen.add(key);
+      return true;
+    });
+
+    // Build set of inactive BN names so we can flag uncovered bookings
+    const inactiveBNs = new Set([...scheds, ...oppScheds]
+      .filter(s => s.Status === 'inactive')
+      .map(s => s.BreakNurseName));
 
     if(!staffBookings.length && !bnOwnBreaks.length){
-      el.innerHTML=`<div class="empty">No breaks signed up yet for ${shift} shift on ${dt}${unit!=='All'?' · '+unit:''}${bnFilter!=='All'?' · '+bnFilter:''}.</div>`;
+      el.innerHTML=`<div class="empty">No breaks signed up yet for ${shift} shift on ${dt}${unit!=='All'?' · '+(unit==='C_PAIR'?'3C/4C':unit):''}${bnFilter!=='All'?' · '+bnFilter:''}.</div>`;
       return;
     }
 
@@ -2750,11 +3333,18 @@ async function loadSummary(){
     let html=`<div class="info-bar"><span>${staffBookings.length} staff break${staffBookings.length!==1?'s':''} &nbsp;·&nbsp; ${bnOwnBreaks.length} BN break${bnOwnBreaks.length!==1?'s':''} blocked</span></div>`;
 
     staffBookings.forEach(b=>{
-      html+=`<div class="summ-row">
-        <div class="summ-time">${fmt12(b.SlotTime)}</div>
+      const bn = getBNForBooking(b);
+      const bnExt = getBNExtForBooking(b);
+      const bnUnavailable = bn && inactiveBNs.has(bn);
+      html+=`<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
+        <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
         <div class="summ-unit">${b.Unit}</div>
         <div class="summ-nurse">${b.NurseName}</div>
-        <div class="summ-bn">${unitBN[b.Unit]||''}</div>
+        <div class="summ-bn">${bnUnavailable
+          ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
+          : (bn ? bn + (bnExt ? ` · ${bnExt}` : '') : '')
+        }</div>
+        <div><button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')" title="Cancel this booking">✕</button></div>
       </div>`;
     });
 
@@ -2776,7 +3366,7 @@ async function loadSummary(){
 }
 
 // ═══════════════════════════════════════════════════════
-// ADMIN TAB
+// SCHEDULE TAB
 // ═══════════════════════════════════════════════════════
 function unlock(){
   if(document.getElementById('pwInput').value===S.pw){
@@ -2809,7 +3399,7 @@ async function saveAssign(){
              document.getElementById('aNurse').value;
   const dt=document.getElementById('aDate').value;
   const shift=S.aShift;
-  const units=S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u);
+  const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
   if(!nurse)  { toast('Select a break nurse.',true); return; }
   if(!dt)     { toast('Select a date.',true); return; }
   if(!units.length){ toast('Select at least one unit.',true); return; }
@@ -2827,28 +3417,24 @@ async function saveAssign(){
       });
     if(conflicts.length){
       const lines = conflicts.map(c => `• ${c.bn} already covers ${c.units.join(', ')}`).join('\n');
-      if(!confirm(`⚠️ Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift. Continue?`)) return;
+      if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Continue','Cancel')) return;
     }
 
-    // Upsert — update if exists, create if not
+    // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
     const existing = await spGet(LISTS.schedule,
       `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
     if(existing.length > 0){
-      await spPatch(LISTS.schedule, existing[0].Id, {
-        Units: JSON.stringify(units),
-        Title: `${nurse}-${dt}-${shift}`
-      });
-      for(let j=1;j<existing.length;j++) await spDel(LISTS.schedule, existing[j].Id);
-      toast(`Coverage updated for ${nurse}!`);
-    } else {
-      await spPost(LISTS.schedule,{
-        Title:`${nurse}-${dt}-${shift}`,
-        BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
-        Units:JSON.stringify(units)
-      });
-      toast(`Coverage saved for ${nurse}!`);
+      for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
     }
+    await spPost(LISTS.schedule,{
+      Title:`${nurse}-${dt}-${shift}`,
+      BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
+      Units:JSON.stringify(units)
+    });
+    toast(existing.length > 0 ? `Coverage updated for ${nurse}!` : `Coverage saved for ${nurse}!`);
     S.aUnits=[];
+    S.editingAssignId = null;
+    document.getElementById('aNurseText').value = '';
     document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
     // Auto-apply BN default template and calculate rotation
     const bnDef = getDefaultTemplate(nurse, shift);
@@ -2861,12 +3447,12 @@ async function saveAssign(){
   }catch(e){ toast(e.message,true); }
 }
 
-let _viewRange = 'week';
+let _viewRange = 'all';
 
 function setViewRange(range, btn){
   _viewRange = range;
-  document.querySelectorAll('#va-week,#va-all').forEach(b => b && b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
+  const allBtn = document.getElementById('va-all');
+  if(allBtn) allBtn.classList.toggle('active', range === 'all');
   loadAssignments();
 }
 
@@ -2876,18 +3462,15 @@ async function loadAssignments(){
   const t = today();
   let filter;
 
-  if(_viewRange === 'day'){
-    const dt = document.getElementById('viewDate').value;
-    if(!dt){ el.innerHTML='<div class="empty">Select a date.</div>'; return; }
-    filter = `ShiftDate eq '${dt}'`;
-  } else if(_viewRange === 'week'){
-    const now = new Date();
-    const day = now.getDay() || 7;
-    const mon = new Date(now); mon.setDate(now.getDate() - day + 1);
-    const sun = new Date(mon); sun.setDate(mon.getDate() + 6);
-    filter = `ShiftDate ge '${localDate(mon)}' and ShiftDate le '${localDate(sun)}'`;
+  if(_viewRange === 'range'){
+    const from = document.getElementById('viewDateFrom').value;
+    const to   = document.getElementById('viewDateTo').value;
+    if(!from && !to){ filter = `ShiftDate ge '${t}'`; }
+    else if(from && to){ filter = `ShiftDate ge '${from}' and ShiftDate le '${to}'`; }
+    else if(from){ filter = `ShiftDate ge '${from}'`; }
+    else { filter = `ShiftDate le '${to}'`; }
   } else {
-    filter = `ShiftDate ge '${t}'`;
+    filter = `ShiftDate ge '${shiftDate(detectShift())}'`;
   }
 
   try{
@@ -2912,7 +3495,7 @@ async function loadAssignments(){
       return `<div style="margin-bottom:14px">
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
         ${items.map(s => {
-          let units=[]; try{ units=JSON.parse(s.Units||'[]'); }catch{}
+          let units=[]; try{ units=[...new Set(JSON.parse(s.Units||'[]'))]; }catch{}
           const icon=s.ShiftType==='Day'?'☀️':'🌙';
           const isInactive = s.Status === 'inactive';
           const statusBadge = isInactive
@@ -2924,14 +3507,14 @@ async function loadAssignments(){
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${!isInactive ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
-                ${!isInactive && !s.IsSupplemental ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${isInactive ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
+                ${!isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                ${!isInactive && !s.IsSupplemental && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
               </div>
             </div>
             <div class="unit-tags">${units.map(u=>
-              !isInactive
+              (!isInactive && s.ShiftDate >= shiftDate(s.ShiftType))
                 ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
                 : `<span class="tag">${u}</span>`
             ).join('')}</div>
@@ -2948,56 +3531,92 @@ async function loadAssignments(){
 async function delAssign(id){
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
-    if(!scheds.length){ if(!confirm('Remove this assignment?')) return; await spDel(LISTS.schedule,id); toast('Assignment removed.'); loadAssignments(); return; }
-    const s = scheds[0];
-    let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-
-    // Find all active staff bookings on this assignment's units
-    const bookings = await spGet(LISTS.bookings, `SlotDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit));
-
-    if(!affected.length){
-      if(!confirm(`Remove assignment for ${s.BreakNurseName} (${s.ShiftType} · ${s.ShiftDate})?`)) return;
+    if(!scheds.length){
+      if(!await customConfirm('Remove this assignment?','Remove','Cancel')) return;
       await spDel(LISTS.schedule, id);
       toast('Assignment removed.');
       loadAssignments();
       return;
     }
+    const s = scheds[0];
+    let units = []; try { units = [...new Set(JSON.parse(s.Units||'[]'))]; } catch{}
 
-    // There are claimed breaks — offer reassignment
+    // Find future affected staff bookings
+    const now = nowMin();
+    const bookings = await spGet(LISTS.bookings, `SlotDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
+    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+
+    // Get same-wing active BNs
     const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    const otherBNs = allScheds.filter(s2 => String(s2.Id) !== String(id) && s2.Status !== 'inactive');
-
-    showReassignModal({
-      deletingAssign: s,
-      units,
-      affected,
-      otherBNs,
-      onReassign: async (targetId) => {
-        const target = otherBNs.find(b => String(b.Id) === String(targetId));
-        if(!target) return;
-        let targetUnits = []; try { targetUnits = JSON.parse(target.Units||'[]'); } catch{}
-        const merged = [...new Set([...targetUnits, ...units])];
-        await spPatch(LISTS.schedule, target.Id, { Units: JSON.stringify(merged) });
-        await spDel(LISTS.schedule, id);
-        toast(`Reassigned to ${target.BreakNurseName} — ${affected.length} booking${affected.length!==1?'s':''} carried over.`);
-        loadAssignments();
-      },
-      onCancelAndDelete: async () => {
-        for(const b of affected) await spDel(LISTS.bookings, b.Id);
-        await spDel(LISTS.schedule, id);
-        toast(`Assignment removed · ${affected.length} booking${affected.length!==1?'s':''} cancelled.`);
-        loadAssignments();
-      }
+    const bnAWings = [...new Set(units.map(u => getUnitWing(u)))];
+    const sameWingBNs = allScheds.filter(s2 =>
+      String(s2.Id) !== String(id) &&
+      s2.Status !== 'inactive' &&
+      !s2.IsSupplemental
+    ).filter(s2 => {
+      let u2 = []; try { u2 = JSON.parse(s2.Units||'[]'); } catch{}
+      return u2.some(u => bnAWings.includes(getUnitWing(u)));
     });
-  } catch(e){ toast(e.message,true); }
+
+    const sameWingFirstNames = sameWingBNs.map(b => firstName(b.BreakNurseName)).join(', ');
+
+    if(!affected.length){
+      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')) return;
+      await spDel(LISTS.schedule, id);
+      toast(`${firstName(s.BreakNurseName)}'s assignment removed.`);
+      loadAssignments();
+      return;
+    }
+
+    // Build affected staff list by name and unit
+    const byNurse = {};
+    affected.forEach(b => {
+      if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
+      byNurse[b.NurseName].push(`${b.Unit} at ${fmt12(b.SlotTime)}`); // formatNurse applied at render
+    });
+    const affectedLines = Object.entries(byNurse)
+      .map(([n, slots]) => `• ${formatNurse(n)} — ${slots.join(', ')}`)
+      .join('\n');
+
+    const wingMsg = sameWingBNs.length
+      ? `\n\n${sameWingFirstNames} ${sameWingBNs.length === 1 ? 'is' : 'are'} on the same wing and will absorb what they can. Breaks that can't be covered will be cancelled.`
+      : '\n\nNo other BNs are available on the same wing — all breaks will be cancelled.';
+
+    const proceed = await customConfirm(
+      `Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment?\n\nThe following staff have breaks booked:\n${affectedLines}${wingMsg}\n\nPlease notify affected staff nurses.`,
+      'Proceed & reassign',
+      'Keep assignment'
+    );
+    if(!proceed) return;
+
+    // Run redistribution algorithm
+    if(sameWingBNs.length){
+      // Temporarily mark inactive so processBNUnavailability can redistribute
+      await spPatch(LISTS.schedule, id, { Status: 'inactive' });
+      await processBNUnavailability(id, s.BreakNurseName, s.ShiftDate, s.ShiftType, true); // redistribute by default on remove
+    } else {
+      // No same-wing BNs — just cancel all bookings
+      for(const b of affected) await spDel(LISTS.bookings, b.Id);
+    }
+
+    // Permanently delete the assignment and any supplementals
+    await spDel(LISTS.schedule, id);
+    const suppls = await spGet(LISTS.schedule,
+      `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
+    for(const sup of suppls.filter(x => x.CoveredFrom === s.BreakNurseName)){
+      // Keep supplementals — they represent real reassignments, just remove the CoveredFrom link
+      await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
+    }
+    toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify affected staff.`);
+    loadAssignments();
+  } catch(e){ toast(e.message, true); }
 }
 
 function showReassignModal({ deletingAssign, units, affected, otherBNs, onReassign, onCancelAndDelete }){
   const existing = document.getElementById('reassignModal');
   if(existing) existing.remove();
 
-  const nurseList = [...new Set(affected.map(b => b.NurseName))];
+  const nurseList = [...new Set(affected.map(b => formatNurse(b.NurseName)))];
   const affectedHtml = nurseList.map(n => {
     const slots = affected.filter(b => b.NurseName === n).map(b => fmt12(b.SlotTime)).join(', ');
     return `<div style="font-size:.82rem;color:var(--text)">• ${n} — ${slots}</div>`;
@@ -3030,7 +3649,7 @@ function showReassignModal({ deletingAssign, units, affected, otherBNs, onReassi
     </div>`;
   document.body.appendChild(modal);
 
-  window._reassignHandlers = { onReassign, onCancelAndDelete, affected, otherBNs, deletingAssign };
+  window._reassignHandlers = { onReassign, onCancelAndDelete, affected, otherBNs: otherBNs, deletingAssign };
 }
 
 async function handleReassignConfirm(){
@@ -3044,9 +3663,9 @@ async function handleReassignConfirm(){
     return;
   }
 
-  // Check new BN's existing bookings for slot conflicts
+  // Check new BN's existing bookings for slot conflicts (skip for new assignments)
   const target = otherBNs.find(b => String(b.Id) === String(targetId));
-  if(target){
+  if(target && !target._isNew){
     const existingBookings = await spGet(LISTS.bookings,
       `SlotDate eq '${deletingAssign.ShiftDate}' and ShiftType eq '${deletingAssign.ShiftType}'`);
     let targetUnits = []; try { targetUnits = JSON.parse(target.Units||'[]'); } catch{}
@@ -3058,7 +3677,7 @@ async function handleReassignConfirm(){
     const conflicts = affected.filter(b => targetTakenSlots.has(b.SlotTime));
     if(conflicts.length){
       const lines = conflicts.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
-      const proceed = confirm(
+      const proceed = await customConfirm(
         `⚠️ ${target.BreakNurseName} already has staff booked at these times:\n\n${lines}\n\nThese conflicting bookings will be cancelled. Continue?`
       );
       if(!proceed) return;
@@ -3080,7 +3699,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
     const now = nowMin();
     const bookings = await spGet(LISTS.bookings,
       `Unit eq '${esc(unit)}' and SlotDate eq '${date}' and ShiftType eq '${shift}'`);
-    const future = bookings.filter(b => !b.IsBNBreak && toMin(b.SlotTime) > now);
+    const future = bookings.filter(b => !b.IsBNBreak && sortKey(b.SlotTime, shift) > nowKey(shift));
 
     // Get this BN's other units on this assignment
     const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
@@ -3093,9 +3712,10 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       ? future.map(b => `<div style="font-size:.82rem">• ${b.NurseName} at ${fmt12(b.SlotTime)}</div>`).join('')
       : '<div style="font-size:.82rem;color:var(--muted)">No pending bookings on this unit.</div>';
 
-    const redirectOptions = remaining.length
-      ? remaining.map(u => `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}" checked> ${u}</label>`).join('')
-      : '<div style="font-size:.82rem;color:var(--muted)">No other units on this assignment.</div>';
+    const ALL_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
+    const redirectOptions = ALL_UNITS
+      .filter(u => u !== unit)
+      .map(u => `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}"${remaining.includes(u) ? ' checked' : ''}> ${u}</label>`).join('');
 
     const existing = document.getElementById('closeUnitModal');
     if(existing) existing.remove();
@@ -3111,10 +3731,8 @@ async function closeUnit(schedId, unit, bnName, date, shift){
           <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">⚠️ ${future.length} pending booking${future.length!==1?'s':''} will be cancelled:</div>
           <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto">${bookingHtml}</div>
         ` : `<div style="margin-bottom:14px">${bookingHtml}</div>`}
-        ${remaining.length ? `
-          <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Redirect extra coverage to:</div>
-          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px">${redirectOptions}</div>
-        ` : ''}
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Redirect extra coverage to:</div>
+          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:4px">${redirectOptions}</div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('closeUnitModal').remove()">Cancel</button>
           <button class="btn btn-danger btn-sm" onclick="confirmCloseUnit(${schedId},'${unit}','${date}','${shift}')">Close Unit</button>
@@ -3154,9 +3772,9 @@ async function confirmCloseUnit(schedId, unit, date, shift){
   } catch(e){ toast(e.message, true); }
 }
 async function recalculateAllRotations(){
-  if(!confirm('Recalculate rotations for all upcoming assignments? This updates slot distributions based on the current algorithm.')) return;
+  if(!await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
 
-  const t = today();
+  const t = shiftDate(detectShift());
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
   const active = scheds.filter(s => s.Status !== 'inactive');
 
@@ -3281,17 +3899,32 @@ function exportSimData(){
   toast('Sim data exported!');
 }
 
-function clearSimData(){
-  if (!confirm('Clear ALL simulation data? This cannot be undone.')) return;
-  DB.BNSchedule = []; DB.BNBookings = [];
+async function clearSimData(){
+  if(!await customConfirm('Clear ALL simulation data? This cannot be undone.','Clear All','Cancel')) return;
+  DB.BNSchedule = []; DB.BNBookings = []; DB.BNState = [];
   localStorage.removeItem('sim_BNSchedule');
   localStorage.removeItem('sim_BNBookings');
+  localStorage.removeItem('sim_BNState');
   localStorage.removeItem('sim_idCounter');
   _simIdCounter = 1000;
-  // Also clear nurse rotation, wing history, and block rotations
+  // Clear all migrated state keys from localStorage
   Object.keys(localStorage).filter(k =>
-    k.startsWith('bnNurseHistory_') || k.startsWith('bnWingHistory_') || k.startsWith('bnRotation_'))
-    .forEach(k => localStorage.removeItem(k));
+    k.startsWith('bnNurseHistory_') || k.startsWith('bnWingHistory_') ||
+    k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
+    k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
+    k === 'bnImportedEntries' || k === 'bnImportedNames' || k === 'unit3CDefault'
+  ).forEach(k => localStorage.removeItem(k));
+  // Also clear BNState entries in backend
+  try {
+    const stateItems = await spGet(LISTS.state, '');
+    for(const item of stateItems) await spDel(LISTS.state, item.Id);
+  } catch(e){ /* non-critical */ }
+  // Reset in-memory state
+  importEntries = [];
+  importedNames = [];
+  populateBNDropdown();
+  renderImportedEntriesSummary();
+  renderImportedNamesList();
   toast('Simulation data cleared.');
   loadAssignments();
 }
@@ -3326,12 +3959,144 @@ function changeBNPw(){
 // TOAST
 // ═══════════════════════════════════════════════════════
 let _toastT;
+// Extract first name from "Last, First M" format
+function firstName(fullName){
+  if(!fullName) return fullName;
+  const parts = fullName.split(',');
+  if(parts.length > 1) return parts[1].trim().split(' ')[0];
+  return fullName.split(' ')[0];
+}
+
+function toTitleCase(str){
+  if(!str) return '';
+  return str.charAt(0).toUpperCase() + str.slice(1);
+}
+
+// Format a NurseName string ("First (12345)") + Unit for display in messages
+// Output: "First (12345) on 7N" or "First on 7N" if no ext
+function formatNurseUnit(nurseName, unit){
+  const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
+  const name = m ? m[1].trim() : (nurseName||'');
+  const ext  = m ? m[2] : '';
+  return ext ? `${name} (${ext}) on ${unit}` : `${name} on ${unit}`;
+}
+
+// Format just name+ext without unit
+function formatNurse(nurseName){
+  const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
+  const name = m ? m[1].trim() : (nurseName||'');
+  const ext  = m ? m[2] : '';
+  return ext ? `${name} (${ext})` : name;
+}
+
+function customConfirm(msg, okLabel, cancelLabel){
+  return new Promise(resolve => {
+    const modal = document.getElementById('customConfirmModal');
+    document.getElementById('customConfirmMsg').textContent = msg;
+    document.getElementById('customConfirmOk').textContent = okLabel;
+    document.getElementById('customConfirmCancel').textContent = cancelLabel;
+    modal.style.display = 'flex';
+    const cleanup = (result) => {
+      modal.style.display = 'none';
+      document.getElementById('customConfirmOk').onclick = null;
+      document.getElementById('customConfirmCancel').onclick = null;
+      resolve(result);
+    };
+    document.getElementById('customConfirmOk').onclick = () => cleanup(true);
+    document.getElementById('customConfirmCancel').onclick = () => cleanup(false);
+  });
+}
+
+// ── Restore Cancelled Breaks modal ───────────────────
+// cancelled: [{NurseName, Unit, SlotTime, SlotDate, ShiftType}]
+// Returns Promise<Array> — the subset the user chose to restore
+let _restoreResolve = null;
+
+function showRestoreModal(cancelled){
+  return new Promise(resolve => {
+    _restoreResolve = resolve;
+    const list = document.getElementById('restoreModalList');
+    // Group by NurseName so nurses with multiple slots are shown together
+    const groups = [];
+    const seenNurse = {};
+    cancelled.forEach((b, i) => {
+      if(!seenNurse[b.NurseName]){
+        seenNurse[b.NurseName] = groups.length;
+        const m = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
+        groups.push({ name: m ? m[1].trim() : b.NurseName, ext: m ? m[2] : '', unit: b.Unit, slots: [] });
+      }
+      groups[seenNurse[b.NurseName]].slots.push({ b, i });
+    });
+
+    list.innerHTML = groups.map(g => `
+      <div style="padding:10px 0;border-bottom:1px solid var(--border)">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
+          <span style="font-weight:700;font-size:.9rem">${g.name}</span>
+          ${g.ext ? `<span style="font-family:'DM Mono',monospace;font-size:.78rem;color:var(--muted)">${g.ext}</span>` : ''}
+          <span style="background:var(--teal-lt);color:var(--teal-dk);padding:1px 6px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.7rem;font-weight:700">${g.unit === 'C_PAIR' ? '3C/4C' : g.unit}</span>
+        </div>
+        ${g.slots.map(({b, i}) => `
+          <label style="display:flex;align-items:center;gap:10px;padding:5px 0 5px 10px;cursor:pointer">
+            <input type="checkbox" id="rc-${i}" checked style="width:15px;height:15px;accent-color:var(--teal);flex-shrink:0"/>
+            <span style="font-family:'DM Mono',monospace;font-size:.875rem;color:var(--teal-dk)">${fmt12(b.SlotTime)}</span>
+          </label>`).join('')}
+      </div>`).join('');
+    document.getElementById('restoreModal').style.display = 'flex';
+    // Store cancelled data for retrieval on confirm
+    document.getElementById('restoreModal').dataset.count = cancelled.length;
+    window._restoreCancelled = cancelled;
+  });
+}
+
+function restoreModalSelectAll(checked){
+  const count = parseInt(document.getElementById('restoreModal').dataset.count || '0');
+  for(let i = 0; i < count; i++){
+    const cb = document.getElementById(`rc-${i}`);
+    if(cb) cb.checked = checked;
+  }
+}
+
+function restoreModalConfirm(doRestore){
+  const modal = document.getElementById('restoreModal');
+  modal.style.display = 'none';
+  if(!doRestore || !window._restoreCancelled){
+    if(_restoreResolve) _restoreResolve([]);
+    _restoreResolve = null;
+    return;
+  }
+  const selected = window._restoreCancelled.filter((_, i) => {
+    const cb = document.getElementById(`rc-${i}`);
+    return cb && cb.checked;
+  });
+  window._restoreCancelled = null;
+  if(_restoreResolve) _restoreResolve(selected);
+  _restoreResolve = null;
+}
+
+// One-way alert using custom modal (no "This page says" header)
+function showAlert(msg){
+  return new Promise(resolve => {
+    const modal = document.getElementById('customConfirmModal');
+    document.getElementById('customConfirmMsg').textContent = msg;
+    document.getElementById('customConfirmOk').textContent = 'OK';
+    document.getElementById('customConfirmCancel').style.display = 'none';
+    modal.style.display = 'flex';
+    const cleanup = () => {
+      modal.style.display = 'none';
+      document.getElementById('customConfirmCancel').style.display = '';
+      document.getElementById('customConfirmOk').onclick = null;
+      resolve();
+    };
+    document.getElementById('customConfirmOk').onclick = cleanup;
+  });
+}
+
 function toast(msg,err=false){
   const t=document.getElementById('toast');
   t.textContent=msg; t.className='toast'+(err?' err':'');
   t.classList.add('show');
   clearTimeout(_toastT);
-  _toastT=setTimeout(()=>t.classList.remove('show'),3200);
+  _toastT=setTimeout(()=>t.classList.remove('show'),6400);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -3375,7 +4140,7 @@ async function runImport(){
   }).length;
 
   if (unsavedCount > 0) {
-    const go = confirm(
+    const go = await customConfirm(
       `You have ${unsavedCount} unsaved assignment${unsavedCount!==1?'s':''} from the previous import.\n\n` +
       `Import anyway and lose these selections?\n\n` +
       `Click Cancel to go back and save them first.`
@@ -3391,7 +4156,7 @@ async function runImport(){
   btn.style.display = 'none'; spin.style.display = 'inline-block';
 
   try {
-    // Route through Apps Script proxy — send as form-encoded to avoid CORS preflight
+    // Route through Apps Script proxy
     const response = await fetch(GAS_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -3402,7 +4167,15 @@ async function runImport(){
       }).toString()
     });
 
-    const data = await response.json();
+    const responseText = await response.text();
+    console.log('Raw Apps Script response:', responseText.slice(0, 200));
+    let data;
+    try { data = JSON.parse(responseText); }
+    catch(e) {
+      toast('Extraction error: Apps Script returned non-JSON: ' + responseText.slice(0,100), true);
+      btn.style.display = 'inline'; spin.style.display = 'none';
+      return;
+    }
 
     // Check for proxy or API-level errors first
     if (data.error) {
@@ -3462,7 +4235,7 @@ async function runImport(){
     const isTimeout = e.message && e.message.includes('timed out');
     const isKey = e.message && e.message.includes('401');
     const msg = isTimeout ? 'Request timed out — the AI service may be slow. Try again.'
-      : isKey ? 'Invalid API key — check your key in the Admin tab.'
+      : isKey ? 'Invalid API key — check your key in the Schedule tab.'
       : 'AI extraction failed: ' + e.message;
     toast(msg, true);
     console.error('Import exception:', e);
@@ -3473,6 +4246,18 @@ async function runImport(){
 
 // Store extracted entries so shift can be toggled after render
 let importEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+// Async refresh from backend on load
+(async () => {
+  try {
+    const remote = await getState('bnImportedEntries');
+    if(remote && Array.isArray(remote)){
+      importEntries = remote;
+      localStorage.setItem('bnImportedEntries', JSON.stringify(remote));
+      populateBNDropdown();
+      renderImportedEntriesSummary();
+    }
+  } catch(e){ /* use localStorage cache */ }
+})();
 
 
 // ═══════════════════════════════════════════════════════
@@ -3617,12 +4402,10 @@ async function renderImportRows(entries, forceReplace = false){
     const sortedDates = [...overlappingDates].sort();
     const first = sortedDates[0], last = sortedDates[sortedDates.length-1];
     const dateRange = first === last ? first : `${first} to ${last}`;
-    const proceed = confirm(
-      `A schedule has already been imported for some of these dates (${dateRange}).
-
-Replace existing entries and re-run suggestions, or cancel?
-
-Click OK to Replace & Continue, or Cancel to discard this import.`
+    const proceed = await customConfirm(
+      `A schedule has already been imported for some of these dates (${dateRange}). Replace existing entries and re-run suggestions?`,
+      'Replace & Continue',
+      'Cancel import'
     );
     if(!proceed){
       toast('Import cancelled.');
@@ -3630,7 +4413,7 @@ Click OK to Replace & Continue, or Cancel to discard this import.`
     }
     // Replace: remove all existing entries for overlapping dates
     const filtered = existingEntries.filter(e => !overlappingDates.includes(e.date));
-    localStorage.setItem('bnImportedEntries', JSON.stringify(filtered));
+    localStorage.setItem('bnImportedEntries', JSON.stringify(filtered)); setState('bnImportedEntries', filtered).catch(()=>{});
     replacementNotice = `Schedule updated for ${dateRange} — review and save the new suggestions below to update assignments.`;
   }
 
@@ -3643,7 +4426,7 @@ Click OK to Replace & Continue, or Cancel to discard this import.`
 
   importEntries = [...baseEntries, ...newEntries.map(e => Object.assign({}, e))];
   importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
-  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
+  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
 
   // Auto-populate the name roster from extracted entries
   const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
@@ -3768,7 +4551,7 @@ function setImportShift(i, sh){
   if(e){
     const match = importEntries.find(x => x.name===e.name && x.date===e.date);
     if(match) match.shift = sh;
-    localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
+    localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
   }
   document.getElementById(`isd-${i}`).classList.toggle('active', sh==='Day');
   document.getElementById(`isn-${i}`).classList.toggle('active', sh==='Noc');
@@ -3830,16 +4613,16 @@ function clearWeekEntries(weekStart){
   const end = new Date(d); end.setDate(d.getDate() + 6);
   const endStr = localDate(end);
   importEntries = importEntries.filter(e => e.date < weekStart || e.date > endStr);
-  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries));
+  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
   renderImportedEntriesSummary();
   populateNurseDropdown();
   toast('Week removed.');
 }
 
-function clearAllImportedEntries(){
-  if (!confirm('Remove ALL imported schedule entries? This cannot be undone.')) return;
+async function clearAllImportedEntries(){
+  if(!await customConfirm('Remove ALL imported schedule entries? This cannot be undone.','Remove All','Cancel')) return;
   importEntries = [];
-  localStorage.removeItem('bnImportedEntries');
+  localStorage.removeItem('bnImportedEntries'); deleteState('bnImportedEntries').catch(()=>{});
   renderImportedEntriesSummary();
   populateNurseDropdown();
   toast('All imported entries cleared.');
@@ -3903,8 +4686,8 @@ async function clearAndResuggest(){
   toast('↺ All suggestions refreshed');
 }
 
-function clearAllImportSels(){
-  if(!confirm('Clear all unit selections? This does not delete extracted entries.')) return;
+async function clearAllImportSels(){
+  if(!await customConfirm('Clear all unit selections? This does not delete extracted entries.','Clear','Cancel')) return;
   Object.keys(importUnitSel).forEach(i => {
     importUnitSel[i] = [];
     UNITS.forEach(u => {
@@ -4107,7 +4890,7 @@ async function saveImportRow(i){
 // ═══════════════════════════════════════════════════════
 // BREAK NURSE OWN-BREAK TAB
 // ═══════════════════════════════════════════════════════
-const BNS = { shift: null, name: '', date: '' };
+const BNS = { shift: null, name: '', date: '', pendingBreaks: new Set() };
 
 function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
@@ -4120,30 +4903,46 @@ function loadBNView(){
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first.', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
+
+  // Clear ext if a different BN is selected
+  if(BNS.name && BNS.name !== name){
+    document.getElementById('bnExtInput').value = '';
+    document.getElementById('bnExtInput').style.borderColor = '';
+  }
+
+  // Restore saved ext for this BN if available
+  const savedExt = localStorage.getItem(`bnExt_${name}_${shiftDate(detectShift())}_${detectShift()}`);
+  const resolvedExt = ext || savedExt || '';
+
+  // Require ext — prompt if not entered and not saved
+  // Ext is optional for viewing — only required for saving to schedule record
+  if(!resolvedExt){
+    document.getElementById('bnExtInput').style.borderColor = '';
+  }
+  document.getElementById('bnExtInput').style.borderColor = '';
+
+  if(resolvedExt && !ext){
+    document.getElementById('bnExtInput').value = resolvedExt;
+  }
+
   BNS.name  = name;
-  BNS.ext   = ext;
+  BNS.ext   = resolvedExt;
   BNS.shift = detectShift();
-  BNS.date  = today();
+  BNS.date  = shiftDate(BNS.shift);
   BNS.defaultShift = BNS.shift;
-  // Set date picker to today
+
+  // Save ext keyed to this shift and patch to schedule record
+  localStorage.setItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`, resolvedExt);
+  spGet(LISTS.schedule,
+    `ShiftDate eq '${BNS.date}' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`)
+    .then(scheds => {
+      const active = scheds.find(s => s.Status !== 'inactive');
+      if(active) spPatch(LISTS.schedule, active.Id, { Ext: resolvedExt }).catch(()=>{});
+    }).catch(()=>{});
+  // Set date picker to shift start date (handles Noc shifts that started yesterday)
   const dp = document.getElementById('bnDate');
   if (dp) dp.value = BNS.date;
   renderBNShiftPill();
-
-  // Restore saved ext for this BN if available
-  const savedExt = localStorage.getItem(`bnExt_${name}`);
-  if(savedExt && !ext){
-    document.getElementById('bnExtInput').value = savedExt;
-    BNS.ext = savedExt;
-  }
-
-function onBNExtInput(){
-  const ext = document.getElementById('bnExtInput').value.trim();
-  if(/^\d{5}$/.test(ext) && BNS.name){
-    BNS.ext = ext;
-    localStorage.setItem(`bnExt_${BNS.name}`, ext);
-  }
-}
 
   // Show default schedule section
   const defWrap = document.getElementById('bnDefaultWrap');
@@ -4156,10 +4955,20 @@ function onBNExtInput(){
   loadBNSlots();
 }
 
+function onBNExtInput(){
+  const ext = document.getElementById('bnExtInput').value.trim();
+  // If name is selected and ext is now valid, auto-load the view (which will save the ext)
+  if(/^\d{5}$/.test(ext)){
+    const name = document.getElementById('bnNameSelect').value.trim();
+    if(name) loadBNView();
+  }
+}
+
 function onBNDateChange(){
   const dp = document.getElementById('bnDate');
   if (!dp || !dp.value) return;
   BNS.date = dp.value;
+  BNS.pendingBreaks.clear(); updateBNSubmitBar();
   // Auto-detect shift based on imported entries for this date
   const entry = importEntries.find(e => e.name === BNS.name && e.date === BNS.date);
   if (entry) {
@@ -4173,6 +4982,7 @@ function onBNDateChange(){
 
 function flipBNShift(){
   BNS.shift = BNS.shift==='Day' ? 'Noc' : 'Day';
+  BNS.pendingBreaks.clear(); updateBNSubmitBar();
   renderBNShiftPill();
   loadBNSlots();
 }
@@ -4211,7 +5021,27 @@ async function loadBNSlots(){
       return;
     }
     document.getElementById('bnNoSched').style.display = 'none';
-    updateSelfAvailBtn(scheds.some(s => s.Status === 'inactive' && !s.IsSupplemental));
+    const isUnavailable = scheds.some(s => s.Status === 'inactive' && !s.IsSupplemental);
+    updateSelfAvailBtn(isUnavailable);
+
+    // Show/hide unavailable banner at top of BN panel
+    let unavailBanner = document.getElementById('bnUnavailBanner');
+    if(!unavailBanner){
+      unavailBanner = document.createElement('div');
+      unavailBanner.id = 'bnUnavailBanner';
+      unavailBanner.style.cssText = 'margin-bottom:12px;padding:10px 14px;border-radius:10px;background:var(--red-lt);border:1.5px solid var(--red);color:var(--red);font-size:.85rem;font-weight:600;display:none';
+      unavailBanner.textContent = '⚠️ You are currently marked unavailable — staff cannot sign up for breaks on your units.';
+      const bnPanel = document.getElementById('bnPanel');
+      if(bnPanel) bnPanel.insertBefore(unavailBanner, bnPanel.firstChild);
+    }
+    unavailBanner.style.display = isUnavailable ? 'block' : 'none';
+    // Warm rotation cache from backend if not already cached
+    await warmRotationCache(BNS.name, dt, shift).catch(()=>{});
+    const bnRotation = loadRotation(BNS.name, dt, shift) || {};
+    // Warm default template from backend if not already cached
+    warmDefaultTemplate(BNS.name, shift).catch(()=>{});
+    // Warm 3C status from backend
+    warm3CStatus(dt, shift).catch(()=>{});
 
     // Get all units this BN covers on this date
     const units = [];
@@ -4220,7 +5050,9 @@ async function loadBNSlots(){
     meta.textContent = `${dateLabel}  ·  Covering: ${units.join(', ')}`;
 
     const slots = generateSlots(shift);
-    const displaySlots = isToday ? slots.filter(s => !isPast(s, shift)) : slots;
+    const bnBlocked = getBNHardBlocked(shift);
+    const displaySlots = (isToday ? slots.filter(s => !isPast(s, shift)) : slots)
+      .filter(s => !bnBlocked.includes(s));
 
     // Fetch existing BN breaks for this nurse/date — unique by SlotTime
     const bnBreaks = await spGet(LISTS.bookings,
@@ -4246,17 +5078,27 @@ async function loadBNSlots(){
     // Render a single unified slot list (applies to all covered units)
     list.innerHTML = displaySlots.map(slot => {
       const isMyBreak = bnBreakTimes.has(slot);
-      return `<div class="slot-row ${isMyBreak?'bn-break mine':'open'}" style="margin-bottom:6px;min-height:48px;cursor:pointer"
-          onclick="${isMyBreak ? `cancelBNBreak('${slot}')` : `claimBNBreak('${slot}')`}">
-        <div class="slot-time">${fmt12(slot)}</div>
-        <div class="slot-name ${isMyBreak?'filled':''}">
-          ${isMyBreak ? '🔒 Your break' : 'Available'}
+      const assignedUnit = bnRotation[slot];
+      const unitTag = assignedUnit
+        ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${assignedUnit === 'C_PAIR' ? '3C/4C' : assignedUnit}</span>`
+        : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
+      const isPendingBreak = BNS.pendingBreaks.has(slot);
+      const rowCls = isMyBreak ? 'bn-break mine' : isPendingBreak ? 'open' : 'open';
+      const rowStyle = isPendingBreak
+        ? 'margin-bottom:6px;min-height:48px;cursor:pointer;border-color:var(--day);box-shadow:0 0 0 2px #f5c060'
+        : 'margin-bottom:6px;min-height:48px;cursor:pointer';
+      return `<div class="slot-row ${rowCls}" style="${rowStyle}">
+        <div class="slot-time" style="display:flex;align-items:center;${isPendingBreak?'color:var(--day);font-weight:700':''}">${fmt12(slot)}${unitTag}</div>
+        <div class="slot-name ${isMyBreak||isPendingBreak?'filled':''}">
+          ${isMyBreak ? '🔒 Your break' : isPendingBreak ? '⏳ Staged' : assignedUnit ? 'Available' : ''}
         </div>
         <div>
           ${isMyBreak
             ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelBNBreak('${slot}')">✕ Remove</button>`
-            : `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600"
-                onclick="event.stopPropagation();claimBNBreak('${slot}')">+ My Break</button>`
+            : isPendingBreak
+              ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="event.stopPropagation();toggleBNPending('${slot}')">✕ Deselect</button>`
+              : `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600"
+                  onclick="event.stopPropagation();toggleBNPending('${slot}')">+ My Break</button>`
           }
         </div>
       </div>`;
@@ -4293,12 +5135,103 @@ async function checkRotationConflicts(bnName, dt, shift, affectedSlots){
   if(!conflicts.length) return true;
 
   const list = conflicts.map(c => `• ${c.name} on ${c.unit} at ${fmt12(c.time)}`).join('\n');
-  const go = confirm(
-    `Adding this break shifts the coverage rotation. The following staff nurse${conflicts.length>1?'s have':' has'} a slot that would no longer be covered:\n\n${list}\n\nIf you proceed, their booking will be cancelled — please call them to let them know.\n\nProceed?`
+  const go = await customConfirm(
+    `Adding this break shifts the coverage rotation. The following staff nurse${conflicts.length>1?'s have':' has'} a slot that would no longer be covered:\n\n${list}\n\nProceeding will cancel their booking — please call them to let them know.`,
+    'Proceed',
+    'Cancel'
   );
   if(!go) return false;
   for(const c of conflicts) await spDel(LISTS.bookings, c.id);
   return true;
+}
+
+// ── BN break pending/submit flow ─────────────────────
+function toggleBNPending(slotTime){
+  if(BNS.pendingBreaks.has(slotTime)){
+    BNS.pendingBreaks.delete(slotTime);
+  } else {
+    BNS.pendingBreaks.add(slotTime);
+  }
+  updateBNSubmitBar();
+  updateBNSlotRow(slotTime);
+}
+
+function clearBNPending(){
+  const prev = [...BNS.pendingBreaks];
+  BNS.pendingBreaks.clear();
+  updateBNSubmitBar();
+  prev.forEach(s => updateBNSlotRow(s));
+}
+
+// Update a single BN slot row in-place — no full list rebuild, no jumping
+function updateBNSlotRow(slotTime){
+  const list = document.getElementById('bnSlotsList');
+  if(!list) return;
+  // Find the row by its onclick attribute containing the slotTime
+  const rows = list.querySelectorAll('.slot-row');
+  for(const row of rows){
+    const btn = row.querySelector('button');
+    if(!btn) continue;
+    if(!btn.getAttribute('onclick')?.includes(slotTime)) continue;
+    const isPending = BNS.pendingBreaks.has(slotTime);
+    // Update border and shadow
+    row.style.borderColor = isPending ? 'var(--day)' : '';
+    row.style.boxShadow = isPending ? '0 0 0 2px #f5c060' : '';
+    // Update time cell color
+    const timeCell = row.querySelector('.slot-time');
+    if(timeCell){
+      timeCell.style.color = isPending ? 'var(--day)' : '';
+      timeCell.style.fontWeight = isPending ? '700' : '';
+    }
+    // Update name cell
+    const nameCell = row.querySelector('.slot-name');
+    if(nameCell){
+      nameCell.textContent = isPending ? '⏳ Pending Submit' : 'Available';
+      nameCell.classList.toggle('filled', isPending);
+    }
+    // Swap button
+    const newBtn = document.createElement('button');
+    if(isPending){
+      newBtn.className = 'btn btn-ghost btn-sm';
+      newBtn.style.color = 'var(--muted)';
+      newBtn.setAttribute('onclick', `event.stopPropagation();toggleBNPending('${slotTime}')`);
+      newBtn.textContent = '✕ Deselect';
+    } else {
+      newBtn.className = 'btn btn-sm';
+      newBtn.style.background = 'var(--day-lt)';
+      newBtn.style.color = 'var(--day)';
+      newBtn.style.fontWeight = '600';
+      newBtn.setAttribute('onclick', `event.stopPropagation();toggleBNPending('${slotTime}')`);
+      newBtn.textContent = '+ My Break';
+    }
+    btn.replaceWith(newBtn);
+    break;
+  }
+}
+
+function updateBNSubmitBar(){
+  const bar = document.getElementById('bnSubmitBar');
+  const lbl = document.getElementById('bnSubmitBarLabel');
+  if(!bar) return;
+  const n = BNS.pendingBreaks.size;
+  if(n === 0){
+    bar.style.display = 'none';
+  } else {
+    bar.style.display = 'flex';
+    const times = [...BNS.pendingBreaks]
+      .sort((a,b) => sortKey(a, BNS.shift) - sortKey(b, BNS.shift))
+      .map(fmt12).join(', ');
+    lbl.textContent = `${n} break${n!==1?'s':''} staged: ${times}`;
+  }
+}
+
+async function submitBNBreaks(){
+  const slots = [...BNS.pendingBreaks].sort((a,b) => sortKey(a, BNS.shift) - sortKey(b, BNS.shift));
+  BNS.pendingBreaks.clear();
+  updateBNSubmitBar();
+  for(const slot of slots){
+    await claimBNBreak(slot);
+  }
 }
 
 async function claimBNBreak(slotTime){
@@ -4310,7 +5243,7 @@ async function claimBNBreak(slotTime){
 
     // Prompt at 6th slot
     if(uniqueTimes.size >= 5 && !uniqueTimes.has(slotTime)){
-      if(!confirm(`You've selected ${uniqueTimes.size} break slots (${uniqueTimes.size*15} min) this shift.\n\nAre you sure you want to add another?`)) return;
+      if(!await customConfirm(`You've selected ${uniqueTimes.size} break slots (${uniqueTimes.size*15} min) this shift. Add another?`,'Add Another','Cancel')) return;
     }
 
     const units = await getBNUnits(BNS.name, dt, shift);
@@ -4322,24 +5255,27 @@ async function claimBNBreak(slotTime){
     if(conflictingStaff.length){
       const lines = conflictingStaff.map(b => {
         const match = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-        return match ? `  • ${match[1]} — Ext. ${match[2]} (${b.Unit})` : `  • ${b.NurseName} (${b.Unit})`;
-      }).join('\n');
-      const ok = confirm(
-        `⚠️ ${fmt12(slotTime)} has staff already booked:\n\n${lines}\n\n` +
-        `Confirm to cancel their break slot — please let them know!`
+        return match ? `${match[1]} (${match[2]}) on ${b.Unit}` : `${b.NurseName} on ${b.Unit}`;
+      }).join(', ');
+      const ok = await customConfirm(
+        `⚠️ ${fmt12(slotTime)} is booked by ${lines}`,
+        'Mark my break & cancel theirs',
+        'Keep their break'
       );
       if(!ok) return;
-      // Cancel the conflicting staff bookings
+      // Cancel the conflicting staff bookings and store them for potential restoration
       for(const b of conflictingStaff){
         await spDel(LISTS.bookings, b.Id);
       }
+      const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
+      const cancelData = conflictingStaff.map(b => ({
+        NurseName: b.NurseName, Unit: b.Unit,
+        SlotTime: b.SlotTime, SlotDate: b.SlotDate, ShiftType: b.ShiftType
+      }));
+      setState(cancelKey, cancelData).catch(()=>{}); // cross-device via BNState
     }
 
-    const allSlots = generateSlots(shift);
-    const dateSeed = dt.split('-').reduce((a,b)=>a+parseInt(b),0) + BNS.name.charCodeAt(0);
-    const currentRot = calculateBlockRotation(units, uniqueTimes, allSlots, dateSeed);
-
-    // Save BN break per unit
+    // Save BN break per unit — no rotation recalc (Option B: break just hides the slot)
     for(const unit of units){
       await spPost(LISTS.bookings, {
         Title: `BN-${BNS.name}-${unit}-${dt}-${slotTime}`,
@@ -4347,9 +5283,6 @@ async function claimBNBreak(slotTime){
         SlotDate: dt, ShiftType: shift, IsBNBreak: 1
       });
     }
-
-    // Keep existing rotation unchanged — just block the break slot
-    saveRotation(BNS.name, dt, shift, currentRot);
     toast(`🔒 ${fmt12(slotTime)} blocked`);
     loadBNSlots();
   } catch(e) { toast(e.message, true); }
@@ -4368,29 +5301,49 @@ async function cancelBNBreak(slotTime){
       !b.IsBNBreak && !isPending(b)
     );
     if(actioned.length > 0){
-      const names = actioned.map(b => `${b.NurseName} on ${b.Unit}`).join(', ');
-      if(!confirm(`This break has already been actioned for ${names}. Cancelling will remove it from records. Proceed?`)) return;
+      const names = actioned.map(b => {
+        const status = isConfirmed(b) ? 'confirmed' : 'marked not taken';
+        return `${formatNurseUnit(b.NurseName, b.Unit)} (${status})`;
+      }).join(', ');
+      if(!await customConfirm(`${names}. Removing will delete this record.`,'Remove anyway','Cancel')) return;
     }
 
     for(const b of breaks) await spDel(LISTS.bookings, b.Id);
 
-    // Recompute rotation without this break
-    const remaining = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
-    const newBreakSlots = new Set(remaining.map(b => b.SlotTime));
-    const units = await getBNUnits(BNS.name, dt, shift);
-    const allSlots = generateSlots(shift);
-    const dateSeed = dt.split('-').reduce((a,b)=>a+parseInt(b),0) + BNS.name.charCodeAt(0);
-    const newRot = calculateBlockRotation(units, newBreakSlots, allSlots, dateSeed);
-    saveRotation(BNS.name, dt, shift, newRot);
+    // Check if any staff nurses had their booking cancelled when this break was marked
+    const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
+    let cancelled = [];
+    try { cancelled = (await getState(cancelKey)) || []; } catch{}
+    deleteState(cancelKey).catch(()=>{});
 
-    toast(`${fmt12(slotTime)} removed — rotation updated`);
+    if(cancelled.length){
+      // Single nurse per slot — fold restore decision into one confirmation
+      const b = cancelled[0];
+      const m = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
+      const restore = await customConfirm(
+        `Remove your ${fmt12(slotTime)} break? ${formatNurseUnit(b.NurseName, b.Unit)} was bumped.`,
+        `Remove & restore ${nurseName}'s break`,
+        'Remove & leave open'
+      );
+      if(restore){
+        await spPost(LISTS.bookings, {
+          Title: `${b.Unit}-${b.SlotDate}-${b.SlotTime}`,
+          NurseName: b.NurseName, Unit: b.Unit, SlotTime: b.SlotTime,
+          SlotDate: b.SlotDate, ShiftType: b.ShiftType
+        });
+        toast(`${fmt12(slotTime)} removed — ${nurseName}'s break restored`);
+      } else {
+        toast(`${fmt12(slotTime)} removed — slot is now open`);
+      }
+    } else {
+      toast(`${fmt12(slotTime)} removed`);
+    }
     loadBNSlots();
   } catch(e) { toast(e.message, true); }
 }
 
 async function clearBNBreaks(){
-  if(!confirm('Remove all your break slots for this shift?')) return;
+  if(!await customConfirm('Remove all your break slots for this shift?','Remove All','Cancel')) return;
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const breaks = await spGet(LISTS.bookings,
@@ -4403,20 +5356,39 @@ async function clearBNBreaks(){
       !b.IsBNBreak && slotTimes.includes(b.SlotTime) && !isPending(b)
     );
     if(actioned.length > 0){
-      const names = [...new Set(actioned.map(b => b.NurseName))].join(', ');
-      if(!confirm(`${actioned.length} break${actioned.length!==1?'s have':' has'} already been actioned for ${names}. Clearing will remove them from records. Proceed?`)) return;
+      const actionLines = actioned.map(b => {
+        const status = isConfirmed(b) ? 'confirmed' : 'not taken';
+        return `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)} — ${status}`;
+      }).join('\n');
+      if(!await customConfirm(actionLines,'Clear anyway','Cancel')) return;
     }
 
     for(const b of breaks) await spDel(LISTS.bookings, b.Id);
 
-    // Reset rotation with no breaks
-    const units = await getBNUnits(BNS.name, dt, shift);
-    const allSlots = generateSlots(shift);
-    const dateSeed = dt.split('-').reduce((a,b)=>a+parseInt(b),0) + BNS.name.charCodeAt(0);
-    const rotation = calculateBlockRotation(units, new Set(), allSlots, dateSeed, shift);
-    saveRotation(BNS.name, dt, shift, rotation);
+    // Collect all stored cancelled bookings across all cleared slots
+    const slotTimes2 = [...new Set(breaks.map(b => b.SlotTime))];
+    let allCancelled = [];
+    for(const st of slotTimes2){
+      const key = `bnBreakCancelled_${dt}_${st}`;
+      try { const d = await getState(key); if(d) allCancelled = allCancelled.concat(d); } catch{}
+      deleteState(key).catch(()=>{});
+    }
 
-    toast('All break slots cleared — rotation reset');
+    if(allCancelled.length){
+      const toRestore = await showRestoreModal(allCancelled);
+      for(const b of toRestore){
+        await spPost(LISTS.bookings, {
+          Title: `${b.Unit}-${b.SlotDate}-${b.SlotTime}`,
+          NurseName: b.NurseName, Unit: b.Unit, SlotTime: b.SlotTime,
+          SlotDate: b.SlotDate, ShiftType: b.ShiftType
+        });
+      }
+      toast(toRestore.length
+        ? `All breaks cleared — ${toRestore.length} booking${toRestore.length!==1?'s':''} restored`
+        : 'All break slots cleared — slots are now open');
+    } else {
+      toast('All break slots cleared');
+    }
     loadBNSlots();
   } catch(e) { toast(e.message, true); }
 }
@@ -4438,8 +5410,9 @@ async function loadBNConfirm(){
       `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
 
+    // Only show units from active records — inactive BN shouldn't see bookings
     const units = [];
-    scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
+    scheds.filter(s => s.Status !== 'inactive').forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
 
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
@@ -4470,7 +5443,8 @@ async function loadBNConfirm(){
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else {
         statusHtml = `<button class="btn btn-success btn-sm" onclick="setBreakStatus(${b.Id},'confirmed')" style="margin-right:4px">✓ Confirm</button>
-          <button class="btn btn-ghost btn-sm" onclick="setBreakStatus(${b.Id},'not_taken')">✗ Not Taken</button>`;
+          <button class="btn btn-ghost btn-sm" onclick="setBreakStatus(${b.Id},'not_taken')" style="margin-right:4px">✗ Not Taken</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`;
       }
 
       return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px">
@@ -4488,6 +5462,22 @@ async function loadBNConfirm(){
   loader.style.display = 'none';
 }
 
+async function cancelStaffBooking(id, nurseName, slotTime){
+  const confirmed = await customConfirm(
+    `Cancel ${formatNurse(nurseName)}'s break at ${fmt12(slotTime)}? The slot will reopen for others to claim.`,
+    'Cancel their break',
+    'Keep it'
+  );
+  if(!confirmed) return;
+  try {
+    await spDel(LISTS.bookings, id);
+    toast(`${formatNurse(nurseName)}'s ${fmt12(slotTime)} break cancelled — slot is now open`);
+    loadSummary();
+    loadBNConfirm();
+    if(S.unit) loadSlots(true);
+  } catch(e){ toast(e.message, true); }
+}
+
 async function setBreakStatus(id, status){
   try {
     await spPatch(LISTS.bookings, id, { BreakStatus: status, IsCompleted: status === 'confirmed' ? 1 : 0 });
@@ -4502,36 +5492,100 @@ async function undoBreakStatus(id){
   } catch(e) { toast(e.message, true); }
 }
 
+async function populateManualSlots(){
+  const unit = document.getElementById('manualUnit').value;
+  const sel  = document.getElementById('manualSlotTime');
+  sel.innerHTML = '<option value="">— loading... —</option>';
+  if(!unit){ sel.innerHTML = '<option value="">— select unit first —</option>'; return; }
+
+  const dt    = BNS.date || today();
+  const shift = BNS.shift;
+  try {
+    // All slots for this shift — no future filter since BN may enter breaks after the fact
+    const allSlots = generateSlots(shift).filter(s => getSlotTier(s, shift) !== 'hardBlocked');
+
+    // Get existing bookings on this unit to exclude already-claimed ones
+    const bookings = await spGet(LISTS.bookings,
+      `Unit eq '${esc(unit)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
+    const claimed = new Set(bookings.filter(b => !b.IsBNBreak).map(b => b.SlotTime));
+
+    // Get BN's own break slots to show (blocked for staff but valid for manual entry)
+    const bnBreaks = new Set(bookings.filter(b => b.IsBNBreak).map(b => b.SlotTime));
+
+    const available = allSlots.filter(s => !claimed.has(s));
+    if(!available.length){
+      sel.innerHTML = '<option value="">No available slots</option>';
+      return;
+    }
+    sel.innerHTML = '<option value="">— select time —</option>' +
+      available.map(s => {
+        const label = bnBreaks.has(s) ? `${fmt12(s)} (BN break — manual only)` : fmt12(s);
+        return `<option value="${s}">${label}</option>`;
+      }).join('');
+  } catch(e) {
+    sel.innerHTML = '<option value="">Error loading slots</option>';
+  }
+}
+
 function toggleManualBreakForm(){
   const form = document.getElementById('bnManualForm');
   if(!form) return;
   const open = form.style.display !== 'none';
   form.style.display = open ? 'none' : 'grid';
   document.getElementById('bnManualAddBtn').textContent = open ? '+ Add Manual Break' : '✕ Cancel';
+  if(!open){
+    // Reset slot dropdown when opening
+    document.getElementById('manualUnit').value = '';
+    document.getElementById('manualSlotTime').innerHTML = '<option value="">— select unit first —</option>';
+    document.getElementById('manualNurseName').value = '';
+    document.getElementById('manualNurseExt').value = '';
+  }
 }
 
 async function saveManualBreak(){
-  const slotTime = document.getElementById('manualSlotTime').value.replace(':','');
+  const slotTime = document.getElementById('manualSlotTime').value;
   const unit     = document.getElementById('manualUnit').value;
   const name     = document.getElementById('manualNurseName').value.trim();
   const ext      = document.getElementById('manualNurseExt').value.trim();
 
-  if(!slotTime){ toast('Please enter a time', true); return; }
-  if(!unit)    { toast('Please select a unit', true); return; }
-  if(!name)    { toast('Please enter a nurse name', true); return; }
+  if(!unit)     { toast('Please select a unit', true); return; }
+  if(!slotTime) { toast('Please select a time slot', true); return; }
+  if(!name)     { toast('Please enter a nurse name', true); return; }
   if(!/^\d{5}$/.test(ext)){ toast('Please enter a 5-digit extension', true); return; }
 
   const nurseName = `${name} (${ext})`;
   const dt = BNS.date || today(), shift = BNS.shift;
 
   try {
+    // Block if this nurse already has a manual break at the same time on any unit
+    const existingAtTime = await spGet(LISTS.bookings,
+      `NurseName eq '${esc(nurseName)}' and SlotDate eq '${dt}' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
+    if(existingAtTime.filter(b => !b.IsBNBreak).length){
+      toast(`${nurseName} already has a break at ${fmt12(slotTime)} — a nurse can only be in one place at a time.`, true);
+      return;
+    }
+
     await spPost(LISTS.bookings, {
       Title: `MANUAL-${unit}-${dt}-${slotTime}`,
       NurseName: nurseName, Unit: unit, SlotTime: slotTime,
       SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
     });
+
+    // Clear fields
+    document.getElementById('manualSlotTime').innerHTML = '<option value="">— select unit first —</option>';
+    document.getElementById('manualUnit').value = '';
+    document.getElementById('manualNurseName').value = '';
+    document.getElementById('manualNurseExt').value = '';
+
     toast(`✓ Manual break saved for ${nurseName} at ${fmt12(slotTime)} on ${unit}`);
-    toggleManualBreakForm();
+    // Close form and refresh list
+    const form = document.getElementById('bnManualForm');
+    if(form) form.style.display = 'none';
+    const btn = document.getElementById('bnManualAddBtn');
+    if(btn) btn.textContent = '+ Add Manual Break';
+    // Ensure confirm wrap is visible and reload
+    const wrap = document.getElementById('bnConfirmWrap');
+    if(wrap) wrap.style.display = 'block';
     loadBNConfirm();
   } catch(e){ toast(e.message, true); }
 }
@@ -5462,9 +6516,21 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
 
 // ─── Imported names roster (replaces SharePoint BNRoster) ───// ─── Imported names roster (replaces SharePoint BNRoster) ───
 let importedNames = JSON.parse(localStorage.getItem('bnImportedNames') || '[]');
+// Async refresh from backend on load
+(async () => {
+  try {
+    const remote = await getState('bnImportedNames');
+    if(remote && Array.isArray(remote)){
+      importedNames = remote;
+      localStorage.setItem('bnImportedNames', JSON.stringify(remote));
+      populateBNDropdown();
+      renderImportedNamesList();
+    }
+  } catch(e){ /* use localStorage cache */ }
+})();
 
 function saveImportedNames(){
-  localStorage.setItem('bnImportedNames', JSON.stringify(importedNames));
+  localStorage.setItem('bnImportedNames', JSON.stringify(importedNames)); setState('bnImportedNames', importedNames).catch(()=>{});
 }
 
 function populateNurseDropdown(){
@@ -5610,6 +6676,15 @@ function syncNurseInput(val){
 function toggleBNList(){
   const body = document.getElementById('bnListBody');
   const chevron = document.getElementById('bnListChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chevron) chevron.textContent = open ? '▼' : '▲';
+}
+
+function toggleImportedEntries(){
+  const body = document.getElementById('importedEntriesBody');
+  const chevron = document.getElementById('importedEntriesChevron');
   if(!body) return;
   const open = body.style.display !== 'none';
   body.style.display = open ? 'none' : 'block';
