@@ -1493,7 +1493,7 @@ function generateSlots(shift){
 // These are never shown to staff regardless of rotation.
 // 0755 is only blocked on weekdays (huddle Mon-Fri); unblocked on weekends
 const HARD_BLOCKED_SLOTS = {
-  Noc: ['0635', '0655'], // shift change (0630) — 0755 added dynamically on weekdays
+  Noc: ['0635', '0655', '1835', '1855'], // shift change slots — 0755 added dynamically on weekdays
   Day: ['0635', '0655', '1835', '1855']  // shift change (0630) + shift change (1830)
 };
 
@@ -1531,6 +1531,53 @@ function getDayOverlapMax(){
   const isWeekday = dow >= 1 && dow <= 5;
   return isWeekday ? 8*60+0 : 8*60+15; // 0800 weekdays, 0815 weekends (0815 itself is blocked)
 }
+
+// ── Central overlap helpers ─────────────────────────────────────────────
+// Single source of truth for overlap window logic.
+// "Overlap" = the window where the outgoing BN covers the incoming shift's staff.
+//   Morning overlap (6:30–overlapMax AM): Noc BN covers incoming Day staff.
+//   Evening overlap (6:30–8:00 PM):       Day BN covers incoming Noc staff.
+
+function getOverlapRange(viewingShift){
+  // Returns the overlap window relevant to the viewing shift's staff.
+  // Day staff see morning overlap (Noc BN coverage).
+  // Noc staff see evening overlap (Day BN coverage).
+  return viewingShift === 'Day'
+    ? { min: 6*60+30, max: getDayOverlapMax() }   // 6:30–8:00 AM (or 8:15 weekends)
+    : { min: 18*60+30, max: 20*60 };              // 6:30–8:00 PM
+}
+
+function isOverlapSlot(slotTime, viewingShift){
+  // True if this slot is in the overlap window relevant to the viewing shift.
+  const m = toMin(String(slotTime).padStart(4,'0'));
+  const r = getOverlapRange(viewingShift);
+  return m >= r.min && m < r.max;
+}
+
+function overlapWindowActive(viewingShift){
+  // True if we are currently inside the relevant overlap window.
+  const m = nowMin();
+  const r = getOverlapRange(viewingShift);
+  return m >= r.min && m < r.max;
+}
+
+function staffWindowOpen(viewingShift){
+  // True if the sign-up window is currently open for this shift's staff.
+  const m = nowMin();
+  return viewingShift === 'Day'
+    ? m >= 6*60+30                             // Day: 6:30 AM onward
+    : (m >= 18*60+30 || m < 6*60+30);         // Noc: 6:30 PM → 6:30 AM
+}
+
+function getSlotOwnerShift(slotTime, viewingShift){
+  // Returns which BN shift is responsible for this slot from the viewer's perspective.
+  // Overlap slots belong to the opposite shift's BN.
+  // e.g. Day staff at 7:15 AM → Noc BN is responsible (morning overlap).
+  return isOverlapSlot(slotTime, viewingShift)
+    ? (viewingShift === 'Day' ? 'Noc' : 'Day')
+    : viewingShift;
+}
+
 
 const SLOT_TIERS = {
   Noc: {
@@ -2597,7 +2644,9 @@ async function loadSlots(silent=false){
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
     const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate eq '${oppDt}'`) : [];
     const scheds = allSchedsRaw.filter(s => s.ShiftDate === dt && s.ShiftType === shift);
-    const oppScheds = allSchedsRaw.filter(s => s.ShiftDate === oppDt && s.ShiftType === oppShift);
+    // For Noc staff, the relevant Day BN schedule is today (not the Noc shift start date yesterday)
+    const oppSchedDt = shift === 'Noc' ? today() : oppDt;
+    const oppScheds = allSchedsRaw.filter(s => s.ShiftDate === oppSchedDt && s.ShiftType === oppShift);
 
     const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
     // Combine BN breaks from both dates so overlap BN breaks are visible
@@ -2615,10 +2664,8 @@ async function loadSlots(silent=false){
     const _nowMBanner = nowMin();
     // Noc sign-up window: 6:30 PM → 6:30 AM. Closed during daytime (6:30 AM – 6:30 PM).
     // Day sign-up window: 6:30 AM → 6:30 PM. Closed after 6:30 PM.
-    const staffWindowClosed = (shift === 'Day' && _nowMBanner >= 18*60+30) ||
-                              (shift === 'Noc' && _nowMBanner >= 6*60+30 && _nowMBanner < 18*60+30);
-    const inRelevantOverlap = (shift === 'Day' && _nowMBanner >= 6*60+30 && _nowMBanner < getDayOverlapMax()) ||
-                              (shift === 'Noc' && _nowMBanner >= 18*60+30 && _nowMBanner < 20*60);
+    const staffWindowClosed = !staffWindowOpen(shift);
+    const inRelevantOverlap = overlapWindowActive(shift);
     const hasAnyCoverage = covering.length > 0 || (oppCoveringBanner.length > 0 && !staffWindowClosed && inRelevantOverlap);
 
     // ── Update coverage banner ──
@@ -2647,7 +2694,57 @@ async function loadSlots(silent=false){
           const fmtDate = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
           notes += `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming coverage: ${upcomingDates.map(fmtDate).join(', ')}</div>`;
         }
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${notes}`;
+        // Check if there's overlap coverage from the other shift's BN for this unit
+        const _oppUnitScheds = oppCoveringBanner.filter(s => {
+          try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
+        });
+        if(_oppUnitScheds.length > 0){
+          // Has overlap coverage — find the last overlap slot for this unit
+          const _limRange = getOverlapRange(shift);
+          const _limOppBN = _oppUnitScheds[0].BreakNurseName;
+          const _limRot = loadRotation(_limOppBN, oppSchedDt, oppShift);
+          const _limSlots = generateSlots(oppShift).filter(s =>
+            isOverlapSlot(s, shift) && getSlotTier(s, oppShift) !== 'hardBlocked'
+          );
+          let _limLast = _limSlots.length ? _limSlots[_limSlots.length - 1] : null;
+          if(_limRot){
+            const _limBNBreaks = new Set([...allBookingsRaw,...oppBookingsRaw]
+              .filter(b => b.IsBNBreak && b.NurseName===_limOppBN)
+              .map(b => String(b.SlotTime).padStart(4,'0')));
+            const _unitLimSlots = _limSlots.filter(s => _limRot[s]===S.unit && !_limBNBreaks.has(s));
+            if(_unitLimSlots.length) _limLast = _unitLimSlots[_unitLimSlots.length-1];
+            else _limLast = null;
+          }
+          // Determine if the overlap has already passed
+          // For evening overlap (PM slots): only "past" if we're currently in the evening
+          // AND past the slot time. During daytime (6:30 AM–6:30 PM), tonight's PM slots
+          // have NOT passed yet — staffWindowClosed=true means we're in daytime.
+          const _limMin = _limLast ? toMin(_limLast) : 0;
+          const _nowW = nowMin();
+          const _limPassed = _limLast ? (
+            !staffWindowClosed && (
+              (_limMin >= 12*60 && _nowW >= 12*60 && _nowW > _limMin) ||
+              (_limMin < 12*60  && _nowW < 12*60  && _nowW > _limMin)
+            )
+          ) : true;
+          const _limTime = _limLast ? fmt12(_limLast) : null;
+          if(_limPassed){
+            // Overlap window has passed — red expired
+            banner.style.background = 'var(--red-lt)';
+            banner.style.borderColor = 'var(--red)';
+            banner.style.color = 'var(--red)';
+            banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime ? `had Break Relief until ${_limTime}` : 'has no Break Relief'}${notes}`;
+          } else {
+            // Overlap window upcoming or active — amber "limited"
+            banner.style.background = '#fff8e6';
+            banner.style.borderColor = '#e6a817';
+            banner.style.color = '#7a5200';
+            const _limMsg = _limTime ? `has limited Break Relief until ${_limTime}` : 'has limited Break Relief';
+            banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limMsg}${notes}`;
+          }
+        } else {
+          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${notes}`;
+        }
       } else if(covering.length > 0 && !staffWindowClosed){
         // Full main-shift coverage — green
         setNameCardEnabled(true);
@@ -2661,19 +2758,16 @@ async function loadSlots(silent=false){
         // Overlap-only coverage — amber, show last available slot time
         setNameCardEnabled(true); // will be overridden below if last slot passed
         // Last slot in the overlap rotation for this unit — claimed or not, unit is covered until then
-        const _overlapRange = shift === 'Day'
-          ? { min: 6*60+30, max: getDayOverlapMax() }
-          : { min: 18*60+30, max: 20*60+0 };
-        const _overlapSlots = generateSlots(oppShift).filter(s => {
-          const m = toMin(s);
-          return m >= _overlapRange.min && m < _overlapRange.max && getSlotTier(s, oppShift) !== 'hardBlocked';
-        });
+        const _overlapRange = getOverlapRange(shift);
+        const _overlapSlots = generateSlots(oppShift).filter(s =>
+          isOverlapSlot(s, shift) && getSlotTier(s, oppShift) !== 'hardBlocked'
+        );
         // Find the last overlap slot actually assigned to THIS unit in the opp BN's rotation
         // Tinsley may cover 10N at 7:35 PM and 10S at 7:55 PM — they should show different times
         let _lastSlot = _overlapSlots.length ? _overlapSlots[_overlapSlots.length - 1] : null;
         const _oppBNName = oppCoveringBanner.length ? oppCoveringBanner[0].BreakNurseName : null;
         if(_oppBNName){
-          const _oppRot = loadRotation(_oppBNName, oppDt, oppShift);
+          const _oppRot = loadRotation(_oppBNName, oppSchedDt, oppShift);
           if(_oppRot){
             // Get overlap slots assigned to this unit, excluding BN's own break slots
             const _bnBreakTimes = new Set(
@@ -2796,7 +2890,7 @@ async function loadSlots(silent=false){
     // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load
     await Promise.all([
       ...covering.map(sched => warmRotationCache(sched.BreakNurseName, dt, shift).catch(()=>{})),
-      ...oppCovering.map(sched => warmRotationCache(sched.BreakNurseName, oppDt, oppShift).catch(()=>{}))
+      ...oppCovering.map(sched => warmRotationCache(sched.BreakNurseName, oppSchedDt, oppShift).catch(()=>{}))
     ]);
     warm3CStatus(dt, shift).catch(()=>{});
 
@@ -2814,9 +2908,7 @@ async function loadSlots(silent=false){
     }
 
     // Overlap: Day staff can use Noc BN slots 0635–0755; Noc staff can use Day BN slots 1835–1955
-    const overlapRange = shift === 'Day'
-      ? { min: 6*60+30, max: getDayOverlapMax() }
-      : { min: 18*60+30, max: 20*60+0 };
+    const overlapRange = getOverlapRange(shift);
 
     // Generate main shift slots + overlap slots from opposite shift
     // If no main BN assigned, skip main slots — only show overlap window
@@ -2826,7 +2918,7 @@ async function loadSlots(silent=false){
       const oppSlots = generateSlots(oppShift);
       overlapSlots = oppSlots.filter(s => {
         const m = toMin(s);
-        return m >= overlapRange.min && m < overlapRange.max;
+        return isOverlapSlot(s, shift);
       });
     }
 
@@ -2871,13 +2963,13 @@ async function loadSlots(silent=false){
       .map(c => formatBNName(c.BreakNurseName))
     )];
 
-    // Always include opp BN in meta when they have overlap slots for this unit
+    // Include opp BN in meta only while the overlap window is still active
     const nowM = nowKey(shift);
-    const inOverlapWindow = nowM >= overlapRange.min && nowM < overlapRange.max;
-    const oppBNNamesList = [...new Set(oppCovering
+    const inOverlapWindow = overlapWindowActive(shift);
+    const oppBNNamesList = inOverlapWindow ? [...new Set(oppCovering
       .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
       .map(c => formatBNName(c.BreakNurseName))
-    )];
+    )] : [];
 
     const allBNDisplay = [...new Set([...mainBNNames, ...oppBNNamesList])].join(', ') || bnNames;
     meta.textContent=`Break nurse for ${S.unit}: ${allBNDisplay}  ·  Slots are 15 min — claim up to 3 per shift`;
@@ -2896,10 +2988,7 @@ async function loadSlots(silent=false){
     // Shift is "active" once its sign-up window opens.
     // For the next (upcoming) shift, skip isPast — all slots are future,
     // and shiftWindowOpen already locks them until sign-up opens.
-    // shiftIsActive uses _nowMBanner (declared above)
-    const shiftIsActive = shift === 'Day'
-      ? _nowMBanner >= 6*60+30
-      : (_nowMBanner >= 18*60+30 || _nowMBanner < getDayOverlapMax());
+    const shiftIsActive = staffWindowOpen(shift);
 
     // Only apply rotation filter if there are future rotation slots for this unit.
     // If all rotation slots are already past, the BN has moved on — show remaining slots.
@@ -2918,14 +3007,10 @@ async function loadSlots(silent=false){
       // Overlap slots: only show the overlap that applies to THIS shift's staff
       // Noc staff see EVENING overlap (6:30-8:00 PM) — Day BN covers their arrival
       // Day staff see MORNING overlap (6:30-8:00 AM) — Noc BN covers their arrival
-      // Exclude the "wrong direction" overlap from each shift
-      const morningOverlap = slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
-      const eveningOverlap = slotMin >= 18*60+30 && slotMin < 20*60;
-      if(shift === 'Noc' && morningOverlap) return false; // morning slots are for Day staff only
-      if(shift === 'Day' && eveningOverlap) return false; // evening slots are for Noc staff only
-      const isOverlapSlot = (shift==='Noc' && eveningOverlap) ||
-                            (shift==='Day' && morningOverlap);
-      if(!isOverlapSlot && useRotation && !unitRotationSlots.has(s)) return false;
+      // Exclude wrong-direction overlap: Noc staff don't see morning overlap, Day don't see evening
+      const _isOverlap = isOverlapSlot(s, shift);
+      if(!_isOverlap && isOverlapSlot(s, shift === 'Day' ? 'Noc' : 'Day')) return false;
+      if(!_isOverlap && useRotation && !unitRotationSlots.has(s)) return false;
       if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
@@ -2963,10 +3048,15 @@ async function loadSlots(silent=false){
     const _slotBNMap = {};
     for(const sched of covering){
       const rot = loadRotation(sched.BreakNurseName, dt, shift);
-      if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
+      if(rot) Object.entries(rot).forEach(([s,u]) => {
+        if(u !== S.unit) return;
+        // Skip slots in the overlap window — those display the opp BN, not the main BN
+        if(isOverlapSlot(s, shift)) return;
+        _slotBNMap[s] = _getBNFirst(sched.BreakNurseName);
+      });
     }
     for(const sched of oppCovering){
-      const rot = loadRotation(sched.BreakNurseName, oppDt, oppShift);
+      const rot = loadRotation(sched.BreakNurseName, oppSchedDt, oppShift);
       if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
     }
 
@@ -2979,8 +3069,7 @@ async function loadSlots(silent=false){
 
       // Determine if this is an overlap slot (covered by opposite shift BN)
       const slotMin = toMin(slot);
-      const isOverlap = (shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax()) ||
-                        (shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0);
+      const isOverlap = isOverlapSlot(slot, shift);
 
       // BN break — slot is simply hidden from staff view
       if (bnBreaks.has(slot)) return;
@@ -2991,9 +3080,7 @@ async function loadSlots(silent=false){
         ? (nowM_ >= 6*60+30 || nowM_ < 6*60+30) // Day always accessible once selected
         : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax()); // Noc: active overnight or after 18:30
       // Window open = can claim. For next-shift preview, locked until shift start
-      const shiftWindowOpen = shift === 'Day'
-        ? nowM_ >= 6*60+30
-        : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax());
+      const shiftWindowOpen = staffWindowOpen(shift);
       const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
 
       const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
@@ -3143,9 +3230,7 @@ function renderSlotsFromCache(){
     : [];
   const mySameShift = myBookings.filter(b => b.ShiftType === shift);
   const canClaimMore = mySameShift.length < MAX_SLOTS;
-  const shiftWindowOpen = shift === 'Day'
-    ? nowMin() >= 6*60+30
-    : (nowMin() >= 18*60+30 || nowMin() < getDayOverlapMax());
+  const shiftWindowOpen = staffWindowOpen(shift);
   const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
   const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
   let html = '';
@@ -3532,9 +3617,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     slotShift = slotShiftOverride;
   } else {
     const slotMin = toMin(slotTime);
-    const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
-    const isOverlapNoc = S.shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0;
-    slotShift = (isOverlapDay || isOverlapNoc) ? (S.shift==='Day'?'Noc':'Day') : S.shift;
+    slotShift = getSlotOwnerShift(slotTime, S.shift);
   }
 
   try{
