@@ -5091,7 +5091,6 @@ async function testSharePointConnectivity(){
 }
 
 async function dedupAssignments(){
-  const dt = document.getElementById('viewDate').value || today();
   try {
     const all = await spGet(LISTS.schedule, `ShiftDate ge '2020-01-01'`);
     // Group by nurse+date+shift
