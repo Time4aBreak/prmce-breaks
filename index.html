@@ -2666,7 +2666,12 @@ async function loadSlots(silent=false){
     // Day sign-up window: 6:30 AM → 6:30 PM. Closed after 6:30 PM.
     const staffWindowClosed = !staffWindowOpen(shift);
     const inRelevantOverlap = overlapWindowActive(shift);
-    const hasAnyCoverage = covering.length > 0 || (oppCoveringBanner.length > 0 && !staffWindowClosed && inRelevantOverlap);
+    // hasAnyCoverage: true if main BN covers this shift OR if there's overlap coverage scheduled
+    // oppCovering counts toward coverage even before window opens (shows limited/amber, not no coverage)
+    const _hasOppCoverage = oppCoveringBanner.some(s => {
+      try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
+    });
+    const hasAnyCoverage = covering.length > 0 || _hasOppCoverage;
 
     // ── Update coverage banner ──
     const banner = document.getElementById('coverageBanner');
