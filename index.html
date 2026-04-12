@@ -991,8 +991,11 @@ function expandCPair(units, date, shift){
     if(u === 'C_PAIR'){
       if(is3COpen(date, shift)) expanded.push('3C');
       expanded.push('4C');
-    } else if(u !== '3C' && u !== '4C'){
-      expanded.push(u);
+    } else if(u === '3C'){
+      // Explicit 3C — still respect open/closed status
+      if(is3COpen(date, shift)) expanded.push('3C');
+    } else if(u === '4C'){
+      expanded.push('4C');
     } else {
       expanded.push(u);
     }
@@ -2847,7 +2850,7 @@ async function loadSlots(silent=false){
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable${_upcomingNote2}`;
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable · opens ${shift === 'Day' ? '6:30 AM' : '6:30 PM'}${_upcomingNote2}`;
       }
     }
 
@@ -3261,27 +3264,6 @@ function renderSlotsFromCache(){
   });
   list.innerHTML = html;
   list.dataset.lastHtml = html;
-
-  // Populate render cache so togglePending can re-render instantly
-  const _allOtherBookings = [...dayBookingsRaw, ...(nocDt !== dt ? nocBookingsRaw : [])];
-  const _otherFuture = allSlots.map(s => s.time);
-  const _otherBMap = {};
-  _allOtherBookings.forEach(b => {
-    if(!b.IsBNBreak && b.Unit === S.unit) _otherBMap[String(b.SlotTime).padStart(4,'0')] = b;
-  });
-  const _otherBNBreaks = new Set(
-    _allOtherBookings.filter(b => b.IsBNBreak).map(b => String(b.SlotTime).padStart(4,'0'))
-  );
-  _slotRenderCache = {
-    future: _otherFuture, bMap: _otherBMap, bnBreaks: _otherBNBreaks,
-    nurseName: (() => { const n=document.getElementById('nurseName')?.value.trim(), e=document.getElementById('nurseExt')?.value.trim(); return (n&&e)?`${n.charAt(0).toUpperCase()+n.slice(1)} (${e})`:''; })(),
-    nurseExt: document.getElementById('nurseExt')?.value.trim()||'',
-    covering: dayCovering, oppCovering: nocCovering, shift: 'Other',
-    overlapRange: { min: 0, max: 0 }
-  };
-  clearInterval(S.refreshTmr);
-  S.refreshTmr = setInterval(() => loadSlots(true), 10000);
-  loader.style.display = 'none';
 }
 
 function togglePending(slotTime, slotShift){
