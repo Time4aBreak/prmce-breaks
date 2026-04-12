@@ -1805,7 +1805,7 @@ function init(){
   document.getElementById('summDate').value=shiftDate(S.shift);
   document.getElementById('aDate').value=shiftDate(S.shift);
   setAShift(S.shift);
-  document.getElementById('viewDate').value=t;
+  const _vd = document.getElementById('viewDate'); if(_vd) _vd.value=t;
 
   // Summary default shift — auto-detect Day/Noc from current time
   S.summShift = detectShift();
