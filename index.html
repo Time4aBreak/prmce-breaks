@@ -6302,10 +6302,8 @@ async function saveImportRow(i){
       const splitNote = wings.length > 1 ? ` (split: ${wings.join(' & ')} Wing)` : '';
       toast(`✓ ${firstName(name)} saved for ${shift} on ${date}${splitNote}`);
     }
-    // Clear stale rotation cache so BN's My Shift regenerates with updated units
-    localStorage.removeItem(`bnRotation_${name}_${date}_${shift}`);
-    // Also clear from BNState so other devices get fresh data
-    setState(`bnRotation_${name}_${date}_${shift}`, null).catch(()=>{});
+    // Immediately regenerate rotation so staff see BN names on slots right away
+    recalculateRotation(name, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
     // If BN portal is open for this nurse on same device, reload their slot view
     if(BNS.name === name && BNS.date === date && BNS.shift === shift){
       loadBNSlots().catch(()=>{});
