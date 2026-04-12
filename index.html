@@ -2676,87 +2676,57 @@ async function loadSlots(silent=false){
     // ── Update coverage banner ──
     const banner = document.getElementById('coverageBanner');
     if(banner){
-      if(!hasAnyCoverage){
-        setNameCardEnabled(false);
-        banner.style.display = 'block';
-        banner.style.background = 'var(--red-lt)';
-        banner.style.borderColor = 'var(--red)';
-        banner.style.color = 'var(--red)';
-        // Find upcoming coverage for this unit+shift in the next 7 days
-        const upcomingDates = [];
-        for(let d = 1; d <= 7; d++){
-          const fd = new Date(dt + 'T12:00:00');
-          fd.setDate(fd.getDate() + d);
-          const fds = fd.toISOString().slice(0,10);
-          const hasCov = allSchedsRaw.some(s =>
-            s.ShiftDate === fds && s.ShiftType === shift && s.Status !== 'inactive' &&
-            (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
-          );
-          if(hasCov) upcomingDates.push(fds);
-        }
-        let notes = '';
-        if(upcomingDates.length){
-          const fmtDate = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
-          notes += `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming coverage: ${upcomingDates.map(fmtDate).join(', ')}</div>`;
-        }
-        // Check if there's overlap coverage from the other shift's BN for this unit
-        const _oppUnitScheds = oppCoveringBanner.filter(s => {
-          try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
-        });
-        if(_oppUnitScheds.length > 0){
-          // Has overlap coverage — find the last overlap slot for this unit
-          const _limRange = getOverlapRange(shift);
-          const _limOppBN = _oppUnitScheds[0].BreakNurseName;
-          const _limRot = loadRotation(_limOppBN, oppSchedDt, oppShift);
-          const _limSlots = generateSlots(oppShift).filter(s =>
-            isOverlapSlot(s, shift) && getSlotTier(s, oppShift) !== 'hardBlocked'
-          );
-          let _limLast = _limSlots.length ? _limSlots[_limSlots.length - 1] : null;
-          if(_limRot){
-            const _limBNBreaks = new Set([...allBookingsRaw,...oppBookingsRaw]
-              .filter(b => b.IsBNBreak && b.NurseName===_limOppBN)
-              .map(b => String(b.SlotTime).padStart(4,'0')));
-            const _unitLimSlots = _limSlots.filter(s => _limRot[s]===S.unit && !_limBNBreaks.has(s));
-            if(_unitLimSlots.length){
-              _limLast = _unitLimSlots[_unitLimSlots.length-1];
-            } else {
-              // Rotation doesn't assign this unit to overlap slots (e.g. cycle hasn't reached it)
-              // Fall back to last non-break overlap slot — BN is still responsible for this unit
-              const _nonBreakSlots = _limSlots.filter(s => !_limBNBreaks.has(s));
-              _limLast = _nonBreakSlots.length ? _nonBreakSlots[_nonBreakSlots.length-1] : null;
-            }
-          }
-          // Determine if the overlap has already passed
-          // For evening overlap (PM slots): only "past" if we're currently in the evening
-          // AND past the slot time. During daytime (6:30 AM–6:30 PM), tonight's PM slots
-          // have NOT passed yet — staffWindowClosed=true means we're in daytime.
-          const _limMin = _limLast ? toMin(_limLast) : 0;
-          const _nowW = nowMin();
-          const _limPassed = _limLast ? (
-            !staffWindowClosed && (
-              (_limMin >= 12*60 && _nowW >= 12*60 && _nowW > _limMin) ||
-              (_limMin < 12*60  && _nowW < 12*60  && _nowW > _limMin)
-            )
-          ) : true;
-          const _limTime = _limLast ? fmt12(_limLast) : null;
-          if(_limPassed){
-            // Overlap window has passed — red expired
-            banner.style.background = 'var(--red-lt)';
-            banner.style.borderColor = 'var(--red)';
-            banner.style.color = 'var(--red)';
-            banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime ? `had Break Relief until ${_limTime}` : 'has no Break Relief'}${notes}`;
+      // ── Shared: upcoming coverage dates note ──
+      const _upcomingDates = [];
+      for(let _d2 = 1; _d2 <= 7; _d2++){
+        const _fd2 = new Date(dt + 'T12:00:00'); _fd2.setDate(_fd2.getDate() + _d2);
+        const _fds2 = _fd2.toISOString().slice(0,10);
+        const _hasCov2 = allSchedsRaw.some(s =>
+          s.ShiftDate === _fds2 && s.ShiftType === shift && s.Status !== 'inactive' &&
+          (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
+        );
+        if(_hasCov2) _upcomingDates.push(_fds2);
+      }
+      const _fmtDate2 = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
+      const _upcomingNote2 = _upcomingDates.length
+        ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${shift} coverage: ${_upcomingDates.map(_fmtDate2).join(', ')}</div>`
+        : '';
+
+      // ── Shared: limited coverage calculation ──
+      const _oppUnitScheds = oppCoveringBanner.filter(s => {
+        try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
+      });
+      const _calcLimited = () => {
+        const _limOppBN = _oppUnitScheds[0].BreakNurseName;
+        const _limRot = loadRotation(_limOppBN, oppSchedDt, oppShift);
+        const _limSlots = generateSlots(oppShift).filter(s =>
+          isOverlapSlot(s, shift) && getSlotTier(s, oppShift) !== 'hardBlocked'
+        );
+        let _limLast = _limSlots.length ? _limSlots[_limSlots.length - 1] : null;
+        if(_limRot){
+          const _limBNBreaks = new Set([...allBookingsRaw,...oppBookingsRaw]
+            .filter(b => b.IsBNBreak && b.NurseName===_limOppBN)
+            .map(b => String(b.SlotTime).padStart(4,'0')));
+          const _unitLimSlots = _limSlots.filter(s => _limRot[s]===S.unit && !_limBNBreaks.has(s));
+          if(_unitLimSlots.length){
+            _limLast = _unitLimSlots[_unitLimSlots.length-1];
           } else {
-            // Overlap window upcoming or active — amber "limited"
-            banner.style.background = '#fff8e6';
-            banner.style.borderColor = '#e6a817';
-            banner.style.color = '#7a5200';
-            const _limMsg = _limTime ? `has limited Break Relief until ${_limTime}` : 'has limited Break Relief';
-            banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limMsg}${notes}`;
+            const _nonBreakSlots = _limSlots.filter(s => !_limBNBreaks.has(s));
+            _limLast = _nonBreakSlots.length ? _nonBreakSlots[_nonBreakSlots.length-1] : null;
           }
-        } else {
-          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${notes}`;
         }
-      } else if(covering.length > 0 && !staffWindowClosed){
+        const _limMin = _limLast ? toMin(_limLast) : 0;
+        const _nowW = nowMin();
+        const _limPassed = _limLast ? (
+          !staffWindowClosed && (
+            (_limMin >= 12*60 && _nowW >= 12*60 && _nowW > _limMin) ||
+            (_limMin < 12*60  && _nowW < 12*60  && _nowW > _limMin)
+          )
+        ) : true;
+        return { limLast: _limLast, limPassed: _limPassed };
+      };
+
+      if(covering.length > 0 && !staffWindowClosed){
         // Full main-shift coverage — green
         setNameCardEnabled(true);
         const plural = covering.length > 1 ? 'Break Nurses' : 'a Break Nurse';
@@ -2765,6 +2735,26 @@ async function loadSlots(silent=false){
         banner.style.borderColor = 'var(--teal)';
         banner.style.color = 'var(--teal-dk)';
         banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has ${plural}!`;
+
+            } else if(!covering.length && _oppUnitScheds.length > 0){
+        // No main shift BN but overlap coverage exists — limited/expired
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        const { limLast, limPassed } = _calcLimited();
+        const _limTime2 = limLast ? fmt12(limLast) : null;
+        if(limPassed){
+          banner.style.background = 'var(--red-lt)';
+          banner.style.borderColor = 'var(--red)';
+          banner.style.color = 'var(--red)';
+          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime2 ? `had Break Relief until ${_limTime2}` : 'has no Break Relief'}${_upcomingNote2}`;
+        } else {
+          setNameCardEnabled(true);
+          banner.style.background = '#fff8e6';
+          banner.style.borderColor = '#e6a817';
+          banner.style.color = '#7a5200';
+          const _limMsg2 = _limTime2 ? `has limited Break Relief until ${_limTime2}` : 'has limited Break Relief';
+          banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limMsg2}${_upcomingNote2}`;
+        }
       } else if(!staffWindowClosed && inRelevantOverlap && oppCoveringBanner.length > 0){
         // Overlap-only coverage — amber, show last available slot time
         setNameCardEnabled(true); // will be overridden below if last slot passed
@@ -2842,28 +2832,22 @@ async function loadSlots(silent=false){
           banner.style.color = '#7a5500';
           banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> only has Break Relief until ${_lastSlot ? fmt12(_lastSlot) : (shift==='Noc'?'8:00 PM':'8:00 AM')}${_upcoming}`;
         }
-      } else {
-        // Staff window closed for this shift — show upcoming coverage
+      } else if(!hasAnyCoverage){
+        // No coverage at all
         setNameCardEnabled(false);
         banner.style.display = 'block';
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        const _upcomingClosed = [];
-        for(let _d = 1; _d <= 7; _d++){
-          const _fd = new Date(dt + 'T12:00:00'); _fd.setDate(_fd.getDate() + _d);
-          const _fds = _fd.toISOString().slice(0,10);
-          const _hasCov = allSchedsRaw.some(s =>
-            s.ShiftDate === _fds && s.ShiftType === shift && s.Status !== 'inactive' &&
-            (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
-          );
-          if(_hasCov) _upcomingClosed.push(_fds);
-        }
-        const _fmtClosed = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
-        const _upcomingNote = _upcomingClosed.length
-          ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${shift} coverage: ${_upcomingClosed.map(_fmtClosed).join(', ')}</div>`
-          : '';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable${_upcomingNote}`;
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
+      } else {
+        // Window closed but coverage exists (main BN, window not open yet)
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--red-lt)';
+        banner.style.borderColor = 'var(--red)';
+        banner.style.color = 'var(--red)';
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable${_upcomingNote2}`;
       }
     }
 
