@@ -85,7 +85,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .slot-row{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:white;margin-bottom:7px;transition:all .15s}
 .slot-row.open:hover{border-color:var(--teal);box-shadow:0 2px 10px rgba(11,112,112,.1);transform:translateY(-1px)}
 .slot-row.mine{background:var(--teal-lt);border-color:var(--teal)}
-.slot-row.taken{background:var(--red-lt);border-color:#e8b0b0}
+.slot-row.taken{background:var(--red-lt);border-color:#e8b0b0}.slot-row.taken.past{background:var(--bg-alt);border-color:var(--border);opacity:.7}
 .slot-row.past{opacity:.38;pointer-events:none}
 .slot-row.locked{opacity:.5;cursor:not-allowed;background:#f8f8f8}
 .slot-row.bn-break{background:#fef9ec;border-color:#f0c040;cursor:not-allowed}
@@ -116,7 +116,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .range-btn.active{background:var(--teal);border-color:var(--teal);color:white}
 .slot-row.bn-break .slot-time{color:#b07800}
 .slot-time{font-family:'DM Mono',monospace;font-size:.95rem;font-weight:500;color:var(--teal-dk)}
-.slot-row.taken .slot-time{color:var(--red)}
+.slot-row.taken .slot-time{color:var(--red)}.slot-row.taken.past .slot-time{color:var(--muted)}
 .slot-name{font-size:.875rem;color:var(--muted)}
 .slot-name.filled{color:var(--text);font-weight:500}
 
@@ -156,7 +156,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 /* ── Toast ── */
 .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
-.toast.err{background:#1a1a2e;border-left:4px solid #c94040;padding-left:22px}
+.toast.err{background:#1a1a2e}
 
 /* ── PW gate ── */
 .pw-gate{max-width:360px;margin:40px auto;text-align:center;padding:32px 24px;background:white;border-radius:16px;border:1px solid var(--border)}
@@ -210,11 +210,33 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="unit-grid" id="unitGrid"></div>
   </div>
 
+
+  <div class="card" id="shiftCard" style="display:none">
+    <div class="card-label">Current Shift</div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
+      <button class="btn btn-sm shift-sel-btn" id="shiftBtnDay"  onclick="selectStaffShift('Day')"  style="display:inline-flex;align-items:center;gap:5px;font-weight:600">Day</button>
+      <button class="btn btn-sm shift-sel-btn" id="shiftBtnNoc"  onclick="selectStaffShift('Noc')"  style="display:inline-flex;align-items:center;gap:5px;font-weight:600">Noc</button>
+      <button class="btn btn-sm shift-sel-btn" id="shiftBtnOther" onclick="selectStaffShift('Other')" style="display:inline-flex;align-items:center;gap:5px;font-weight:600">Other</button>
+    </div>
+    <div id="shiftPillWrap" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div id="shiftPill"></div>
+    </div>
+    <div id="otherEndWrap" style="display:none;margin-top:10px">
+      <label style="font-size:.8rem;color:var(--muted);display:block;margin-bottom:4px">Round up to shift end hour</label>
+      <select id="otherEndTime" onchange="onOtherEndTimeChange()" style="width:100%;padding:7px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem">
+        <option value="">— select end time —</option>
+      </select>
+    </div>
+  </div>
+
   <!-- Coverage banner — shown when unit selected -->
   <div id="coverageBanner" style="display:none;margin:0 0 8px;padding:10px 16px;border-radius:10px;background:var(--day-lt);border:1.5px solid var(--day);font-size:.85rem;color:var(--day);font-weight:500;line-height:1.5"></div>
 
+  <!-- Window not open hint -->
+  <div id="windowHint" style="display:none"></div>
+
   <!-- Name & extension -->
-  <div class="card">
+  <div class="card" id="nameCard" style="display:none">
     <div class="card-label">Your Name &amp; Extension</div>
     <div class="row">
       <div class="field">
@@ -229,22 +251,15 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
       ⚠ Both first name and a 5-digit Spectra extension are required.
     </div>
+    <div id="nameWindowHint" style="display:none;font-size:.8rem;color:var(--day);font-weight:500;margin-top:6px"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
       <div style="font-size:.72rem;color:var(--muted)">
-        💡 The screen refreshes every 10 seconds to show the latest availability — your entered information is saved.
+        💡 Slots update every 10 seconds.
       </div>
       <button class="btn btn-ghost btn-sm" style="font-size:.72rem;white-space:nowrap;margin-left:8px" onclick="clearNameExt()">✕ Clear</button>
     </div>
     <!-- Booking status after name+ext+unit entered -->
     <div id="myBookingStatus" style="display:none;margin-top:10px;padding:8px 12px;border-radius:8px;background:var(--teal-lt);border:1px solid var(--teal);font-size:.82rem"></div>
-  </div>
-
-  <div class="card" id="shiftCard" style="display:none">
-    <div class="card-label">Current Shift</div>
-    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-      <div id="shiftPill"></div>
-      <button class="btn btn-ghost btn-sm" onclick="flipShift()">Switch shift</button>
-    </div>
   </div>
 
   <div id="slotsWrap" style="display:none">
@@ -279,7 +294,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <p>Enter your password to access the portal</p>
       <input type="password" id="portalPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockPortal()"/>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockPortal()">Unlock</button>
+      <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockPortal()">Unlock</button>
       <div id="portalPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
     </div>
   </div>
@@ -308,8 +323,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div class="field">
         <label>Shift</label>
         <div class="toggle-row">
-          <div class="toggle-opt active" id="sDay" onclick="setSummShift('Day')">☀️ Day</div>
-          <div class="toggle-opt"        id="sNoc" onclick="setSummShift('Noc')">🌙 Noc</div>
+          <div class="toggle-opt active" id="sDay" onclick="setSummShift('Day')"><span class="shift-icon-wrap" id="sDayIcon"></span> Day</div>
+          <div class="toggle-opt"        id="sNoc" onclick="setSummShift('Noc')"><span class="shift-icon-wrap" id="sNocIcon"></span> Noc</div>
         </div>
       </div>
     </div>
@@ -420,9 +435,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="bnConfirmWrap" style="display:none">
         <div class="card">
           <div class="bn-card-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div class="card-label" style="margin:0">✅ Confirm Staff Breaks</div>
+            <div class="card-label" style="margin:0">✅ Staff Breaks Taken</div>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-success btn-sm" onclick="confirmAllBreaks()">✓ Confirm All</button>
+              <button class="btn btn-success btn-sm" onclick="confirmAllBreaks()">✓ Taken All</button>
               <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
             </div>
           </div>
@@ -464,6 +479,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
       </div>
 
+
+
+
     </div>
 
     <div id="bnNoSched" style="display:none">
@@ -482,8 +500,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           Set your usual break times. This template will be auto-applied to all your upcoming shifts.
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
-          <button class="btn btn-ghost btn-sm" id="bnDefaultDayBtn" onclick="loadDefaultGrid('Day')">☀️ Day</button>
-          <button class="btn btn-ghost btn-sm" id="bnDefaultNocBtn" onclick="loadDefaultGrid('Noc')">🌙 Noc</button>
+          <button class="btn btn-ghost btn-sm" id="bnDefaultDayBtn" onclick="loadDefaultGrid('Day')"><span style="display:inline-flex;align-items:center;gap:3px" id="bnDayBtnLabel"><span id="bnDayIcon"></span> Day</span></button>
+          <button class="btn btn-ghost btn-sm" id="bnDefaultNocBtn" onclick="loadDefaultGrid('Noc')"><span style="display:inline-flex;align-items:center;gap:3px"><span id="bnNocIcon"></span> Noc</span></button>
         </div>
         <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
@@ -515,7 +533,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <p>Enter your admin or break nurse password to access Analytics</p>
       <input type="password" id="rptPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockReports()"/>
-      <button class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockReports()">Unlock</button>
+      <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockReports()">Unlock</button>
       <div id="rptPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
     </div>
   </div>
@@ -653,7 +671,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <h2>Schedule</h2>
       <p>Schedule coordinator portal</p>
       <input type="password" id="pwInput" placeholder="Password" onkeydown="if(event.key==='Enter')unlock()"/>
-      <button class="btn btn-primary" style="width:100%" onclick="unlock()">Unlock</button>
+      <button type="button" class="btn btn-primary" style="width:100%" onclick="unlock()">Unlock</button>
       <div id="pwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
     </div>
   </div>
@@ -693,7 +711,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer" onclick="toggleExtractedRows()">
           <div style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Extracted — Review &amp; Assign Units</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Selections</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();resuggestAll()" style="font-size:.72rem">↺ Re-suggest All</button>
+            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Assignments</button>
             <span id="extractedChevron" style="font-size:.85rem;color:var(--muted)">▲</span>
           </div>
         </div>
@@ -702,10 +721,12 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <span id="importRestoreMsg"></span>
             <button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button>
           </div>
+          <div id="acceptBarTop" style="margin-bottom:12px;display:none;justify-content:flex-end">
+            <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
+          </div>
           <div id="importRows"></div>
-          <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-            <div style="font-size:.75rem;color:var(--muted)">💡 Review assignments above then accept all or save individually.</div>
-            <button class="btn btn-success" onclick="acceptAllAndSave()" id="acceptAllBtn" style="font-size:.85rem;padding:8px 18px">✅ Accept All &amp; Save</button>
+          <div id="acceptBarBottom" style="margin-top:12px;display:none;justify-content:flex-end">
+            <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
           </div>
           <div id="acceptAllStatus" style="display:none;margin-top:8px;font-size:.8rem;color:var(--green);font-weight:600"></div>
         </div>
@@ -728,8 +749,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="field">
             <label>Shift</label>
             <div class="toggle-row">
-              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')">☀️ Day</div>
-              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')">🌙 Noc</div>
+              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
+              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
             </div>
           </div>
         </div>
@@ -783,12 +804,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     </div>
 
     <!-- Sim mode controls (only visible in simulation mode) -->
-    <div class="card" id="simControls" style="display:none;border-color:#e8a020;background:#fef9ec">
-      <div class="card-label" style="color:#b07800">🧪 Simulation Mode Controls</div>
-      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px;line-height:1.5">You are running in local simulation mode. Data is stored in your browser only. When ready to go live, set SIM_MODE = false in the code.</p>
+    <div class="card" id="simControls" style="border-color:var(--border)">
+      <div class="card-label">🗄 Data Management</div>
       <div style="display:flex;gap:8px;flex-wrap:wrap">
-        <button class="btn btn-ghost btn-sm" onclick="exportSimData()">📥 Export sim data</button>
-        <button class="btn btn-danger btn-sm" onclick="clearSimData()">🗑 Clear all sim data</button>
+        <button class="btn btn-danger btn-sm" onclick="clearSimData()">🗑 Clear all data</button>
       </div>
     </div>
 
@@ -808,32 +827,31 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
-    <!-- Change passwords -->
+    <!-- Change passwords — collapsible -->
     <div class="card">
-      <div class="card-label">Change Schedule Password</div>
-      <div class="row">
-        <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
-        <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
-        <button class="btn btn-ghost btn-sm" onclick="changePw()">Update</button>
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePwCard()">
+        <div class="card-label" style="margin:0">🔑 Change Passwords</div>
+        <span id="pwCardChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
       </div>
-      <div id="pwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
-    </div>
-
-    <div class="card">
-      <div class="card-label">Change Break Nurse Password</div>
-      <p style="font-size:.8rem;color:var(--muted);margin-bottom:10px">This password is for break nurses accessing the Breakers Portal.</p>
-      <div class="row">
-        <input type="password" id="bnpw1" placeholder="New password" style="flex:1"/>
-        <input type="password" id="bnpw2" placeholder="Confirm" style="flex:1"/>
-        <button class="btn btn-ghost btn-sm" onclick="changeBNPw()">Update</button>
+      <div id="pwCardBody" style="display:none;margin-top:14px">
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Schedule (Admin) Password</div>
+        <div class="row" style="margin-bottom:12px">
+          <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
+          <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="changePw()">Update</button>
+        </div>
+        <div id="pwMsg" style="font-size:.8rem;margin-bottom:14px;display:none"></div>
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Break Nurse Password</div>
+        <div class="row">
+          <input type="password" id="bnpw1" placeholder="New password" style="flex:1"/>
+          <input type="password" id="bnpw2" placeholder="Confirm" style="flex:1"/>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="changeBNPw()">Update</button>
+        </div>
+        <div id="bnpwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
       </div>
-      <div id="bnpwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
     </div>
 
     <!-- API Key — collapsible, closed by default, at bottom of admin -->
-    <div class="card" id="apiKeyCard" style="display:none">
-      <!-- API key is now stored in Apps Script server-side — no longer needed in browser -->
-    </div>
 
     <!-- Break Nurses (from imported schedule) — collapsible, bottom of admin -->
     <div class="card">
@@ -881,7 +899,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 <!-- Custom confirm modal -->
 <div id="customConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center">
   <div style="background:var(--card);border-radius:16px;padding:24px;max-width:500px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-    <div id="customConfirmMsg" style="font-size:.95rem;line-height:1.5;margin-bottom:20px;color:var(--text)"></div>
+    <div id="customConfirmMsg" style="font-size:.9rem;line-height:1.5;margin-bottom:16px;color:var(--text);max-height:55vh;overflow-y:auto"></div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-top:4px">
       <button id="customConfirmOk" class="btn btn-primary" style="width:100%"></button>
       <button id="customConfirmCancel" class="btn btn-ghost" style="width:100%"></button>
@@ -902,6 +920,26 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="restoreModalConfirm(false)">Leave all open</button>
       <button class="btn btn-primary" onclick="restoreModalConfirm(true)">Confirm</button>
+    </div>
+  </div>
+</div>
+
+<div id="manageSlotModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;padding:22px;max-width:460px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:4px" id="manageSlotTitle">Manage your break</div>
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:16px" id="manageSlotInfo"></div>
+    <div id="manageTransferSection" style="display:none;margin-bottom:16px;padding:14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg)">
+      <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="transferName" placeholder="First name" style="flex:1;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferExt" placeholder="Ext" maxlength="5" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+      </div>
+      <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary" id="manageTransferBtn" onclick="manageSlotAction('transfer')">Transfer to another nurse</button>
+      <button class="btn btn-danger" onclick="manageSlotAction('cancel')">Cancel and reopen slot</button>
+      <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
     </div>
   </div>
 </div>
@@ -997,14 +1035,14 @@ const S = {
   shift:           null,   // 'Day' | 'Noc'
   unit:            null,
   adminOk:         false,
-  pw:              localStorage.getItem('bnPw') || 'breaker',
   summShift:       'Day',
   summUnit:        'All',
   aShift:          'Day',
   aUnits:          [],
   editingAssignId: null,
   refreshTmr:      null,
-  pendingClaims:   new Set()  // slot times staged for submission
+  pendingClaims:   new Set(),  // slot times staged for submission
+  otherEndTime:    null
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1012,11 +1050,13 @@ const S = {
 // ═══════════════════════════════════════════════════════
 
 // ── Set to true to use local simulation instead ────────
-const SIM_MODE = true;
+const SIM_MODE = false;
+const DEV_MODE = true; // Auto-unlock portal as admin — set false for production
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
 const GAS_URL = 'https://script.google.com/macros/s/AKfycbwgqdIOwBVsdhJclYv8lT4tNSr2BToZI9xrV3Hk_DmFXFJlIiMICz_nWfEcgERhTT_XRg/exec';
+const REQUEST_TOKEN = 'prmce_xK9mN2vQ8rT5wY3j'; // Must match REQUEST_TOKEN in Script Properties
 // ─────────────────────────────────────────────────────
 
 // ── Simulated in-browser database ────────────────────
@@ -1107,8 +1147,22 @@ async function spPatch(list, id, data){
 
 // ── Google Sheets API functions — all GET to avoid CORS ──
 const API = { failCount: 0, bannerShown: false };
-const API_TIMEOUT_MS = 12000; // 12 second timeout per call
+const API_TIMEOUT_MS = 30000; // 30 second timeout (Apps Script cold start can take ~20s)
 const API_MAX_RETRIES = 2;
+
+// Fetch all upcoming schedules — no cache, always fresh
+// Uses the same ge filter proven to work in loadAssignments
+async function fetchAllSchedules(floorDate){
+  const floor = floorDate || shiftDate(detectShift());
+  return spGet(LISTS.schedule, `ShiftDate ge '${floor}'`);
+}
+function clearSchedCache(){ /* no-op — no cache to clear */ }
+
+async function getAllSchedules(){ return fetchAllSchedules(); }
+async function getSchedules(date, shift){
+  const all = await fetchAllSchedules(date);
+  return all.filter(s => s.ShiftDate === date && s.ShiftType === shift);
+}
 
 function showAPIError(msg){
   // Show a persistent banner if backend is unreachable
@@ -1152,7 +1206,7 @@ async function fetchWithTimeout(url, ms){
 
 async function gasCall(params, retries=API_MAX_RETRIES){
   if(SIM_MODE) throw new Error('gasCall called in SIM_MODE');
-  const url = GAS_URL + '?' + new URLSearchParams(params).toString();
+  const url = GAS_URL + '?' + new URLSearchParams({...params, token: REQUEST_TOKEN}).toString();
   let lastErr;
   for(let attempt = 0; attempt <= retries; attempt++){
     try {
@@ -1184,11 +1238,59 @@ async function _spPostReal(list, data){
     sheet: list,
     data: encodeURIComponent(JSON.stringify(data))
   });
+  if(d && d.error === 'SLOT_TAKEN'){
+    // Server-side race condition detected — another nurse saved first
+    throw new Error(`SLOT_TAKEN:${d.takenBy || 'another nurse'}`);
+  }
   return d.item;
 }
 
 async function _spDelReal(list, id){
   await gasCall({ action:'delete', sheet:list, id:String(id) });
+}
+
+// Batch upsert: send all records in one round trip
+// records: [{matchFields:{...}, data:{...}}] — matchFields used to find existing, data to write
+async function spBatchUpsert(list, records){
+  if(!records.length) return;
+  // Chunk records to stay within URL length limits (~8KB)
+  const CHUNK_SIZE = 5;
+  for(let i = 0; i < records.length; i += CHUNK_SIZE){
+    const chunk = records.slice(i, i + CHUNK_SIZE);
+    await gasCall({
+      action: 'batchUpsert',
+      sheet: list,
+      records: encodeURIComponent(JSON.stringify(chunk))
+    });
+  }
+}
+
+// Batch set state: write multiple BNState entries in one round trip
+async function spBatchSetState(entries){
+  if(!entries.length) return;
+  entries.forEach(({key, value}) => localStorage.setItem(key, JSON.stringify(value)));
+  try {
+    const CHUNK_SIZE = 5;
+    for(let i = 0; i < entries.length; i += CHUNK_SIZE){
+      const chunk = entries.slice(i, i + CHUNK_SIZE);
+      await gasCall({
+        action: 'batchSetState',
+        entries: encodeURIComponent(JSON.stringify(chunk))
+      });
+    }
+  } catch(e){
+    console.warn('batchSetState failed, localStorage cache used:', e.message);
+  }
+}
+
+// Batch get: fetch multiple queries in one round trip
+// queries: [{sheet, filter}] — returns array of item arrays
+async function spBatchGet(queries){
+  const d = await gasCall({
+    action: 'batchGet',
+    queries: encodeURIComponent(JSON.stringify(queries))
+  });
+  return (d.results || []).map(r => r.items || []);
 }
 
 async function _spPatchReal(list, id, data){
@@ -1201,6 +1303,7 @@ async function _spPatchReal(list, id, data){
 }
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
+function escHTML(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
 // ── BNState helpers — cross-device persistent storage ──
 // Falls back to localStorage in SIM_MODE automatically via spGet/spPost/spPatch
@@ -1260,6 +1363,7 @@ function localDate(d){
 
 // Returns the correct shift date — for Noc shift after midnight, the shift started yesterday
 function shiftDate(shift){
+  if(shift === 'Other') return today(); // Other shift always uses today
   const now = new Date();
   const h = now.getHours();
   // Noc BN shift runs 2000-0830. If it's before 08:30, shift started yesterday
@@ -1274,6 +1378,72 @@ function shiftDate(shift){
 function nowMin(){
   const n = new Date();
   return n.getHours()*60 + n.getMinutes();
+}
+
+// ── Shift icons ─────────────────────────────────────────
+function getMoonPhase(dateStr){
+  // Returns 0-7 (0=new, 4=full, etc.) based on lunar cycle
+  // dateStr optional — defaults to today
+  const known = new Date(2000, 0, 6, 18, 14, 0); // known new moon
+  const now = dateStr ? new Date(dateStr + 'T20:00:00') : new Date();
+  const diff = (now - known) / (1000 * 60 * 60 * 24);
+  const cycle = 29.530588853;
+  const phase = ((diff % cycle) + cycle) % cycle;
+  return Math.floor((phase / cycle) * 8) % 8;
+}
+
+function moonSVG(size=16, dateStr=null){
+  const phase = getMoonPhase(dateStr);
+  const r = size / 2;
+  const cx = r, cy = r;
+  const dark = '#1a2744', light = '#c8d8f0';
+  // Each phase: background circle + overlay path
+  const phases = [
+    // 0 New
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${dark}"/>`,
+    // 1 Waxing crescent
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${dark}"/><path d="M${cx} ${1} a${r-1} ${r-1} 0 0 1 0 ${(r-1)*2} c${r*0.7} -${r*0.5} ${r*0.7} -${r*1.5} 0 -${(r-1)*2}z" fill="${light}"/>`,
+    // 2 First quarter
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${dark}"/><path d="M${cx} ${1} v${(r-1)*2} a${r-1} ${r-1} 0 0 0 0 -${(r-1)*2}z" fill="${light}"/>`,
+    // 3 Waxing gibbous
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${light}"/><path d="M${cx} ${1} a${r-1} ${r-1} 0 0 0 0 ${(r-1)*2} c-${r*0.7} -${r*0.5} -${r*0.7} -${r*1.5} 0 -${(r-1)*2}z" fill="${dark}"/>`,
+    // 4 Full
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${light}"/>`,
+    // 5 Waning gibbous
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${light}"/><path d="M${cx} ${1} a${r-1} ${r-1} 0 0 1 0 ${(r-1)*2} c${r*0.7} -${r*0.5} ${r*0.7} -${r*1.5} 0 -${(r-1)*2}z" fill="${dark}"/>`,
+    // 6 Last quarter
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${dark}"/><path d="M${cx} ${1} v${(r-1)*2} a${r-1} ${r-1} 0 0 1 0 -${(r-1)*2}z" fill="${light}"/>`,
+    // 7 Waning crescent
+    `<circle cx="${cx}" cy="${cy}" r="${r-1}" fill="${dark}"/><path d="M${cx} ${1} a${r-1} ${r-1} 0 0 0 0 ${(r-1)*2} c${r*0.7} -${r*0.5} ${r*0.7} -${r*1.5} 0 -${(r-1)*2}z" fill="${light}"/>`,
+  ];
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle;flex-shrink:0">${phases[phase]}</svg>`;
+}
+
+function sunSVG(size=16){
+  const r = size/2, cx = r, cy = r, cr = r*0.38, sr = r*0.55;
+  let rays = '';
+  for(let i=0;i<8;i++){
+    const a = (i*45)*Math.PI/180;
+    const x1 = cx + Math.cos(a)*sr*0.72, y1 = cy + Math.sin(a)*sr*0.72;
+    const x2 = cx + Math.cos(a)*(r-1),   y2 = cy + Math.sin(a)*(r-1);
+    rays += `<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="#d4820a" stroke-width="1.4" stroke-linecap="round"/>`;
+  }
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle;flex-shrink:0">${rays}<circle cx="${cx}" cy="${cy}" r="${cr}" fill="#f0a500"/></svg>`;
+}
+
+function otherSVG(size=16){
+  const h = size/2, pad = 2;
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}" style="vertical-align:middle;flex-shrink:0">
+    <line x1="${pad}" y1="${h}" x2="${size-pad}" y2="${h}" stroke="#6a50e0" stroke-width="1.5" stroke-linecap="round"/>
+    <polyline points="${size-pad-4},${h-3} ${size-pad},${h} ${size-pad-4},${h+3}" stroke="#6a50e0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+    <polyline points="${pad+4},${h-3} ${pad},${h} ${pad+4},${h+3}" stroke="#6a50e0" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" fill="none"/>
+  </svg>`;
+}
+
+function shiftIcon(sh, size=16, dateStr=null){
+  if(sh === 'Day') return sunSVG(size);
+  if(sh === 'Other') return otherSVG(size);
+  return moonSVG(size, dateStr);
 }
 
 function detectShift(){
@@ -1293,8 +1463,10 @@ function fromMin(m){
 }
 
 function fmt12(hhmm){
-  const h = parseInt(hhmm.slice(0,2));
-  const m = hhmm.slice(2,4);
+  // Normalize to 4 digits first — old data may be stored as 3 chars e.g. "215"
+  const s = String(hhmm).padStart(4,'0');
+  const h = parseInt(s.slice(0,2));
+  const m = s.slice(2,4);
   return `${h%12||12}:${m} ${h<12?'AM':'PM'}`;
 }
 
@@ -1327,23 +1499,29 @@ const HARD_BLOCKED_SLOTS = {
 
 // Slots the BN themselves cannot take as a break (separate from staff hard-blocks)
 function getBNHardBlocked(shift){
+  // Returns slots to HIDE entirely from the BN's break slot list
+  // 0815 (Noc) and 2015 (Day) are hard-blocked for staff — remove from BN list too
+  // 0755 weekdays: Noc BN must be at huddle — blocked for BN breaks
+  // 0635, 0655 (Noc), 1835, 1855 (Day): hard-blocked for staff but BNs CAN use these
   const dow = new Date().getDay();
   const isWeekday = dow >= 1 && dow <= 5;
   if(shift === 'Noc'){
-    // 0815 always blocked (break ends at 0830 = clock-out, no buffer)
-    // 0755 blocked weekdays only (required at huddle 0800)
     return isWeekday ? ['0755', '0815'] : ['0815'];
   } else {
-    // Day shift: 2015 always blocked (break ends at 2030 = clock-out, no buffer)
     return ['2015'];
   }
+}
+
+function getDayHardBlocked(){
+  const dow = new Date().getDay();
+  const isWeekday = dow >= 1 && dow <= 5;
+  // 0755 blocked weekdays — break ends 0810, BN late for 0800 huddle
+  return isWeekday ? [...HARD_BLOCKED_SLOTS.Day, '0755'] : [...HARD_BLOCKED_SLOTS.Day];
 }
 
 function getNocHardBlocked(){
   const dow = new Date().getDay(); // 0=Sun, 6=Sat
   const isWeekday = dow >= 1 && dow <= 5;
-  // Weekdays: block 0755 (huddle) and everything from 0755 up
-  // Weekends: block 0815 (ends at 0830 = clock-out, no buffer) and everything from 0815 up
   return isWeekday ? [...HARD_BLOCKED_SLOTS.Noc, '0755'] : [...HARD_BLOCKED_SLOTS.Noc, '0815'];
 }
 
@@ -1363,7 +1541,7 @@ const SLOT_TIERS = {
     thirdLow:    s => { const m = sortKey(s,'Noc'); return m > sortKey('0615','Noc') + 1440 && m < sortKey('0755','Noc') + 1440; }
   },
   Day: {
-    hardBlocked: s => HARD_BLOCKED_SLOTS.Day.includes(s),
+    hardBlocked: s => getDayHardBlocked().includes(s),
     earlyLow:    s => { const m = toMin(s); return m >= toMin('0835') && m <= toMin('0915'); },
     prime:       s => { const m = toMin(s); return m > toMin('0915') && m < toMin('1715'); },
     lateLow:     s => { const m = toMin(s); return m >= toMin('1715') && m <= toMin('1815'); },
@@ -1491,12 +1669,52 @@ function validateTabStructure(){
     return false;
   }
 
-  console.log('✓ Tab structure integrity OK');
+
   return true;
 }
 
 // ═══════════════════════════════════════════════════════
+// ── Staff inactivity timeout — clears name/ext after 5 min of no interaction ──
+let _inactivityTimer = null;
+const INACTIVITY_MS = 5 * 60 * 1000; // 5 minutes
+
+function resetInactivityTimer(){
+  clearTimeout(_inactivityTimer);
+  _inactivityTimer = setTimeout(() => {
+    // Only clear if on Sign Up tab and fields have content
+    const nameEl = document.getElementById('nurseName');
+    const extEl  = document.getElementById('nurseExt');
+    if(nameEl && extEl && (nameEl.value.trim() || extEl.value.trim())){
+      clearNameExt();
+      toast('Session cleared after 5 minutes of inactivity.');
+    }
+  }, INACTIVITY_MS);
+}
+
+function initInactivityTimer(){
+  // Reset on any touch/click/key activity on the Sign Up tab
+  ['touchstart','mousedown','keydown','scroll'].forEach(evt => {
+    document.addEventListener(evt, () => {
+      // Only active when Sign Up tab is showing
+      const signUpTab = document.getElementById('tab-staff');
+      if(signUpTab && signUpTab.style.display !== 'none') resetInactivityTimer();
+    }, { passive: true });
+  });
+  resetInactivityTimer();
+}
+
 function init(){
+  // Inject SVG shift icons into static HTML placeholders
+  const _iconTargets = [
+    ['sDayIcon', 'Day'], ['sNocIcon', 'Noc'],
+    ['aDayIcon', 'Day'], ['aNocIcon', 'Noc'],
+    ['bnDayIcon', 'Day'], ['bnNocIcon', 'Noc'],
+  ];
+  _iconTargets.forEach(([id, sh]) => {
+    const el = document.getElementById(id);
+    if(el){ el.style.cssText='display:inline-flex;align-items:center'; el.innerHTML = shiftIcon(sh, 13); }
+  });
+
   // Staff unit grid — use STAFF_UNITS (3C and 4C separate, no C_PAIR)
   const ug = document.getElementById('unitGrid');
   buildStaffUnitGrid();
@@ -1542,8 +1760,8 @@ function init(){
   setAShift(S.shift);
   document.getElementById('viewDate').value=t;
 
-  // Summary default shift
-  S.summShift=S.shift;
+  // Summary default shift — auto-detect Day/Noc from current time
+  S.summShift = detectShift();
   hiShift('sDay','sNoc', S.summShift);
 
   // Clock
@@ -1555,6 +1773,9 @@ function init(){
 
   // Verify tab structure integrity on startup
   setTimeout(validateTabStructure, 100);
+
+  // Start staff inactivity timer (clears name/ext after 5 min)
+  initInactivityTimer();
 }
 
 function pill(label, key, active){
@@ -1591,39 +1812,72 @@ function updateClock(){
 // ═══════════════════════════════════════════════════════
 function unlockPortal(){
   const pw = document.getElementById('portalPwInput').value;
-  const adminPw = localStorage.getItem('bnAdminPw') || 'breaker';
-  const bnPw    = localStorage.getItem('bnBnPw')    || 'breaknurse';
+  const err = document.getElementById('portalPwErr');
+  err.style.display = 'none';
+  if(!pw){ err.style.display = 'block'; err.textContent = 'Please enter a password.'; return; }
 
-  if(pw === adminPw){
-    PORTAL.unlocked = true; PORTAL.level = 'admin';
-  } else if(pw === bnPw){
-    PORTAL.unlocked = true; PORTAL.level = 'bn';
-  } else {
-    document.getElementById('portalPwErr').style.display = 'block'; return;
-  }
+  const btn = document.querySelector('#portalGate button');
+  if(btn){ btn.disabled = true; btn.textContent = 'Verifying...'; }
 
-  document.getElementById('portalGate').style.display  = 'none';
-  document.getElementById('portalPanel').style.display = 'block';
+  validatePortalPassword(pw).then(level => {
+    if(btn){ btn.disabled = false; btn.textContent = 'Unlock'; }
+    if(!level){
+      err.style.display = 'block'; err.textContent = 'Incorrect password.'; return;
+    }
+    PORTAL.unlocked = true; PORTAL.level = level;
+    document.getElementById('portalGate').style.display  = 'none';
+    document.getElementById('portalPanel').style.display = 'block';
 
-  // Show/hide sub-tabs based on access level
-  const adminBtn = document.getElementById('st-admin');
-  if(PORTAL.level === 'admin' && adminBtn) adminBtn.style.display = 'inline-flex';
+    const adminBtn = document.getElementById('st-admin');
+    if(PORTAL.level === 'admin' && adminBtn) adminBtn.style.display = 'inline-flex';
 
-  // Auto-load default sub-tab
-  showSubTab('summary', document.getElementById('st-summary'));
+    showSubTab('summary', document.getElementById('st-summary'));
+    // Auto-detect Day/Noc for coverage tab
+    const _autoSumShift = detectShift();
+    S.summShift = _autoSumShift;
+    hiShift('sDay','sNoc', _autoSumShift);
+    const _summDp = document.getElementById('summDate');
+    if(_summDp) _summDp.value = shiftDate(_autoSumShift);
+    loadSummary();
+    populateBNDropdown();
+    if(PORTAL.level === 'admin'){
+      loadAdminData();
+      renderImportedNamesList();
+      renderImportedEntriesSummary();
+      checkForRestorableSuggestions();
+      show3CDefaultToggle();
+      update3CToggle();
+    }
+  }).catch(e => {
+    if(btn){ btn.disabled = false; btn.textContent = 'Unlock'; }
+    err.style.display = 'block';
+    err.textContent = 'Connection error — try again.';
+  });
+}
 
-  // Pre-load data
-  loadSummary();
-  populateBNDropdown();
-  if(PORTAL.level === 'admin'){
-    loadAdminData();
-    showApiKeyStatus();
-    renderImportedNamesList();
-    renderImportedEntriesSummary();
-    checkForRestorableSuggestions();
-    show3CDefaultToggle();
-    update3CToggle();
-    if(SIM_MODE) document.getElementById('simControls').style.display = 'block';
+async function validatePortalPassword(pw){
+  try {
+    const states = SIM_MODE
+      ? await spGet(LISTS.state, `(Key eq 'portalPw_admin' or Key eq 'portalPw_bn')`)
+      : (await spBatchGet([{sheet:LISTS.state, filter:`(Key eq 'portalPw_admin' or Key eq 'portalPw_bn')`}]))[0];
+    let adminPw = 'breaker', bnPw = 'breaknurse'; // defaults if not yet set in BNState
+    states.forEach(s => {
+      try {
+        const val = JSON.parse(s.Value);
+        if(s.Key === 'portalPw_admin') adminPw = val;
+        if(s.Key === 'portalPw_bn') bnPw = val;
+      } catch{}
+    });
+    if(pw === adminPw) return 'admin';
+    if(pw === bnPw) return 'bn';
+    return null;
+  } catch {
+    // Fallback to localStorage if API unavailable
+    const adminPw = localStorage.getItem('bnAdminPw') || 'breaker';
+    const bnPw    = localStorage.getItem('bnBnPw')    || 'breaknurse';
+    if(pw === adminPw) return 'admin';
+    if(pw === bnPw) return 'bn';
+    return null;
   }
 }
 
@@ -1675,7 +1929,6 @@ function showSubTab(name, btn){
     checkForRestorableSuggestions();
     show3CDefaultToggle();
     update3CToggle();
-    if(SIM_MODE) document.getElementById('simControls').style.display = 'block';
   }
 }
 
@@ -1686,8 +1939,38 @@ function showTab(name, btn){
   if(tabEl) tabEl.classList.add('active');
   (btn||document.getElementById(`nt-${name}`))?.classList.add('active');
 
+  // Scroll to top on every tab switch
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+
+  // Clear schedule cache on tab switch so fresh data is fetched
+  clearSchedCache();
+
+  // If switching to staff tab with a unit selected, refresh slots (which updates banner too)
+  if(name === 'staff' && S.unit){
+    loadSlots();
+  }
+
   // If portal already unlocked this session, skip gate
-  if(name==='portal' && PORTAL.unlocked){
+  if(name==='portal' && (PORTAL.unlocked || DEV_MODE)){
+    if(DEV_MODE && !PORTAL.unlocked){
+      PORTAL.unlocked = true; PORTAL.level = 'admin';
+      const adminBtn = document.getElementById('st-admin');
+      if(adminBtn) adminBtn.style.display = 'inline-flex';
+      // Auto-detect current shift for coverage tab
+      const _devShift = detectShift();
+      S.summShift = _devShift;
+      hiShift('sDay','sNoc', _devShift);
+      const _devDp = document.getElementById('summDate');
+      if(_devDp) _devDp.value = shiftDate(_devShift);
+      loadSummary();
+      populateBNDropdown();
+      loadAdminData();
+      renderImportedNamesList();
+      renderImportedEntriesSummary();
+      checkForRestorableSuggestions();
+      show3CDefaultToggle();
+      update3CToggle();
+    }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
   }
@@ -1701,12 +1984,51 @@ function pickUnit(u){
   S.pendingClaims.clear();
   updateSubmitBar();
   document.querySelectorAll('.unit-btn').forEach(b=>b.classList.remove('active'));
-  document.getElementById(`ub-${u}`).classList.add('active');
+  const _ubtn = document.getElementById(`ub-${u}`);
+  if(_ubtn) _ubtn.classList.add('active');
   document.getElementById('shiftCard').style.display='block';
   document.getElementById('slotsWrap').style.display='block';
-  updateCoverageBanner();
+  // Auto-switch to current Day/Noc shift when changing units (unless Other was intentionally set)
+  if(S.shift !== 'Other'){
+    const autoShift = detectShift();
+    if(S.shift !== autoShift){
+      S.shift = autoShift;
+      // Update shift button active state
+      ['Day','Noc','Other'].forEach(sh => {
+        const btn = document.getElementById(`shiftBtn${sh}`);
+        if(btn) btn.classList.toggle('active', sh === autoShift);
+      });
+    }
+  }
+  renderShiftPill();
+  // Instantly show unit name in banner while API loads
+  const banner = document.getElementById('coverageBanner');
+  if(banner){
+    banner.style.display = 'block';
+    banner.style.background = 'var(--bg)';
+    banner.style.borderColor = 'var(--border)';
+    banner.style.color = 'var(--muted)';
+    banner.innerHTML = `Checking <strong>${escHTML(u)}</strong>…`;
+  }
+  // Clear slot list immediately so old unit's slots don't linger
+  const slotsList = document.getElementById('slotsList');
+  if(slotsList){ slotsList.innerHTML = ''; slotsList.dataset.lastHtml = ''; }
+  _slotRenderCache = null;
+  updateNameCardState();
+  updateNameCardVisibility();
   checkWrongUnit(u);
-  loadSlots();
+  loadSlots(); // loadSlots now updates the banner too
+}
+
+function isSignupWindowOpen(){
+  return true; // No window gate — isPast() already handles future-only slots
+}
+
+function updateNameCardVisibility(){
+  const card = document.getElementById('nameCard');
+  const hint = document.getElementById('windowHint');
+  if(card) card.style.display = 'block';
+  if(hint) hint.style.display = 'none';
 }
 
 async function checkWrongUnit(selectedUnit){
@@ -1714,10 +2036,19 @@ async function checkWrongUnit(selectedUnit){
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!firstName || !/^[0-9]{5}$/.test(nurseExt)) return;
   const name = `${toTitleCase(firstName)} (${nurseExt})`;
-  const dt = shiftDate(S.shift);
+  const dt = today();
   try {
-    const mine = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(name)}' and SlotDate eq '${dt}' and ShiftType eq '${S.shift}'`);
+    let mine;
+    if(S.shift === 'Other'){
+      const [d,n] = await Promise.all([
+        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate eq '${dt}' and ShiftType eq 'Day'`),
+        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate eq '${dt}' and ShiftType eq 'Noc'`)
+      ]);
+      mine = [...d, ...n];
+    } else {
+      mine = await spGet(LISTS.bookings,
+        `NurseName eq '${esc(name)}' and SlotDate eq '${shiftDate(S.shift)}' and ShiftType eq '${S.shift}'`);
+    }
     const otherUnits = [...new Set(mine.filter(b => !b.IsBNBreak && b.Unit !== selectedUnit).map(b => b.Unit))];
     if(otherUnits.length){
       toast(`⚠️ You have breaks booked on ${otherUnits.join(', ')} — are you on the right unit?`, true);
@@ -1725,18 +2056,161 @@ async function checkWrongUnit(selectedUnit){
   } catch(e){ /* non-critical, fail silently */ }
 }
 
-function renderShiftPill(){
-  const p=document.getElementById('shiftPill');
-  p.className=`shift-pill shift-${S.shift==='Day'?'day':'noc'}`;
-  p.textContent= S.shift==='Day' ? '☀️ Day Shift (0630–1900)' : '🌙 Noc Shift (1830–0700)';
+function updateNameExtLock(){
+  unlockNameExt(); // No window gate
 }
 
-function flipShift(){
-  S.shift = S.shift==='Day' ? 'Noc' : 'Day';
+function lockNameExt(msg){
+  const nameEl = document.getElementById('nurseName');
+  const extEl  = document.getElementById('nurseExt');
+  const hint   = document.getElementById('nameExtHint');
+  if(nameEl){ nameEl.disabled=true; nameEl.style.opacity='.4'; }
+  if(extEl) { extEl.disabled=true;  extEl.style.opacity='.4'; }
+  if(hint)  { hint.style.display='block'; hint.style.color='var(--muted)'; hint.textContent=msg; }
+}
+
+function unlockNameExt(){
+  const nameEl = document.getElementById('nurseName');
+  const extEl  = document.getElementById('nurseExt');
+  if(nameEl){ nameEl.disabled=false; nameEl.style.opacity=''; }
+  if(extEl) { extEl.disabled=false;  extEl.style.opacity=''; }
+  ['nameExtHint','nameWindowHint','windowHint'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el){ el.style.display='none'; el.textContent=''; }
+  });
+}
+
+function renderShiftPill(){
+  const p = document.getElementById('shiftPill');
+  if(!p) return;
+
+  // No end-time pill needed — dropdown already shows selected time
+  p.style.display='none';
+
+  // Update buttons with SVG icons
+  ['Day','Noc','Other'].forEach(sh => {
+    const btn = document.getElementById(`shiftBtn${sh}`);
+    if(!btn) return;
+    const active = sh === S.shift;
+    const label = sh;
+    const iconColor = active ? 'white' : null;
+    // Rebuild button content with icon
+    const iconSize = 15;
+    let icon = sh==='Day' ? sunSVG(iconSize) : sh==='Other' ? otherSVG(iconSize) : moonSVG(iconSize);
+    // Tint active icon white using filter
+    if(active) icon = icon.replace(/fill="#[^"]+"/g, 'fill="white"').replace(/stroke="#[^"]+"/g, 'stroke="white"');
+    btn.innerHTML = icon + ' ' + label;
+    if(active){
+      btn.style.background = sh==='Day' ? 'var(--day)' : sh==='Noc' ? 'var(--teal-dk)' : '#5b4fcf';
+      btn.style.color = 'white';
+      btn.style.borderColor = 'transparent';
+    } else {
+      btn.style.background = 'transparent';
+      btn.style.color = 'var(--text)';
+      btn.style.borderColor = '';
+    }
+  });
+}
+
+function populateOtherEndTimes(){
+  const sel = document.getElementById('otherEndTime');
+  if(!sel) return;
+  const nowM = nowMin();
+  // Round up to the next hour as the starting point
+  const nextHour = Math.ceil(nowM / 60) * 60;
+  const opts = ['<option value="">— select end time —</option>'];
+  // 1-hour increments for next 13 hours (13 options)
+  for(let i = 0; i <= 12; i++){
+    const m = ((nextHour + i * 60) % 1440 + 1440) % 1440;
+    const hhmm = String(Math.floor(m/60)).padStart(2,'0') + String(m%60).padStart(2,'0');
+    opts.push(`<option value="${hhmm}">${fmt12(hhmm)}</option>`);
+  }
+  sel.innerHTML = opts.join('');
+  // Restore saved value if still in range
+  if(S.otherEndTime){
+    const opt = sel.querySelector(`option[value="${S.otherEndTime}"]`);
+    if(opt) sel.value = S.otherEndTime;
+  }
+}
+
+function selectStaffShift(sh){
+  S.shift = sh;
+  const ow = document.getElementById('otherEndWrap');
+  if(ow) ow.style.display = sh === 'Other' ? 'block' : 'none';
+  if(sh === 'Other') populateOtherEndTimes();
   S.pendingClaims.clear();
   updateSubmitBar();
   renderShiftPill();
-  if(S.unit) loadSlots();
+  updateNameCardState();
+  if(S.unit) updateNameCardVisibility();
+  updateNameExtLock();
+  if(sh === 'Other'){
+    if(S.unit && S.otherEndTime){
+      // End time already set — reload slots immediately
+      loadSlots();
+    } else {
+      // Hide banner and slots until end time is chosen
+      const banner = document.getElementById('coverageBanner');
+      if(banner) banner.style.display = 'none';
+      const slotsWrap = document.getElementById('slotsWrap');
+      if(slotsWrap) slotsWrap.querySelector('#slotsList').innerHTML = '';
+    }
+  }
+  if(sh !== 'Other' && S.unit){
+    // Show instant "Checking…" feedback before API call
+    const banner = document.getElementById('coverageBanner');
+    if(banner){
+      banner.style.display = 'block';
+      banner.style.background = 'var(--bg-alt,#f5f5f5)';
+      banner.style.borderColor = 'var(--border)';
+      banner.style.color = 'var(--muted)';
+      banner.innerHTML = `&#x231B; Checking <strong>${escHTML(S.unit)}</strong> ${escHTML(S.shift)}…`;
+    }
+    document.getElementById('slotsList').innerHTML = '';
+    _slotRenderCache = null;
+    loadSlots();
+  }
+}
+
+function onOtherEndTimeChange(){
+  const val = document.getElementById('otherEndTime').value;
+  if(!val) return;
+  S.otherEndTime = val;
+  renderShiftPill();
+  S.pendingClaims.clear();
+  updateSubmitBar();
+  // Clear cache and stop timer so stale data doesn't overwrite fresh load
+  _slotRenderCache = null;
+  clearInterval(S.refreshTmr);
+  if(S.unit){ updateNameCardVisibility(); loadSlots(); }
+}
+
+function updateNameCardState(){
+  // Block name/ext entry for Day/Noc until sign-up window opens
+  if(S.shift === 'Other') { setNameCardEnabled(true); return; }
+  const nowM_ = nowMin();
+  const isOpen = S.shift === 'Day'
+    ? (nowM_ >= 6*60+30)
+    : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax());
+  setNameCardEnabled(isOpen);
+}
+
+function setNameCardEnabled(enabled){
+  const nameInput = document.getElementById('nurseName');
+  const extInput  = document.getElementById('nurseExt');
+  const hint = document.getElementById('nameWindowHint');
+  if(!nameInput) return;
+  nameInput.disabled = !enabled;
+  extInput.disabled  = !enabled;
+  nameInput.style.opacity = enabled ? '' : '.4';
+  extInput.style.opacity  = enabled ? '' : '.4';
+  if(hint){
+    hint.style.display = 'none';
+  }
+}
+
+function flipShift(){
+  selectStaffShift(S.shift === 'Day' ? 'Noc' : S.shift === 'Noc' ? 'Other' : 'Day');
 }
 
 
@@ -2094,6 +2568,10 @@ async function recalculateRotation(bnName, date, shift){
 
 async function loadSlots(silent=false){
   if(!S.unit) return;
+  // Route Other shift to its own handler
+  if(S.shift === 'Other'){
+    return loadOtherSlots(silent);
+  }
   const loader=document.getElementById('slotsLoader');
   const list=document.getElementById('slotsList');
   const meta=document.getElementById('slotsMeta');
@@ -2106,40 +2584,224 @@ async function loadSlots(silent=false){
 
   try {
     const dt=shiftDate(S.shift), shift=S.shift;
+    const oppShift = shift === 'Day' ? 'Noc' : 'Day';
+    const oppDt = shift === 'Day'
+      ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
+      : dt;
 
-    // Get coverage for this unit today
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+    // ── Sequential spGet: schedule first, then bookings (both dates for overlap BN breaks) ──
+    const schedFloor = oppDt < dt ? oppDt : dt;
+    const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`);
+    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+    // Also fetch opposite date bookings — needed for overlap BN breaks (e.g. Noc BN break at 7:55 AM
+    // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
+    const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate eq '${oppDt}'`) : [];
+    const scheds = allSchedsRaw.filter(s => s.ShiftDate === dt && s.ShiftType === shift);
+    const oppScheds = allSchedsRaw.filter(s => s.ShiftDate === oppDt && s.ShiftType === oppShift);
+
+    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
+    // Combine BN breaks from both dates so overlap BN breaks are visible
+    const allBNBreaks = [
+      ...allBookingsRaw.filter(b => b.IsBNBreak),
+      ...oppBookingsRaw.filter(b => b.IsBNBreak)
+    ];
+
     const covering = scheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, shift));
+    const oppCoveringBanner = oppScheds.filter(s => {
+      try { return JSON.parse(s.Units||'[]').includes(S.unit) && s.Status !== 'inactive'; } catch { return false; }
+    });
+    // oppCovering only counts as coverage if the overlap window is currently relevant:
+    // Day staff in morning overlap (6:30-8:00 AM) or Noc staff in evening overlap (6:30-8:00 PM)
+    const _nowMBanner = nowMin();
+    // Noc sign-up window: 6:30 PM → 6:30 AM. Closed during daytime (6:30 AM – 6:30 PM).
+    // Day sign-up window: 6:30 AM → 6:30 PM. Closed after 6:30 PM.
+    const staffWindowClosed = (shift === 'Day' && _nowMBanner >= 18*60+30) ||
+                              (shift === 'Noc' && _nowMBanner >= 6*60+30 && _nowMBanner < 18*60+30);
+    const inRelevantOverlap = (shift === 'Day' && _nowMBanner >= 6*60+30 && _nowMBanner < getDayOverlapMax()) ||
+                              (shift === 'Noc' && _nowMBanner >= 18*60+30 && _nowMBanner < 20*60);
+    const hasAnyCoverage = covering.length > 0 || (oppCoveringBanner.length > 0 && !staffWindowClosed && inRelevantOverlap);
 
-    if(!covering.length){
-      // On silent refresh, preserve existing slots rather than flashing "no coverage"
-      if(silent){ loader.style.display='none'; return; }
-      meta.textContent = '';
-      list.innerHTML=`<div class="empty">No break coverage is scheduled for <strong>${S.unit}</strong> on the ${shift} shift today.</div>`;
-      loader.style.display='none';
-      return;
+    // ── Update coverage banner ──
+    const banner = document.getElementById('coverageBanner');
+    if(banner){
+      if(!hasAnyCoverage){
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--red-lt)';
+        banner.style.borderColor = 'var(--red)';
+        banner.style.color = 'var(--red)';
+        // Find upcoming coverage for this unit+shift in the next 7 days
+        const upcomingDates = [];
+        for(let d = 1; d <= 7; d++){
+          const fd = new Date(dt + 'T12:00:00');
+          fd.setDate(fd.getDate() + d);
+          const fds = fd.toISOString().slice(0,10);
+          const hasCov = allSchedsRaw.some(s =>
+            s.ShiftDate === fds && s.ShiftType === shift && s.Status !== 'inactive' &&
+            (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
+          );
+          if(hasCov) upcomingDates.push(fds);
+        }
+        let notes = '';
+        if(upcomingDates.length){
+          const fmtDate = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
+          notes += `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming coverage: ${upcomingDates.map(fmtDate).join(', ')}</div>`;
+        }
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${notes}`;
+      } else if(covering.length > 0 && !staffWindowClosed){
+        // Full main-shift coverage — green
+        setNameCardEnabled(true);
+        const plural = covering.length > 1 ? 'Break Nurses' : 'a Break Nurse';
+        banner.style.display = 'block';
+        banner.style.background = 'var(--teal-lt)';
+        banner.style.borderColor = 'var(--teal)';
+        banner.style.color = 'var(--teal-dk)';
+        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has ${plural}!`;
+      } else if(!staffWindowClosed && inRelevantOverlap && oppCoveringBanner.length > 0){
+        // Overlap-only coverage — amber, show last available slot time
+        setNameCardEnabled(true); // will be overridden below if last slot passed
+        // Last slot in the overlap rotation for this unit — claimed or not, unit is covered until then
+        const _overlapRange = shift === 'Day'
+          ? { min: 6*60+30, max: getDayOverlapMax() }
+          : { min: 18*60+30, max: 20*60+0 };
+        const _overlapSlots = generateSlots(oppShift).filter(s => {
+          const m = toMin(s);
+          return m >= _overlapRange.min && m < _overlapRange.max && getSlotTier(s, oppShift) !== 'hardBlocked';
+        });
+        // Find the last overlap slot actually assigned to THIS unit in the opp BN's rotation
+        // Tinsley may cover 10N at 7:35 PM and 10S at 7:55 PM — they should show different times
+        let _lastSlot = _overlapSlots.length ? _overlapSlots[_overlapSlots.length - 1] : null;
+        const _oppBNName = oppCoveringBanner.length ? oppCoveringBanner[0].BreakNurseName : null;
+        if(_oppBNName){
+          const _oppRot = loadRotation(_oppBNName, oppDt, oppShift);
+          if(_oppRot){
+            // Get overlap slots assigned to this unit, excluding BN's own break slots
+            const _bnBreakTimes = new Set(
+              [...allBookingsRaw, ...oppBookingsRaw]
+                .filter(b => b.IsBNBreak && b.NurseName === _oppBNName)
+                .map(b => String(b.SlotTime).padStart(4,'0'))
+            );
+            const _unitOverlapSlots = _overlapSlots.filter(s =>
+              _oppRot[s] === S.unit && !_bnBreakTimes.has(s)
+            );
+            if(_unitOverlapSlots.length){
+              _lastSlot = _unitOverlapSlots[_unitOverlapSlots.length - 1];
+            } else {
+              // Either no rotation for this unit, or all assigned slots are BN breaks
+              // Either way: no actual coverage → null so banner shows full red
+              _lastSlot = null;
+            }
+          }
+        }
+        // If current time is past the last overlap slot, coverage has ended — show red
+        // isPast() alone is unreliable here — at 5 AM, a PM slot's sortKey > nowKey('Day')
+        // so isPast thinks it hasn't happened yet. Use wall-clock comparison instead:
+        // PM slot (>=720 min) is past if current time is AM (<720) = we're next day
+        // PM slot is also past if current time is later PM
+        // AM slot is past if current time is later AM
+        const _lastSlotMin = _lastSlot ? toMin(_lastSlot) : 0;
+        const _nowWall = nowMin();
+        const _lastSlotPassed = _lastSlot ? (
+          (_lastSlotMin >= 12*60 && _nowWall < 12*60) ||
+          (_lastSlotMin >= 12*60 && _nowWall >= 12*60 && _nowWall > _lastSlotMin) ||
+          (_lastSlotMin < 12*60  && _nowWall < 12*60  && _nowWall > _lastSlotMin)
+        ) : true;
+        // Upcoming coverage dates (used by both amber and expired-red)
+        const _upcomingDates = [];
+        for(let _d = 1; _d <= 7; _d++){
+          const _fd = new Date(dt + 'T12:00:00'); _fd.setDate(_fd.getDate() + _d);
+          const _fds = _fd.toISOString().slice(0,10);
+          const _hasCov = allSchedsRaw.some(s =>
+            s.ShiftDate === _fds && s.ShiftType === shift && s.Status !== 'inactive' &&
+            (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
+          );
+          if(_hasCov) _upcomingDates.push(_fds);
+        }
+        const _fmtDate = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
+        const _upcoming = _upcomingDates.length
+          ? `<div style="font-size:.8rem;margin-top:6px;opacity:.9">📅 Upcoming ${shift} coverage: ${_upcomingDates.map(_fmtDate).join(', ')}</div>`
+          : '';
+        if(_lastSlotPassed){
+          setNameCardEnabled(false);
+          // Last overlap slot has passed — full red no coverage
+          banner.style.display = 'block';
+          banner.style.background = 'var(--red-lt)';
+          banner.style.borderColor = 'var(--red)';
+          banner.style.color = 'var(--red)';
+          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_lastSlot ? `had Break Relief until ${fmt12(_lastSlot)}` : 'has no Break Relief'}${_upcoming}`;
+        } else {
+          // Still within overlap window — amber
+          banner.style.display = 'block';
+          banner.style.background = '#fff8e6';
+          banner.style.borderColor = '#e6a817';
+          banner.style.color = '#7a5500';
+          banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> only has Break Relief until ${_lastSlot ? fmt12(_lastSlot) : (shift==='Noc'?'8:00 PM':'8:00 AM')}${_upcoming}`;
+        }
+      } else {
+        // Staff window closed for this shift — show upcoming coverage
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--red-lt)';
+        banner.style.borderColor = 'var(--red)';
+        banner.style.color = 'var(--red)';
+        const _upcomingClosed = [];
+        for(let _d = 1; _d <= 7; _d++){
+          const _fd = new Date(dt + 'T12:00:00'); _fd.setDate(_fd.getDate() + _d);
+          const _fds = _fd.toISOString().slice(0,10);
+          const _hasCov = allSchedsRaw.some(s =>
+            s.ShiftDate === _fds && s.ShiftType === shift && s.Status !== 'inactive' &&
+            (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
+          );
+          if(_hasCov) _upcomingClosed.push(_fds);
+        }
+        const _fmtClosed = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
+        const _upcomingNote = _upcomingClosed.length
+          ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${shift} coverage: ${_upcomingClosed.map(_fmtClosed).join(', ')}</div>`
+          : '';
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable${_upcomingNote}`;
+      }
     }
 
-    // Only show break nurse(s) assigned to THIS specific unit
-    const unitBNNames = [...new Set(
-      covering
+    const oppCovering = oppScheds.filter(s => {
+      try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
+    });
+
+    // No main shift coverage — only continue if there are overlap slots from the opposite BN
+    if(!covering.length){
+      if(!oppCovering.length){
+        if(silent){ loader.style.display='none'; return; }
+        meta.textContent = '';
+        list.innerHTML='';
+        loader.style.display='none';
+        return;
+      }
+      // There IS overlap coverage — fall through to show those slots
+      if(silent){ loader.style.display='none'; return; }
+    }
+
+    // Show break nurses for this unit — main shift BN + any opposite shift BN covering overlap
+    const unitBNNames = [...new Set([
+      ...covering
+        .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
+        .map(c => c.BreakNurseName),
+      ...oppCovering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
         .map(c => c.BreakNurseName)
-    )].join(', ');
+    ])].join(', ');
     const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
     const firstName = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     const nurseName = firstName && nurseExt ? `${toTitleCase(firstName)} (${nurseExt})` : '';
 
-    // Load block rotation for each BN covering this unit
-    // Merge all BN rotations — a slot is available to this unit if ANY BN has it assigned here
-    const unitRotationSlots = new Set();
-    // Warm rotation cache from backend for covering BNs if not already cached
-    covering.forEach(sched => warmRotationCache(sched.BreakNurseName, dt, shift).catch(()=>{}));
-    // Warm 3C status
+    // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load
+    await Promise.all([
+      ...covering.map(sched => warmRotationCache(sched.BreakNurseName, dt, shift).catch(()=>{})),
+      ...oppCovering.map(sched => warmRotationCache(sched.BreakNurseName, oppDt, oppShift).catch(()=>{}))
+    ]);
     warm3CStatus(dt, shift).catch(()=>{});
 
+    // Load block rotation for each BN covering this unit
+    const unitRotationSlots = new Set();
     let hasAnyRotation = false;
     for(const sched of covering){
       const bnRot = loadRotation(sched.BreakNurseName, dt, shift);
@@ -2152,27 +2814,13 @@ async function loadSlots(silent=false){
     }
 
     // Overlap: Day staff can use Noc BN slots 0635–0755; Noc staff can use Day BN slots 1835–1955
-    const oppShift = shift === 'Day' ? 'Noc' : 'Day';
-    // Overlap window in minutes from midnight (handles wrap for Noc)
     const overlapRange = shift === 'Day'
-      ? { min: 6*60+30, max: getDayOverlapMax() }  // 0630–0800 weekdays, 0630–0830 weekends
-      : { min: 18*60+30, max: 20*60+0 };           // 1830–2000 → Day BN covers Noc staff early breaks
-
-    // Opposite shift date: for Day staff morning overlap, the Noc BN started the previous day
-    // For Noc staff evening overlap, the Day BN started the same day
-    const oppDt = shift === 'Day'
-      ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
-      : dt;
-
-    // Check if opposite shift BN covers this unit
-    const oppScheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`);
-    const oppCovering = oppScheds.filter(s => {
-      try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
-    });
+      ? { min: 6*60+30, max: getDayOverlapMax() }
+      : { min: 18*60+30, max: 20*60+0 };
 
     // Generate main shift slots + overlap slots from opposite shift
-    const mainSlots = generateSlots(shift);
+    // If no main BN assigned, skip main slots — only show overlap window
+    const mainSlots = covering.length ? generateSlots(shift) : [];
     let overlapSlots = [];
     if (oppCovering.length) {
       const oppSlots = generateSlots(oppShift);
@@ -2186,32 +2834,28 @@ async function loadSlots(silent=false){
     const allSlots = [...new Set([...overlapSlots, ...mainSlots])];
     allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
 
-    // Fetch bookings for both shifts on this unit (covers overlap slots)
-    const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
-
     const bMap    = {};
-    bookings.forEach(b => { if (!b.IsBNBreak) bMap[b.SlotTime] = b; });
+    bookings.forEach(b => { if (!b.IsBNBreak) bMap[String(b.SlotTime).padStart(4,'0')] = b; });
 
     // Block slots where ANY BN covering this unit has marked their own break
-    // regardless of which unit they marked it on — a BN on break can't cover anywhere
     const allBNNames = [
       ...new Set([...covering, ...oppCovering].map(c => c.BreakNurseName))
     ];
-    const allBNBreaks = await spGet(LISTS.bookings,
-      `SlotDate eq '${dt}' and IsBNBreak eq 1`);
     const bnBreaks = new Set(
-      allBNBreaks
+      allBNBreaks.map(b => ({...b, SlotTime: String(b.SlotTime).padStart(4,'0')}))
         .filter(b => allBNNames.includes(b.NurseName))
         .map(b => b.SlotTime)
     );
 
-    // Fetch THIS nurse's bookings (to enforce max 3, both shifts combined)
+    // Fetch THIS nurse's bookings — count per shift type separately (max 3 per shift)
     const myBookings = nurseName
       ? bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak)
       : [];
-    const myTimes = myBookings.map(b=>b.SlotTime);
-    const canClaimMore = myTimes.length < MAX_SLOTS;
+    const myTimes = myBookings.map(b=>String(b.SlotTime).padStart(4,'0'));
+    // For overlap slots (stored as opposite ShiftType), count against that shift's quota
+    // For same-shift slots, count against current shift quota
+    const mySameShift = myBookings.filter(b => b.ShiftType === shift);
+    const canClaimMore = mySameShift.length < MAX_SLOTS;
 
     // Build BN name label — include both main and overlap BNs
     // Look up BN extensions — from schedule record first, fall back to localStorage
@@ -2227,13 +2871,13 @@ async function loadSlots(silent=false){
       .map(c => formatBNName(c.BreakNurseName))
     )];
 
-    // Only show opposite shift BN if we're currently within the overlap window
+    // Always include opp BN in meta when they have overlap slots for this unit
     const nowM = nowKey(shift);
     const inOverlapWindow = nowM >= overlapRange.min && nowM < overlapRange.max;
-    const oppBNNamesList = inOverlapWindow ? [...new Set(oppCovering
+    const oppBNNamesList = [...new Set(oppCovering
       .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
       .map(c => formatBNName(c.BreakNurseName))
-    )] : [];
+    )];
 
     const allBNDisplay = [...new Set([...mainBNNames, ...oppBNNamesList])].join(', ') || bnNames;
     meta.textContent=`Break nurse for ${S.unit}: ${allBNDisplay}  ·  Slots are 15 min — claim up to 3 per shift`;
@@ -2249,22 +2893,81 @@ async function loadSlots(silent=false){
     const earliestBNStart = Object.values(bnStartMins).length
       ? Math.min(...Object.values(bnStartMins)) : null;
 
+    // Shift is "active" once its sign-up window opens.
+    // For the next (upcoming) shift, skip isPast — all slots are future,
+    // and shiftWindowOpen already locks them until sign-up opens.
+    // shiftIsActive uses _nowMBanner (declared above)
+    const shiftIsActive = shift === 'Day'
+      ? _nowMBanner >= 6*60+30
+      : (_nowMBanner >= 18*60+30 || _nowMBanner < getDayOverlapMax());
+
+    // Only apply rotation filter if there are future rotation slots for this unit.
+    // If all rotation slots are already past, the BN has moved on — show remaining slots.
+    const futureRotSlots = [...unitRotationSlots].filter(s => !isPast(s, shift));
+    const useRotation = hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length > 0;
+
     const future = allSlots.filter(s => {
-      if(isPast(s, shift)) return false;
+      if(shiftIsActive && isPast(s, shift) && !bMap[s]) return false; // keep past claimed slots visible
       if(getSlotTier(s, shift) === 'hardBlocked') return false;
-      // Always allow overlap slots through — they belong to the opposite shift BN's rotation
       const slotMin = toMin(s);
-      const isOverlapSlot = (shift==='Noc' && slotMin >= overlapRange.min && slotMin < overlapRange.max) ||
-                            (shift==='Day' && slotMin >= overlapRange.min && slotMin < overlapRange.max);
-      if(!isOverlapSlot && hasAnyRotation && unitRotationSlots.size > 0 && !unitRotationSlots.has(s)) return false;
+      // Day staff cutoff: no slots at or after 6:30 PM (shift change)
+      if(shift === 'Day' && slotMin >= 18*60+30) return false;
+      // Noc staff cutoff: no slots at or after 8:30 AM (shift change)
+      // Noc staff can claim up to overlap window end (8:00 AM) — overlap BN is still covering
+      if(shift === 'Noc' && sortKey(s,'Noc') >= sortKey(fromMin(getDayOverlapMax()),'Noc')) return false;
+      // Overlap slots: only show the overlap that applies to THIS shift's staff
+      // Noc staff see EVENING overlap (6:30-8:00 PM) — Day BN covers their arrival
+      // Day staff see MORNING overlap (6:30-8:00 AM) — Noc BN covers their arrival
+      // Exclude the "wrong direction" overlap from each shift
+      const morningOverlap = slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
+      const eveningOverlap = slotMin >= 18*60+30 && slotMin < 20*60;
+      if(shift === 'Noc' && morningOverlap) return false; // morning slots are for Day staff only
+      if(shift === 'Day' && eveningOverlap) return false; // evening slots are for Noc staff only
+      const isOverlapSlot = (shift==='Noc' && eveningOverlap) ||
+                            (shift==='Day' && morningOverlap);
+      if(!isOverlapSlot && useRotation && !unitRotationSlots.has(s)) return false;
       if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
+    // Diagnostic: log when coverage exists but no slots found
+    if(!future.length && covering.length > 0){
+      console.log('[DBG slots] shiftIsActive:', shiftIsActive, 'hasAnyRotation:', hasAnyRotation,
+        'unitRotSlots:', unitRotationSlots.size, 'futureRotSlots:', futureRotSlots.length,
+        'useRotation:', useRotation, 'allSlots sample isPast:',
+        allSlots.slice(0,3).map(s => s+':'+(shiftIsActive && isPast(s,shift))));
+    }
+
+    // Always include the nurse's own claimed slots even if outside the rotation window
+    if(nurseName){
+      bookings.forEach(b => {
+        const normTime = String(b.SlotTime).padStart(4,'0');
+        if(!b.IsBNBreak && b.NurseName === nurseName && !future.includes(normTime)){
+          future.push(normTime);
+        }
+      });
+      future.sort((a,b2) => sortKey(a,shift) - sortKey(b2,shift));
+    }
     if(!future.length){
       if(silent){ loader.style.display='none'; return; }
-      list.innerHTML='<div class="empty">No more break slots available for the remainder of this shift.</div>';
+      const emptyMsg = shiftIsActive
+        ? `No break slots found for ${escHTML(S.unit)} ${escHTML(shift)} this shift.`
+        : `${escHTML(shift)} shift slots will appear here once the rotation is set up.`;
+      list.innerHTML=`<div class="empty">${emptyMsg}</div>`;
       loader.style.display='none';
       return;
+    }
+
+    // Build slot→BN map from rotations for per-slot BN display
+    // Use window.firstName to avoid collision with local var 'firstName'
+    const _getBNFirst = n => { const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
+    const _slotBNMap = {};
+    for(const sched of covering){
+      const rot = loadRotation(sched.BreakNurseName, dt, shift);
+      if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
+    }
+    for(const sched of oppCovering){
+      const rot = loadRotation(sched.BreakNurseName, oppDt, oppShift);
+      if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
     }
 
     let html='';
@@ -2272,6 +2975,7 @@ async function loadSlots(silent=false){
       const booking=bMap[slot];
       const isMine = booking && booking.NurseName===nurseName && nurseName;
       const isTaken= booking && !isMine;
+      const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
 
       // Determine if this is an overlap slot (covered by opposite shift BN)
       const slotMin = toMin(slot);
@@ -2281,33 +2985,57 @@ async function loadSlots(silent=false){
       // BN break — slot is simply hidden from staff view
       if (bnBreaks.has(slot)) return;
 
+      // Sign-up window: current shift always open; next shift visible but locked until start
+      const nowM_ = nowMin();
+      const isCurrentShift = shift === 'Day'
+        ? (nowM_ >= 6*60+30 || nowM_ < 6*60+30) // Day always accessible once selected
+        : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax()); // Noc: active overnight or after 18:30
+      // Window open = can claim. For next-shift preview, locked until shift start
+      const shiftWindowOpen = shift === 'Day'
+        ? nowM_ >= 6*60+30
+        : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax());
+      const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
+
+      const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
       let canClaim=false, lockReason='';
       if(!isTaken && !isMine){
-        if(!nurseName)        { canClaim=false; lockReason='Enter name + ext above'; }
-        else if(!canClaimMore){ canClaim=false; lockReason='Max 3 slots reached'; }
-        else                  { canClaim=true; }
+        if(!shiftWindowOpen)              { canClaim=false; lockReason=openLabel; }
+        else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
+        else if(!canClaimMore)            { canClaim=false; lockReason='Max 3 slots reached'; }
+        else                              { canClaim=true; }
       }
 
       const isPending = S.pendingClaims.has(slot);
-      const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
+      const isPastSlot = shiftIsActive && isPast(slot, shift);
+      const cls = isMine?'mine':isTaken?(isPastSlot?'taken past':'taken'):isPending?'mine':canClaim?'open':'locked';
+      const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
+      const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
+      const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
 
-      html+=`<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':''}">
-        <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':''}">${fmt12(slot)}</div>
+      html+=`<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
+        <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
         <div class="slot-name ${booking||isPending?'filled':''}">${
-          isMine ? booking.NurseName : isPending ? '\u2713 Selected' : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
+          isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason ? `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : 'Available'))
         }</div>
         <div>
-          ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="cancelSlot('${booking.Id}')">✕ Cancel</button>` : ''}
+          ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
           ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
           ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
         </div>
       </div>`;
     });
     // Silent DOM update — only re-render if content changed
+    updateNameExtLock();
     if(list.dataset.lastHtml !== html){
       list.innerHTML = html;
       list.dataset.lastHtml = html;
     }
+
+    // Populate cache for instant pending re-renders
+    _slotRenderCache = {
+      future, bMap, bnBreaks, nurseName, nurseExt: document.getElementById('nurseExt').value.trim(),
+      covering, oppCovering, shift, overlapRange
+    };
 
     // Start silent background refresh timer
     clearInterval(S.refreshTmr);
@@ -2342,16 +3070,17 @@ async function silentRefreshSlots(){
   try {
     const dt = shiftDate(S.shift), shift = S.shift;
 
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+    // Sequential spGet: reliable vs concurrent requests to Apps Script
+    const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
+    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+    const scheds = allSchedsForSilent.filter(s => s.ShiftDate === dt && s.ShiftType === shift);
+    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
+    const allBNBreaks = allBookingsRaw.filter(b => b.IsBNBreak);
+
     const covering = scheds.filter(s => unitCoveredBy(s, S.unit, dt, shift));
     if(!covering.length) return;
 
     const allBNNames = [...new Set(covering.map(c => c.BreakNurseName))];
-    const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
-    const allBNBreaks = await spGet(LISTS.bookings,
-      `SlotDate eq '${dt}' and IsBNBreak eq 1`);
 
     // Build a lightweight state fingerprint from current bookings
     const bMap = {};
@@ -2401,11 +3130,86 @@ async function silentRefreshSlots(){
 }
 
 // ── Pending claim basket (Submit flow) ───────────────
-function togglePending(slotTime){
-  if(S.pendingClaims.has(slotTime)){
-    S.pendingClaims.delete(slotTime);
+// Cache for instant pending re-renders (populated by loadSlots after each full load)
+let _slotRenderCache = null; // { future, bMap, bnBreaks, nurseName, nurseExt, covering, oppCovering, shift, overlapRange, canClaimMore }
+
+function renderSlotsFromCache(){
+  if(!_slotRenderCache){ loadSlots(true); return; } // fallback if no cache yet
+  const { future, bMap, bnBreaks, nurseName, nurseExt, covering, oppCovering, shift, overlapRange } = _slotRenderCache;
+  const list = document.getElementById('slotsList');
+  if(!list) return;
+  const myBookings = nurseName
+    ? Object.values(bMap).filter(b => b.NurseName === nurseName && !b.IsBNBreak)
+    : [];
+  const mySameShift = myBookings.filter(b => b.ShiftType === shift);
+  const canClaimMore = mySameShift.length < MAX_SLOTS;
+  const shiftWindowOpen = shift === 'Day'
+    ? nowMin() >= 6*60+30
+    : (nowMin() >= 18*60+30 || nowMin() < getDayOverlapMax());
+  const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
+  const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
+  let html = '';
+  future.forEach(slot => {
+    if(bnBreaks.has(slot)) return;
+    const booking = bMap[slot];
+    const isMine  = booking && booking.NurseName === nurseName && nurseName;
+    const isTaken = booking && !isMine;
+    const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
+    const isPending = S.pendingClaims.has(slot);
+    let canClaim = false, lockReason = '';
+    if(!isTaken && !isMine){
+      if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
+      else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
+      else if(!canClaimMore)             { canClaim=false; lockReason='Max 3 slots reached'; }
+      else                               { canClaim=true; }
+    }
+    const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
+    const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
+    const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
+    const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
+    html += `<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
+      <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
+      <div class="slot-name ${booking||isPending?'filled':''}">${
+        isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
+      }</div>
+      <div>
+        ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
+        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
+        ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
+      </div>
+    </div>`;
+  });
+  list.innerHTML = html;
+  list.dataset.lastHtml = html;
+
+  // Populate render cache so togglePending can re-render instantly
+  const _allOtherBookings = [...dayBookingsRaw, ...(nocDt !== dt ? nocBookingsRaw : [])];
+  const _otherFuture = allSlots.map(s => s.time);
+  const _otherBMap = {};
+  _allOtherBookings.forEach(b => {
+    if(!b.IsBNBreak && b.Unit === S.unit) _otherBMap[String(b.SlotTime).padStart(4,'0')] = b;
+  });
+  const _otherBNBreaks = new Set(
+    _allOtherBookings.filter(b => b.IsBNBreak).map(b => String(b.SlotTime).padStart(4,'0'))
+  );
+  _slotRenderCache = {
+    future: _otherFuture, bMap: _otherBMap, bnBreaks: _otherBNBreaks,
+    nurseName: (() => { const n=document.getElementById('nurseName')?.value.trim(), e=document.getElementById('nurseExt')?.value.trim(); return (n&&e)?`${n.charAt(0).toUpperCase()+n.slice(1)} (${e})`:''; })(),
+    nurseExt: document.getElementById('nurseExt')?.value.trim()||'',
+    covering: dayCovering, oppCovering: nocCovering, shift: 'Other',
+    overlapRange: { min: 0, max: 0 }
+  };
+  clearInterval(S.refreshTmr);
+  S.refreshTmr = setInterval(() => loadSlots(true), 10000);
+  loader.style.display = 'none';
+}
+
+function togglePending(slotTime, slotShift){
+  // For Other shift, key includes the shift type: "HHMM|ShiftType"
+  const key = slotShift && slotShift !== S.shift ? `${slotTime}|${slotShift}` : slotTime;
+  if(S.pendingClaims.has(key)){
+    S.pendingClaims.delete(key);
   } else {
-    // Check max slots before adding to pending
     const firstName = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
@@ -2417,16 +3221,16 @@ function togglePending(slotTime){
       toast(`Max ${MAX_SLOTS} slots per shift.`, true);
       return;
     }
-    S.pendingClaims.add(slotTime);
+    S.pendingClaims.add(key);
   }
   updateSubmitBar();
-  loadSlots(true); // silent re-render to show pending state
+  renderSlotsFromCache(); // instant local re-render — no network call needed
 }
 
 function clearPending(){
   S.pendingClaims.clear();
   updateSubmitBar();
-  loadSlots(true);
+  renderSlotsFromCache();
 }
 
 function updateSubmitBar(){
@@ -2451,9 +3255,27 @@ async function submitClaims(){
     toast('Please enter your first name and a 5-digit Spectra extension.', true);
     return;
   }
-  // Float check once before submitting the batch
-  const dt = shiftDate(S.shift);
-  const allBookingsToday = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+  const name = `${toTitleCase(firstName)} (${nurseExt})`;
+  // For Other shift, slots may span two dates (Day date + Noc date)
+  // Use both dates for the pre-fetch so race checks work correctly
+  const dt = S.shift === 'Other' ? today() : shiftDate(S.shift);
+  const nocDt = shiftDate('Noc');
+  const needsBothDates = S.shift === 'Other' && nocDt !== dt;
+
+  // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) ──
+  let allBookingsToday;
+  if(SIM_MODE){
+    const main = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+    const noc  = needsBothDates ? await spGet(LISTS.bookings, `SlotDate eq '${nocDt}'`) : [];
+    allBookingsToday = [...main, ...noc];
+  } else {
+    const queries = [{sheet:LISTS.bookings, filter:`SlotDate eq '${dt}'`}];
+    if(needsBothDates) queries.push({sheet:LISTS.bookings, filter:`SlotDate eq '${nocDt}'`});
+    const r = await spBatchGet(queries);
+    allBookingsToday = needsBothDates ? [...r[0], ...r[1]] : r[0];
+  }
+
+  // Float check — once before the batch
   const otherUnitBookings = allBookingsToday.filter(b => {
     if(b.IsBNBreak) return false;
     if(b.Unit === S.unit) return false;
@@ -2469,7 +3291,6 @@ async function submitClaims(){
     );
     if(!floated){ pickUnit(myOtherUnits[0]); return; }
     for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
-    for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
     S.pendingClaims.clear(); updateSubmitBar();
     const extEl = document.getElementById('nurseExt');
     if(extEl) extEl.value = '';
@@ -2477,21 +3298,32 @@ async function submitClaims(){
     toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}.`);
     return;
   }
+
   const btn = document.getElementById('submitBtn');
-  // Pause auto-refresh during batch to prevent race conditions
   clearInterval(S.refreshTmr);
   if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
-  const slots = [...S.pendingClaims].sort((a,b) => sortKey(a,S.shift)-sortKey(b,S.shift));
+  const slots = [...S.pendingClaims].sort((a,b) => {
+    const aTime = a.includes('|') ? a.split('|')[0] : a;
+    const bTime = b.includes('|') ? b.split('|')[0] : b;
+    const aSh   = a.includes('|') ? a.split('|')[1] : S.shift;
+    const bSh   = b.includes('|') ? b.split('|')[1] : S.shift;
+    return sortKey(aTime, aSh) - sortKey(bTime, bSh);
+  });
   const results = { claimed: [], failed: [] };
   for(const slot of slots){
-    const result = await claimSlot(slot, true); // silent=true, float check already done
-    if(result === 'ok') results.claimed.push(slot);
-    else results.failed.push({ slot, reason: result });
+    const slotTime  = slot.includes('|') ? slot.split('|')[0] : slot;
+    const slotShift = slot.includes('|') ? slot.split('|')[1] : S.shift;
+    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday);
+    if(result === 'ok'){
+      results.claimed.push(slotTime);
+      // Add to cached data so next iteration's max/race checks see it
+      allBookingsToday.push({NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false});
+    }
+    else results.failed.push({ slot: slotTime, reason: result });
   }
   S.pendingClaims.clear();
   updateSubmitBar();
   if(btn){ btn.disabled = false; btn.textContent = 'Submit breaks'; }
-  // Show result summary
   if(results.failed.length === 0){
     toast(`✓ ${results.claimed.length} break${results.claimed.length!==1?'s':''} confirmed!`);
   } else {
@@ -2499,13 +3331,189 @@ async function submitClaims(){
     const fail = results.failed.map(f => `${fmt12(f.slot)}: ${f.reason}`).join(' | ');
     toast(`${ok}${results.failed.length} couldn't be saved: ${fail}`, true);
   }
-  // Resume auto-refresh
-  if(S.unit) S.refreshTmr = setInterval(() => loadSlots(true), 10000);
+  if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000);
   loadSlots();
   if(document.getElementById('summList')) loadSummary();
 }
 
-async function claimSlot(slotTime, silent=false){
+async function loadOtherSlots(silent=false){
+  const loader = document.getElementById('slotsLoader');
+  const list   = document.getElementById('slotsList');
+  const meta   = document.getElementById('slotsMeta');
+  if(!silent) loader.style.display = 'inline-block';
+
+  const endTime = S.otherEndTime;
+  if(!endTime){
+    list.innerHTML = '<div class="empty">Enter your shift end time above to see available slots.</div>';
+    loader.style.display = 'none';
+    return;
+  }
+
+  const endMin = toMin(endTime.length === 4 ? endTime : endTime.replace(':',''));
+  const nowM   = nowMin();
+  const dt     = today();
+  const nocDt  = shiftDate('Noc'); // For Noc schedule, use shift date (yesterday if after midnight)
+
+  try {
+    // Fetch all schedules once + bookings
+    // Sequential spGet: schedule first, then bookings
+    const otherFloor = nocDt < dt ? nocDt : dt;
+    const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${otherFloor}'`);
+    const dayBookingsRaw = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+    const nocBookingsRaw = nocDt !== dt ? await spGet(LISTS.bookings, `SlotDate eq '${nocDt}'`) : [];
+    const dayScheds = allSchedsRaw.filter(s => s.ShiftDate === dt && s.ShiftType === 'Day');
+    const nocScheds = allSchedsRaw.filter(s => s.ShiftDate === nocDt && s.ShiftType === 'Noc');
+    const dayBookings = dayBookingsRaw.filter(b => b.Unit === S.unit && b.ShiftType === 'Day');
+    const nocBookings = (nocDt !== dt ? nocBookingsRaw : dayBookingsRaw).filter(b => b.Unit === S.unit && b.ShiftType === 'Noc');
+
+    const dayCovering = dayScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Day'));
+    const nocCovering = nocScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Noc'));
+    // Warm rotation caches so rotation filter has data
+    Promise.all([
+      ...dayCovering.map(s => warmRotationCache(s.BreakNurseName, dt, 'Day').catch(()=>{})),
+      ...nocCovering.map(s => warmRotationCache(s.BreakNurseName, nocDt, 'Noc').catch(()=>{}))
+    ]);
+    warm3CStatus(dt, 'Day').catch(()=>{});
+
+    // ── Update coverage banner from loadOtherSlots data ──
+    const banner = document.getElementById('coverageBanner');
+    if(banner){
+      if(!dayCovering.length && !nocCovering.length){
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--red-lt)';
+        banner.style.borderColor = 'var(--red)';
+        banner.style.color = 'var(--red)';
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} Other</strong> has no Break Relief`;
+      } else {
+        setNameCardEnabled(true);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--teal-lt)';
+        banner.style.borderColor = 'var(--teal)';
+        banner.style.color = 'var(--teal-dk)';
+        const parts = [];
+        if(dayCovering.length) parts.push('Day');
+        if(nocCovering.length) parts.push('Noc');
+        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)}</strong> has Break Relief (${parts.join(' & ')})!`;
+      }
+    }
+
+    // Build rotation sets per shift — same logic as loadSlots
+    const dayRotSlots = new Set();
+    const nocRotSlots = new Set();
+    let dayHasRotation = false, nocHasRotation = false;
+    for(const sched of dayCovering){
+      const rot = loadRotation(sched.BreakNurseName, dt, 'Day');
+      if(rot){ dayHasRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) dayRotSlots.add(sl); }); }
+    }
+    for(const sched of nocCovering){
+      const rot = loadRotation(sched.BreakNurseName, nocDt, 'Noc');
+      if(rot){ nocHasRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) nocRotSlots.add(sl); }); }
+    }
+    // Only apply rotation filter if there are future rotation slots for this unit
+    const futureDayRot = [...dayRotSlots].filter(s => !isPast(s,'Day'));
+    const futureNocRot = [...nocRotSlots].filter(s => !isPast(s,'Noc'));
+    const useDayRotation = dayHasRotation && dayRotSlots.size > 0 && futureDayRot.length > 0;
+    const useNocRotation = nocHasRotation && nocRotSlots.size > 0 && futureNocRot.length > 0;
+
+    // Generate all slots from both shifts
+    const daySlots = generateSlots('Day').filter(s => getSlotTier(s,'Day') !== 'hardBlocked');
+    const nocSlots = generateSlots('Noc').filter(s => getSlotTier(s,'Noc') !== 'hardBlocked');
+
+    // Determine if shift crosses midnight (end time is AM = next day)
+    const crossesMidnight = endMin < 12*60;
+    // For midnight-crossing shifts, adjust all comparisons consistently:
+    // PM times stay as-is (e.g. 11:15 PM = 1395), AM times get +1440 (e.g. 3:35 AM = 1655)
+    // nowM also gets +1440 when current time is AM, so past PM slots are excluded
+    const nowMAdj = (crossesMidnight && nowM < 12*60) ? nowM + 1440 : nowM;
+    const endAdj  = crossesMidnight ? endMin + 1440 : endMin;
+    const allSlots = [
+      ...daySlots.map(s => {
+        const raw = toMin(s);
+        const sm = (crossesMidnight && raw < 12*60) ? raw + 1440 : raw;
+        return { time: s, shift: 'Day', sortM: sm };
+      }),
+      ...nocSlots.map(s => ({ time: s, shift: 'Noc', sortM: sortKey(s,'Noc') }))
+    ]
+    .filter(s => {
+      const m = s.sortM;
+      return m >= nowMAdj && m <= endAdj;
+    })
+    .filter(s => s.shift === 'Day' ? dayCovering.length > 0 : nocCovering.length > 0)
+    .filter(s => {
+      // Apply rotation filter — only show slots assigned to this unit
+      if(s.shift === 'Day') return !useDayRotation || dayRotSlots.has(s.time);
+      return !useNocRotation || nocRotSlots.has(s.time);
+    })
+    .sort((a,b) => a.sortM - b.sortM);
+
+    if(!allSlots.length){
+      meta.textContent = '';
+      list.innerHTML = '<div class="empty">No break slots available for the remainder of your shift.</div>';
+      loader.style.display = 'none';
+      return;
+    }
+
+    // Use booking results from batch query above
+    const allBookings = [...dayBookings, ...nocBookings];
+
+    // My bookings across both shifts
+    const nurseName = S.firstName && S.nurseExt ? `${S.firstName} (${S.nurseExt})` : null;
+    const myBookings = nurseName ? allBookings.filter(b => b.NurseName === nurseName && !b.IsBNBreak) : [];
+    const myTimes    = new Set(myBookings.map(b => b.SlotTime));
+    const canClaimMore = myBookings.length < MAX_SLOTS;
+
+    // Only show BN names for shifts that have slots in the filtered list
+    const hasDay = allSlots.some(s => s.shift === 'Day');
+    const hasNoc = allSlots.some(s => s.shift === 'Noc');
+    const activeDayBN = hasDay ? dayCovering.map(s => firstName(s.BreakNurseName)).join(', ') : '';
+    const activeNocBN = hasNoc ? nocCovering.map(s => firstName(s.BreakNurseName)).join(', ') : '';
+    const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
+    meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
+
+    list.innerHTML = allSlots.map(({time, shift: slotShift}) => {
+      const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && !b.IsBNBreak);
+      const isMine  = myTimes.has(time);
+      const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
+
+      if(isMine){
+        const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===nurseName && !b.IsBNBreak);
+        return `<div class="slot-row mine" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:2px solid var(--teal);margin-bottom:6px;background:var(--teal-lt)">
+          <div class="slot-time" style="font-weight:700;color:var(--teal-dk)">${fmt12(time)}</div>
+          <div class="slot-name filled">${nurseName}</div>
+          ${myBooking ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${myBooking.Id}','${time}','${escHTML(nurseName)}')">✕ Manage</button>` : ''}
+        </div>`;
+      }
+      if(booking){
+        return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg);opacity:.6">
+          <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
+          <div class="slot-name" style="color:var(--muted)">Taken</div>
+        </div>`;
+      }
+      if(!canClaimMore && !S.pendingClaims.has(time)){
+        return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
+          <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
+          <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${MAX_SLOTS} slots reached</div>
+        </div>`;
+      }
+      const pendingKey = `${time}|${slotShift}`;
+      const isPending = S.pendingClaims.has(pendingKey);
+
+      return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
+        <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
+        <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':'Available'}</div>
+        <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'✕ Deselect':'+  Select'}</button>
+      </div>`;
+    }).join('');
+
+    loader.style.display = 'none';
+  } catch(e){
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    loader.style.display = 'none';
+  }
+}
+
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null){
   const firstName = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
@@ -2514,18 +3522,35 @@ async function claimSlot(slotTime, silent=false){
   }
   document.getElementById('nameExtHint').style.display = 'none';
   const name = `${toTitleCase(firstName)} (${nurseExt})`;
-  const dt=shiftDate(S.shift);
+  let dt;
+  if(slotShiftOverride === 'Noc') dt = shiftDate('Noc');
+  else if(slotShiftOverride === 'Day') dt = today();
+  else dt = shiftDate(S.shift);
 
-  // Determine correct shift for this slot (overlap slots belong to opposite shift's BN)
-  const slotMin = toMin(slotTime);
-  const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
-  const isOverlapNoc = S.shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0;
-  const slotShift = (isOverlapDay || isOverlapNoc) ? (S.shift==='Day'?'Noc':'Day') : S.shift;
+  let slotShift;
+  if(slotShiftOverride){
+    slotShift = slotShiftOverride;
+  } else {
+    const slotMin = toMin(slotTime);
+    const isOverlapDay = S.shift==='Day' && slotMin >= 6*60+30 && slotMin < getDayOverlapMax();
+    const isOverlapNoc = S.shift==='Noc' && slotMin >= 18*60+30 && slotMin < 20*60+0;
+    slotShift = (isOverlapDay || isOverlapNoc) ? (S.shift==='Day'?'Noc':'Day') : S.shift;
+  }
 
   try{
-    // Float check — only on first slot of a submit batch (not silent) to avoid repeated modals
+    // Use pre-fetched data if available (from submitClaims batch), otherwise fetch once
+    let allBookingsToday = prefetchedBookings;
+    if(!allBookingsToday){
+      if(SIM_MODE){
+        allBookingsToday = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
+      } else {
+        const r = await spBatchGet([{sheet:LISTS.bookings, filter:`SlotDate eq '${dt}'`}]);
+        allBookingsToday = r[0];
+      }
+    }
+
+    // Float check — only on individual claims (not silent/batch)
     if(!silent){
-      const allBookingsToday = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
       const otherUnitBookings = allBookingsToday.filter(b => {
         if(b.IsBNBreak) return false;
         if(b.Unit === S.unit) return false;
@@ -2550,26 +3575,27 @@ async function claimSlot(slotTime, silent=false){
       }
     }
 
-    // Double-check total slots claimed
-    const mine=await spGet(LISTS.bookings,
-      `NurseName eq '${esc(name)}' and Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}'`);
-    const staffMine = mine.filter(b=>!b.IsBNBreak);
-    if(staffMine.length>=MAX_SLOTS){
-      if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`,true);
+    // Max check — from pre-fetched data
+    const staffMine = allBookingsToday.filter(b =>
+      b.NurseName === name && b.Unit === S.unit && b.ShiftType === slotShift && !b.IsBNBreak
+    );
+    if(staffMine.length >= MAX_SLOTS){
+      if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`, true);
       return `Max ${MAX_SLOTS} reached`;
     }
 
-    // Race condition check
-    const existing = await spGet(LISTS.bookings,
-      `Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}' and SlotTime eq '${slotTime}' and ShiftType eq '${slotShift}'`);
-    const taken = existing.find(b => !b.IsBNBreak);
+    // Race condition check — from pre-fetched data
+    const slotBookings = allBookingsToday.filter(b =>
+      b.Unit === S.unit && b.SlotTime === slotTime && b.ShiftType === slotShift
+    );
+    const taken = slotBookings.find(b => !b.IsBNBreak);
     if(taken){
       if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true); loadSlots(); }
       return `${fmt12(slotTime)} already taken`;
     }
 
-    // BN break conflict check
-    const bnBreakConflict = existing.find(b => b.IsBNBreak);
+    // BN break conflict check — from pre-fetched data
+    const bnBreakConflict = slotBookings.find(b => b.IsBNBreak);
     if(bnBreakConflict){
       if(!silent){ toast(`${fmt12(slotTime)} is blocked — break nurse is on break at this time.`, true); loadSlots(); }
       return `${fmt12(slotTime)} BN on break`;
@@ -2577,11 +3603,24 @@ async function claimSlot(slotTime, silent=false){
 
     await spPost(LISTS.bookings,{
       Title:`${S.unit}-${dt}-${slotTime}`,
-      NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift
+      NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
+      IsOtherShift: slotShiftOverride ? 1 : 0
     });
     if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(firstName)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
-  }catch(e){ if(!silent) toast(e.message,true); return e.message; }
+  }catch(e){
+    if(!silent){
+      const msg = e.message || '';
+      if(msg.startsWith('SLOT_TAKEN:')){
+        const who = msg.split(':')[1];
+        toast(`${fmt12(slotTime)} was just claimed by ${who}. Please choose another slot.`, true);
+        loadSlots();
+      } else {
+        toast(msg, true);
+      }
+    }
+    return e.message;
+  }
 }
 
 async function cancelSlot(id){
@@ -2591,6 +3630,101 @@ async function cancelSlot(id){
     loadSlots();
     if(document.getElementById('summList')) loadSummary();
   }catch(e){ toast(e.message,true); }
+}
+
+// ── Manage My Slot: Transfer or Cancel ──
+let _manageSlotData = null;
+
+function manageMySlot(bookingId, slotTime, nurseName){
+  _manageSlotData = { bookingId, slotTime, nurseName };
+  const modal = document.getElementById('manageSlotModal');
+  document.getElementById('manageSlotTitle').textContent = `Manage your ${fmt12(slotTime)} break`;
+  document.getElementById('manageSlotInfo').textContent = `${S.unit} · ${nurseName}`;
+  document.getElementById('manageTransferSection').style.display = 'none';
+  document.getElementById('manageTransferBtn').textContent = 'Transfer to another nurse';
+  document.getElementById('transferName').value = '';
+  document.getElementById('transferExt').value = '';
+  document.getElementById('transferErr').style.display = 'none';
+  modal.style.display = 'flex';
+}
+
+function closeManageModal(){
+  document.getElementById('manageSlotModal').style.display = 'none';
+  _manageSlotData = null;
+}
+
+async function manageSlotAction(action){
+  if(!_manageSlotData) return;
+  const { bookingId, slotTime, nurseName } = _manageSlotData;
+
+  if(action === 'transfer'){
+    const section = document.getElementById('manageTransferSection');
+    if(section.style.display === 'none'){
+      // First tap: show name/ext fields
+      section.style.display = 'block';
+      document.getElementById('manageTransferBtn').textContent = 'Confirm transfer';
+      document.getElementById('transferName').focus();
+      return;
+    }
+    // Second tap: validate and transfer
+    const newName = document.getElementById('transferName').value.trim();
+    const newExt = document.getElementById('transferExt').value.trim();
+    const errEl = document.getElementById('transferErr');
+    if(!newName || !/^\d{5}$/.test(newExt)){
+      errEl.textContent = 'Enter a first name and 5-digit extension.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const newNurseName = `${toTitleCase(newName)} (${newExt})`;
+    try {
+      // Update the booking to the new nurse
+      await spPatch(LISTS.bookings, bookingId, { NurseName: newNurseName });
+      // Store notification for BN
+      const dt = shiftDate(S.shift);
+      const key = `slotNotify_${dt}_${S.shift}`;
+      let notifications = [];
+      try { notifications = JSON.parse(localStorage.getItem(key) || '[]'); } catch{}
+      notifications.push({
+        type: 'transfer',
+        unit: S.unit,
+        slotTime,
+        fromNurse: nurseName,
+        toNurse: newNurseName,
+        ts: Date.now()
+      });
+      localStorage.setItem(key, JSON.stringify(notifications));
+      // Also persist to BNState for cross-device
+      setState(key, notifications);
+      closeManageModal();
+      toast(`✓ ${fmt12(slotTime)} transferred to ${toTitleCase(newName)}`);
+      loadSlots();
+      if(document.getElementById('summList')) loadSummary();
+    } catch(e){ toast(e.message, true); }
+  }
+
+  if(action === 'cancel'){
+    try {
+      // Store notification before deleting
+      const dt = shiftDate(S.shift);
+      const key = `slotNotify_${dt}_${S.shift}`;
+      let notifications = [];
+      try { notifications = JSON.parse(localStorage.getItem(key) || '[]'); } catch{}
+      notifications.push({
+        type: 'cancel',
+        unit: S.unit,
+        slotTime,
+        fromNurse: nurseName,
+        ts: Date.now()
+      });
+      localStorage.setItem(key, JSON.stringify(notifications));
+      setState(key, notifications);
+      await spDel(LISTS.bookings, bookingId);
+      closeManageModal();
+      toast(`✓ ${fmt12(slotTime)} cancelled and reopened.`);
+      loadSlots();
+      if(document.getElementById('summList')) loadSummary();
+    } catch(e){ toast(e.message, true); }
+  }
 }
 
 
@@ -2807,6 +3941,21 @@ function updateSelfAvailBtn(isInactive){
   }
 }
 
+function markCardUnavailableInDOM(bnName){
+  const allCards = document.querySelectorAll('.sched-card');
+  allCards.forEach(card => {
+    const hd = card.querySelector('.sched-card-hd');
+    if(hd && hd.textContent.includes(bnName) && !card.classList.contains('sched-inactive')){
+      card.classList.add('sched-inactive');
+      const badge = document.createElement('span');
+      badge.style.cssText = 'font-size:.7rem;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 6px;border-radius:4px;margin-left:6px';
+      badge.textContent = 'UNAVAILABLE';
+      const nameEl = hd.querySelector('strong');
+      if(nameEl) nameEl.after(badge);
+    }
+  });
+}
+
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
   try {
     // Get BN-A's units and mark record inactive
@@ -2837,7 +3986,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     if(!uncovered.length){
       toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
-      loadAssignments();
+      markCardUnavailableInDOM(bnName);
       return;
     }
 
@@ -2857,16 +4006,16 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // If cancel all chosen, skip redistribution entirely
     if(!redistribute){
       const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — please notify these nurses:\n\n${flagList}`);
-      loadAssignments();
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
+      markCardUnavailableInDOM(bnName);
       return;
     }
 
     if(!otherBNs.length){
       // No other BNs available — flag all
       const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify the affected nurses or their charge nurses.`);
-      loadAssignments();
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
+      markCardUnavailableInDOM(bnName);
       return;
     }
 
@@ -3040,13 +4189,14 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     if(absorbed.length) msg += `\n\n✓ ${absorbed.length} break${absorbed.length!==1?'s':''} redistributed.`;
     if(flaggedNurses.length){
       const flagList = flaggedNurses.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      msg += `\n\n⚠️ The following breaks could not be covered — please notify these nurses or their charge nurses:\n\n${flagList}`;
+      msg += `\n\n⚠️ The following breaks could not be covered — Please notify!\n\n${flagList}`;
       await showAlert(msg);
     } else {
       toast(msg.replace(/\n/g, ' '));
     }
 
-    loadAssignments();
+    // Update assignment display immediately, background refresh for full state
+    markCardUnavailableInDOM(bnName);
   } catch(e) { toast(e.message, true); }
 }
 
@@ -3058,57 +4208,8 @@ function fmt24(date){
 // ═══════════════════════════════════════════════════════
 // COVERAGE BANNER & BOOKING STATUS (Sign-Up Tab)
 // ═══════════════════════════════════════════════════════
-async function updateCoverageBanner(){
-  const banner = document.getElementById('coverageBanner');
-  const statusEl = document.getElementById('myBookingStatus');
-  if(!banner || !S.unit) return;
-
-  const dt = shiftDate(S.shift), shift = S.shift;
-  const scheds = await spGet(LISTS.schedule,
-    `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
-  const covering = scheds.filter(s => {
-    try { return JSON.parse(s.Units||'[]').includes(S.unit) && s.Status !== 'inactive'; } catch { return false; }
-  });
-
-  if(!covering.length){
-    banner.style.display = 'block';
-    banner.style.background = 'var(--red-lt)';
-    banner.style.borderColor = 'var(--red)';
-    banner.style.color = 'var(--red)';
-    banner.innerHTML = `⚠️ Break coverage for <strong>${S.unit}</strong> is currently unavailable.`;
-  } else {
-    const bnNames = [...new Set(covering.map(c => c.BreakNurseName.split(' ')[0]))].join(', ');
-    banner.style.display = 'block';
-    banner.style.background = 'var(--teal-lt)';
-    banner.style.borderColor = 'var(--teal)';
-    banner.style.color = 'var(--teal-dk)';
-    banner.innerHTML = `✓ Break coverage for <strong>${S.unit}</strong> is scheduled. Enter your name and extension to check your booking status.`;
-  }
-
-  // Show booking status if name+ext entered
-  const firstName = document.getElementById('nurseName').value.trim();
-  const ext = document.getElementById('nurseExt').value.trim();
-  if(firstName && /^[0-9]{5}$/.test(ext)){
-    const nurseName = `${firstName} (${ext})`;
-    const bookings = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(nurseName)}' and Unit eq '${esc(S.unit)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
-    const staffBookings = bookings.filter(b => !b.IsBNBreak);
-    if(staffBookings.length){
-      const statusLines = staffBookings.map(b => {
-        const status = isConfirmed(b) ? '✓ Confirmed'
-          : isNotTaken(b) ? '✗ Not taken'
-          : '⏳ Claimed';
-        return `${fmt12(b.SlotTime)} — ${status}`;
-      }).join('<br>');
-      statusEl.style.display = 'block';
-      statusEl.innerHTML = `<strong>Your break status for ${S.unit}:</strong><br>${statusLines}`;
-    } else {
-      statusEl.style.display = 'none';
-    }
-  } else {
-    statusEl.style.display = 'none';
-  }
-}
+// Banner is now updated by loadSlots/loadOtherSlots — no separate function needed
+async function updateCoverageBanner(){ /* no-op — handled by loadSlots */ }
 
 function onNameInput(){
   // Clear ext whenever name is edited so duplicate check doesn't fire on stale ext
@@ -3120,7 +4221,6 @@ function onNameInput(){
 function onNameExtInput(){
   if(S.unit) {
     loadSlots(true);
-    updateCoverageBanner();
   }
 }
 
@@ -3176,6 +4276,18 @@ function toggleExtractedRows(){
   wrap.style.display = open ? 'none' : 'block';
   if(chev) chev.textContent = open ? '▲' : '▼';
 }
+function collapseExtractedRows(){
+  const wrap = document.getElementById('importRowsWrap');
+  const chev = document.getElementById('extractedChevron');
+  if(wrap) wrap.style.display = 'none';
+  if(chev) chev.textContent = '▲';
+}
+function expandExtractedRows(){
+  const wrap = document.getElementById('importRowsWrap');
+  const chev = document.getElementById('extractedChevron');
+  if(wrap) wrap.style.display = 'block';
+  if(chev) chev.textContent = '▼';
+}
 
 function editSavedRow(i){
   // Re-enable unit buttons for this row
@@ -3227,13 +4339,9 @@ async function loadSummary(){
       if(unit==='C_PAIR') filter+=` and (Unit eq '3C' or Unit eq '4C')`;
       else filter+=` and Unit eq '${esc(unit)}'`;
     }
-    const bookings=await spGet(LISTS.bookings,filter);
-
-    // Also fetch overlap bookings from opposite shift
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
     const overlapMin = shift === 'Day' ? 6*60+30 : 18*60+30;
     const overlapMax = shift === 'Day' ? getDayOverlapMax() : 20*60+0;
-    // For Day shift morning overlap, Noc BN started previous day
     const oppDt = shift === 'Day'
       ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
       : dt;
@@ -3242,18 +4350,31 @@ async function loadSummary(){
       if(unit==='C_PAIR') oppFilter+=` and (Unit eq '3C' or Unit eq '4C')`;
       else oppFilter += ` and Unit eq '${esc(unit)}'`;
     }
+    // ── SINGLE ROUND TRIP: batch all queries ──
+    const queries = [
+      {sheet:LISTS.bookings, filter},
+      {sheet:LISTS.bookings, filter:oppFilter},
+      {sheet:LISTS.schedule, filter:`ShiftDate eq '${dt}' and ShiftType eq '${shift}'`},
+      {sheet:LISTS.schedule, filter:`ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`}
+    ];
+    let results;
+    if(SIM_MODE){
+      results = await Promise.all(queries.map(q => spGet(q.sheet, q.filter)));
+    } else {
+      // Sequential spGet — concurrent requests to Apps Script interfere
+      results = [];
+      for(const q of queries) results.push(await spGet(q.sheet, q.filter));
+    }
+    const [bookings, oppBookings, scheds, oppScheds] = results;
 
-    // Run all queries in parallel for speed
-    const [oppBookings, scheds, oppScheds] = await Promise.all([
-      spGet(LISTS.bookings, oppFilter),
-      spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`),
-      spGet(LISTS.schedule, `ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`)
-    ]);
-
-    const overlapBookings = oppBookings.filter(b => {
+    // For Noc shift view: evening overlap bookings are stored as ShiftType='Noc'
+    // so they're already in the main bookings query — no oppBookings needed for Noc
+    // For Day shift view: morning overlap bookings are stored as ShiftType='Noc' (previous day)
+    // so we DO need oppBookings for Day view
+    const overlapBookings = shift === 'Day' ? oppBookings.filter(b => {
       const m = toMin(b.SlotTime);
       return m >= overlapMin && m < overlapMax;
-    });
+    }) : [];
     const allBookings = [...bookings, ...overlapBookings];
 
     // Build separate BN maps — main shift and opp shift (for overlap attribution)
@@ -3339,7 +4460,7 @@ async function loadSummary(){
       html+=`<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
         <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
         <div class="summ-unit">${b.Unit}</div>
-        <div class="summ-nurse">${b.NurseName}</div>
+        <div class="summ-nurse">${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}</div>
         <div class="summ-bn">${bnUnavailable
           ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
           : (bn ? bn + (bnExt ? ` · ${bnExt}` : '') : '')
@@ -3369,20 +4490,24 @@ async function loadSummary(){
 // SCHEDULE TAB
 // ═══════════════════════════════════════════════════════
 function unlock(){
-  if(document.getElementById('pwInput').value===S.pw){
-    S.adminOk=true;
-    document.getElementById('adminGate').style.display='none';
-    document.getElementById('adminPanel').style.display='block';
-    loadAdminData();
-    showApiKeyStatus();
-    renderImportedNamesList();
-    populateNurseDropdown();
-    renderImportedEntriesSummary();
-    if (SIM_MODE) document.getElementById('simControls').style.display = 'block'; // will filter by today's date + current shift
-  } else {
+  const pw = document.getElementById('pwInput').value;
+  validatePortalPassword(pw).then(level => {
+    if(level === 'admin'){
+      S.adminOk=true;
+      document.getElementById('adminGate').style.display='none';
+      document.getElementById('adminPanel').style.display='block';
+      loadAdminData();
+      renderImportedNamesList();
+      populateNurseDropdown();
+      renderImportedEntriesSummary();
+    } else {
+      document.getElementById('pwErr').style.display='block';
+      document.getElementById('pwInput').value='';
+    }
+  }).catch(() => {
     document.getElementById('pwErr').style.display='block';
     document.getElementById('pwInput').value='';
-  }
+  });
 }
 
 function loadAdminData(){ loadAssignments(); }
@@ -3436,13 +4561,15 @@ async function saveAssign(){
     S.editingAssignId = null;
     document.getElementById('aNurseText').value = '';
     document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
-    // Auto-apply BN default template and calculate rotation
+    // Auto-apply BN default template and calculate rotation — await so slots load after rotation is ready
     const bnDef = getDefaultTemplate(nurse, shift);
-    if(bnDef && bnDef.length > 0){
-      applyDefaultToShift(nurse, dt, shift, bnDef).catch(e => toast('Rotation error: ' + e.message, true));
-    } else {
-      recalculateRotation(nurse, dt, shift).catch(e => toast('Rotation error: ' + e.message, true));
-    }
+    try {
+      if(bnDef && bnDef.length > 0){
+        await applyDefaultToShift(nurse, dt, shift, bnDef);
+      } else {
+        await recalculateRotation(nurse, dt, shift);
+      }
+    } catch(e){ toast('Rotation error: ' + e.message, true); }
     loadAssignments();
   }catch(e){ toast(e.message,true); }
 }
@@ -3457,6 +4584,8 @@ function setViewRange(range, btn){
 }
 
 async function loadAssignments(){
+  clearSchedCache();
+  clearCoverageCountsCache();
   const el = document.getElementById('assignList');
   el.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   const t = today();
@@ -3475,7 +4604,10 @@ async function loadAssignments(){
 
   try{
     const scheds = await spGet(LISTS.schedule, filter);
-    if(!scheds.length){ el.innerHTML='<div class="empty">No assignments found.</div>'; return; }
+    if(!scheds.length){
+      el.innerHTML='<div class="empty">No assignments found.</div>';
+      return;
+    }
 
     scheds.sort((a,b) =>
       a.ShiftDate.localeCompare(b.ShiftDate) ||
@@ -3496,7 +4628,7 @@ async function loadAssignments(){
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
         ${items.map(s => {
           let units=[]; try{ units=[...new Set(JSON.parse(s.Units||'[]'))]; }catch{}
-          const icon=s.ShiftType==='Day'?'☀️':'🌙';
+          const icon=shiftIcon(s.ShiftType, 14, s.ShiftDate);
           const isInactive = s.Status === 'inactive';
           const statusBadge = isInactive
             ? `<span style="font-size:.7rem;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 6px;border-radius:4px;margin-left:6px">UNAVAILABLE</span>`
@@ -3523,7 +4655,7 @@ async function loadAssignments(){
       </div>`;
     }).join('');
   }catch(e){
-    el.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}<br><br>
+    el.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(e.message)}<br><br>
       <button class="btn btn-ghost btn-sm" onclick="loadAssignments()">↺ Try again</button></div>`;
   }
 }
@@ -3583,7 +4715,7 @@ async function delAssign(id){
       : '\n\nNo other BNs are available on the same wing — all breaks will be cancelled.';
 
     const proceed = await customConfirm(
-      `Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment?\n\nThe following staff have breaks booked:\n${affectedLines}${wingMsg}\n\nPlease notify affected staff nurses.`,
+      `Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment?\n\nThe following staff have breaks booked:\n${affectedLines}${wingMsg}\n\nPlease notify!`,
       'Proceed & reassign',
       'Keep assignment'
     );
@@ -3607,7 +4739,7 @@ async function delAssign(id){
       // Keep supplementals — they represent real reassignments, just remove the CoveredFrom link
       await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
     }
-    toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify affected staff.`);
+    toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify!`);
     loadAssignments();
   } catch(e){ toast(e.message, true); }
 }
@@ -3781,18 +4913,39 @@ async function recalculateAllRotations(){
   if(!active.length){ toast('No upcoming assignments found', true); return; }
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
-  let done = 0, failed = 0;
+
+  // Compute all rotations client-side, then batch-save to BNState in one call
+  const rotationEntries = [];
+  let failed = 0;
 
   for(const s of active){
     try {
-      await recalculateRotation(s.BreakNurseName, s.ShiftDate, s.ShiftType);
-      done++;
+      const rawUnits = [];
+      try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
+      if(!rawUnits.length) continue;
+      const units = expandCPair(rawUnits, s.ShiftDate, s.ShiftType);
+      const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
+      const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
+      const key = `bnRotation_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`;
+      localStorage.setItem(key, JSON.stringify(rotation));
+      rotationEntries.push({ key, value: rotation });
     } catch(e) {
       console.warn(`Rotation failed for ${s.BreakNurseName} ${s.ShiftDate}:`, e.message);
       failed++;
     }
   }
 
+  // Single batch call to save all rotations
+  if(rotationEntries.length){
+    try {
+      await spBatchSetState(rotationEntries);
+    } catch(e) {
+      toast(`Rotations computed locally but remote save failed: ${e.message}`, true);
+      return;
+    }
+  }
+
+  const done = rotationEntries.length;
   if(failed > 0) toast(`↺ ${done} recalculated · ${failed} failed`, true);
   else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated`);
 }
@@ -3900,32 +5053,50 @@ function exportSimData(){
 }
 
 async function clearSimData(){
-  if(!await customConfirm('Clear ALL simulation data? This cannot be undone.','Clear All','Cancel')) return;
-  DB.BNSchedule = []; DB.BNBookings = []; DB.BNState = [];
-  localStorage.removeItem('sim_BNSchedule');
-  localStorage.removeItem('sim_BNBookings');
-  localStorage.removeItem('sim_BNState');
-  localStorage.removeItem('sim_idCounter');
-  _simIdCounter = 1000;
-  // Clear all migrated state keys from localStorage
+  if(!await customConfirm('Clear ALL data (assignments, bookings, state)? This cannot be undone.','Clear All','Cancel')) return;
+  // Clear localStorage state keys
   Object.keys(localStorage).filter(k =>
     k.startsWith('bnNurseHistory_') || k.startsWith('bnWingHistory_') ||
     k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
     k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
-    k === 'bnImportedEntries' || k === 'bnImportedNames' || k === 'unit3CDefault'
+    k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
+    k.startsWith('bnBreakCancelled_') ||
+    k === 'bnImportedEntries' || k === 'bnImportedNames' || k === 'unit3CDefault' ||
+    k === 'bnLastImportBatch'
   ).forEach(k => localStorage.removeItem(k));
-  // Also clear BNState entries in backend
-  try {
-    const stateItems = await spGet(LISTS.state, '');
-    for(const item of stateItems) await spDel(LISTS.state, item.Id);
-  } catch(e){ /* non-critical */ }
-  // Reset in-memory state
+  if(SIM_MODE){
+    DB.BNSchedule = []; DB.BNBookings = []; DB.BNState = [];
+    localStorage.removeItem('sim_BNSchedule');
+    localStorage.removeItem('sim_BNBookings');
+    localStorage.removeItem('sim_BNState');
+    localStorage.removeItem('sim_idCounter');
+    _simIdCounter = 1000;
+  } else {
+    // Clear all rows from each sheet using server-side clearSheet (removes ALL rows including no-Id rows)
+    try {
+      await gasCall({action:'clearSheet', sheet:LISTS.schedule});
+      await gasCall({action:'clearSheet', sheet:LISTS.bookings});
+      await gasCall({action:'clearSheet', sheet:LISTS.state});
+    } catch(e){ toast('Some sheets could not be cleared: ' + e.message, true); }
+  }
+  // Clear in-memory assignment display immediately
+  const assignListEl = document.getElementById('assignList');
+  if(assignListEl) assignListEl.innerHTML = '<div class="empty">No assignments found.</div>';
+  clearSchedCache();
   importEntries = [];
   importedNames = [];
+  // Clear import suggestions
+  localStorage.removeItem('bnLastImportBatch');
+  _currentImportEntries = [];
+  window._lastEntriesToProcess = [];
+  const restoreBanner = document.getElementById('importRestoreBanner');
+  if(restoreBanner) restoreBanner.style.display = 'none';
+  const importResults = document.getElementById('importResults');
+  if(importResults) importResults.style.display = 'none';
   populateBNDropdown();
   renderImportedEntriesSummary();
   renderImportedNamesList();
-  toast('Simulation data cleared.');
+  toast('All data cleared.');
   loadAssignments();
 }
 
@@ -3936,10 +5107,19 @@ function changePw(){
   if(!p1||p1!==p2){
     msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
   }
-  S.pw=p1; localStorage.setItem('bnPw',p1);
+  setState('portalPw_admin', p1);
   document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
   msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Password updated ✓';
   setTimeout(()=>msg.style.display='none',3000);
+}
+
+function togglePwCard(){
+  const body = document.getElementById('pwCardBody');
+  const chev = document.getElementById('pwCardChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chev) chev.textContent = open ? '▼' : '▲';
 }
 
 function changeBNPw(){
@@ -3949,7 +5129,7 @@ function changeBNPw(){
   if(!p1||p1!==p2){
     msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
   }
-  localStorage.setItem('bnBreakPw',p1);
+  setState('portalPw_bn', p1);
   document.getElementById('bnpw1').value=''; document.getElementById('bnpw2').value='';
   msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Break nurse password updated ✓';
   setTimeout(()=>msg.style.display='none',3000);
@@ -3976,23 +5156,23 @@ function toTitleCase(str){
 // Output: "First (12345) on 7N" or "First on 7N" if no ext
 function formatNurseUnit(nurseName, unit){
   const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
-  const name = m ? m[1].trim() : (nurseName||'');
+  const name = m ? escHTML(m[1].trim()) : escHTML(nurseName||'');
   const ext  = m ? m[2] : '';
-  return ext ? `${name} (${ext}) on ${unit}` : `${name} on ${unit}`;
+  return ext ? `${name} ${ext} on ${escHTML(unit)}` : `${name} on ${escHTML(unit)}`;
 }
 
 // Format just name+ext without unit
 function formatNurse(nurseName){
   const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
-  const name = m ? m[1].trim() : (nurseName||'');
+  const name = m ? escHTML(m[1].trim()) : escHTML(nurseName||'');
   const ext  = m ? m[2] : '';
-  return ext ? `${name} (${ext})` : name;
+  return ext ? `${name} ${ext}` : name;
 }
 
 function customConfirm(msg, okLabel, cancelLabel){
   return new Promise(resolve => {
     const modal = document.getElementById('customConfirmModal');
-    document.getElementById('customConfirmMsg').textContent = msg;
+    document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
     document.getElementById('customConfirmOk').textContent = okLabel;
     document.getElementById('customConfirmCancel').textContent = cancelLabel;
     modal.style.display = 'flex';
@@ -4023,7 +5203,7 @@ function showRestoreModal(cancelled){
       if(!seenNurse[b.NurseName]){
         seenNurse[b.NurseName] = groups.length;
         const m = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-        groups.push({ name: m ? m[1].trim() : b.NurseName, ext: m ? m[2] : '', unit: b.Unit, slots: [] });
+        groups.push({ name: m ? m[1].trim() : b.NurseName, ext: m ? m[2] : '', unit: b.Unit === 'C_PAIR' ? '3C/4C' : b.Unit, slots: [] });
       }
       groups[seenNurse[b.NurseName]].slots.push({ b, i });
     });
@@ -4074,10 +5254,31 @@ function restoreModalConfirm(doRestore){
 }
 
 // One-way alert using custom modal (no "This page says" header)
+function formatModalMsg(msg){
+  // Convert newlines and bullet points to clean HTML
+  const lines = msg.split('\n').filter(l => l.trim());
+  const hasBullets = lines.some(l => l.trim().startsWith('•'));
+  if(!hasBullets) return lines.map(l => `<p style="margin-bottom:6px">${l}</p>`).join('');
+  let html = '';
+  let inList = false;
+  lines.forEach(l => {
+    const trimmed = l.trim();
+    if(trimmed.startsWith('•')){
+      if(!inList){ html += '<ul style="margin:8px 0;padding-left:18px;list-style:none">'; inList=true; }
+      html += `<li style="margin-bottom:5px;padding-left:4px">${trimmed.slice(1).trim()}</li>`;
+    } else {
+      if(inList){ html += '</ul>'; inList=false; }
+      html += `<p style="margin-bottom:6px">${trimmed}</p>`;
+    }
+  });
+  if(inList) html += '</ul>';
+  return html;
+}
+
 function showAlert(msg){
   return new Promise(resolve => {
     const modal = document.getElementById('customConfirmModal');
-    document.getElementById('customConfirmMsg').textContent = msg;
+    document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
     document.getElementById('customConfirmOk').textContent = 'OK';
     document.getElementById('customConfirmCancel').style.display = 'none';
     modal.style.display = 'flex';
@@ -4093,7 +5294,7 @@ function showAlert(msg){
 
 function toast(msg,err=false){
   const t=document.getElementById('toast');
-  t.textContent=msg; t.className='toast'+(err?' err':'');
+  t.textContent=(err?'⚠ ':'')+msg; t.className='toast'+(err?' err':'');
   t.classList.add('show');
   clearTimeout(_toastT);
   _toastT=setTimeout(()=>t.classList.remove('show'),6400);
@@ -4126,6 +5327,7 @@ function loadImportFile(file){
     document.getElementById('importPreview').style.display = 'block';
     document.getElementById('importResults').style.display = 'none';
     document.getElementById('importRows').innerHTML = '';
+    updateAcceptBars();
   };
   reader.readAsDataURL(file);
 }
@@ -4143,7 +5345,8 @@ async function runImport(){
     const go = await customConfirm(
       `You have ${unsavedCount} unsaved assignment${unsavedCount!==1?'s':''} from the previous import.\n\n` +
       `Import anyway and lose these selections?\n\n` +
-      `Click Cancel to go back and save them first.`
+      `Click Cancel to go back and save them first.`,
+      'Import Anyway', 'Cancel'
     );
     if (!go) return;
   }
@@ -4163,12 +5366,13 @@ async function runImport(){
       body: new URLSearchParams({
         action: 'extractSchedule',
         imageData: importImageB64,
-        mediaType: importImageType
+        mediaType: importImageType,
+        token: REQUEST_TOKEN
       }).toString()
     });
 
     const responseText = await response.text();
-    console.log('Raw Apps Script response:', responseText.slice(0, 200));
+
     let data;
     try { data = JSON.parse(responseText); }
     catch(e) {
@@ -4186,7 +5390,7 @@ async function runImport(){
 
     // Proxy returns { result: "raw json string" }
     const raw = data.result || (data.content || []).map(c => c.text || '').join('');
-    console.log('AI raw response:', raw);
+
 
     if (!raw.trim()) {
       toast('AI returned an empty response. Check your API key and try again.', true);
@@ -4209,6 +5413,7 @@ async function runImport(){
         '<br>Try uploading a screenshot that shows only the schedule grid with names and dates visible.' +
         '</div>';
       document.getElementById('importResults').style.display = 'block';
+    updateAcceptBars();
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
@@ -4280,6 +5485,15 @@ function clearLastBatch(){
 }
 
 // Called on admin load — check if there's a restorable batch
+function updateAcceptBars(){
+  const rows = document.getElementById('importRows');
+  const show = rows && rows.children.length > 0;
+  const top = document.getElementById('acceptBarTop');
+  const bot = document.getElementById('acceptBarBottom');
+  if(top) top.style.display = show ? 'flex' : 'none';
+  if(bot) bot.style.display = show ? 'flex' : 'none';
+}
+
 function checkForRestorableSuggestions(){
   const batch = loadLastBatch();
   const banner = document.getElementById('importRestoreBanner');
@@ -4293,6 +5507,7 @@ function checkForRestorableSuggestions(){
     msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
     banner.style.display = 'flex';
     document.getElementById('importResults').style.display = 'block';
+    updateAcceptBars();
   } else {
     banner.style.display = 'none';
   }
@@ -4304,6 +5519,7 @@ async function restoreLastImport(){
     toast('No previous import to restore', true);
     return;
   }
+  clearCoverageCountsCache(); // fresh fetch, then cache for duration
   const banner = document.getElementById('importRestoreBanner');
   if(banner) banner.style.display = 'none';
 
@@ -4354,8 +5570,8 @@ async function restoreLastImport(){
         <span style="font-weight:600;font-size:.9rem">${e.name}</span>
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
         <div style="display:flex;gap:5px;margin-left:auto">
-          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Day')">☀️ Day</div>
-          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Noc')">🌙 Noc</div>
+          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
+          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -4376,7 +5592,9 @@ async function restoreLastImport(){
   }).join('');
 
   document.getElementById('importResults').style.display = 'block';
+    updateAcceptBars();
   toast(`↺ Restored ${batch.length} suggestion${batch.length!==1?'s':''}`);
+    expandExtractedRows();
 
   // Apply on classes
   for(let i = 0; i < batch.length; i++){
@@ -4439,6 +5657,7 @@ async function renderImportRows(entries, forceReplace = false){
   if (!entries.length) {
     wrap.innerHTML = '<div class="empty">No schedule entries found. Try a clearer screenshot.</div>';
     document.getElementById('importResults').style.display = 'block';
+    updateAcceptBars();
     return;
   }
 
@@ -4449,6 +5668,15 @@ async function renderImportRows(entries, forceReplace = false){
     if(!byDateShift[key]) byDateShift[key] = [];
     if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
   });
+
+  // Pre-warm coverage count caches for all shifts present — avoids 1 API call per date
+  const shiftsNeeded = [...new Set(entriesToProcess.map(e => e.shift))];
+  // Show progress indicator while computing suggestions
+  const _importWrap = document.getElementById('importRows');
+  if(_importWrap) _importWrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted)">⏳ Computing suggestions for ${entriesToProcess.length} entries…</div>`;
+  document.getElementById('importResults').style.display = 'block';
+  expandExtractedRows();
+  await Promise.allSettled(shiftsNeeded.map(sh => getUnitCoverageCounts(sh)));
 
   const allSuggestions = {};
   // Process dates in chronological order so wing history and counts accumulate correctly
@@ -4493,10 +5721,10 @@ async function renderImportRows(entries, forceReplace = false){
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
             style="padding:3px 10px;font-size:.75rem;cursor:pointer"
-            onclick="setImportShift(${i},'Day')">☀️ Day</div>
+            onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
           <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}"
             style="padding:3px 10px;font-size:.75rem;cursor:pointer"
-            onclick="setImportShift(${i},'Noc')">🌙 Noc</div>
+            onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
         </div>
       </div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -4519,6 +5747,8 @@ async function renderImportRows(entries, forceReplace = false){
   }).join('');
 
   document.getElementById('importResults').style.display = 'block';
+    updateAcceptBars();
+    expandExtractedRows();
   // Show replacement notice if applicable
   const noticeEl = document.getElementById('importReplacementNotice');
   if(noticeEl){
@@ -4698,73 +5928,187 @@ async function clearAllImportSels(){
   toast('All unit selections cleared.');
 }
 
-// Accept all & save — saves every row that has units selected
-async function acceptAllAndSave(){
-  const btn = document.getElementById('acceptAllBtn');
-  const status = document.getElementById('acceptAllStatus');
-  btn.disabled = true;
-  btn.textContent = '⏳ Saving...';
+async function resuggestAll(){
+  const batch = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  if(!batch.length){ toast('No entries to re-suggest.', true); return; }
 
-  let saved = 0, skipped = 0, failed = 0;
-  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
-  const total = entriesToProcess.length;
+  clearCoverageCountsCache();
+  Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
 
-  for(let i = 0; i < total; i++){
-    const rawUnits = importUnitSel[i] || [];
-    if(!rawUnits.length){ skipped++; continue; }
-    const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
+  const byDateShift = {};
+  batch.forEach(e => {
+    const key = `${e.date}|${e.shift}`;
+    if(!byDateShift[key]) byDateShift[key] = [];
+    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+  });
 
-    const savedEl = document.getElementById(`saved-${i}`);
-    if(savedEl && savedEl.style.display !== 'none'){ skipped++; continue; }
-
-    try {
-      const entry = entriesToProcess[i];
-      const { name, date, shift } = entry;
-      const existing = await spGet(LISTS.schedule,
-        `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
-
-      if(existing.length > 0){
-        await spPatch(LISTS.schedule, existing[0].Id, {
-          Units: JSON.stringify(units), Title: `${name}-${date}-${shift}`
-        });
-        for(let j = 1; j < existing.length; j++) await spDel(LISTS.schedule, existing[j].Id);
-      } else {
-        await spPost(LISTS.schedule, {
-          Title: `${name}-${date}-${shift}`,
-          BreakNurseName: name, ShiftDate: date, ShiftType: shift,
-          Units: JSON.stringify(units)
-        });
-      }
-
-      const saveBtn = document.getElementById(`savebtn-${i}`);
-      if(saveBtn){ saveBtn.disabled = true; saveBtn.style.opacity = '.5'; }
-      if(savedEl) savedEl.style.display = 'inline';
-      const editBtn2 = document.getElementById(`editbtn-${i}`);
-      if(editBtn2) editBtn2.style.display = 'inline-flex';
-      const unitGrid2 = document.getElementById(`unitgrid-${i}`);
-      if(unitGrid2) unitGrid2.querySelectorAll('.uc').forEach(el => {
-        el.style.pointerEvents = 'none'; el.style.opacity = '.65';
+  const allSuggestions = {};
+  const batchCountOverlay = {};
+  const sortedKeys = Object.keys(byDateShift).sort();
+  for(const key of sortedKeys){
+    const nurses = byDateShift[key];
+    const [date, shift] = key.split('|');
+    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+    for(const [name, slots] of Object.entries(suggestions)){
+      allSuggestions[`${name}|${date}|${shift}`] = slots;
+      slots.forEach(slot => {
+        batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
-      // Auto-calculate rotation for this assignment
-      recalculateRotation(name, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
-      saved++;
-    } catch(e) {
-      failed++;
     }
   }
 
-  btn.disabled = false;
-  btn.textContent = '✅ Accept All & Save';
+  for(let i = 0; i < batch.length; i++){
+    const e = batch[i];
+    importUnitSel[i] = allSuggestions[`${e.name}|${e.date}|${e.shift}`] || [];
+    // Update DOM
+    UNITS.forEach(u => {
+      const el = document.getElementById(`iu-${i}-${u}`);
+      if(el){
+        if(importUnitSel[i].includes(u)) el.classList.add('on');
+        else el.classList.remove('on');
+      }
+    });
+    // Update count label
+    const countEl = document.getElementById(`suggest-count-${i}`);
+    if(countEl){
+      const uPerN = unitsPerNurse(e.shift, batch.filter(x => x.date===e.date && x.shift===e.shift).length);
+      countEl.textContent = `✨ ${suggestedSlotCount(importUnitSel[i])} suggested · target ${uPerN}`;
+    }
+    // Re-enable save button if it was disabled
+    const savedEl = document.getElementById(`saved-${i}`);
+    const saveBtn = document.getElementById(`savebtn-${i}`);
+    const editBtn = document.getElementById(`editbtn-${i}`);
+    const unitGrid = document.getElementById(`unitgrid-${i}`);
+    if(savedEl) savedEl.style.display = 'none';
+    if(saveBtn){ saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
+    if(editBtn) editBtn.style.display = 'none';
+    if(unitGrid) unitGrid.querySelectorAll('.uc').forEach(el => {
+      el.style.pointerEvents = ''; el.style.opacity = '';
+    });
+  }
 
-  const msg = `✓ ${saved} saved${skipped > 0 ? ` · ${skipped} skipped (no units or already saved)` : ''}${failed > 0 ? ` · ${failed} failed` : ''}`;
-  status.textContent = msg;
+  toast(`↺ Re-suggested ${batch.length} assignments`);
+}
+
+// Accept all & save — saves every row that has units selected
+async function acceptAllAndSave(){
+  const btns = document.querySelectorAll('.accept-all-btn');
+  const status = document.getElementById('acceptAllStatus');
+  btns.forEach(b => { b.disabled = true; b.textContent = '⏳ Saving...'; });
+  status.textContent = 'Preparing batch...';
   status.style.display = 'block';
-  if(saved > 0){
-    toast(msg);
-    loadAssignments();
-    renderImportedEntriesSummary();
-    if(failed === 0) clearLastBatch(); // all saved successfully — no need to restore
-    checkForRestorableSuggestions();
+
+  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const records = [];
+  const indices = [];
+
+  for(let i = 0; i < entriesToProcess.length; i++){
+    const rawUnits = importUnitSel[i] || [];
+    if(!rawUnits.length) continue;
+    const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
+    const { name, date, shift } = entriesToProcess[i];
+    records.push({
+      matchFields: { BreakNurseName: name, ShiftDate: date, ShiftType: shift },
+      data: { Title: `${name}-${date}-${shift}`, BreakNurseName: name, ShiftDate: date, ShiftType: shift, Units: JSON.stringify(units) }
+    });
+    indices.push(i);
+  }
+
+  const skipped = entriesToProcess.length - indices.length;
+  if(!records.length){
+    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    status.textContent = `Nothing to save (${skipped} skipped)`;
+    return;
+  }
+
+  try {
+    status.textContent = `Saving ${records.length} assignments in one batch...`;
+    await spBatchUpsert(LISTS.schedule, records);
+
+    // Update UI for all saved entries
+    indices.forEach(i => {
+      const savedEl = document.getElementById(`saved-${i}`);
+      const saveBtn = document.getElementById(`savebtn-${i}`);
+      const editBtn2 = document.getElementById(`editbtn-${i}`);
+      const unitGrid2 = document.getElementById(`unitgrid-${i}`);
+      if(saveBtn){ saveBtn.disabled = true; saveBtn.style.opacity = '.5'; }
+      if(savedEl) savedEl.style.display = 'inline';
+      if(editBtn2) editBtn2.style.display = 'inline-flex';
+      if(unitGrid2) unitGrid2.querySelectorAll('.uc').forEach(el => {
+        el.style.pointerEvents = 'none'; el.style.opacity = '.65';
+      });
+    });
+
+    // Recalculate all rotations in one batch
+    status.textContent = 'Recalculating rotations...';
+    const rotationEntries = [];
+    for(const i of indices){
+      const { name, date, shift } = entriesToProcess[i];
+      const rawUnits = importUnitSel[i] || [];
+      const units = expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift);
+      if(!units.length) continue;
+      const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
+      const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
+      const key = `bnRotation_${name}_${date}_${shift}`;
+      localStorage.setItem(key, JSON.stringify(rotation));
+      rotationEntries.push({ key, value: rotation });
+    }
+    if(rotationEntries.length) await spBatchSetState(rotationEntries);
+
+    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+    collapseExtractedRows();
+
+    // Build assignment list immediately from saved data (no Sheets delay)
+    const savedScheds = records.map((r, idx) => ({
+      Id: 'pending_' + idx,
+      BreakNurseName: r.data.BreakNurseName,
+      ShiftDate: r.data.ShiftDate,
+      ShiftType: r.data.ShiftType,
+      Units: r.data.Units,
+      Status: 'active'
+    }));
+    // Filter to upcoming only
+    const t = today();
+    const upcoming = savedScheds.filter(s => s.ShiftDate >= shiftDate(detectShift()));
+    if(upcoming.length){
+      upcoming.sort((a,b) =>
+        a.ShiftDate.localeCompare(b.ShiftDate) ||
+        a.ShiftType.localeCompare(b.ShiftType) ||
+        a.BreakNurseName.localeCompare(b.BreakNurseName)
+      );
+      const byDate = {};
+      upcoming.forEach(s => { if(!byDate[s.ShiftDate]) byDate[s.ShiftDate]=[]; byDate[s.ShiftDate].push(s); });
+      const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+      const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+      const el = document.getElementById('assignList');
+      el.innerHTML = Object.entries(byDate).map(([date, items]) => {
+        const d = new Date(date + 'T12:00:00');
+        const label = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+        return `<div style="margin-bottom:14px">
+          <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
+          ${items.map(s => {
+            let units=[]; try{ units=[...new Set(JSON.parse(s.Units||'[]'))]; }catch{}
+            const icon=shiftIcon(s.ShiftType, 14, s.ShiftDate);
+            return `<div class="sched-card">
+              <div class="sched-card-hd">
+                <span><strong>${escHTML(s.BreakNurseName)}</strong>&nbsp;
+                  <span style="color:var(--muted);font-size:.85rem;display:inline-flex;align-items:center;gap:3px">${icon} ${s.ShiftType}</span>
+                </span>
+              </div>
+              <div style="display:flex;gap:5px;flex-wrap:wrap;margin-top:6px">
+                ${units.map(u => `<span class="unit-tag">${u}</span>`).join('')}
+              </div>
+            </div>`;
+          }).join('')}
+        </div>`;
+      }).join('');
+      el.dataset.schedCount = upcoming.length;
+    }
+  } catch(e) {
+    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    status.textContent = `⚠ Batch failed: ${e.message}. Try saving individually.`;
+    console.error('acceptAllAndSave batch error:', e);
   }
 }
 
@@ -4842,21 +6186,34 @@ async function saveImportRow(i){
   // Expand C_PAIR to ['3C','4C']
   const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
   try {
+    // Cross-wing check — warn if BN will be split across A Wing and D Wing
+    const wings = [...new Set(rawUnits.map(u => getWing(u === 'C_PAIR' ? '3C' : u)).filter(w => w !== '?'))];
+    if(wings.length > 1){
+      const shortName = firstName(name);
+      const wingList = wings.join(' and ') + ' Wing';
+      const proceed = await customConfirm(
+        `${shortName} will be split between ${wingList}.`,
+        'Split',
+        "Don't split"
+      );
+      if(!proceed) return;
+    }
+
     // Check if assignment already exists for this nurse/date/shift — update if so
     const existing = await spGet(LISTS.schedule,
       `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
 
-    if (existing.length > 0) {
-      // Update first match, delete any extras
+    const isUpdate = existing.length > 0;
+    if (isUpdate) {
       await spPatch(LISTS.schedule, existing[0].Id, {
         Units: JSON.stringify(units),
         Title: `${name}-${date}-${shift}`
       });
-      // Delete any duplicates beyond the first
       for (let j = 1; j < existing.length; j++) {
         await spDel(LISTS.schedule, existing[j].Id);
       }
-      toast(`✓ ${name} updated for ${shift} on ${date}`);
+      const splitNote = wings.length > 1 ? ` (split: ${wings.join(' & ')} Wing)` : '';
+      toast(`✓ ${firstName(name)} updated for ${shift} on ${date}${splitNote}`);
     } else {
       await spPost(LISTS.schedule, {
         Title: `${name}-${date}-${shift}`,
@@ -4865,7 +6222,16 @@ async function saveImportRow(i){
         ShiftType: shift,
         Units: JSON.stringify(units)
       });
-      toast(`✓ ${name} saved for ${shift} on ${date}`);
+      const splitNote = wings.length > 1 ? ` (split: ${wings.join(' & ')} Wing)` : '';
+      toast(`✓ ${firstName(name)} saved for ${shift} on ${date}${splitNote}`);
+    }
+    // Clear stale rotation cache so BN's My Shift regenerates with updated units
+    localStorage.removeItem(`bnRotation_${name}_${date}_${shift}`);
+    // Also clear from BNState so other devices get fresh data
+    setState(`bnRotation_${name}_${date}_${shift}`, null).catch(()=>{});
+    // If BN portal is open for this nurse on same device, reload their slot view
+    if(BNS.name === name && BNS.date === date && BNS.shift === shift){
+      loadBNSlots().catch(()=>{});
     }
     const svEl = document.getElementById(`saved-${i}`);
     const sbEl = document.getElementById(`savebtn-${i}`);
@@ -4991,7 +6357,9 @@ function renderBNShiftPill(){
   const p = document.getElementById('bnShiftPill');
   if (!p) return;
   p.className = `shift-pill shift-${BNS.shift==='Day'?'day':'noc'}`;
-  p.textContent = BNS.shift==='Day' ? '☀️ Day (0800–2030)' : '🌙 Noc (2000–0830)';
+  p.style.display = 'inline-flex'; p.style.alignItems = 'center'; p.style.gap = '6px';
+  const icon = BNS.shift==='Day' ? sunSVG(14) : moonSVG(14);
+  p.innerHTML = icon + (BNS.shift==='Day' ? 'Day (0800–2030)' : 'Noc (2000–0830)');
 }
 
 async function loadBNSlots(){
@@ -5010,9 +6378,23 @@ async function loadBNSlots(){
     const _days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     const dtFmt = (()=>{ const d=new Date(dt+'T12:00:00'); return `${_days[d.getDay()]} ${_months[d.getMonth()]} ${d.getDate()}`; })();
 
-    // Check this break nurse has an assignment on this date
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+    // ── SINGLE ROUND TRIP: batch schedule + breaks ──
+    let batchResults;
+    const schedFilter = `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
+    const breaksFilter = `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`;
+    if(SIM_MODE){
+      batchResults = await Promise.all([
+        spGet(LISTS.schedule, schedFilter),
+        spGet(LISTS.bookings, breaksFilter)
+      ]);
+    } else {
+      batchResults = await spBatchGet([
+        {sheet:LISTS.schedule, filter:schedFilter},
+        {sheet:LISTS.bookings, filter:breaksFilter}
+      ]);
+    }
+    const scheds = batchResults[0];
+    const bnBreaksPrefetched = batchResults[1];
 
     if (!scheds.length){
       document.getElementById('bnNoSched').style.display = 'block';
@@ -5054,9 +6436,8 @@ async function loadBNSlots(){
     const displaySlots = (isToday ? slots.filter(s => !isPast(s, shift)) : slots)
       .filter(s => !bnBlocked.includes(s));
 
-    // Fetch existing BN breaks for this nurse/date — unique by SlotTime
-    const bnBreaks = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+    // Use pre-fetched BN breaks from batch query
+    const bnBreaks = bnBreaksPrefetched;
 
     // Deduplicate by SlotTime — store one representative Id per time
     const bnBreakTimes = new Set();
@@ -5255,7 +6636,7 @@ async function claimBNBreak(slotTime){
     if(conflictingStaff.length){
       const lines = conflictingStaff.map(b => {
         const match = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-        return match ? `${match[1]} (${match[2]}) on ${b.Unit}` : `${b.NurseName} on ${b.Unit}`;
+        return match ? `${match[1]} ${match[2]} on ${b.Unit}` : `${b.NurseName} on ${b.Unit}`;
       }).join(', ');
       const ok = await customConfirm(
         `⚠️ ${fmt12(slotTime)} is booked by ${lines}`,
@@ -5284,7 +6665,8 @@ async function claimBNBreak(slotTime){
       });
     }
     toast(`🔒 ${fmt12(slotTime)} blocked`);
-    loadBNSlots();
+    // Short delay before reload — Sheets needs a moment to commit the write
+    setTimeout(() => loadBNSlots(), 1500);
   } catch(e) { toast(e.message, true); }
 }
 
@@ -5406,16 +6788,34 @@ async function loadBNConfirm(){
   const dt = BNS.date || today(), shift = BNS.shift;
 
   try {
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+    // ── SINGLE ROUND TRIP: schedule + bookings + notification state ──
+    const schedFilter = `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
+    const bookFilter = `SlotDate eq '${dt}' and ShiftType eq '${shift}'`;
+    const notifyKey = `slotNotify_${dt}_${shift}`;
+    const notifyFilter = `Key eq '${esc(notifyKey)}'`;
+    let results;
+    if(SIM_MODE){
+      results = await Promise.all([
+        spGet(LISTS.schedule, schedFilter),
+        spGet(LISTS.bookings, bookFilter),
+        spGet(LISTS.state, notifyFilter)
+      ]);
+    } else {
+      results = await spBatchGet([
+        {sheet:LISTS.schedule, filter:schedFilter},
+        {sheet:LISTS.bookings, filter:bookFilter},
+        {sheet:LISTS.state, filter:notifyFilter}
+      ]);
+    }
+    const scheds = results[0];
+    const allBookings = results[1];
+    const notifyState = results[2];
+
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
 
-    // Only show units from active records — inactive BN shouldn't see bookings
     const units = [];
     scheds.filter(s => s.Status !== 'inactive').forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
 
-    const allBookings = await spGet(LISTS.bookings,
-      `SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
     const staffBookings = allBookings.filter(b => !b.IsBNBreak && units.includes(b.Unit));
 
     if (!staffBookings.length) {
@@ -5427,7 +6827,66 @@ async function loadBNConfirm(){
 
     staffBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
 
-    list.innerHTML = staffBookings.map(b => {
+    // ── Load notifications from batch result ──
+    let notifications = [];
+    try {
+      if(notifyState.length){
+        const val = JSON.parse(notifyState[0].Value || '[]');
+        notifications = Array.isArray(val) ? val : [];
+      } else {
+        const lsVal = localStorage.getItem(notifyKey);
+        if(lsVal) notifications = JSON.parse(lsVal);
+      }
+    } catch{ notifications = []; }
+
+    // Filter notifications to only this BN's units
+    const myNotifications = notifications.filter(n => units.includes(n.unit));
+    // Get dismissed notification IDs
+    const dismissKey = `slotNotifyDismissed_${dt}_${shift}`;
+    const dismissed = new Set(JSON.parse(localStorage.getItem(dismissKey) || '[]'));
+    const visibleNotifications = myNotifications.filter(n => !dismissed.has(`${n.fromNurse}_${n.slotTime}_${n.ts}`));
+
+    let notifyHtml = '';
+    if(visibleNotifications.length){
+      // Group by fromNurse
+      const grouped = {};
+      visibleNotifications.forEach(n => {
+        const key = n.fromNurse;
+        if(!grouped[key]) grouped[key] = { nurse: n.fromNurse, unit: n.unit, cancelled: [], transferred: [] };
+        if(n.type === 'cancel') grouped[key].cancelled.push(n);
+        else if(n.type === 'transfer') grouped[key].transferred.push(n);
+      });
+
+      notifyHtml = `<div style="margin-bottom:12px">`;
+      Object.values(grouped).forEach(g => {
+        const parts = [];
+        if(g.cancelled.length){
+          parts.push(`Cancelled ${g.cancelled.map(n => fmt12(n.slotTime)).join(', ')}`);
+        }
+        if(g.transferred.length){
+          // Group transfers by toNurse
+          const byTo = {};
+          g.transferred.forEach(n => {
+            if(!byTo[n.toNurse]) byTo[n.toNurse] = [];
+            byTo[n.toNurse].push(n);
+          });
+          Object.entries(byTo).forEach(([toNurse, xfers]) => {
+            parts.push(`Transferred ${xfers.map(n => fmt12(n.slotTime)).join(', ')} to ${formatNurse(toNurse)}`);
+          });
+        }
+        const allIds = [...g.cancelled, ...g.transferred].map(n => `${n.fromNurse}_${n.slotTime}_${n.ts}`);
+        notifyHtml += `<div style="display:flex;align-items:flex-start;gap:8px;padding:10px 12px;margin-bottom:6px;border-radius:10px;background:${g.cancelled.length ? 'var(--red-lt)' : '#fff8e6'};border:1.5px solid ${g.cancelled.length ? 'var(--red)' : '#e8a020'}">
+          <div style="flex:1;font-size:.85rem">
+            <span style="font-weight:600">${formatNurse(g.nurse)}</span> <span style="color:var(--muted)">· ${g.unit}</span><br>
+            <span style="font-size:.8rem">${parts.join(' · ')}</span>
+          </div>
+          <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:2px 6px" onclick="dismissNotifications(${JSON.stringify(allIds).replace(/"/g,'&quot;')},'${escHTML(dismissKey)}')">✕</button>
+        </div>`;
+      });
+      notifyHtml += `</div>`;
+    }
+
+    list.innerHTML = notifyHtml + staffBookings.map(b => {
       const bConfirmed  = isConfirmed(b);
       const bNotTaken   = isNotTaken(b);
 
@@ -5435,14 +6894,14 @@ async function loadBNConfirm(){
       let statusHtml = '';
       if(bConfirmed){
         rowClass = 'confirmed';
-        statusHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Confirmed</span>
+        statusHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else if(bNotTaken){
         rowClass = '';
         statusHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else {
-        statusHtml = `<button class="btn btn-success btn-sm" onclick="setBreakStatus(${b.Id},'confirmed')" style="margin-right:4px">✓ Confirm</button>
+        statusHtml = `<button class="btn btn-success btn-sm" onclick="setBreakStatus(${b.Id},'confirmed')" style="margin-right:4px">✓ Taken</button>
           <button class="btn btn-ghost btn-sm" onclick="setBreakStatus(${b.Id},'not_taken')" style="margin-right:4px">✗ Not Taken</button>
           <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`;
       }
@@ -5588,6 +7047,13 @@ async function saveManualBreak(){
     if(wrap) wrap.style.display = 'block';
     loadBNConfirm();
   } catch(e){ toast(e.message, true); }
+}
+
+function dismissNotifications(ids, dismissKey){
+  const dismissed = new Set(JSON.parse(localStorage.getItem(dismissKey) || '[]'));
+  ids.forEach(id => dismissed.add(id));
+  localStorage.setItem(dismissKey, JSON.stringify([...dismissed]));
+  loadBNConfirm();
 }
 
 async function confirmBreak(id){
@@ -5794,7 +7260,7 @@ function renderVolBN(bookings, scheds){
       <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(val/maxVal*100)}%"></div></div></div>
       <div style="text-align:right">
         <div class="rpt-row-val">${val}</div>
-        ${_rptVolBNShift === 'both' ? `<div style="font-size:.7rem;color:var(--muted)">${counts.day}☀ · ${counts.noc}🌙</div>` : ''}
+        ${_rptVolBNShift === 'both' ? `<div style="font-size:.7rem;color:var(--muted);display:inline-flex;align-items:center;gap:2px">${counts.day}${sunSVG(10)} · ${counts.noc}${moonSVG(10)}</div>` : ''}
       </div>
     </div>`;
   }).join('');
@@ -5937,17 +7403,20 @@ const RPT = { range: 'mtd', from: '', to: '', unlocked: false };
 
 function unlockReports(){
   const entered = document.getElementById('rptPwInput').value;
-  const adminPw  = localStorage.getItem('bnPw')      || 'breaker';
-  const bnPw     = localStorage.getItem('bnBreakPw') || 'breaknurse';
-  if (entered === adminPw || entered === bnPw) {
-    RPT.unlocked = true;
-    document.getElementById('rptGate').style.display  = 'none';
-    document.getElementById('rptPanel').style.display = 'block';
-    setRange('mtd', document.getElementById('rb-mtd'));
-  } else {
+  validatePortalPassword(entered).then(level => {
+    if(level){
+      RPT.unlocked = true;
+      document.getElementById('rptGate').style.display  = 'none';
+      document.getElementById('rptPanel').style.display = 'block';
+      setRange('mtd', document.getElementById('rb-mtd'));
+    } else {
+      document.getElementById('rptPwErr').style.display = 'block';
+      document.getElementById('rptPwInput').value = '';
+    }
+  }).catch(() => {
     document.getElementById('rptPwErr').style.display = 'block';
     document.getElementById('rptPwInput').value = '';
-  }
+  });
 }
 
 function setRange(key, btn){
@@ -6164,8 +7633,8 @@ async function loadReports(){
     const total = byShift.Day + byShift.Noc || 1;
 
     document.getElementById('rptShiftList').innerHTML = [
-      { sh: 'Day', icon: '☀️', color: 'var(--day)' },
-      { sh: 'Noc', icon: '🌙', color: 'var(--noc)' }
+      { sh: 'Day', icon: sunSVG(13), color: 'var(--day)' },
+      { sh: 'Noc', icon: moonSVG(13), color: 'var(--noc)' }
     ].map(({sh, icon, color}) => `
       <div class="rpt-row">
         <div class="rpt-row-lbl">${icon} ${sh}</div>
@@ -6238,12 +7707,15 @@ function unitsPerNurse(shift, nurseCount){
 }
 
 // ── All-time coverage counts ──────────────────────────
+let _coverageCountsCache = {};
 async function getUnitCoverageCounts(shift){
+  if(_coverageCountsCache[shift]) return _coverageCountsCache[shift];
   const counts = {};
   ALL_COVERAGE_SLOTS.forEach(s => counts[s] = 0);
   try {
-    // Fetch ALL saved assignments ever (no date filter)
-    const scheds = await spGet(LISTS.schedule, `ShiftType eq '${shift}'`);
+    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
+    const cutStr = cutoff.toISOString().slice(0,10);
+    const scheds = await spGet(LISTS.schedule, `ShiftType eq '${shift}' and ShiftDate ge '${cutStr}'`);
     scheds.forEach(s => {
       let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
       const hasC = units.includes('3C') || units.includes('4C');
@@ -6254,8 +7726,10 @@ async function getUnitCoverageCounts(shift){
       });
     });
   } catch(e) { /* return zeros on error */ }
+  _coverageCountsCache[shift] = counts;
   return counts;
 }
+function clearCoverageCountsCache(){ _coverageCountsCache = {}; }
 
 // ── Per-nurse wing history (rolling 60 days) ──────────
 function getNurseWingHistory(nurseName, shift){
@@ -6706,53 +8180,6 @@ function addManualName(){
   toast(`${val} added.`);
 }
 
-// ─── API Key management ───────────────────────────────
-function toggleApiKeySection(forceOpen = false){
-  const body = document.getElementById('apiKeyBody');
-  const chev = document.getElementById('apiKeyChevron');
-  if(!body) return;
-  const open = forceOpen || body.style.display === 'none';
-  body.style.display = open ? 'block' : 'none';
-  if(chev) chev.textContent = open ? '▲' : '▼';
-}
-
-function openApiKeySection(){
-  // Open and scroll to the API key section
-  toggleApiKeySection(true);
-  setTimeout(() => {
-    const card = document.getElementById('apiKeyCard');
-    if(card) card.scrollIntoView({ behavior:'smooth', block:'center' });
-  }, 100);
-}
-
-function saveApiKey(){
-  const key = document.getElementById('apiKeyInput').value.trim();
-  const status = document.getElementById('apiKeyStatus');
-  if (!key.startsWith('sk-ant-')) {
-    status.style.display = 'block';
-    status.style.color = 'var(--red)';
-    status.textContent = "⚠ That doesn't look like a valid Anthropic key (should start with sk-ant-).";
-    return;
-  }
-  localStorage.setItem('bnApiKey', key);
-  document.getElementById('apiKeyInput').value = '';
-  status.style.display = 'block';
-  status.style.color = 'var(--green)';
-  status.textContent = '✓ API key saved. AI import is ready to use.';
-  setTimeout(() => { status.style.display = 'none'; toggleApiKeySection(false); }, 3000);
-  showApiKeyStatus();
-}
-
-function showApiKeyStatus(){
-  const key = localStorage.getItem('bnApiKey');
-  const badge = document.getElementById('apiKeyBadge');
-  const status = document.getElementById('apiKeyStatus');
-  if(badge) badge.style.display = key ? 'inline' : 'none';
-  if(key && status && status.style.display !== 'none'){
-    status.style.color = 'var(--green)';
-    status.textContent = '✓ API key is saved (' + key.slice(0,12) + '...). AI import is ready.';
-  }
-}
 
 // ═══════════════════════════════════════════════════════
 // START
