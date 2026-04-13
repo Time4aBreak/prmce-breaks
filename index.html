@@ -404,7 +404,6 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
           Select your break slots for this shift. These will be blocked for all units you cover.
-          A prompt will appear after 5 slots (75 min).
         </p>
         <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
         <div id="bnSlotsList"></div>
@@ -1024,6 +1023,23 @@ const FIRST_DAY  = 8*60+35;   // 515 min
 const FIRST_NOC  = 20*60+35;  // 1235 min
 const SLOT_IV    = 20;         // interval (15 min break + 5 min gap)
 const NUM_SLOTS  = 36;
+
+// ── Sign-up window open times (staff) ────────────────
+// Day staff can sign up from 6:30 AM onward
+// Noc staff can sign up from 6:30 PM until 6:30 AM
+const SIGNUP_OPEN_DAY = 6*60+30;   // 390 min
+const SIGNUP_OPEN_NOC = 18*60+30;  // 1110 min
+
+// ── Staff slot cutoff times ───────────────────────────
+// Last slot staff can claim for each shift
+// Day staff: slots end before 6:30 PM (shift change)
+// Noc staff: slots end before 6:30 AM (shift change)
+const SLOT_CUTOFF_DAY = 18*60+30;  // 1110 min — 6:30 PM
+const SLOT_CUTOFF_NOC = 6*60+30;   // 390 min  — 6:30 AM
+
+// ── BN clock-out times ───────────────────────────────
+const BN_CLOCKOUT_DAY = 20*60+30;  // 1230 min — 8:30 PM
+const BN_CLOCKOUT_NOC = 8*60+30;   // 510 min  — 8:30 AM
 const MAX_SLOTS  = 3;
 
 // ═══════════════════════════════════════════════════════
@@ -1043,7 +1059,8 @@ const S = {
   editingAssignId: null,
   refreshTmr:      null,
   pendingClaims:   new Set(),  // slot times staged for submission
-  otherEndTime:    null
+  otherEndTime:    null,
+  submitting:      false       // guard against double-tap during submission
 };
 
 // ═══════════════════════════════════════════════════════
@@ -1591,8 +1608,8 @@ function staffWindowOpen(viewingShift){
   // True if the sign-up window is currently open for this shift's staff.
   const m = nowMin();
   return viewingShift === 'Day'
-    ? m >= 6*60+30                             // Day: 6:30 AM onward
-    : (m >= 18*60+30 || m < 6*60+30);         // Noc: 6:30 PM → 6:30 AM
+    ? m >= SIGNUP_OPEN_DAY
+    : (m >= SIGNUP_OPEN_NOC || m < getDayOverlapMax());
 }
 
 function getSlotOwnerShift(slotTime, viewingShift){
@@ -2260,8 +2277,8 @@ function updateNameCardState(){
   if(S.shift === 'Other') { setNameCardEnabled(true); return; }
   const nowM_ = nowMin();
   const isOpen = S.shift === 'Day'
-    ? (nowM_ >= 6*60+30)
-    : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax());
+    ? (nowM_ >= SIGNUP_OPEN_DAY)
+    : (nowM_ >= SIGNUP_OPEN_NOC || nowM_ < getDayOverlapMax());
   setNameCardEnabled(isOpen);
 }
 
@@ -3101,10 +3118,9 @@ async function loadSlots(silent=false){
       if(shiftIsActive && isPast(s, shift) && !bMap[s]) return false; // keep past claimed slots visible
       if(getSlotTier(s, shift) === 'hardBlocked') return false;
       const slotMin = toMin(s);
-      // Day staff cutoff: no slots at or after 6:30 PM (shift change)
-      if(shift === 'Day' && slotMin >= 18*60+30) return false;
-      // Noc staff cutoff: no slots at or after 8:30 AM (shift change)
-      // Noc staff can claim up to overlap window end (8:00 AM) — overlap BN is still covering
+      // Day staff cutoff: no slots at or after 6:30 PM
+      if(shift === 'Day' && slotMin >= SLOT_CUTOFF_DAY) return false;
+      // Noc staff cutoff: morning overlap ends at 0800 weekdays / 0815 weekends (huddle boundary)
       if(shift === 'Noc' && sortKey(s,'Noc') >= sortKey(fromMin(getDayOverlapMax()),'Noc')) return false;
       // Overlap slots: only show the overlap that applies to THIS shift's staff
       // Noc staff see EVENING overlap (6:30-8:00 PM) — Day BN covers their arrival
@@ -3378,6 +3394,7 @@ function renderSlotsFromCache(){
 }
 
 function togglePending(slotTime, slotShift){
+  if(S.submitting) return; // block selection changes during submission
   // For Other shift, key includes the shift type: "HHMM|ShiftType"
   const key = slotShift && slotShift !== S.shift ? `${slotTime}|${slotShift}` : slotTime;
   if(S.pendingClaims.has(key)){
@@ -3472,6 +3489,8 @@ async function submitClaims(){
     return;
   }
 
+  if(S.submitting) return; // prevent double-tap
+  S.submitting = true;
   const btn = document.getElementById('submitBtn');
   clearInterval(S.refreshTmr);
   if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
@@ -3504,6 +3523,7 @@ async function submitClaims(){
     const fail = results.failed.map(f => `${fmt12(f.slot)}: ${f.reason}`).join(' | ');
     toast(`${ok}${results.failed.length} couldn't be saved: ${fail}`, true);
   }
+  S.submitting = false;
   if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000);
   loadSlots();
   if(document.getElementById('summList')) loadSummary();
@@ -4041,6 +4061,22 @@ function clearBNStartTime(){
   toast('Start time cleared');
 }
 function restoreBNStartTimeUI(){
+  // Auto-clear start time keys after the BN's shift has ended
+  // Day BN clocks out at 2030, Noc BN clocks out at 0830 (next day)
+  const shiftEndMin = { Day: BN_CLOCKOUT_DAY, Noc: BN_CLOCKOUT_NOC };
+  Object.keys(localStorage).filter(k => k.startsWith('bnStart_')).forEach(k => {
+    const parts = k.split('_');
+    if(parts.length < 4) return;
+    const keyDate = parts[parts.length - 2];
+    const keyShift = parts[parts.length - 1];
+    const endMin = shiftEndMin[keyShift];
+    if(endMin === undefined) return;
+    // Noc end (0830) is next calendar day relative to the shift start date
+    const base = new Date(keyDate + 'T00:00:00');
+    const msOffset = (keyShift === 'Noc' ? 86400000 : 0) + endMin * 60000;
+    const endDate = new Date(base.getTime() + msOffset);
+    if(Date.now() > endDate.getTime()) localStorage.removeItem(k);
+  });
   populateBNStartTimeSlots();
 }
 
@@ -4502,7 +4538,7 @@ async function loadSummary(){
       else filter+=` and Unit eq '${esc(unit)}'`;
     }
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
-    const overlapMin = shift === 'Day' ? 6*60+30 : 18*60+30;
+    const overlapMin = shift === 'Day' ? SIGNUP_OPEN_DAY : SIGNUP_OPEN_NOC;
     const overlapMax = shift === 'Day' ? getDayOverlapMax() : 20*60+0;
     const oppDt = shift === 'Day'
       ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
@@ -6508,7 +6544,8 @@ async function loadBNSlots(){
       const displayUnit = isMyBreak ? (bnBreakUnits[slot] || assignedUnit) : assignedUnit;
       const unitDisplay = displayUnit ? (displayUnit === 'C_PAIR' ? '3C/4C' : displayUnit) : null;
       // Check if this slot is before the BN's set start time
-      const isBeforeStart = _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
+      // Only flag start time on available slots — not on already-claimed breaks
+      const isBeforeStart = !isMyBreak && _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
       const unitTag = isBeforeStart
         ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · starts later</span>`
         : assignedUnit
@@ -6522,7 +6559,7 @@ async function loadBNSlots(){
       return `<div class="slot-row ${rowCls}" style="${rowStyle}">
         <div class="slot-time" style="display:flex;align-items:center;${isPendingBreak?'color:var(--day);font-weight:700':''}">${fmt12(slot)}${unitTag}</div>
         <div class="slot-name ${isMyBreak||isPendingBreak?'filled':''}">
-          ${isMyBreak ? '🔒 Your break' : isPendingBreak ? '⏳ Staged' : assignedUnit ? 'Available' : ''}
+          ${isMyBreak ? '🔒 Your break' : isPendingBreak ? '⏳ Staged' : isBeforeStart ? '' : assignedUnit ? 'Available' : ''}
         </div>
         <div>
           ${isMyBreak
@@ -6659,11 +6696,6 @@ async function claimBNBreak(slotTime){
     const existing = await spGet(LISTS.bookings,
       `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
     const uniqueTimes = new Set(existing.map(b => b.SlotTime));
-
-    // Prompt at 6th slot
-    if(uniqueTimes.size >= 5 && !uniqueTimes.has(slotTime)){
-      if(!await customConfirm(`You've selected ${uniqueTimes.size} break slots (${uniqueTimes.size*15} min) this shift. Add another?`,'Add Another','Cancel')) return;
-    }
 
     const units = await getBNUnits(BNS.name, dt, shift);
 
@@ -7591,7 +7623,7 @@ async function loadReports(){
     // ── Slot Demand — avg minutes after shift start when claimed ──
     // Lower avg = nurses grabbed it sooner = more in demand
     // Shift start: Day=06:30, Noc=18:30 (in minutes from midnight)
-    const shiftStartMin = { Day: 6*60+30, Noc: 18*60+30 };
+    const shiftStartMin = { Day: SIGNUP_OPEN_DAY, Noc: SIGNUP_OPEN_NOC };
 
     const slotClaimTimes = {}; // slotTime → [minutesAfterShiftStart, ...]
     staffBookings.forEach(b => {
