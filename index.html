@@ -2501,16 +2501,21 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     for(const b of existing) await spDel(LISTS.bookings, b.Id);
   }
 
-  // Build all rows and send in ONE POST call via batchInsert
+  // Load rotation to get the correct unit per slot
+  const rotKey = `bnRotation_${name}_${date}_${shift}`;
+  let rotation = {};
+  try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
+
+  // Build one row per slot using the rotation unit — fall back to first unit if not in rotation
+  const expandedUnits = expandCPair(units, date, shift);
   const rows = [];
   for(const slotTime of defaultSlots){
-    for(const unit of units){
-      rows.push({
-        Title: `BN-${name}-${unit}-${date}-${slotTime}`,
-        NurseName: name, Unit: unit, SlotTime: slotTime,
-        SlotDate: date, ShiftType: shift, IsBNBreak: 1
-      });
-    }
+    const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+    rows.push({
+      Title: `BN-${name}-${unit}-${date}-${slotTime}`,
+      NurseName: name, Unit: unit, SlotTime: slotTime,
+      SlotDate: date, ShiftType: shift, IsBNBreak: 1
+    });
   }
   if(rows.length){
     await gasCallPost({
@@ -6474,10 +6479,12 @@ async function loadBNSlots(){
     // Deduplicate by SlotTime — store one representative Id per time
     const bnBreakTimes = new Set();
     const bnBreakIds = {};
+    const bnBreakUnits = {}; // slotTime -> unit from the stored break record
     bnBreaks.forEach(b => {
       const _bnST = String(b.SlotTime).padStart(4,'0');
       bnBreakTimes.add(_bnST);
       if(!bnBreakIds[_bnST]) bnBreakIds[_bnST] = b.Id;
+      if(!bnBreakUnits[_bnST] && b.Unit) bnBreakUnits[_bnST] = b.Unit;
     });
 
     const myBreakCount = bnBreakTimes.size;
@@ -6497,9 +6504,11 @@ async function loadBNSlots(){
     list.innerHTML = displaySlots.map(slot => {
       const isMyBreak = bnBreakTimes.has(slot);
       const assignedUnit = bnRotation[slot];
+      // For "Your break" slots, show the actual stored unit — not the rotation unit
+      const displayUnit = isMyBreak ? (bnBreakUnits[slot] || assignedUnit) : assignedUnit;
+      const unitDisplay = displayUnit ? (displayUnit === 'C_PAIR' ? '3C/4C' : displayUnit) : null;
       // Check if this slot is before the BN's set start time
       const isBeforeStart = _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
-      const unitDisplay = assignedUnit ? (assignedUnit === 'C_PAIR' ? '3C/4C' : assignedUnit) : null;
       const unitTag = isBeforeStart
         ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · starts later</span>`
         : assignedUnit
@@ -6685,14 +6694,17 @@ async function claimBNBreak(slotTime){
       setState(cancelKey, cancelData).catch(()=>{}); // cross-device via BNState
     }
 
-    // Save BN break per unit — no rotation recalc (Option B: break just hides the slot)
-    for(const unit of units){
-      await spPost(LISTS.bookings, {
-        Title: `BN-${BNS.name}-${unit}-${dt}-${slotTime}`,
-        NurseName: BNS.name, Unit: unit, SlotTime: slotTime,
-        SlotDate: dt, ShiftType: shift, IsBNBreak: 1
-      });
-    }
+    // Save BN break for the rotation unit — one row per slot, unit from rotation
+    const rotKey = `bnRotation_${BNS.name}_${dt}_${shift}`;
+    let rotation = {};
+    try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
+    const expandedUnits = expandCPair(units, dt, shift);
+    const unit = rotation[String(slotTime).padStart(4,'0')] || expandedUnits[0] || units[0];
+    await spPost(LISTS.bookings, {
+      Title: `BN-${BNS.name}-${unit}-${dt}-${slotTime}`,
+      NurseName: BNS.name, Unit: unit, SlotTime: slotTime,
+      SlotDate: dt, ShiftType: shift, IsBNBreak: 1
+    });
     toast(`🔒 ${fmt12(slotTime)} blocked`);
     // Short delay before reload — Sheets needs a moment to commit the write
     setTimeout(() => loadBNSlots(), 1500);
