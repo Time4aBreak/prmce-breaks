@@ -2390,24 +2390,32 @@ async function applyDefaultToAll(){
     return;
   }
 
+  // Disable button and show progress
+  const applyBtn = document.getElementById('bnApplyAllBtn');
+  if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Applying…'; }
+
   // Get all upcoming assignments for this BN
   const scheds = await spGet(LISTS.schedule,
     `BreakNurseName eq '${esc(name)}'`);
   const upcoming = scheds.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
 
-  if(!upcoming.length){ toast('No upcoming shifts found', true); return; }
+  if(!upcoming.length){
+    toast('No upcoming shifts found', true);
+    if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply default to all my upcoming shifts'; }
+    return;
+  }
 
   let applied = 0;
   for(const sched of upcoming){
     const def = sched.ShiftType === 'Day' ? dayDef : nocDef;
     if(!def.length) continue;
+    if(applyBtn) applyBtn.textContent = `⏳ Applying shift ${applied + 1} of ${upcoming.length}…`;
     await applyDefaultToShift(name, sched.ShiftDate, sched.ShiftType, def);
     applied++;
   }
   toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
-  // Show applied state on button
-  const applyBtn = document.getElementById('bnApplyAllBtn');
   if(applyBtn){
+    applyBtn.disabled = false;
     applyBtn.textContent = '✓ Applied to all upcoming shifts';
     applyBtn.style.background = 'var(--teal-dk)';
     applyBtn.style.opacity = '1';
@@ -2424,16 +2432,17 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     `NurseName eq '${esc(name)}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   for(const b of existing) await spDel(LISTS.bookings, b.Id);
 
-  // Save default slots
+  // Batch-save all default slots across all units in one call
+  const records = [];
   for(const slotTime of defaultSlots){
     for(const unit of units){
-      await spPost(LISTS.bookings, {
-        Title: `BN-${name}-${unit}-${date}-${slotTime}`,
-        NurseName: name, Unit: unit, SlotTime: slotTime,
-        SlotDate: date, ShiftType: shift, IsBNBreak: 1
+      records.push({
+        matchFields: { NurseName: name, Unit: unit, SlotTime: slotTime, SlotDate: date, ShiftType: shift, IsBNBreak: 1 },
+        data: { Title: `BN-${name}-${unit}-${date}-${slotTime}`, NurseName: name, Unit: unit, SlotTime: slotTime, SlotDate: date, ShiftType: shift, IsBNBreak: 1 }
       });
     }
   }
+  if(records.length) await spBatchUpsert(LISTS.bookings, records);
 
   // Recalculate rotation
   await recalculateRotation(name, date, shift);
