@@ -4023,14 +4023,16 @@ function onBNStartTimeChange(){
   const val = document.getElementById('bnStartTime').value;
   if(val) localStorage.setItem(getBNStartKey(), val);
   else localStorage.removeItem(getBNStartKey());
-  loadBNSlots();
+  const _sy1 = window.scrollY;
+  loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
   toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
 }
 function clearBNStartTime(){
   localStorage.removeItem(getBNStartKey());
   const el = document.getElementById('bnStartTime');
   if(el) el.value = '';
-  loadBNSlots();
+  const _sy2 = window.scrollY;
+  loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
   toast('Start time cleared');
 }
 function restoreBNStartTimeUI(){
@@ -6487,13 +6489,22 @@ async function loadBNSlots(){
       return;
     }
 
+    // Load BN's own start time setting for this shift
+    const _bnStartVal = localStorage.getItem(`bnStart_${BNS.name}_${BNS.date || today()}_${shift}`);
+    const _bnStartMin = _bnStartVal ? toMin(_bnStartVal) : null;
+
     // Render a single unified slot list (applies to all covered units)
     list.innerHTML = displaySlots.map(slot => {
       const isMyBreak = bnBreakTimes.has(slot);
       const assignedUnit = bnRotation[slot];
-      const unitTag = assignedUnit
-        ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${assignedUnit === 'C_PAIR' ? '3C/4C' : assignedUnit}</span>`
-        : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
+      // Check if this slot is before the BN's set start time
+      const isBeforeStart = _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
+      const unitDisplay = assignedUnit ? (assignedUnit === 'C_PAIR' ? '3C/4C' : assignedUnit) : null;
+      const unitTag = isBeforeStart
+        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;font-style:italic">${unitDisplay || '—'} · Before set start time</span>`
+        : assignedUnit
+          ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay}</span>`
+          : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
       const isPendingBreak = BNS.pendingBreaks.has(slot);
       const rowCls = isMyBreak ? 'bn-break mine' : isPendingBreak ? 'open' : 'open';
       const rowStyle = isPendingBreak
