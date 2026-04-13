@@ -2407,12 +2407,17 @@ async function applyDefaultToAll(){
       return;
     }
 
-    if(applyBtn) applyBtn.textContent = '⏳ Removing old breaks…';
-
-    // ── Delete all existing BN breaks for upcoming shifts in one pass ──
+    // ── ONE batchDelete: remove all old BN breaks for upcoming shifts ──
     const upcomingKeys = new Set(upcoming.map(s => `${s.ShiftDate}|${s.ShiftType}`));
     const toDelete = existingBreaks.filter(b => upcomingKeys.has(`${b.SlotDate}|${b.ShiftType}`));
-    for(const b of toDelete) await spDel(LISTS.bookings, b.Id);
+    if(toDelete.length){
+      if(applyBtn) applyBtn.textContent = '⏳ Removing old breaks…';
+      await gasCall({
+        action: 'batchDelete',
+        sheet: LISTS.bookings,
+        ids: encodeURIComponent(JSON.stringify(toDelete.map(b => b.Id)))
+      });
+    }
 
     // ── Build all new break rows across all shifts ──
     if(applyBtn) applyBtn.textContent = '⏳ Saving breaks…';
