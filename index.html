@@ -6671,6 +6671,7 @@ async function claimBNBreak(slotTime){
 }
 
 async function cancelBNBreak(slotTime){
+  slotTime = String(slotTime).padStart(4,'0'); // normalize — Sheets may strip leading zero
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const breaks = await spGet(LISTS.bookings,
