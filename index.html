@@ -3682,7 +3682,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     await spPost(LISTS.bookings,{
       Title:`${S.unit}-${dt}-${slotTime}`,
       NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
-      IsOtherShift: slotShiftOverride ? 1 : 0
+      IsOtherShift: (S.shift === 'Other') ? 1 : 0
     });
     if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(firstName)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
