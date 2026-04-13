@@ -413,7 +413,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <span id="bnSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--day)"></span>
           <div style="display:flex;gap:8px">
             <button class="btn btn-ghost btn-sm" onclick="clearBNPending()">Clear</button>
-            <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" onclick="submitBNBreaks()">Submit breaks</button>
+            <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" id="bnSubmitBtn" onclick="submitBNBreaks()">Submit breaks</button>
           </div>
         </div>
         <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
@@ -6501,7 +6501,7 @@ async function loadBNSlots(){
       const isBeforeStart = _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
       const unitDisplay = assignedUnit ? (assignedUnit === 'C_PAIR' ? '3C/4C' : assignedUnit) : null;
       const unitTag = isBeforeStart
-        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;font-style:italic">${unitDisplay || '—'} · Before set start time</span>`
+        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · starts later</span>`
         : assignedUnit
           ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay}</span>`
           : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
@@ -6628,11 +6628,20 @@ function updateBNSubmitBar(){
 
 async function submitBNBreaks(){
   const slots = [...BNS.pendingBreaks].sort((a,b) => sortKey(a, BNS.shift) - sortKey(b, BNS.shift));
+  if(!slots.length) return;
+  const btn = document.getElementById('bnSubmitBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
   BNS.pendingBreaks.clear();
-  updateBNSubmitBar();
+  updateBNSubmitBar(); // hides bar — but btn stays visible via submitBtn above... 
+  // Actually keep bar visible until done
+  const bar = document.getElementById('bnSubmitBar');
+  const lbl = document.getElementById('bnSubmitBarLabel');
+  if(bar){ bar.style.display = 'flex'; }
+  if(lbl){ lbl.textContent = `Submitting ${slots.length} break${slots.length!==1?'s':''}…`; }
   for(const slot of slots){
     await claimBNBreak(slot);
   }
+  if(bar) bar.style.display = 'none';
 }
 
 async function claimBNBreak(slotTime){
