@@ -2508,6 +2508,11 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
   const units = await getBNUnits(name, date, shift);
   if(!units.length) return;
 
+  // Has the sign-up window already opened for this shift's date?
+  // For today's shift: check current time. For future dates: window hasn't opened yet.
+  const shiftIsToday = date === shiftDate(shift);
+  const shiftAlreadyStarted = shiftIsToday && staffWindowOpen(shift);
+
   // Remove existing BN breaks — batchDelete if multiple, single spDel if just one
   const existing = await spGet(LISTS.bookings,
     `NurseName eq '${esc(name)}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
@@ -2518,32 +2523,58 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     for(const b of existing) await spDel(LISTS.bookings, b.Id);
   }
 
-  // Load rotation to get the correct unit per slot
-  const rotKey = `bnRotation_${name}_${date}_${shift}`;
-  let rotation = {};
-  try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
+  if(shiftAlreadyStarted){
+    // Shift already started — save breaks using existing rotation, no recalc
+    const rotKey = `bnRotation_${name}_${date}_${shift}`;
+    let rotation = {};
+    try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
+    const expandedUnits = expandCPair(units, date, shift);
+    const rows = [];
+    for(const slotTime of defaultSlots){
+      const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+      rows.push({
+        Title: `BN-${name}-${unit}-${date}-${slotTime}`,
+        NurseName: name, Unit: unit, SlotTime: slotTime,
+        SlotDate: date, ShiftType: shift, IsBNBreak: 1
+      });
+    }
+    if(rows.length){
+      await gasCallPost({
+        action: 'batchInsert',
+        sheet: LISTS.bookings,
+        rows: encodeURIComponent(JSON.stringify(rows))
+      });
+    }
+    // No rotation recalc — shift has started, unit assignments are locked
+  } else {
+    // Future shift — recalculate rotation incorporating the new breaks
+    const expandedUnits = expandCPair(units, date, shift);
+    const bnBreakSet = new Set(defaultSlots);
+    const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
+    const allSlots = getAvailableSlots(shift);
+    const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, allSlots, dateSeed, shift);
+    saveRotation(name, date, shift, rotation);
 
-  // Build one row per slot using the rotation unit — fall back to first unit if not in rotation
-  const expandedUnits = expandCPair(units, date, shift);
-  const rows = [];
-  for(const slotTime of defaultSlots){
-    const unit = rotation[slotTime] || expandedUnits[0] || units[0];
-    rows.push({
-      Title: `BN-${name}-${unit}-${date}-${slotTime}`,
-      NurseName: name, Unit: unit, SlotTime: slotTime,
-      SlotDate: date, ShiftType: shift, IsBNBreak: 1
-    });
+    // Save breaks using the newly calculated rotation unit per slot
+    const rows = [];
+    for(const slotTime of defaultSlots){
+      const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+      rows.push({
+        Title: `BN-${name}-${unit}-${date}-${slotTime}`,
+        NurseName: name, Unit: unit, SlotTime: slotTime,
+        SlotDate: date, ShiftType: shift, IsBNBreak: 1
+      });
+    }
+    if(rows.length){
+      await gasCallPost({
+        action: 'batchInsert',
+        sheet: LISTS.bookings,
+        rows: encodeURIComponent(JSON.stringify(rows))
+      });
+    }
+    // Persist updated rotation to BNState
+    spBatchSetState([{ key: `bnRotation_${name}_${date}_${shift}`, value: rotation }]).catch(()=>{});
   }
-  if(rows.length){
-    await gasCallPost({
-      action: 'batchInsert',
-      sheet: LISTS.bookings,
-      rows: encodeURIComponent(JSON.stringify(rows))
-    });
-  }
-
-  // Recalculate rotation
-  await recalculateRotation(name, date, shift);
 }
 
 async function resetShiftToDefault(){
@@ -3986,17 +4017,58 @@ function getUnitWing(unit){
 
 // Mark a BN unavailable from Admin tab
 async function markBNUnavailable(schedId, bnName, date, shift){
-  const confirmed = await customConfirm(
-    `Mark ${firstName(bnName)} as unavailable for the ${shift} shift?`,
-    'Mark unavailable',
-    'Cancel'
+  // Fetch context for the modal — existing bookings and same-wing BNs
+  const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}'`);
+  const allBookings = await spGet(LISTS.bookings, `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
+
+  // BN's own units
+  const thisSched = allScheds.find(s => String(s.Id) === String(schedId));
+  let bnUnits = [];
+  try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
+
+  // Staff bookings on this BN's units
+  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit));
+
+  // Same-wing BNs available to absorb
+  const sameWingBNs = allScheds.filter(s =>
+    s.BreakNurseName !== bnName &&
+    s.Status !== 'inactive' &&
+    (() => { try { const u = JSON.parse(s.Units||'[]'); return u.some(x => bnUnits.some(y => getWing(x)!=='?' && getWing(x)===getWing(y))); } catch { return false; } })()
   );
-  if(!confirmed) return;
-  const redistribute = await customConfirm(
-    `What would you like to do with ${firstName(bnName)}'s uncovered breaks?`,
-    'Redistribute eligible slots',
-    'Cancel all slots'
-  );
+  const sameWingNames = [...new Set(sameWingBNs.map(s => firstName(s.BreakNurseName)))];
+
+  // Build modal message
+  let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
+
+Covering: ${bnUnits.join(', ')}`;
+  if(affectedBookings.length){
+    const slotList = [...new Set(affectedBookings.map(b => fmt12(b.SlotTime)))].join(', ');
+    const nurseList = [...new Set(affectedBookings.map(b => b.NurseName.split('(')[0].trim()))].join(', ');
+    msg += `
+
+⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected (${slotList})
+Staff: ${nurseList}`;
+  }
+  if(sameWingNames.length){
+    msg += `
+
+↺ ${sameWingNames.join(', ')} ${sameWingNames.length===1?'is':'are'} on the same wing and can absorb eligible slots.`;
+  } else {
+    msg += `
+
+⚠️ No other BNs are available on the same wing — all staff bookings will be cancelled.`;
+  }
+
+  if(!await customConfirm(msg, `Mark ${firstName(bnName)} unavailable`, 'Cancel')) return;
+
+  const redistribute = sameWingNames.length
+    ? await customConfirm(
+        `What would you like to do with ${firstName(bnName)}'s uncovered slots?`,
+        `Redistribute to ${sameWingNames.join('/')}`,
+        'Cancel all slots'
+      )
+    : false;
+
   await processBNUnavailability(schedId, bnName, date, shift, redistribute);
 }
 
@@ -4746,6 +4818,34 @@ async function saveAssign(){
     // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
     const existing = await spGet(LISTS.schedule,
       `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
+
+    // If editing an active shift, warn coordinator about rotation impact
+    const isActiveShift = dt === shiftDate(shift) && staffWindowOpen(shift);
+    if(existing.length > 0 && isActiveShift){
+      // Check for any existing staff bookings on this BN's units
+      const existingUnits = [];
+      existing.forEach(s => { try { JSON.parse(s.Units||'[]').forEach(u => { if(!existingUnits.includes(u)) existingUnits.push(u); }); } catch{} });
+      const removedUnits = existingUnits.filter(u => !units.includes(u));
+      const addedUnits   = units.filter(u => !existingUnits.includes(u));
+      const staffBookings = await spGet(LISTS.bookings, `SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
+      const affectedBookings = staffBookings.filter(b =>
+        !b.IsBNBreak && (removedUnits.includes(b.Unit) || addedUnits.includes(b.Unit))
+      );
+
+      let warningLines = [];
+      if(removedUnits.length) warningLines.push(`Units removed: ${removedUnits.join(', ')}`);
+      if(addedUnits.length)   warningLines.push(`Units added: ${addedUnits.join(', ')}`);
+      if(affectedBookings.length){
+        const names = [...new Set(affectedBookings.map(b => b.NurseName.split('(')[0].trim()))];
+        warningLines.push(`Staff with existing bookings on affected units: ${names.join(', ')}`);
+        warningLines.push(`Their bookings will remain but may no longer match the break nurse rotation.`);
+      }
+      warningLines.push(`The rotation will recalculate for the new unit set. Breaks already taken will not be reshuffled.`);
+
+      const warnMsg = 'This shift is already active.\n\n' + warningLines.join('\n\n');
+      if(!await customConfirm(warnMsg, 'Update assignment', 'Cancel')) return;
+    }
+
     if(existing.length > 0){
       for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
     }
@@ -6492,7 +6592,23 @@ async function loadBNSlots(){
     unavailBanner.style.display = isUnavailable ? 'block' : 'none';
     // Warm rotation cache from backend if not already cached
     await warmRotationCache(BNS.name, dt, shift).catch(()=>{});
-    const bnRotation = loadRotation(BNS.name, dt, shift) || {};
+    let bnRotation = loadRotation(BNS.name, dt, shift) || null;
+    if(!bnRotation){
+      // No cached rotation — calculate client-side from schedule units
+      const rawUnits = [];
+      scheds.forEach(s => {
+        try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
+      });
+      if(rawUnits.length){
+        const expandedUnits = expandCPair(rawUnits, dt, shift);
+        const bnBreakSlots = new Set(bnBreaksPrefetched.map(b => String(b.SlotTime).padStart(4,'0')));
+        const dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
+        bnRotation = calculateBlockRotation(expandedUnits, bnBreakSlots, getAvailableSlots(shift), dateSeed, shift);
+        saveRotation(BNS.name, dt, shift, bnRotation);
+      } else {
+        bnRotation = {};
+      }
+    }
     // Warm default template from backend if not already cached
     warmDefaultTemplate(BNS.name, shift).catch(()=>{});
     // Warm 3C status from backend
@@ -6771,8 +6887,7 @@ async function cancelBNBreak(slotTime){
     } else {
       for(const b of breaks) await spDel(LISTS.bookings, b.Id);
     }
-    // Recalculate rotation so the freed slot shows its correct unit tag
-    recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+    // Note: no rotation recalc on mid-shift break removal — unit assignments stay fixed
 
     // Check if any staff nurses had their booking cancelled when this break was marked
     const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
@@ -6832,8 +6947,7 @@ async function clearBNBreaks(){
       await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
         ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
     }
-    // Recalculate rotation so freed slots show correct unit tags
-    recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+    // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
 
     // Collect all stored cancelled bookings across all cleared slots
     const slotTimes2 = [...new Set(breaks.map(b => b.SlotTime))];
