@@ -5661,16 +5661,32 @@ function checkForRestorableSuggestions(){
   const msg = document.getElementById('importRestoreMsg');
   if(!banner || !msg) return;
 
+  // Always hide first — only show after confirming assignments don't already exist
+  banner.style.display = 'none';
+
   if(batch && batch.length > 0){
     const dates = [...new Set(batch.map(e => e.date))].sort();
     const first = dates[0], last = dates[dates.length-1];
     const range = first === last ? first : `${first} to ${last}`;
-    msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
-    banner.style.display = 'flex';
-    document.getElementById('importResults').style.display = 'block';
-    updateAcceptBars();
-  } else {
-    banner.style.display = 'none';
+
+    spGet(LISTS.schedule, `ShiftDate ge '${first}' and ShiftDate le '${last}'`)
+      .then(existing => {
+        if(existing && existing.length > 0){
+          // Assignments already saved — clear stale batch silently
+          clearLastBatch();
+        } else {
+          // No assignments found — genuine unsaved suggestions
+          msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
+          banner.style.display = 'flex';
+          document.getElementById('importResults').style.display = 'block';
+          updateAcceptBars();
+        }
+      })
+      .catch(() => {
+        // On error, show banner conservatively
+        msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
+        banner.style.display = 'flex';
+      });
   }
 }
 
@@ -6143,20 +6159,30 @@ async function acceptAllAndSave(){
       });
     });
 
-    // Recalculate all rotations in one batch
+    // Recalculate all rotations — apply default breaks if BN has them set
     status.textContent = 'Recalculating rotations...';
     const rotationEntries = [];
+    const defaultApplyPromises = [];
     for(const i of indices){
       const { name, date, shift } = entriesToProcess[i];
       const rawUnits = importUnitSel[i] || [];
       const units = expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift);
       if(!units.length) continue;
-      const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
-      const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
-      const key = `bnRotation_${name}_${date}_${shift}`;
-      localStorage.setItem(key, JSON.stringify(rotation));
-      rotationEntries.push({ key, value: rotation });
+      const bnDef = getDefaultTemplate(name, shift);
+      if(bnDef && bnDef.length > 0){
+        // BN has a default — apply it (which also recalculates rotation incorporating breaks)
+        defaultApplyPromises.push(applyDefaultToShift(name, date, shift, bnDef).catch(()=>{}));
+      } else {
+        // No default — calculate rotation with empty break set
+        const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
+        const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
+        const key = `bnRotation_${name}_${date}_${shift}`;
+        localStorage.setItem(key, JSON.stringify(rotation));
+        rotationEntries.push({ key, value: rotation });
+      }
     }
+    // Fire default applies concurrently, then batch-save plain rotations
+    await Promise.all(defaultApplyPromises);
     if(rotationEntries.length) await spBatchSetState(rotationEntries);
 
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
@@ -6329,8 +6355,13 @@ async function saveImportRow(i){
       const splitNote = wings.length > 1 ? ` (split: ${wings.join(' & ')} Wing)` : '';
       toast(`✓ ${firstName(name)} saved for ${shift} on ${date}${splitNote}`);
     }
-    // Immediately regenerate rotation so staff see BN names on slots right away
-    recalculateRotation(name, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
+    // Immediately regenerate rotation — apply default breaks if BN has them set
+    const _bnDef = getDefaultTemplate(name, shift);
+    if(_bnDef && _bnDef.length > 0){
+      applyDefaultToShift(name, date, shift, _bnDef).catch(e => console.warn('Default apply failed:', e.message));
+    } else {
+      recalculateRotation(name, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
+    }
     // If BN portal is open for this nurse on same device, reload their slot view
     if(BNS.name === name && BNS.date === date && BNS.shift === shift){
       loadBNSlots().catch(()=>{});
