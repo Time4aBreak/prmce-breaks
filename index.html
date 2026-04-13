@@ -1319,12 +1319,23 @@ async function getState(key){
   try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
 }
 
+// Per-key write lock — prevents concurrent setState calls from creating duplicate rows
+const _stateWriteLock = {};
+
 async function setState(key, value){
+  // Wait for any in-flight write on this key to finish before starting a new one
+  if(_stateWriteLock[key]){
+    try { await _stateWriteLock[key]; } catch{}
+  }
+  let _resolve;
+  _stateWriteLock[key] = new Promise(r => _resolve = r);
   try {
     const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
     const val = JSON.stringify(value);
     if(items.length){
       await spPatch(LISTS.state, items[0].Id, { Value: val, UpdatedAt: new Date().toISOString() });
+      // Delete any extra rows (can accumulate from concurrent writes)
+      for(let i = 1; i < items.length; i++) spDel(LISTS.state, items[i].Id).catch(()=>{});
     } else {
       await spPost(LISTS.state, { Title: key, Key: key, Value: val, UpdatedAt: new Date().toISOString() });
     }
@@ -1333,6 +1344,9 @@ async function setState(key, value){
   } catch(e){
     // Fall back to localStorage only
     localStorage.setItem(key, JSON.stringify(value));
+  } finally {
+    _resolve();
+    delete _stateWriteLock[key];
   }
 }
 
