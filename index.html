@@ -3489,8 +3489,12 @@ async function loadOtherSlots(silent=false){
     const daySlots = generateSlots('Day').filter(s => getSlotTier(s,'Day') !== 'hardBlocked');
     const nocSlots = generateSlots('Noc').filter(s => getSlotTier(s,'Noc') !== 'hardBlocked');
 
-    // Determine if shift crosses midnight (end time is AM = next day)
-    const crossesMidnight = endMin < 12*60;
+    // Determine if shift crosses midnight: window wraps around midnight relative to CURRENT time.
+    // e.g. now=11PM, end=2PM → crosses midnight (true)
+    // e.g. now=1AM, end=2PM → does NOT cross midnight (false) — straight window through morning to afternoon
+    // e.g. now=1AM, end=5AM → does NOT cross midnight (false) — straight AM window
+    // e.g. now=11PM, end=5AM → crosses midnight (true)
+    const crossesMidnight = endMin < nowM;
     // For midnight-crossing shifts, adjust all comparisons consistently:
     // PM times stay as-is (e.g. 11:15 PM = 1395), AM times get +1440 (e.g. 3:35 AM = 1655)
     // nowM also gets +1440 when current time is AM, so past PM slots are excluded
@@ -3502,7 +3506,14 @@ async function loadOtherSlots(silent=false){
         const sm = (crossesMidnight && raw < 12*60) ? raw + 1440 : raw;
         return { time: s, shift: 'Day', sortM: sm };
       }),
-      ...nocSlots.map(s => ({ time: s, shift: 'Noc', sortM: sortKey(s,'Noc') }))
+      ...nocSlots.map(s => {
+        const raw = toMin(s);
+        // When NOT crossing midnight, use raw time — sortKey's +1440 offset for AM times
+        // puts them above any PM endAdj (e.g. 1:55 AM sortKey=1555 > endAdj=840) so they
+        // get wrongly filtered out. Raw time (115) compares correctly against the window.
+        const sm = crossesMidnight ? sortKey(s,'Noc') : raw;
+        return { time: s, shift: 'Noc', sortM: sm };
+      })
     ]
     .filter(s => {
       const m = s.sortM;
