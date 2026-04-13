@@ -2432,15 +2432,23 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     `NurseName eq '${esc(name)}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   for(const b of existing) await spDel(LISTS.bookings, b.Id);
 
-  // Save default slots — sequential spPost (reliable)
+  // Build all rows and send in ONE Apps Script call via batchInsert
+  const rows = [];
   for(const slotTime of defaultSlots){
     for(const unit of units){
-      await spPost(LISTS.bookings, {
+      rows.push({
         Title: `BN-${name}-${unit}-${date}-${slotTime}`,
         NurseName: name, Unit: unit, SlotTime: slotTime,
         SlotDate: date, ShiftType: shift, IsBNBreak: 1
       });
     }
+  }
+  if(rows.length){
+    await gasCall({
+      action: 'batchInsert',
+      sheet: LISTS.bookings,
+      rows: encodeURIComponent(JSON.stringify(rows))
+    });
   }
 
   // Recalculate rotation
