@@ -4010,10 +4010,11 @@ function populateBNStartTimeSlots(){
   if(!el) return;
   const shift = BNS.shift || detectShift();
   const saved = localStorage.getItem(getBNStartKey()) || '';
-  // Future slots only — start time only makes sense going forward
+  // Only filter past slots if viewing today's shift — future dates show all slots
+  const isToday = (BNS.date || today()) === shiftDate(shift);
   const slots = generateSlots(shift)
     .filter(s => getSlotTier(s, shift) !== 'hardBlocked')
-    .filter(s => sortKey(s, shift) > nowKey(shift));
+    .filter(s => !isToday || sortKey(s, shift) > nowKey(shift));
   el.innerHTML = '<option value="">— full shift —</option>' +
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
@@ -6376,6 +6377,8 @@ async function loadBNSlots(){
   const list   = document.getElementById('bnSlotsList');
   const meta   = document.getElementById('bnMeta');
   const countEl = document.getElementById('bnBreakCount');
+  // Save scroll position so add/remove break doesn't jump the page
+  const _scrollY = window.scrollY;
   loader.style.display = 'inline-block';
   list.innerHTML = '';
   restoreBNStartTimeUI();
@@ -6517,6 +6520,8 @@ async function loadBNSlots(){
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
   }
   loader.style.display = 'none';
+  // Restore scroll position — prevents page jumping on break add/remove
+  requestAnimationFrame(() => window.scrollTo({ top: _scrollY, behavior: 'instant' }));
   loadBNConfirm();
 }
 
