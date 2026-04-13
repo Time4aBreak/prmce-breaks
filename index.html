@@ -3057,6 +3057,13 @@ async function loadSlots(silent=false){
       const rot = loadRotation(sched.BreakNurseName, oppSchedDt, oppShift);
       if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
     }
+    // Fallback: overlap slots not assigned to this unit in the rotation still get the opp BN's name.
+    // The Day BN covers the unit during the whole overlap window even if their rotation
+    // happened to assign other units to those specific slot times.
+    if(oppCovering.length){
+      const _oppBNFirst = _getBNFirst(oppCovering[0].BreakNurseName);
+      overlapSlots.forEach(s => { if(!_slotBNMap[s]) _slotBNMap[s] = _oppBNFirst; });
+    }
 
     let html='';
     future.forEach(slot=>{
@@ -3563,7 +3570,7 @@ async function loadOtherSlots(silent=false){
 
       return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
         <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
-        <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':'Available'}</div>
+        <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
         <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'✕ Deselect':'+  Select'}</button>
       </div>`;
     }).join('');
