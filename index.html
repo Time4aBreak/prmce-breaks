@@ -424,9 +424,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
         </div>
         <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" onclick="clearBNBreaks()">Clear All My Breaks</button>
-          <button class="btn btn-ghost btn-sm" onclick="resetShiftToDefault()">Reset this shift to default</button>
-          <button class="btn btn-ghost btn-sm" onclick="resetAllToDefault()">Reset all upcoming shifts to default</button>
+          <button class="btn btn-ghost btn-sm" id="clearAllBreaksBtn" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks()">Clear All My Breaks</button>
+          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Resetting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Reset this shift to default'})">Reset this shift to default</button>
           <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="toggleSelfAvailability()">🏠 Mark unavailable</button>
         </div>
       </div>
@@ -437,7 +436,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="bn-card-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
             <div class="card-label" style="margin:0">✅ Staff Breaks Taken</div>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-success btn-sm" onclick="confirmAllBreaks()">✓ Taken All</button>
+              <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='✓ Taken All'})">✓ Taken All</button>
               <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
             </div>
           </div>
@@ -472,7 +471,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               </div>
               <div style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
-                <button class="btn btn-success btn-sm" onclick="saveManualBreak()">Save Break</button>
+                <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';saveManualBreak().finally(()=>{this.disabled=false;this.textContent='Save Break'})">Save Break</button>
               </div>
             </div>
           </div>
@@ -505,7 +504,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="saveDefaultTemplate()">Save Default</button>
+          <button class="btn btn-primary btn-sm" onclick="this.disabled=true;this.textContent='Saving…';saveDefaultTemplate().finally(()=>{this.disabled=false;this.textContent='Save Default'})">Save Default</button>
           <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
           <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="applyDefaultToAll()" style="opacity:.5;cursor:not-allowed" disabled>
             Apply default to all my upcoming shifts
@@ -781,7 +780,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="unit-check-grid" id="aUnits"></div>
         </div>
 
-        <button class="btn btn-primary" style="width:100%" onclick="saveAssign()">Save Assignment</button>
+        <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
     </div>
 
@@ -2492,12 +2491,17 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
   const units = await getBNUnits(name, date, shift);
   if(!units.length) return;
 
-  // Remove existing BN breaks for this date/shift
+  // Remove existing BN breaks — batchDelete if multiple, single spDel if just one
   const existing = await spGet(LISTS.bookings,
     `NurseName eq '${esc(name)}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
-  for(const b of existing) await spDel(LISTS.bookings, b.Id);
+  if(existing.length > 1){
+    await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
+      ids: encodeURIComponent(JSON.stringify(existing.map(b=>b.Id))) });
+  } else {
+    for(const b of existing) await spDel(LISTS.bookings, b.Id);
+  }
 
-  // Build all rows and send in ONE Apps Script call via batchInsert
+  // Build all rows and send in ONE POST call via batchInsert
   const rows = [];
   for(const slotTime of defaultSlots){
     for(const unit of units){
@@ -2509,7 +2513,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     }
   }
   if(rows.length){
-    await gasCall({
+    await gasCallPost({
       action: 'batchInsert',
       sheet: LISTS.bookings,
       rows: encodeURIComponent(JSON.stringify(rows))
@@ -6499,7 +6503,7 @@ async function loadBNSlots(){
         </div>
         <div>
           ${isMyBreak
-            ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();cancelBNBreak('${slot}')">✕ Remove</button>`
+            ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();this.disabled=true;this.textContent='Removing…';cancelBNBreak('${slot}')">✕ Remove</button>`
             : isPendingBreak
               ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="event.stopPropagation();toggleBNPending('${slot}')">✕ Deselect</button>`
               : `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600"
@@ -6786,8 +6790,14 @@ async function clearBNBreaks(){
     } else {
       toast('All break slots cleared');
     }
+    const clearBtn = document.getElementById('clearAllBreaksBtn');
+    if(clearBtn){ clearBtn.disabled=false; clearBtn.textContent='Clear All My Breaks'; }
     loadBNSlots();
-  } catch(e) { toast(e.message, true); }
+  } catch(e) {
+    toast(e.message, true);
+    const clearBtn = document.getElementById('clearAllBreaksBtn');
+    if(clearBtn){ clearBtn.disabled=false; clearBtn.textContent='Clear All My Breaks'; }
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -6916,8 +6926,8 @@ async function loadBNConfirm(){
         statusHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else {
-        statusHtml = `<button class="btn btn-success btn-sm" onclick="setBreakStatus(${b.Id},'confirmed')" style="margin-right:4px">✓ Taken</button>
-          <button class="btn btn-ghost btn-sm" onclick="setBreakStatus(${b.Id},'not_taken')" style="margin-right:4px">✗ Not Taken</button>
+        statusHtml = `<button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';setBreakStatus(${b.Id},'confirmed').finally(()=>{this.disabled=false;this.textContent='✓ Taken'})" style="margin-right:4px">✓ Taken</button>
+          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Saving…';setBreakStatus(${b.Id},'not_taken').finally(()=>{this.disabled=false;this.textContent='✗ Not Taken'})" style="margin-right:4px">✗ Not Taken</button>
           <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`;
       }
 
