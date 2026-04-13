@@ -5238,8 +5238,22 @@ function changeBNPw(){
 // ═══════════════════════════════════════════════════════
 let _toastT;
 // Extract first name from "Last, First M" format
+// ── Preferred display names ───────────────────────────
+// Maps full name (as stored in Sheets) → preferred first name shown throughout the app.
+// Add entries here whenever a BN goes by a different name than their legal first name.
+const PREFERRED_NAMES = {
+  'Rivera, Christlyne J': 'Jhaiz',
+  'Rivera, Christlyne':   'Jhaiz',
+  'Samra, Akdeep K':      'Deepi',
+  'Samra, Akdeep':        'Deepi',
+  'Yago, Leonel Richie':  'Leo',
+  'Yago, Leonel':         'Leo',
+};
+
 function firstName(fullName){
   if(!fullName) return fullName;
+  // Check preferred name lookup first
+  if(PREFERRED_NAMES[fullName]) return PREFERRED_NAMES[fullName];
   const parts = fullName.split(',');
   if(parts.length > 1) return parts[1].trim().split(' ')[0];
   return fullName.split(' ')[0];
@@ -6414,7 +6428,31 @@ function loadBNView(){
 
   document.getElementById('bnShiftWrap').style.display = 'block';
   document.getElementById('bnNoSched').style.display   = 'none';
-  loadBNSlots();
+
+  // Before first render: check if BN is scheduled for this date/shift.
+  // If not, scan forward up to 30 days and jump to their next scheduled shift.
+  (async () => {
+    try {
+      const check = await spGet(LISTS.schedule,
+        `ShiftDate eq '${BNS.date}' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+      if(!check.length){
+        const upcoming = await spGet(LISTS.schedule,
+          `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}'`);
+        const future = upcoming
+          .filter(s => s.Status !== 'inactive' &&
+            (s.ShiftDate > BNS.date || (s.ShiftDate === BNS.date && s.ShiftType !== BNS.shift)))
+          .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
+        if(future.length){
+          BNS.date  = future[0].ShiftDate;
+          BNS.shift = future[0].ShiftType;
+          const dp = document.getElementById('bnDate');
+          if(dp) dp.value = BNS.date;
+          renderBNShiftPill();
+        }
+      }
+    } catch(e){ /* fall through — loadBNSlots will handle */ }
+    loadBNSlots();
+  })();
 }
 
 function onBNExtInput(){
@@ -6493,6 +6531,24 @@ async function loadBNSlots(){
     const bnBreaksPrefetched = batchResults[1];
 
     if (!scheds.length){
+      // Auto-find next scheduled assignment for this BN within 14 days
+      try {
+        const upcoming = await spGet(LISTS.schedule,
+          `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${dt}'`);
+        const future = upcoming
+          .filter(s => s.Status !== 'inactive' && (s.ShiftDate > dt || (s.ShiftDate === dt && s.ShiftType !== shift)))
+          .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
+        if(future.length){
+          // Jump to next scheduled date/shift automatically
+          BNS.date  = future[0].ShiftDate;
+          BNS.shift = future[0].ShiftType;
+          const dp = document.getElementById('bnDate');
+          if(dp) dp.value = BNS.date;
+          renderBNShiftPill();
+          loadBNSlots(); // recurse with correct date/shift
+          return;
+        }
+      } catch(e){ /* fall through to no-sched message */ }
       document.getElementById('bnNoSched').style.display = 'block';
       loader.style.display = 'none';
       list.innerHTML = '';
