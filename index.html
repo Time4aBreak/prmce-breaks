@@ -503,11 +503,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="saveDefaultTemplate();this.textContent='✓ Saved';setTimeout(()=>this.textContent='Save Default',1500)">Save Default</button>
-          <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
-          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="applyDefaultToAll()" style="opacity:.5;cursor:not-allowed" disabled>
-            Apply default to all my upcoming shifts
+          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="saveAndApplyDefault(this)">
+            Apply to all shifts
           </button>
+          <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
         </div>
         <div id="bnApplyAllHint" style="font-size:.75rem;color:var(--muted);margin-top:6px;display:none">
           You haven't set a default break schedule yet. Select your usual break times above to get started.
@@ -2327,13 +2326,22 @@ function saveDefaultTemplate(){
   const key = `bnDefault_${name}_${shift}`;
   localStorage.setItem(key, JSON.stringify(selected));
   setState(key, selected).catch(()=>{});
-  document.getElementById('bnDefaultSaved').style.display = 'inline';
-  setTimeout(() => {
-    const el = document.getElementById('bnDefaultSaved');
-    if(el) el.style.display = 'none';
-  }, 2000);
   updateApplyAllBtn();
-  toast(`Default ${shift} break schedule saved (${selected.length} slot${selected.length!==1?'s':''})`);
+}
+
+async function saveAndApplyDefault(btn){
+  const name = BNS.name;
+  const shift = BNS.defaultShift || 'Day';
+  if(!name){ toast('Select your name first', true); return; }
+  const selected = [...document.querySelectorAll('.bn-default-slot.on')]
+    .map(el => el.dataset.slot);
+  if(!selected.length){
+    toast('Select at least one break slot first', true); return;
+  }
+  // Save default first
+  saveDefaultTemplate();
+  // Then apply to all upcoming shifts
+  await applyDefaultToAll();
 }
 
 function clearDefaultTemplate(){
@@ -2349,24 +2357,9 @@ function clearDefaultTemplate(){
 }
 
 function updateApplyAllBtn(){
-  const name = BNS.name;
-  if(!name) return;
-  const dayDef = getDefaultTemplate(name, 'Day');
-  const nocDef = getDefaultTemplate(name, 'Noc');
-  const hasDefault = (dayDef && dayDef.length > 0) || (nocDef && nocDef.length > 0);
+  // Button is always enabled — saveAndApplyDefault guards against empty selection
   const btn = document.getElementById('bnApplyAllBtn');
-  const hint = document.getElementById('bnApplyAllHint');
-  if(!btn) return;
-  if(hasDefault){
-    btn.disabled = false;
-    btn.style.opacity = '1';
-    btn.style.cursor = 'pointer';
-    if(hint) hint.style.display = 'none';
-  } else {
-    btn.disabled = true;
-    btn.style.opacity = '.5';
-    btn.style.cursor = 'not-allowed';
-  }
+  if(btn){ btn.disabled = false; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
 }
 
 function loadDefaultGrid(shift){
@@ -2413,7 +2406,7 @@ async function applyDefaultToAll(){
   }
 
   const applyBtn = document.getElementById('bnApplyAllBtn');
-  if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Fetching schedule…'; }
+  if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Applying…'; }
 
   try {
     // ── ONE round trip: fetch all schedules + all existing BN breaks ──
@@ -2425,7 +2418,7 @@ async function applyDefaultToAll(){
     const upcoming = schedRaw.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
     if(!upcoming.length){
       toast('No upcoming shifts found', true);
-      if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply default to all my upcoming shifts'; }
+      if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply to all shifts'; }
       return;
     }
 
@@ -2433,7 +2426,7 @@ async function applyDefaultToAll(){
     const upcomingKeys = new Set(upcoming.map(s => `${s.ShiftDate}|${s.ShiftType}`));
     const toDelete = existingBreaks.filter(b => upcomingKeys.has(`${b.SlotDate}|${b.ShiftType}`));
     if(toDelete.length){
-      if(applyBtn) applyBtn.textContent = '⏳ Removing old breaks…';
+      if(applyBtn) applyBtn.textContent = '⏳ Applying…';
       await gasCallPost({
         action: 'batchDelete',
         sheet: LISTS.bookings,
@@ -2493,14 +2486,14 @@ async function applyDefaultToAll(){
     toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
     if(applyBtn){
       applyBtn.disabled = false;
-      applyBtn.textContent = '✓ Applied to all upcoming shifts';
+      applyBtn.textContent = '✓ Applied to all shifts';
       applyBtn.style.background = 'var(--teal-dk)';
       applyBtn.style.opacity = '1';
     }
     loadBNSlots();
   } catch(e){
     toast('Error: ' + e.message, true);
-    if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply default to all my upcoming shifts'; }
+    if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply to all shifts'; }
   }
 }
 
