@@ -6380,10 +6380,19 @@ function loadBNView(){
   if (!name) { toast('Select your name first.', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
 
-  // Clear ext if a different BN is selected
+  // Clear ext and slot display immediately when switching to a different BN
   if(BNS.name && BNS.name !== name){
     document.getElementById('bnExtInput').value = '';
     document.getElementById('bnExtInput').style.borderColor = '';
+    // Instantly clear slots and show finding indicator
+    const _sl = document.getElementById('bnSlotsList');
+    const _mt = document.getElementById('bnMeta');
+    const _bc = document.getElementById('bnBreakCount');
+    const _cw = document.getElementById('bnConfirmWrap');
+    if(_sl) _sl.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
+    if(_mt) _mt.textContent = '';
+    if(_bc) _bc.textContent = '';
+    if(_cw) _cw.style.display = 'none';
   }
 
   // Restore saved ext for this BN if available
