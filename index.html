@@ -2858,13 +2858,13 @@ async function loadSlots(silent=false){
         banner.style.color = 'var(--red)';
         banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
       } else {
-        // Window closed but coverage exists (main BN, window not open yet)
+        // Window closed but coverage exists today — no upcoming dates, "opens X" says it all
         setNameCardEnabled(false);
         banner.style.display = 'block';
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable · opens ${shift === 'Day' ? '6:30 AM' : '6:30 PM'}${_upcomingNote2}`;
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable · opens ${shift === 'Day' ? '6:30 AM' : '6:30 PM'}`;
       }
     }
 
@@ -4672,6 +4672,13 @@ function setViewRange(range, btn){
   _viewRange = range;
   const allBtn = document.getElementById('va-all');
   if(allBtn) allBtn.classList.toggle('active', range === 'all');
+  // Reset date pickers when switching back to All Upcoming
+  if(range === 'all'){
+    const fromEl = document.getElementById('viewDateFrom');
+    const toEl   = document.getElementById('viewDateTo');
+    if(fromEl) fromEl.value = '';
+    if(toEl)   toEl.value   = '';
+  }
   loadAssignments();
 }
 
