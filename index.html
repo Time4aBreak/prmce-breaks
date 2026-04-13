@@ -3075,9 +3075,9 @@ async function loadSlots(silent=false){
     // Also respect each covering BN's start time — hide slots before they arrive
     const bnStartMins = {};
     [...covering, ...oppCovering].forEach(c => {
-      const key = `bnStart_${c.BreakNurseName}_${dt}_${c.ShiftType}`;
+      const key = `bnStart_${c.BreakNurseName}_${c.ShiftDate || dt}_${c.ShiftType}`;
       const val = localStorage.getItem(key);
-      if(val){ const [h,m]=val.split(':').map(Number); bnStartMins[c.BreakNurseName]=h*60+m; }
+      if(val){ bnStartMins[c.BreakNurseName] = toMin(val); }
     });
     const earliestBNStart = Object.values(bnStartMins).length
       ? Math.min(...Object.values(bnStartMins)) : null;
