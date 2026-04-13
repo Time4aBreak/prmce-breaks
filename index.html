@@ -504,7 +504,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-primary btn-sm" onclick="this.disabled=true;this.textContent='Saving…';saveDefaultTemplate().finally(()=>{this.disabled=false;this.textContent='Save Default'})">Save Default</button>
+          <button class="btn btn-primary btn-sm" onclick="saveDefaultTemplate();this.textContent='✓ Saved';setTimeout(()=>this.textContent='Save Default',1500)">Save Default</button>
           <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
           <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="applyDefaultToAll()" style="opacity:.5;cursor:not-allowed" disabled>
             Apply default to all my upcoming shifts
