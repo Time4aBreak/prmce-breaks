@@ -2390,37 +2390,87 @@ async function applyDefaultToAll(){
     return;
   }
 
-  // Disable button and show progress
   const applyBtn = document.getElementById('bnApplyAllBtn');
-  if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Applying…'; }
+  if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Fetching schedule…'; }
 
-  // Get all upcoming assignments for this BN
-  const scheds = await spGet(LISTS.schedule,
-    `BreakNurseName eq '${esc(name)}'`);
-  const upcoming = scheds.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
+  try {
+    // ── ONE round trip: fetch all schedules + all existing BN breaks ──
+    const [schedRaw, existingBreaks] = await Promise.all([
+      spGet(LISTS.schedule, `BreakNurseName eq '${esc(name)}'`),
+      spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and IsBNBreak eq 1`)
+    ]);
 
-  if(!upcoming.length){
-    toast('No upcoming shifts found', true);
+    const upcoming = schedRaw.filter(s => s.ShiftDate >= shiftDate(s.ShiftType));
+    if(!upcoming.length){
+      toast('No upcoming shifts found', true);
+      if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply default to all my upcoming shifts'; }
+      return;
+    }
+
+    if(applyBtn) applyBtn.textContent = '⏳ Removing old breaks…';
+
+    // ── Delete all existing BN breaks for upcoming shifts in one pass ──
+    const upcomingKeys = new Set(upcoming.map(s => `${s.ShiftDate}|${s.ShiftType}`));
+    const toDelete = existingBreaks.filter(b => upcomingKeys.has(`${b.SlotDate}|${b.ShiftType}`));
+    for(const b of toDelete) await spDel(LISTS.bookings, b.Id);
+
+    // ── Build all new break rows across all shifts ──
+    if(applyBtn) applyBtn.textContent = '⏳ Saving breaks…';
+    const allRows = [];
+    const rotationEntries = [];
+
+    for(const sched of upcoming){
+      const def = sched.ShiftType === 'Day' ? dayDef : nocDef;
+      if(!def.length) continue;
+      let units = [];
+      try { units = JSON.parse(sched.Units || '[]'); } catch{}
+      if(!units.length) continue;
+
+      for(const slotTime of def){
+        for(const unit of units){
+          allRows.push({
+            Title: `BN-${name}-${unit}-${sched.ShiftDate}-${slotTime}`,
+            NurseName: name, Unit: unit, SlotTime: slotTime,
+            SlotDate: sched.ShiftDate, ShiftType: sched.ShiftType, IsBNBreak: 1
+          });
+        }
+      }
+
+      // Pre-compute rotation (client-side, no API needed)
+      const expandedUnits = expandCPair(units, sched.ShiftDate, sched.ShiftType);
+      const bnBreakSet = new Set(def);
+      const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
+      const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
+      const key = `bnRotation_${name}_${sched.ShiftDate}_${sched.ShiftType}`;
+      localStorage.setItem(key, JSON.stringify(rotation));
+      rotationEntries.push({ key, value: rotation });
+    }
+
+    // ── ONE batchInsert for all rows ──
+    if(allRows.length){
+      await gasCall({
+        action: 'batchInsert',
+        sheet: LISTS.bookings,
+        rows: encodeURIComponent(JSON.stringify(allRows))
+      });
+    }
+
+    // ── ONE batchSetState for all rotations ──
+    if(rotationEntries.length) await spBatchSetState(rotationEntries);
+
+    const applied = upcoming.filter(s => (s.ShiftType==='Day'?dayDef:nocDef).length > 0).length;
+    toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
+    if(applyBtn){
+      applyBtn.disabled = false;
+      applyBtn.textContent = '✓ Applied to all upcoming shifts';
+      applyBtn.style.background = 'var(--teal-dk)';
+      applyBtn.style.opacity = '1';
+    }
+    loadBNSlots();
+  } catch(e){
+    toast('Error: ' + e.message, true);
     if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply default to all my upcoming shifts'; }
-    return;
   }
-
-  let applied = 0;
-  for(const sched of upcoming){
-    const def = sched.ShiftType === 'Day' ? dayDef : nocDef;
-    if(!def.length) continue;
-    if(applyBtn) applyBtn.textContent = `⏳ Applying shift ${applied + 1} of ${upcoming.length}…`;
-    await applyDefaultToShift(name, sched.ShiftDate, sched.ShiftType, def);
-    applied++;
-  }
-  toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
-  if(applyBtn){
-    applyBtn.disabled = false;
-    applyBtn.textContent = '✓ Applied to all upcoming shifts';
-    applyBtn.style.background = 'var(--teal-dk)';
-    applyBtn.style.opacity = '1';
-  }
-  loadBNSlots();
 }
 
 async function applyDefaultToShift(name, date, shift, defaultSlots){
