@@ -2432,17 +2432,16 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
     `NurseName eq '${esc(name)}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   for(const b of existing) await spDel(LISTS.bookings, b.Id);
 
-  // Batch-save all default slots across all units in one call
-  const records = [];
+  // Save default slots — sequential spPost (reliable)
   for(const slotTime of defaultSlots){
     for(const unit of units){
-      records.push({
-        matchFields: { NurseName: name, Unit: unit, SlotTime: slotTime, SlotDate: date, ShiftType: shift, IsBNBreak: 1 },
-        data: { Title: `BN-${name}-${unit}-${date}-${slotTime}`, NurseName: name, Unit: unit, SlotTime: slotTime, SlotDate: date, ShiftType: shift, IsBNBreak: 1 }
+      await spPost(LISTS.bookings, {
+        Title: `BN-${name}-${unit}-${date}-${slotTime}`,
+        NurseName: name, Unit: unit, SlotTime: slotTime,
+        SlotDate: date, ShiftType: shift, IsBNBreak: 1
       });
     }
   }
-  if(records.length) await spBatchUpsert(LISTS.bookings, records);
 
   // Recalculate rotation
   await recalculateRotation(name, date, shift);
