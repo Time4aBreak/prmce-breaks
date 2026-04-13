@@ -2451,13 +2451,17 @@ async function applyDefaultToAll(){
       rotationEntries.push({ key, value: rotation });
     }
 
-    // ── ONE batchInsert for all rows ──
+    // ── batchInsert in chunks of 50 rows to stay within URL limits ──
     if(allRows.length){
-      await gasCall({
-        action: 'batchInsert',
-        sheet: LISTS.bookings,
-        rows: encodeURIComponent(JSON.stringify(allRows))
-      });
+      const CHUNK = 50;
+      for(let ci = 0; ci < allRows.length; ci += CHUNK){
+        const chunk = allRows.slice(ci, ci + CHUNK);
+        await gasCall({
+          action: 'batchInsert',
+          sheet: LISTS.bookings,
+          rows: encodeURIComponent(JSON.stringify(chunk))
+        });
+      }
     }
 
     // ── ONE batchSetState for all rotations ──
