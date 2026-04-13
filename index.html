@@ -6539,6 +6539,14 @@ function loadBNView(){
   document.getElementById('bnShiftWrap').style.display = 'block';
   document.getElementById('bnNoSched').style.display   = 'none';
 
+  // Show "Finding shift…" while the pre-scan runs
+  const _bnMeta = document.getElementById('bnMeta');
+  const _bnList = document.getElementById('bnSlotsList');
+  const _bnLoader = document.getElementById('bnLoader');
+  if(_bnMeta) _bnMeta.textContent = '';
+  if(_bnList) _bnList.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
+  if(_bnLoader) _bnLoader.style.display = 'inline-block';
+
   // Before first render: check if BN is scheduled for this date/shift.
   // If not, scan forward up to 30 days and jump to their next scheduled shift.
   (async () => {
@@ -6705,8 +6713,9 @@ async function loadBNSlots(){
     const bnBreakTimes = new Set();
     const bnBreakIds = {};
     bnBreaks.forEach(b => {
-      bnBreakTimes.add(b.SlotTime);
-      if(!bnBreakIds[b.SlotTime]) bnBreakIds[b.SlotTime] = b.Id;
+      const _bnST = String(b.SlotTime).padStart(4,'0');
+      bnBreakTimes.add(_bnST);
+      if(!bnBreakIds[_bnST]) bnBreakIds[_bnST] = b.Id;
     });
 
     const myBreakCount = bnBreakTimes.size;
