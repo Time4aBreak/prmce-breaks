@@ -1017,7 +1017,6 @@ const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings', 
 function isConfirmed(b)  { return b.BreakStatus === 'confirmed' || (b.IsCompleted == 1 && b.BreakStatus !== 'not_taken'); }
 function isNotTaken(b)   { return b.BreakStatus === 'not_taken'; }
 function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
-function getBreakStatus(b){ return isConfirmed(b) ? 'confirmed' : isNotTaken(b) ? 'not_taken' : 'pending'; }
 
 // Slot constants
 // Day:  first slot 08:35, last 20:15 (ends 20:30). 36 slots × 20 min = 700 min span.
@@ -1161,11 +1160,6 @@ async function fetchAllSchedules(floorDate){
 }
 function clearSchedCache(){ /* no-op — no cache to clear */ }
 
-async function getAllSchedules(){ return fetchAllSchedules(); }
-async function getSchedules(date, shift){
-  const all = await fetchAllSchedules(date);
-  return all.filter(s => s.ShiftDate === date && s.ShiftType === shift);
-}
 
 function showAPIError(msg){
   // Show a persistent banner if backend is unreachable
@@ -1207,17 +1201,7 @@ async function fetchWithTimeout(url, ms, opts={}){
   }
 }
 
-async function gasCallLong(params){
-  // Extended timeout for bulk operations like batchInsert/batchDelete
-  const url = GAS_URL + '?' + new URLSearchParams({...params, token: REQUEST_TOKEN}).toString();
-  const r = await fetchWithTimeout(url, 90000); // 90 seconds
-  if(!r.ok) throw new Error('Server error: ' + r.status);
-  const d = await r.json();
-  if(d.error) throw new Error(d.error);
-  clearAPIError();
-  return d;
-}
-
+// gasCallLong removed — superseded by gasCallPost (POST avoids GET URL length limits)
 async function gasCallPost(params){
   // POST variant for large payloads that exceed GET URL length limits
   const body = new URLSearchParams({...params, token: REQUEST_TOKEN});
@@ -2110,9 +2094,6 @@ function pickUnit(u){
   loadSlots(); // loadSlots now updates the banner too
 }
 
-function isSignupWindowOpen(){
-  return true; // No window gate — isPast() already handles future-only slots
-}
 
 function updateNameCardVisibility(){
   const card = document.getElementById('nameCard');
@@ -2299,9 +2280,6 @@ function setNameCardEnabled(enabled){
   }
 }
 
-function flipShift(){
-  selectStaffShift(S.shift === 'Day' ? 'Noc' : S.shift === 'Noc' ? 'Other' : 'Day');
-}
 
 
 
@@ -2404,6 +2382,8 @@ function toggleDefaultSlot(el, slot){
   el.classList.toggle('on');
 }
 
+// clearAndResuggest removed — bulk re-suggest flow replaced by applyDefaultToAll
+// cancelSlot, confirmBreak removed — replaced by cancelBNBreak / loadBNConfirm flow
 async function applyDefaultToAll(){
   const name = BNS.name;
   if(!name){ toast('Select your name first', true); return; }
@@ -3816,15 +3796,6 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   }
 }
 
-async function cancelSlot(id){
-  try{
-    await spDel(LISTS.bookings,id);
-    toast('Break cancelled.');
-    loadSlots();
-    if(document.getElementById('summList')) loadSummary();
-  }catch(e){ toast(e.message,true); }
-}
-
 // ── Manage My Slot: Transfer or Cancel ──
 let _manageSlotData = null;
 
@@ -4030,12 +4001,6 @@ async function markBNAvailable(schedId, bnName){
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
-function getBNStartMin(){
-  const val = localStorage.getItem(getBNStartKey());
-  if(!val) return null;
-  const [h,m] = val.split(':').map(Number);
-  return h*60+m;
-}
 function populateBNStartTimeSlots(){
   const el = document.getElementById('bnStartTime');
   if(!el) return;
@@ -4149,6 +4114,8 @@ function markCardUnavailableInDOM(bnName){
   });
 }
 
+// showReassignModal + handleReassignConfirm removed — modal-based reassign flow
+// replaced by processBNUnavailability + customConfirm (inline redistribution algorithm)
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
   try {
     // Get BN-A's units and mark record inactive
@@ -4393,16 +4360,6 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
   } catch(e) { toast(e.message, true); }
 }
 
-// Helper: format current time as HH:MM
-function fmt24(date){
-  return `${String(date.getHours()).padStart(2,'0')}:${String(date.getMinutes()).padStart(2,'0')}`;
-}
-
-// ═══════════════════════════════════════════════════════
-// COVERAGE BANNER & BOOKING STATUS (Sign-Up Tab)
-// ═══════════════════════════════════════════════════════
-// Banner is now updated by loadSlots/loadOtherSlots — no separate function needed
-async function updateCoverageBanner(){ /* no-op — handled by loadSlots */ }
 
 function onNameInput(){
   // Clear ext whenever name is edited so duplicate check doesn't fire on stale ext
@@ -4944,87 +4901,6 @@ async function delAssign(id){
   } catch(e){ toast(e.message, true); }
 }
 
-function showReassignModal({ deletingAssign, units, affected, otherBNs, onReassign, onCancelAndDelete }){
-  const existing = document.getElementById('reassignModal');
-  if(existing) existing.remove();
-
-  const nurseList = [...new Set(affected.map(b => formatNurse(b.NurseName)))];
-  const affectedHtml = nurseList.map(n => {
-    const slots = affected.filter(b => b.NurseName === n).map(b => fmt12(b.SlotTime)).join(', ');
-    return `<div style="font-size:.82rem;color:var(--text)">• ${n} — ${slots}</div>`;
-  }).join('');
-
-  const bnOptions = otherBNs.length
-    ? otherBNs.map(b => `<option value="${b.Id}">${b.BreakNurseName}</option>`).join('')
-    : '<option disabled>No other BNs on this shift</option>';
-
-  const modal = document.createElement('div');
-  modal.id = 'reassignModal';
-  modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px`;
-  modal.innerHTML = `
-    <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-      <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Remove Assignment</div>
-      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${deletingAssign.BreakNurseName} · ${deletingAssign.ShiftType} · ${deletingAssign.ShiftDate}</div>
-      <div style="font-size:.82rem;font-weight:600;margin-bottom:6px;color:var(--text)">⚠️ ${affected.length} claimed break${affected.length!==1?'s':''} will be affected:</div>
-      <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:120px;overflow-y:auto">${affectedHtml}</div>
-      <div style="margin-bottom:16px">
-        <label style="font-size:.82rem;font-weight:600;display:block;margin-bottom:6px">Reassign coverage to:</label>
-        <select id="reassignTarget" style="width:100%;padding:8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem">
-          <option value="">— Cancel all bookings and delete —</option>
-          ${bnOptions}
-        </select>
-      </div>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('reassignModal').remove()">Back</button>
-        <button class="btn btn-danger btn-sm" onclick="handleReassignConfirm()">Confirm</button>
-      </div>
-    </div>`;
-  document.body.appendChild(modal);
-
-  window._reassignHandlers = { onReassign, onCancelAndDelete, affected, otherBNs: otherBNs, deletingAssign };
-}
-
-async function handleReassignConfirm(){
-  const modal = document.getElementById('reassignModal');
-  const targetId = document.getElementById('reassignTarget').value;
-  const { onReassign, onCancelAndDelete, affected, otherBNs, deletingAssign } = window._reassignHandlers || {};
-
-  if(!targetId){
-    modal.remove();
-    if(onCancelAndDelete) await onCancelAndDelete();
-    return;
-  }
-
-  // Check new BN's existing bookings for slot conflicts (skip for new assignments)
-  const target = otherBNs.find(b => String(b.Id) === String(targetId));
-  if(target && !target._isNew){
-    const existingBookings = await spGet(LISTS.bookings,
-      `SlotDate eq '${deletingAssign.ShiftDate}' and ShiftType eq '${deletingAssign.ShiftType}'`);
-    let targetUnits = []; try { targetUnits = JSON.parse(target.Units||'[]'); } catch{}
-    const targetTakenSlots = new Set(
-      existingBookings
-        .filter(b => !b.IsBNBreak && targetUnits.includes(b.Unit))
-        .map(b => b.SlotTime)
-    );
-    const conflicts = affected.filter(b => targetTakenSlots.has(b.SlotTime));
-    if(conflicts.length){
-      const lines = conflicts.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
-      const proceed = await customConfirm(
-        `⚠️ ${target.BreakNurseName} already has staff booked at these times:\n\n${lines}\n\nThese conflicting bookings will be cancelled. Continue?`
-      );
-      if(!proceed) return;
-      // Cancel the conflicting bookings from the new BN's existing staff
-      for(const b of existingBookings.filter(b => !b.IsBNBreak && targetUnits.includes(b.Unit) && targetTakenSlots.has(b.SlotTime))){
-        await spDel(LISTS.bookings, b.Id);
-      }
-    }
-  }
-
-  modal.remove();
-  if(onReassign) await onReassign(targetId);
-}
-
-
 async function closeUnit(schedId, unit, bnName, date, shift){
   try {
     // Get future claimed bookings on this unit
@@ -5150,63 +5026,6 @@ async function recalculateAllRotations(){
   else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated`);
 }
 
-async function testSharePointConnectivity(){
-  const SP_SITE = 'https://providence4.sharepoint.com/sites/TowerCentral';
-  const results = document.getElementById('spTestResults');
-  const spinner = document.getElementById('spTestSpinner');
-  spinner.style.display = 'inline-block';
-  results.innerHTML = '';
-
-  const tests = [
-    {
-      label: 'BNSchedule list (GET)',
-      url: `${SP_SITE}/_api/web/lists/getbytitle('BNSchedule')/items?$top=1&$select=Id`,
-    },
-    {
-      label: 'BNBookings list (GET)',
-      url: `${SP_SITE}/_api/web/lists/getbytitle('BNBookings')/items?$top=1&$select=Id`,
-    },
-    {
-      label: 'Request Digest (POST auth check)',
-      url: `${SP_SITE}/_api/contextinfo`,
-      method: 'POST'
-    }
-  ];
-
-  const rows = [];
-  for(const test of tests){
-    try {
-      const opts = {
-        method: test.method || 'GET',
-        headers: { 'Accept': 'application/json;odata=verbose' },
-        credentials: 'include'
-      };
-      const res = await Promise.race([
-        fetch(test.url, opts),
-        new Promise((_,reject) => setTimeout(() => reject(new Error('Timed out after 8s')), 8000))
-      ]);
-      if(res.ok || res.status === 200){
-        rows.push(`<div style="color:var(--green)">✅ ${test.label} — <strong>OK</strong> (${res.status})</div>`);
-      } else if(res.status === 401 || res.status === 403){
-        rows.push(`<div style="color:var(--red)">🔒 ${test.label} — <strong>Auth required</strong> (${res.status}) — make sure you're logged into your hospital account</div>`);
-      } else {
-        rows.push(`<div style="color:var(--red)">⚠️ ${test.label} — <strong>HTTP ${res.status}</strong></div>`);
-      }
-    } catch(e){
-      const isBlocked = e.message.includes('Failed to fetch') || e.message.includes('NetworkError');
-      rows.push(`<div style="color:var(--red)">${isBlocked ? '🚫' : '⚠️'} ${test.label} — <strong>${isBlocked ? 'Blocked by network or CORS' : e.message}</strong></div>`);
-    }
-  }
-
-  const allOk = rows.every(r => r.includes('✅'));
-  const summary = allOk
-    ? `<div style="margin-top:10px;padding:8px 12px;background:var(--teal-lt);border-radius:8px;color:var(--teal-dk);font-weight:600">✅ SharePoint is reachable — migration to SharePoint backend is feasible!</div>`
-    : `<div style="margin-top:10px;padding:8px 12px;background:var(--red-lt);border-radius:8px;color:var(--red);font-weight:600">⚠️ One or more tests failed — see details above. SharePoint backend may not work from this browser.</div>`;
-
-  results.innerHTML = rows.join('') + summary;
-  spinner.style.display = 'none';
-}
-
 async function dedupAssignments(){
   try {
     const all = await spGet(LISTS.schedule, `ShiftDate ge '2020-01-01'`);
@@ -5234,21 +5053,6 @@ async function dedupAssignments(){
     toast(deleted > 0 ? `🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}` : 'No duplicates found');
     loadAssignments();
   } catch(e) { toast(e.message, true); }
-}
-
-// ── Sim helpers ──────────────────────────────────────
-function exportSimData(){
-  const data = {
-    BNSchedule: DB.BNSchedule,
-    BNBookings:  DB.BNBookings,
-    exported: new Date().toISOString()
-  };
-  const blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
-  const a = document.createElement('a');
-  a.href = URL.createObjectURL(blob);
-  a.download = 'prmce_sim_data.json';
-  a.click();
-  toast('Sim data exported!');
 }
 
 async function clearSimData(){
@@ -5351,6 +5155,9 @@ const PREFERRED_NAMES = {
   'Yago, Leonel':         'Leo',
 };
 
+// fmt24 removed — time formatting replaced by fmt12 throughout
+// isSignupWindowOpen, getBreakStatus removed — replaced by inline banner logic in loadSlots
+// getBNStartMin removed — shift window detection moved to shiftDate/detectShift helpers
 function firstName(fullName){
   if(!fullName) return fullName;
   // Check preferred name lookup first
@@ -6071,63 +5878,6 @@ async function clearAllImportedEntries(){
   toast('All imported entries cleared.');
 }
 
-// Clear all unit selections across all import rows
-
-// Clear all selections then re-run suggestions
-async function clearAndResuggest(){
-  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
-  if(!entriesToProcess.length) return;
-
-  // Clear all selections
-  Object.keys(importUnitSel).forEach(i => {
-    importUnitSel[i] = [];
-    UNITS.forEach(u => {
-      const el = document.getElementById(`iu-${i}-${u}`);
-      if(el) el.classList.remove('on');
-    });
-  });
-
-  // Re-run algorithm fresh across all dates (chronological with overlay)
-  const byDateShift = {};
-  entriesToProcess.forEach(e => {
-    const key = `${e.date}|${e.shift}`;
-    if(!byDateShift[key]) byDateShift[key] = [];
-    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
-  });
-
-  const allSuggestions = {};
-  const batchCountOverlay = {};
-  const sortedKeys = Object.keys(byDateShift).sort((a,b) => a.localeCompare(b));
-  for(const key of sortedKeys){
-    const nurses = byDateShift[key];
-    const [date, shift] = key.split('|');
-    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
-    for(const [name, slots] of Object.entries(suggestions)){
-      allSuggestions[`${name}|${date}|${shift}`] = slots;
-      slots.forEach(slot => {
-        batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
-      });
-    }
-  }
-
-  // Apply suggestions to DOM rows and importUnitSel
-  entriesToProcess.forEach((e, i) => {
-    const key = `${e.name}|${e.date}|${e.shift}`;
-    const units = allSuggestions[key] || [];
-    importUnitSel[i] = units;
-    units.forEach(u => {
-      const el = document.getElementById(`iu-${i}-${u}`);
-      if(el) el.classList.add('on');
-    });
-    // Update suggested count label
-    const uPerN = unitsPerNurse(e.shift,
-      entriesToProcess.filter(x => x.date===e.date && x.shift===e.shift).length);
-    const countEl = document.getElementById(`suggest-count-${i}`);
-    if(countEl) countEl.textContent = `✨ ${suggestedSlotCount(units)} suggested · target ${uPerN}`;
-  });
-
-  toast('↺ All suggestions refreshed');
-}
 
 async function clearAllImportSels(){
   if(!await customConfirm('Clear all unit selections? This does not delete extracted entries.','Clear','Cancel')) return;
@@ -6614,6 +6364,9 @@ function renderBNShiftPill(){
   p.innerHTML = icon + (BNS.shift==='Day' ? 'Day (0800–2030)' : 'Noc (2000–0830)');
 }
 
+// updateCoverageBanner removed — banner rendering inlined into loadSlots
+// getSchedules, getAllSchedules removed — replaced by direct spGet calls with batchGet
+// checkRotationConflicts, flipShift removed — rotation conflict handling absorbed into recalculateRotation
 async function loadBNSlots(){
   const loader = document.getElementById('bnLoader');
   const list   = document.getElementById('bnSlotsList');
@@ -6764,6 +6517,8 @@ async function loadBNSlots(){
 }
 
 // Helper: get BN's covered units for a given date/shift
+// testSharePointConnectivity removed — SharePoint hosting abandoned in favour of Google Sheets/Apps Script
+// exportSimData removed — SIM_MODE export no longer needed in production
 async function getBNUnits(bnName, dt, shift){
   const scheds = await spGet(LISTS.schedule,
     `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
@@ -6772,32 +6527,6 @@ async function getBNUnits(bnName, dt, shift){
   return units;
 }
 
-// Helper: check for staff conflicts and prompt — returns true if ok to proceed
-async function checkRotationConflicts(bnName, dt, shift, affectedSlots){
-  if(!affectedSlots || affectedSlots.size === 0) return true;
-  const units = await getBNUnits(bnName, dt, shift);
-  const conflicts = [];
-  for(const unit of units){
-    const claimed = await spGet(LISTS.bookings,
-      `Unit eq '${esc(unit)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}'`);
-    claimed.filter(b => !b.IsBNBreak && affectedSlots.has(b.SlotTime))
-      .forEach(b => { if(!conflicts.find(c=>c.id===b.Id))
-        conflicts.push({ id: b.Id, name: b.NurseName, unit, time: b.SlotTime }); });
-  }
-  if(!conflicts.length) return true;
-
-  const list = conflicts.map(c => `• ${c.name} on ${c.unit} at ${fmt12(c.time)}`).join('\n');
-  const go = await customConfirm(
-    `Adding this break shifts the coverage rotation. The following staff nurse${conflicts.length>1?'s have':' has'} a slot that would no longer be covered:\n\n${list}\n\nProceeding will cancel their booking — please call them to let them know.`,
-    'Proceed',
-    'Cancel'
-  );
-  if(!go) return false;
-  for(const c of conflicts) await spDel(LISTS.bookings, c.id);
-  return true;
-}
-
-// ── BN break pending/submit flow ─────────────────────
 function toggleBNPending(slotTime){
   if(BNS.pendingBreaks.has(slotTime)){
     BNS.pendingBreaks.delete(slotTime);
@@ -6961,7 +6690,15 @@ async function cancelBNBreak(slotTime){
       if(!await customConfirm(`${names}. Removing will delete this record.`,'Remove anyway','Cancel')) return;
     }
 
-    for(const b of breaks) await spDel(LISTS.bookings, b.Id);
+    // Use batchDelete for speed if multiple rows (same slot, multiple units)
+    if(breaks.length > 1){
+      await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
+        ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
+    } else {
+      for(const b of breaks) await spDel(LISTS.bookings, b.Id);
+    }
+    // Recalculate rotation so the freed slot shows its correct unit tag
+    recalculateRotation(BNS.name, dt, shift).catch(()=>{});
 
     // Check if any staff nurses had their booking cancelled when this break was marked
     const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
@@ -7016,7 +6753,13 @@ async function clearBNBreaks(){
       if(!await customConfirm(actionLines,'Clear anyway','Cancel')) return;
     }
 
-    for(const b of breaks) await spDel(LISTS.bookings, b.Id);
+    // batchDelete — much faster than sequential spDel
+    if(breaks.length){
+      await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
+        ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
+    }
+    // Recalculate rotation so freed slots show correct unit tags
+    recalculateRotation(BNS.name, dt, shift).catch(()=>{});
 
     // Collect all stored cancelled bookings across all cleared slots
     const slotTimes2 = [...new Set(breaks.map(b => b.SlotTime))];
@@ -7327,9 +7070,6 @@ function dismissNotifications(ids, dismissKey){
   loadBNConfirm();
 }
 
-async function confirmBreak(id){
-  await setBreakStatus(id, 'confirmed');
-}
 
 async function confirmAllBreaks(){
   const dt = BNS.date || today(), shift = BNS.shift;
