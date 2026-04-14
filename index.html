@@ -894,6 +894,48 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 <div class="toast" id="toast"></div>
 
 <!-- Custom confirm modal -->
+<!-- 3C Mid-Shift Modal -->
+<div id="c3MidShiftModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;padding:24px;max-width:560px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;overflow-y:auto">
+    <div id="c3ModalTitle" style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:6px"></div>
+    <div id="c3ModalSubtitle" style="font-size:.8rem;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
+
+    <!-- Step 1: Cancel claims (close flow only) -->
+    <div id="c3CancelStep" style="display:none;margin-bottom:14px">
+      <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:8px">Existing 3C bookings:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" id="c3KeepClaimsBtn" onclick="c3SelectCancelMode('keep')">Keep all existing breaks</button>
+        <button class="btn btn-danger btn-sm" id="c3CancelClaimsBtn" onclick="c3SelectCancelMode('cancel')">Cancel remaining claims</button>
+      </div>
+    </div>
+
+    <!-- Slot list -->
+    <div id="c3SlotListWrap" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div id="c3SlotListLabel" style="font-size:.85rem;font-weight:600;color:var(--text)"></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SelectAll()">Select All</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3ClearAll()">Clear All</button>
+        </div>
+      </div>
+      <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>
+    </div>
+
+    <!-- Cross-wing warning -->
+    <div id="c3WingWarning" style="display:none;font-size:.78rem;color:#856404;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:8px 12px;margin-bottom:12px"></div>
+
+    <!-- Explanation -->
+    <div id="c3Explanation" style="font-size:.78rem;color:var(--muted);background:var(--bg);border-radius:8px;padding:8px 12px;margin-bottom:14px;line-height:1.5"></div>
+
+    <!-- Action buttons -->
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()" style="display:none"></button>
+      <button class="btn btn-ghost btn-sm" onclick="c3ApplyNextShift()">Apply to next covered shift only</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — don't change 3C status</button>
+    </div>
+  </div>
+</div>
+
 <div id="customConfirmModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:none;align-items:center;justify-content:center">
   <div style="background:var(--card);border-radius:16px;padding:24px;max-width:500px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
     <div id="customConfirmMsg" style="font-size:.9rem;line-height:1.5;margin-bottom:16px;color:var(--text);max-height:55vh;overflow-y:auto"></div>
@@ -1667,7 +1709,46 @@ function isPast(hhmm, shift){
 // 3C OPEN/CLOSED MANAGEMENT
 // ═══════════════════════════════════════════════════════
 
+// ── 3C mid-shift modal state ─────────────────────────
+const _c3Modal = {
+  mode: null,       // 'open' | 'close'
+  scope: 'global',  // 'global' | 'assignment'
+  date: null,
+  shift: null,
+  bnName: null,
+  bnUnits: [],
+  pendingVal: null, // 'open' | 'closed'
+  pendingBtn: null,
+  cancelMode: null, // 'keep' | 'cancel'
+  slots: [],        // { time, label, unit, checked, unitSelect (for close manual) }
+};
+
 function set3CDefaultVal(val, btn){
+  const dt = shiftDate(detectShift());
+  const shift = detectShift();
+  const isActive = staffWindowOpen(shift);
+
+  if(isActive){
+    // Find BN covering 4C (or 3C) right now
+    const scheds = _schedCache[dt + shift] || [];
+    const cWingBN = scheds.find(s => {
+      try { const u = JSON.parse(s.Units||'[]'); return u.includes('4C') || u.includes('C_PAIR') || u.includes('3C'); } catch{ return false; }
+    });
+    const bnName = cWingBN?.BreakNurseName || null;
+    const bnUnits = cWingBN ? (() => { try { return JSON.parse(cWingBN.Units||'[]'); } catch{ return []; } })() : [];
+    _c3Modal.mode = val === 'open' ? 'open' : 'close';
+    _c3Modal.scope = 'global';
+    _c3Modal.date = dt;
+    _c3Modal.shift = shift;
+    _c3Modal.bnName = bnName;
+    _c3Modal.bnUnits = bnUnits;
+    _c3Modal.pendingVal = val;
+    _c3Modal.pendingBtn = btn;
+    show3CMidShiftModal().catch(()=>{});
+    return;
+  }
+
+  // Not active — just apply
   set3CDefault(val);
   const closedBtn = document.getElementById('3cdef-closed');
   const openBtn = document.getElementById('3cdef-open');
@@ -1676,6 +1757,325 @@ function set3CDefaultVal(val, btn){
   if(btn) btn.classList.add('active');
   buildStaffUnitGrid();
   toast(`3C default set to ${val}`);
+}
+
+function set3CForDate(val, btn){
+  const date  = document.getElementById('aDate').value;
+  const shift = S.aShift;
+  if(!date){ toast('Select a date first', true); return; }
+
+  const isActive = date === shiftDate(shift) && staffWindowOpen(shift);
+
+  if(isActive){
+    const scheds = _schedCache[date + shift] || [];
+    const aDate = document.getElementById('aDate').value;
+    // For per-assignment: find the BN selected in the assign form
+    const nurseName = (document.getElementById('aNurseText')?.value?.trim()) ||
+                      document.getElementById('aNurse')?.value || null;
+    const matchSched = scheds.find(s => s.BreakNurseName === nurseName);
+    const bnUnits = matchSched ? (() => { try { return JSON.parse(matchSched.Units||'[]'); } catch{ return []; } })() : S.aUnits || [];
+    _c3Modal.mode = val === 'open' ? 'open' : 'close';
+    _c3Modal.scope = 'assignment';
+    _c3Modal.date = date;
+    _c3Modal.shift = shift;
+    _c3Modal.bnName = nurseName;
+    _c3Modal.bnUnits = bnUnits;
+    _c3Modal.pendingVal = val;
+    _c3Modal.pendingBtn = btn;
+    show3CMidShiftModal().catch(()=>{});
+    return;
+  }
+
+  set3CStatus(date, shift, val);
+  const c3Closed = document.getElementById('3c-closed');
+  const c3Open = document.getElementById('3c-open');
+  if(c3Closed) c3Closed.classList.remove('active');
+  if(c3Open) c3Open.classList.remove('active');
+  if(btn) btn.classList.add('active');
+  update3CToggle();
+  buildStaffUnitGrid();
+}
+
+async function show3CMidShiftModal(){
+  const { mode, date, shift, bnName, bnUnits } = _c3Modal;
+  const modal = document.getElementById('c3MidShiftModal');
+  const title = document.getElementById('c3ModalTitle');
+  const subtitle = document.getElementById('c3ModalSubtitle');
+  const cancelStep = document.getElementById('c3CancelStep');
+  const slotWrap = document.getElementById('c3SlotListWrap');
+  const slotLabel = document.getElementById('c3SlotListLabel');
+  const slotList = document.getElementById('c3SlotList');
+  const wingWarn = document.getElementById('c3WingWarning');
+  const explanation = document.getElementById('c3Explanation');
+  const confirmBtn = document.getElementById('c3ConfirmBtn');
+
+  // Reset
+  cancelStep.style.display = 'none';
+  slotWrap.style.display = 'none';
+  wingWarn.style.display = 'none';
+  confirmBtn.style.display = 'none';
+  _c3Modal.cancelMode = null;
+  _c3Modal.slots = [];
+
+  const bnDisplay = bnName ? firstName(bnName) : 'the current BN';
+
+  if(mode === 'open'){
+    title.textContent = 'Open 3C for This Shift';
+    subtitle.textContent = `${bnDisplay} is currently covering ${bnUnits.filter(u=>u!=='C_PAIR').join(', ')}. Select which remaining open slots to make available for 3C staff.`;
+
+    // Fetch bookings to determine available slots
+    const [bookings, bnBreaks] = await Promise.all([
+      spGet(LISTS.bookings, `SlotDate eq '${date}' and ShiftType eq '${shift}'`),
+      spGet(LISTS.bookings, `NurseName eq '${esc(bnName||'')}' and SlotDate eq '${date}' and ShiftType eq '${shift}' and IsBNBreak eq 1`)
+    ]);
+
+    const claimedSlots = new Set(bookings.filter(b => !b.IsBNBreak).map(b => String(b.SlotTime).padStart(4,'0')));
+    const bnBreakSlots = new Set(bnBreaks.map(b => String(b.SlotTime).padStart(4,'0')));
+    const rotation = loadRotation(bnName, date, shift) || {};
+
+    // Get 4C slots from rotation that are future, unclaimed, not BN breaks
+    const candidates = Object.entries(rotation)
+      .filter(([slot, unit]) => {
+        const s = String(slot).padStart(4,'0');
+        return (unit === '4C' || unit === 'C_PAIR') &&
+          !isPast(s, shift) &&
+          !claimedSlots.has(s) &&
+          !bnBreakSlots.has(s);
+      })
+      .map(([slot]) => String(slot).padStart(4,'0'))
+      .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+
+    // Include overlap slots from opposite BN if applicable
+    const overlapRange = getOverlapRange(shift);
+    const allSlots = getAvailableSlots(shift);
+    const overlapCandidates = allSlots.filter(s => {
+      const m = toMin(s);
+      return m >= overlapRange.min && m < overlapRange.max &&
+        !isPast(s, shift) && !claimedSlots.has(s) && !bnBreakSlots.has(s) &&
+        !candidates.includes(s);
+    });
+
+    const allCandidates = [...candidates, ...overlapCandidates];
+    _c3Modal.slots = allCandidates.map(s => ({ time: s, checked: false }));
+
+    slotLabel.textContent = `Select slots to open for 3C (${allCandidates.length} available):`;
+    renderC3SlotList();
+    slotWrap.style.display = 'block';
+    explanation.textContent = '✓ Selected slots will show as available to 3C staff. Unselected slots remain available to 4C staff. Already-claimed 4C bookings are not affected.';
+    confirmBtn.textContent = 'Open selected slots to 3C';
+    confirmBtn.style.display = 'block';
+
+  } else {
+    // Close mode
+    title.textContent = 'Close 3C for This Shift';
+    subtitle.textContent = `${bnDisplay} is currently covering 3C. Choose what to do with existing 3C bookings.`;
+    cancelStep.style.display = 'block';
+    explanation.textContent = 'Existing 3C bookings can be kept or cancelled. If cancelled, you can reassign freed slots.';
+  }
+
+  modal.style.display = 'flex';
+}
+
+function renderC3SlotList(){
+  const { mode, slots, bnUnits, date, shift } = _c3Modal;
+  const list = document.getElementById('c3SlotList');
+  const wingWarn = document.getElementById('c3WingWarning');
+
+  if(mode === 'open'){
+    list.innerHTML = slots.map((s, i) => `
+      <label style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:${s.checked?'var(--teal-lt)':'var(--bg)'}">
+        <input type="checkbox" ${s.checked?'checked':''} onchange="c3ToggleSlot(${i}, this.checked)" style="accent-color:var(--teal)">
+        <span style="font-weight:600;font-family:'DM Mono',monospace;font-size:.85rem">${fmt12(s.time)}</span>
+        <span style="font-size:.75rem;color:var(--muted)">→ 3C</span>
+      </label>`).join('');
+  } else {
+    // Close/manual assign mode
+    const otherUnits = bnUnits.flatMap(u => u === 'C_PAIR' ? ['4C'] : u === '3C' ? [] : [u]);
+    const allUnits = [...new Set(['4C', ...otherUnits])];
+    list.innerHTML = slots.map((s, i) => `
+      <div style="display:flex;align-items:center;gap:10px;padding:8px 12px;border:1px solid var(--border);border-radius:8px;background:var(--bg)">
+        <span style="font-weight:600;font-family:'DM Mono',monospace;font-size:.85rem;min-width:70px">${fmt12(s.time)}</span>
+        <select onchange="c3SetSlotUnit(${i}, this.value)" style="flex:1;padding:4px 8px;border-radius:6px;border:1px solid var(--border);font-size:.8rem;background:var(--bg);color:var(--text)">
+          <option value="">— leave unassigned —</option>
+          ${allUnits.map(u => `<option value="${u}" ${s.unit===u?'selected':''}>${u}</option>`).join('')}
+        </select>
+      </div>`).join('');
+
+    // Cross-wing warning
+    const hasMultiWing = allUnits.some(u => getWing(u) !== getWing('3C') && getWing(u) !== '?');
+    if(hasMultiWing){
+      wingWarn.textContent = `⚠️ Some units are in different wings. Assigning slots across wings means the BN will need to travel between wings.`;
+      wingWarn.style.display = 'block';
+    }
+  }
+}
+
+function c3ToggleSlot(i, checked){
+  _c3Modal.slots[i].checked = checked;
+  renderC3SlotList();
+}
+
+function c3SetSlotUnit(i, unit){
+  _c3Modal.slots[i].unit = unit;
+}
+
+function c3SelectAll(){
+  _c3Modal.slots.forEach(s => s.checked = true);
+  renderC3SlotList();
+}
+
+function c3ClearAll(){
+  _c3Modal.slots.forEach(s => { s.checked = false; s.unit = ''; });
+  renderC3SlotList();
+}
+
+function c3SelectCancelMode(mode){
+  _c3Modal.cancelMode = mode;
+  const keepBtn = document.getElementById('c3KeepClaimsBtn');
+  const cancelBtn = document.getElementById('c3CancelClaimsBtn');
+  if(keepBtn) keepBtn.classList.toggle('active', mode === 'keep');
+  if(cancelBtn) cancelBtn.classList.toggle('active', mode === 'cancel');
+
+  const slotWrap = document.getElementById('c3SlotListWrap');
+  const slotLabel = document.getElementById('c3SlotListLabel');
+  const explanation = document.getElementById('c3Explanation');
+  const confirmBtn = document.getElementById('c3ConfirmBtn');
+
+  if(mode === 'keep'){
+    slotWrap.style.display = 'none';
+    explanation.textContent = '3C will be closed. Existing bookings are honoured. No new 3C slots will be available.';
+    confirmBtn.textContent = 'Close 3C — keep existing breaks';
+    confirmBtn.style.display = 'block';
+  } else {
+    // Load 3C slots to reassign
+    const { date, shift, bnName, bnUnits } = _c3Modal;
+    const rotation = loadRotation(bnName, date, shift) || {};
+    const c3Slots = Object.entries(rotation)
+      .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
+      .map(([slot]) => String(slot).padStart(4,'0'))
+      .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+    _c3Modal.slots = c3Slots.map(s => ({ time: s, unit: '4C' }));
+
+    slotLabel.textContent = `Assign freed 3C slots (${c3Slots.length} slots):`;
+
+    // Sub-options: give all to 4C or manual
+    slotWrap.innerHTML = `
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-ghost btn-sm" onclick="c3GiveAllTo4C()">Give all to 4C</button>
+        <button class="btn btn-ghost btn-sm" onclick="c3ManualAssign()">Manually assign each slot</button>
+      </div>
+      <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
+    slotWrap.style.display = 'block';
+    explanation.textContent = 'Remaining 3C bookings will be cancelled. Freed slots can be given to 4C or assigned to other units.';
+    confirmBtn.textContent = 'Close 3C — apply changes';
+    confirmBtn.style.display = 'block';
+  }
+}
+
+function c3GiveAllTo4C(){
+  _c3Modal.slots.forEach(s => s.unit = '4C');
+  document.getElementById('c3SlotList').innerHTML = `<div style="font-size:.8rem;color:var(--muted);padding:8px">All ${_c3Modal.slots.length} slots will be reassigned to 4C.</div>`;
+}
+
+function c3ManualAssign(){
+  renderC3SlotList();
+}
+
+async function c3Confirm(){
+  const { mode, date, shift, bnName, cancelMode, slots, pendingVal, pendingBtn, scope } = _c3Modal;
+  const confirmBtn = document.getElementById('c3ConfirmBtn');
+  confirmBtn.disabled = true;
+  confirmBtn.textContent = 'Applying…';
+
+  try {
+    const rotation = loadRotation(bnName, date, shift) || {};
+
+    if(mode === 'open'){
+      // Update rotation: selected slots → 3C
+      const selected = slots.filter(s => s.checked);
+      selected.forEach(s => { rotation[s.time] = '3C'; });
+      saveRotation(bnName, date, shift, rotation);
+      spBatchSetState([{ key: `bnRotation_${bnName}_${date}_${shift}`, value: rotation }]).catch(()=>{});
+      toast(`✓ ${selected.length} slot${selected.length!==1?'s':''} opened for 3C`);
+
+    } else {
+      // Close mode
+      if(cancelMode === 'cancel'){
+        // Cancel remaining 3C bookings
+        const c3Bookings = await spGet(LISTS.bookings,
+          `SlotDate eq '${date}' and ShiftType eq '${shift}' and Unit eq '3C'`);
+        const future3C = c3Bookings.filter(b => !b.IsBNBreak && !isPast(String(b.SlotTime).padStart(4,'0'), shift));
+        if(future3C.length){
+          await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
+            ids: encodeURIComponent(JSON.stringify(future3C.map(b=>b.Id))) });
+        }
+        // Reassign slots in rotation
+        slots.forEach(s => {
+          if(s.unit) rotation[s.time] = s.unit;
+          else delete rotation[s.time];
+        });
+        saveRotation(bnName, date, shift, rotation);
+        spBatchSetState([{ key: `bnRotation_${bnName}_${date}_${shift}`, value: rotation }]).catch(()=>{});
+        toast(`✓ 3C closed — ${future3C.length} booking${future3C.length!==1?'s':''} cancelled`);
+      } else {
+        // Keep claims — just update rotation to remove future 3C slots
+        Object.keys(rotation).forEach(slot => {
+          if(rotation[slot] === '3C' && isPast(String(slot).padStart(4,'0'), shift)){
+            // keep past 3C slots as-is
+          } else if(rotation[slot] === '3C'){
+            rotation[slot] = '4C'; // revert future unbooked to 4C
+          }
+        });
+        saveRotation(bnName, date, shift, rotation);
+        spBatchSetState([{ key: `bnRotation_${bnName}_${date}_${shift}`, value: rotation }]).catch(()=>{});
+        toast('✓ 3C closed — existing breaks honoured');
+      }
+    }
+
+    // Apply the status change
+    if(scope === 'global'){
+      set3CDefault(pendingVal);
+      const closedBtn = document.getElementById('3cdef-closed');
+      const openBtn = document.getElementById('3cdef-open');
+      if(closedBtn) closedBtn.classList.remove('active');
+      if(openBtn) openBtn.classList.remove('active');
+      if(pendingBtn) pendingBtn.classList.add('active');
+    } else {
+      set3CStatus(date, shift, pendingVal);
+      update3CToggle();
+    }
+    buildStaffUnitGrid();
+    if(S.unit) loadSlots();
+
+  } catch(e){
+    toast('Error: ' + e.message, true);
+  } finally {
+    confirmBtn.disabled = false;
+    document.getElementById('c3MidShiftModal').style.display = 'none';
+  }
+}
+
+function c3ApplyNextShift(){
+  const { pendingVal, pendingBtn, scope, date, shift } = _c3Modal;
+  if(scope === 'global'){
+    set3CDefault(pendingVal);
+    const closedBtn = document.getElementById('3cdef-closed');
+    const openBtn = document.getElementById('3cdef-open');
+    if(closedBtn) closedBtn.classList.remove('active');
+    if(openBtn) openBtn.classList.remove('active');
+    if(pendingBtn) pendingBtn.classList.add('active');
+  } else {
+    set3CStatus(date, shift, pendingVal);
+    update3CToggle();
+  }
+  buildStaffUnitGrid();
+  toast(`3C will be ${pendingVal} from the next covered shift`);
+  document.getElementById('c3MidShiftModal').style.display = 'none';
+}
+
+function c3Cancel(){
+  document.getElementById('c3MidShiftModal').style.display = 'none';
+  toast('3C status unchanged');
 }
 
 function show3CDefaultToggle(){
