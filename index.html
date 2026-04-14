@@ -2710,8 +2710,13 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
 // Store rotation — writes to localStorage immediately and syncs to backend async
 function saveRotation(bnName, date, shift, rotation){
   const key = `bnRotation_${bnName}_${date}_${shift}`;
-  localStorage.setItem(key, JSON.stringify(rotation));
-  setState(key, rotation).catch(()=>{});
+  // Normalize all slot keys to 4 digits before saving
+  const normalized = {};
+  Object.entries(rotation).forEach(([slot, unit]) => {
+    normalized[String(slot).padStart(4,'0')] = unit;
+  });
+  localStorage.setItem(key, JSON.stringify(normalized));
+  setState(key, normalized).catch(()=>{});
 }
 
 // Load rotation — reads from localStorage cache (populated by warmRotationCache)
@@ -3045,7 +3050,7 @@ async function loadSlots(silent=false){
       if(bnRot){
         hasAnyRotation = true;
         Object.entries(bnRot).forEach(([slot, unit]) => {
-          if(unit === S.unit) unitRotationSlots.add(slot);
+          if(unit === S.unit) unitRotationSlots.add(String(slot).padStart(4,'0'));
         });
       }
     }
@@ -3336,7 +3341,7 @@ async function silentRefreshSlots(){
     let hasAnyRotation = false;
     covering.forEach(s => {
       const rot = loadRotation(s.BreakNurseName, dt, shift);
-      if(rot){ hasAnyRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) unitRotationSlots.add(sl); }); }
+      if(rot){ hasAnyRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) unitRotationSlots.add(String(sl).padStart(4,'0')); }); }
     });
 
     // Use getAvailableSlots (excludes hard-blocked) to match loadSlots exactly
