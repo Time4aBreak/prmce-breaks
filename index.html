@@ -5147,10 +5147,15 @@ async function recalculateAllRotations(){
       if(!rawUnits.length) continue;
       const units = expandCPair(rawUnits, s.ShiftDate, s.ShiftType);
       const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
-      const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
+      // Use existing BN default breaks if available
+      const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
+      const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
+      const rotation = calculateBlockRotation(units, bnBreakSet, getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
+      // saveRotation normalizes keys to 4 digits
+      saveRotation(s.BreakNurseName, s.ShiftDate, s.ShiftType, rotation);
       const key = `bnRotation_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`;
-      localStorage.setItem(key, JSON.stringify(rotation));
-      rotationEntries.push({ key, value: rotation });
+      const normalized = JSON.parse(localStorage.getItem(key));
+      rotationEntries.push({ key, value: normalized });
     } catch(e) {
       console.warn(`Rotation failed for ${s.BreakNurseName} ${s.ShiftDate}:`, e.message);
       failed++;
