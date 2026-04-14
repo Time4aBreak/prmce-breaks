@@ -1864,11 +1864,29 @@ async function show3CMidShiftModal(){
     confirmBtn.style.display = 'block';
 
   } else {
-    // Close mode
+    // Close mode — always cancels remaining 3C slots
     title.textContent = 'Close 3C for This Shift';
-    subtitle.textContent = `${bnDisplay} is currently covering 3C. Choose what to do with existing 3C bookings.`;
-    cancelStep.style.display = 'block';
-    explanation.textContent = 'Existing 3C bookings can be kept or cancelled. If cancelled, you can reassign freed slots.';
+    subtitle.textContent = `${bnDisplay} is currently covering 3C. Remaining 3C slots will be cancelled.`;
+
+    // Pre-load 3C slots for manual assign path
+    const rotation = loadRotation(bnName, date, shift) || {};
+    const c3Slots = Object.entries(rotation)
+      .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
+      .map(([slot]) => String(slot).padStart(4,'0'))
+      .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+    _c3Modal.slots = c3Slots.map(s => ({ time: s, unit: '4C' }));
+
+    explanation.textContent = `${c3Slots.length} remaining 3C slot${c3Slots.length!==1?'s':''} will be cancelled. Choose how to reassign them.`;
+
+    // Replace action buttons with close-specific options
+    const actionDiv = document.getElementById('c3MidShiftModal').querySelector('div[style*="flex-direction:column"]');
+    if(actionDiv){
+      actionDiv.innerHTML = `
+        <button class="btn btn-primary btn-sm" onclick="c3GiveAllTo4CAndConfirm()">Give 3C's slots for the remainder of this shift to 4C</button>
+        <button class="btn btn-ghost btn-sm" onclick="c3ShowManualAssign()">Manually assign slots to selected units</button>
+        <button class="btn btn-ghost btn-sm" onclick="c3ApplyNextShift()">Apply 3C closure to next covered shift — closes 3C for all upcoming shifts</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — leave 3C as is</button>`;
+    }
   }
 
   modal.style.display = 'flex';
@@ -2096,6 +2114,39 @@ async function _recalcFutureRotations(currentDate, currentShift){
     } catch(e){ console.warn('Rotation recalc failed:', e.message); }
   }
   if(rotationEntries.length) spBatchSetState(rotationEntries).catch(()=>{});
+}
+
+async function c3GiveAllTo4CAndConfirm(){
+  _c3Modal.cancelMode = 'cancel';
+  _c3Modal.slots.forEach(s => s.unit = '4C');
+  await c3Confirm();
+}
+
+function c3ShowManualAssign(){
+  _c3Modal.cancelMode = 'cancel';
+  const slotWrap = document.getElementById('c3SlotListWrap');
+  const slotLabel = document.getElementById('c3SlotListLabel');
+  const confirmBtn = document.getElementById('c3ConfirmBtn');
+  slotLabel.textContent = `Assign freed 3C slots (${_c3Modal.slots.length} slots):`;
+  // Replace sub-buttons with slot list header + select all/clear all
+  slotWrap.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+      <div style="font-size:.85rem;font-weight:600;color:var(--text)">${slotLabel.textContent}</div>
+      <div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('4C')">All to 4C</button>
+        <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('')">Clear All</button>
+      </div>
+    </div>
+    <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
+  slotWrap.style.display = 'block';
+  renderC3SlotList();
+  confirmBtn.textContent = 'Close 3C — apply slot assignments';
+  confirmBtn.style.display = 'block';
+}
+
+function c3SetAllUnit(unit){
+  _c3Modal.slots.forEach(s => s.unit = unit);
+  renderC3SlotList();
 }
 
 function c3Cancel(){
