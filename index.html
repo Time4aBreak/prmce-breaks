@@ -817,7 +817,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="toggle-row" style="gap:6px">
-            <div class="toggle-opt" id="3cdef-closed" onclick="set3CDefaultVal('closed',this)" style="padding:5px 14px;font-size:.8rem">Closed</div>
+            <div class="toggle-opt active" id="3cdef-closed" onclick="set3CDefaultVal('closed',this)" style="padding:5px 14px;font-size:.8rem">Closed</div>
             <div class="toggle-opt" id="3cdef-open"   onclick="set3CDefaultVal('open',this)"   style="padding:5px 14px;font-size:.8rem">Open</div>
           </div>
         </div>
@@ -2023,7 +2023,7 @@ function showSubTab(name, btn){
     renderImportedEntriesSummary();
     checkForRestorableSuggestions();
     // Small delay ensures panel is visible before toggling active state
-    setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 50);
+    setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 200);
   }
 }
 
@@ -2063,7 +2063,7 @@ function showTab(name, btn){
       renderImportedNamesList();
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
-      setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 50);
+      setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 200);
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
