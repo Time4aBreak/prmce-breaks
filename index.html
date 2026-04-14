@@ -1015,11 +1015,12 @@ async function warm3CStatus(date, shift){
   try {
     const remote = await getState(key);
     if(remote !== null) localStorage.setItem(key, remote);
-    // Also warm default
-    if(!localStorage.getItem('unit3CDefault')){
-      const def = await getState('unit3CDefault');
-      if(def !== null) localStorage.setItem('unit3CDefault', def);
-    }
+    // Always fetch unit3CDefault from BNState — source of truth is Sheets, not localStorage
+    const def = await getState('unit3CDefault');
+    const resolved = (def !== null) ? def : 'closed';
+    localStorage.setItem('unit3CDefault', resolved);
+    // Refresh toggle if admin panel is visible
+    show3CDefaultToggle();
   } catch(e){}
 }
 
@@ -2080,8 +2081,6 @@ function c3Cancel(){
 
 function show3CDefaultToggle(){
   const def = get3CDefault();
-  // Ensure default is persisted if not already set
-  if(!localStorage.getItem('unit3CDefault')) localStorage.setItem('unit3CDefault', 'closed');
   const closedBtn = document.getElementById('3cdef-closed');
   const openBtn   = document.getElementById('3cdef-open');
   if(closedBtn) closedBtn.classList.toggle('active', def === 'closed');
@@ -2418,7 +2417,12 @@ function showSubTab(name, btn){
       const panel2 = document.getElementById('adminPanel');
       if(gate) gate.style.display = 'none';
       if(panel2) panel2.style.display = 'block';
-      show3CDefaultToggle();
+      // Sync 3C default from BNState whenever admin panel opens
+      getState('unit3CDefault').then(def => {
+        const resolved = (def !== null) ? def : 'closed';
+        localStorage.setItem('unit3CDefault', resolved);
+        show3CDefaultToggle();
+      }).catch(() => { show3CDefaultToggle(); });
     }
     loadAdminData();
     renderImportedNamesList();
@@ -2469,8 +2473,12 @@ function showTab(name, btn){
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
-    // Show 3C toggle after panel is visible
-    if(PORTAL.level === 'admin') show3CDefaultToggle();
+    // Always sync 3C default from BNState on portal open — source of truth is Sheets
+    getState('unit3CDefault').then(def => {
+      const resolved = (def !== null) ? def : 'closed';
+      localStorage.setItem('unit3CDefault', resolved);
+      show3CDefaultToggle();
+    }).catch(() => { show3CDefaultToggle(); });
   }
 }
 
@@ -5185,7 +5193,11 @@ function unlock(){
       renderImportedNamesList();
       populateNurseDropdown();
       renderImportedEntriesSummary();
-      show3CDefaultToggle();
+      getState('unit3CDefault').then(def => {
+        const resolved = (def !== null) ? def : 'closed';
+        localStorage.setItem('unit3CDefault', resolved);
+        show3CDefaultToggle();
+      }).catch(() => { show3CDefaultToggle(); });
     } else {
       document.getElementById('pwErr').style.display='block';
       document.getElementById('pwInput').value='';
