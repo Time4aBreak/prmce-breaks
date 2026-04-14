@@ -1680,6 +1680,8 @@ function set3CDefaultVal(val, btn){
 
 function show3CDefaultToggle(){
   const def = get3CDefault();
+  // Ensure default is persisted if not already set
+  if(!localStorage.getItem('unit3CDefault')) localStorage.setItem('unit3CDefault', 'closed');
   const closedBtn = document.getElementById('3cdef-closed');
   const openBtn   = document.getElementById('3cdef-open');
   if(closedBtn) closedBtn.classList.toggle('active', def === 'closed');
@@ -2023,7 +2025,7 @@ function showSubTab(name, btn){
     renderImportedEntriesSummary();
     checkForRestorableSuggestions();
     // Small delay ensures panel is visible before toggling active state
-    setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 200);
+    show3CDefaultToggle(); update3CToggle();
   }
 }
 
@@ -2063,7 +2065,7 @@ function showTab(name, btn){
       renderImportedNamesList();
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
-      setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 200);
+      show3CDefaultToggle(); update3CToggle();
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
