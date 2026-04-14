@@ -3165,7 +3165,7 @@ async function loadSlots(silent=false){
 
     // If this unit's rotation slots are all past, show no slots — unit is done for this shift
     if(unitDoneForShift){
-      list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for this shift.</div>`;
+      list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for today's shift.</div>`;
       loader.style.display = 'none';
       return;
     }
@@ -3189,9 +3189,9 @@ async function loadSlots(silent=false){
     }
     if(!future.length){
       if(silent){ loader.style.display='none'; return; }
-      const emptyMsg = shiftIsActive
-        ? `No break slots found for ${escHTML(S.unit)} ${escHTML(shift)} this shift.`
-        : `${escHTML(shift)} shift slots will appear here once the rotation is set up.`;
+      const emptyMsg = hasAnyRotation
+        ? `Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for today's shift.`
+        : `No break slots available for ${escHTML(S.unit)} ${escHTML(shift)} this shift.`;
       list.innerHTML=`<div class="empty">${emptyMsg}</div>`;
       loader.style.display='none';
       return;
