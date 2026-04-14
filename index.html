@@ -3139,9 +3139,10 @@ async function loadSlots(silent=false){
     const shiftIsActive = staffWindowOpen(shift);
 
     // Only apply rotation filter if there are future rotation slots for this unit.
-    // If all rotation slots are already past, the BN has moved on — show remaining slots.
+    // If all rotation slots are already past, this unit is done for the shift — show nothing.
     const futureRotSlots = [...unitRotationSlots].filter(s => !isPast(s, shift));
-    const useRotation = hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length > 0;
+    const useRotation = hasAnyRotation && unitRotationSlots.size > 0;
+    const unitDoneForShift = hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length === 0;
 
     const future = allSlots.filter(s => {
       if(shiftIsActive && isPast(s, shift) && !bMap[s]) return false; // keep past claimed slots visible
@@ -3161,6 +3162,13 @@ async function loadSlots(silent=false){
       if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
+
+    // If this unit's rotation slots are all past, show no slots — unit is done for this shift
+    if(unitDoneForShift){
+      list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for this shift.</div>`;
+      loader.style.display = 'none';
+      return;
+    }
     // Diagnostic: log when coverage exists but no slots found
     if(!future.length && covering.length > 0){
       console.log('[DBG slots] shiftIsActive:', shiftIsActive, 'hasAnyRotation:', hasAnyRotation,
