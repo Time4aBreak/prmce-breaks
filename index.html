@@ -1669,9 +1669,12 @@ function isPast(hhmm, shift){
 
 function set3CDefaultVal(val, btn){
   set3CDefault(val);
-  document.querySelectorAll('#3cdef-closed,#3cdef-open').forEach(b => b.classList.remove('active'));
+  const closedBtn = document.getElementById('3cdef-closed');
+  const openBtn = document.getElementById('3cdef-open');
+  if(closedBtn) closedBtn.classList.remove('active');
+  if(openBtn) openBtn.classList.remove('active');
   if(btn) btn.classList.add('active');
-  buildStaffUnitGrid(); // refresh staff unit grid
+  buildStaffUnitGrid();
   toast(`3C default set to ${val}`);
 }
 
@@ -1688,7 +1691,10 @@ function set3CForDate(val, btn){
   const shift = S.aShift;
   if(!date){ toast('Select a date first', true); return; }
   set3CStatus(date, shift, val);
-  document.querySelectorAll('#3c-closed,#3c-open').forEach(b => b.classList.remove('active'));
+  const c3Closed = document.getElementById('3c-closed');
+  const c3Open = document.getElementById('3c-open');
+  if(c3Closed) c3Closed.classList.remove('active');
+  if(c3Open) c3Open.classList.remove('active');
   if(btn) btn.classList.add('active');
   update3CToggle();
   buildStaffUnitGrid(); // refresh staff unit grid
