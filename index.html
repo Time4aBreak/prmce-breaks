@@ -812,7 +812,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
         <div>
-          <div class="card-label" style="margin:0">3C Global Default Status</div>
+          <div class="card-label" style="margin:0">Is 3C Open?</div>
           <div style="font-size:.75rem;color:var(--muted);margin-top:4px">Applied to all dates unless overridden per assignment</div>
         </div>
         <div style="display:flex;align-items:center;gap:8px">
@@ -2022,8 +2022,8 @@ function showSubTab(name, btn){
     populateNurseDropdown();
     renderImportedEntriesSummary();
     checkForRestorableSuggestions();
-    show3CDefaultToggle();
-    update3CToggle();
+    // Small delay ensures panel is visible before toggling active state
+    setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 50);
   }
 }
 
@@ -2063,8 +2063,7 @@ function showTab(name, btn){
       renderImportedNamesList();
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
-      show3CDefaultToggle();
-      update3CToggle();
+      setTimeout(() => { show3CDefaultToggle(); update3CToggle(); }, 50);
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
