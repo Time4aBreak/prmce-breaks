@@ -2418,14 +2418,14 @@ function showSubTab(name, btn){
       const panel2 = document.getElementById('adminPanel');
       if(gate) gate.style.display = 'none';
       if(panel2) panel2.style.display = 'block';
+      show3CDefaultToggle();
     }
     loadAdminData();
     renderImportedNamesList();
     populateNurseDropdown();
     renderImportedEntriesSummary();
     checkForRestorableSuggestions();
-    // Small delay ensures panel is visible before toggling active state
-    show3CDefaultToggle(); update3CToggle();
+    update3CToggle();
   }
 }
 
@@ -2469,6 +2469,8 @@ function showTab(name, btn){
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
+    // Show 3C toggle after panel is visible
+    if(PORTAL.level === 'admin') show3CDefaultToggle();
   }
 }
 
@@ -5183,6 +5185,7 @@ function unlock(){
       renderImportedNamesList();
       populateNurseDropdown();
       renderImportedEntriesSummary();
+      show3CDefaultToggle();
     } else {
       document.getElementById('pwErr').style.display='block';
       document.getElementById('pwInput').value='';
