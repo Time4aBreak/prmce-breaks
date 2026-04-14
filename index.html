@@ -1731,21 +1731,21 @@ function set3CDefaultVal(val, btn){
 
   if(isActive){
     // Find BN covering 4C (or 3C) right now
-    const scheds = _schedCache[dt + shift] || [];
-    const cWingBN = scheds.find(s => {
-      try { const u = JSON.parse(s.Units||'[]'); return u.includes('4C') || u.includes('C_PAIR') || u.includes('3C'); } catch{ return false; }
-    });
-    const bnName = cWingBN?.BreakNurseName || null;
-    const bnUnits = cWingBN ? (() => { try { return JSON.parse(cWingBN.Units||'[]'); } catch{ return []; } })() : [];
     _c3Modal.mode = val === 'open' ? 'open' : 'close';
     _c3Modal.scope = 'global';
     _c3Modal.date = dt;
     _c3Modal.shift = shift;
-    _c3Modal.bnName = bnName;
-    _c3Modal.bnUnits = bnUnits;
     _c3Modal.pendingVal = val;
     _c3Modal.pendingBtn = btn;
-    show3CMidShiftModal().catch(()=>{});
+    // Fetch schedule to find C Wing BN
+    spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`).then(scheds => {
+      const cWingBN = scheds.find(s => {
+        try { const u = JSON.parse(s.Units||'[]'); return u.includes('4C') || u.includes('C_PAIR') || u.includes('3C'); } catch{ return false; }
+      });
+      _c3Modal.bnName = cWingBN?.BreakNurseName || null;
+      _c3Modal.bnUnits = cWingBN ? (() => { try { return JSON.parse(cWingBN.Units||'[]'); } catch{ return []; } })() : [];
+      show3CMidShiftModal().catch(e => { console.error('3C modal error:', e); toast('Error: ' + e.message, true); });
+    }).catch(e => { toast('Error loading schedule: ' + e.message, true); });
     return;
   }
 
@@ -1768,22 +1768,19 @@ function set3CForDate(val, btn){
   const isActive = date === shiftDate(shift) && staffWindowOpen(shift);
 
   if(isActive){
-    const scheds = _schedCache[date + shift] || [];
-    const aDate = document.getElementById('aDate').value;
-    // For per-assignment: find the BN selected in the assign form
     const nurseName = (document.getElementById('aNurseText')?.value?.trim()) ||
                       document.getElementById('aNurse')?.value || null;
-    const matchSched = scheds.find(s => s.BreakNurseName === nurseName);
-    const bnUnits = matchSched ? (() => { try { return JSON.parse(matchSched.Units||'[]'); } catch{ return []; } })() : S.aUnits || [];
     _c3Modal.mode = val === 'open' ? 'open' : 'close';
     _c3Modal.scope = 'assignment';
     _c3Modal.date = date;
     _c3Modal.shift = shift;
     _c3Modal.bnName = nurseName;
-    _c3Modal.bnUnits = bnUnits;
     _c3Modal.pendingVal = val;
     _c3Modal.pendingBtn = btn;
-    show3CMidShiftModal().catch(()=>{});
+    spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurseName||'')}'`).then(scheds => {
+      _c3Modal.bnUnits = scheds.length ? (() => { try { return JSON.parse(scheds[0].Units||'[]'); } catch{ return []; } })() : S.aUnits || [];
+      show3CMidShiftModal().catch(e => { console.error('3C modal error:', e); toast('Error: ' + e.message, true); });
+    }).catch(e => { toast('Error loading schedule: ' + e.message, true); });
     return;
   }
 
@@ -2047,6 +2044,8 @@ async function c3Confirm(){
     }
     buildStaffUnitGrid();
     if(S.unit) loadSlots();
+    // Recalculate future rotations to reflect new 3C status
+    _recalcFutureRotations(date, shift).catch(()=>{});
 
   } catch(e){
     toast('Error: ' + e.message, true);
@@ -2070,8 +2069,33 @@ function c3ApplyNextShift(){
     update3CToggle();
   }
   buildStaffUnitGrid();
-  toast(`3C will be ${pendingVal} from the next covered shift`);
+  toast(`3C will be ${pendingVal} from the next covered shift — recalculating future rotations…`);
   document.getElementById('c3MidShiftModal').style.display = 'none';
+  // Silently recalculate future rotations to include/exclude 3C
+  _recalcFutureRotations(date, shift).catch(()=>{});
+}
+
+async function _recalcFutureRotations(currentDate, currentShift){
+  const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${currentDate}'`);
+  const future = scheds.filter(s => s.Status !== 'inactive' &&
+    (s.ShiftDate > currentDate || (s.ShiftDate === currentDate && s.ShiftType !== currentShift)));
+  const rotationEntries = [];
+  for(const s of future){
+    try {
+      const rawUnits = [];
+      try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
+      if(!rawUnits.length) continue;
+      const units = expandCPair(rawUnits, s.ShiftDate, s.ShiftType);
+      const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
+      const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
+      const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
+      const rotation = calculateBlockRotation(units, bnBreakSet, getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
+      saveRotation(s.BreakNurseName, s.ShiftDate, s.ShiftType, rotation);
+      const key = `bnRotation_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`;
+      rotationEntries.push({ key, value: JSON.parse(localStorage.getItem(key)) });
+    } catch(e){ console.warn('Rotation recalc failed:', e.message); }
+  }
+  if(rotationEntries.length) spBatchSetState(rotationEntries).catch(()=>{});
 }
 
 function c3Cancel(){
