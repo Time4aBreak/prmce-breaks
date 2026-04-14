@@ -1749,7 +1749,7 @@ function set3CDefaultVal(val, btn){
     return;
   }
 
-  // Not active — just apply
+  // Not active — just apply and recalc future rotations
   set3CDefault(val);
   const closedBtn = document.getElementById('3cdef-closed');
   const openBtn = document.getElementById('3cdef-open');
@@ -1757,7 +1757,10 @@ function set3CDefaultVal(val, btn){
   if(openBtn) openBtn.classList.remove('active');
   if(btn) btn.classList.add('active');
   buildStaffUnitGrid();
-  toast(`3C default set to ${val}`);
+  toast(`3C set to ${val} — recalculating rotations…`);
+  _recalcFutureRotations(shiftDate(shift), shift).then(() => {
+    toast(`3C set to ${val} — rotations updated`);
+  }).catch(()=>{});
 }
 
 function set3CForDate(val, btn){
