@@ -1826,8 +1826,8 @@ async function show3CMidShiftModal(){
 
     // Fetch bookings to determine available slots
     const [bookings, bnBreaks] = await Promise.all([
-      spGet(LISTS.bookings, `SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}'`),
-      spGet(LISTS.bookings, `NurseName eq '${esc(bnName||'')}' and SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`)
+      spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`),
+      spGet(LISTS.bookings, `NurseName eq '${esc(bnName||'')}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`)
     ]);
 
     const claimedSlots = new Set(bookings.filter(b => !b.IsBNBreak).map(b => String(b.SlotTime).padStart(4,'0')));
@@ -2030,7 +2030,7 @@ async function c3Confirm(){
       if(cancelMode === 'cancel'){
         // Cancel remaining 3C bookings
         const c3Bookings = await spGet(LISTS.bookings,
-          `SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}' and Unit eq '3C'`);
+          `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and Unit eq '3C'`);
         const future3C = c3Bookings.filter(b => !b.IsBNBreak && !isPast(String(b.SlotTime).padStart(4,'0'), shift));
         if(future3C.length){
           await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
@@ -2621,13 +2621,13 @@ async function checkWrongUnit(selectedUnit){
     let mine;
     if(S.shift === 'Other'){
       const [d,n] = await Promise.all([
-        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq 'Day'`),
-        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq 'Noc'`)
+        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq 'Day'`),
+        spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq 'Noc'`)
       ]);
       mine = [...d, ...n];
     } else {
       mine = await spGet(LISTS.bookings,
-        `NurseName eq '${esc(name)}' and SlotDate ge '${shiftDate(S.shift)}}' and SlotDate le '${{shiftDate(S.shift)}}T23' and ShiftType eq '${S.shift}'`);
+        `NurseName eq '${esc(name)}' and SlotDate ge '${shiftDate(S.shift)}' and SlotDate le '${shiftDate(S.shift)}T23' and ShiftType eq '${S.shift}'`);
     }
     const otherUnits = [...new Set(mine.filter(b => !b.IsBNBreak && b.Unit !== selectedUnit).map(b => b.Unit))];
     if(otherUnits.length){
@@ -3026,7 +3026,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
 
   // Remove existing BN breaks — batchDelete if multiple, single spDel if just one
   const existing = await spGet(LISTS.bookings,
-    `NurseName eq '${esc(name)}' and SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+    `NurseName eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   if(existing.length > 1){
     await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
       ids: encodeURIComponent(JSON.stringify(existing.map(b=>b.Id))) });
@@ -3269,7 +3269,7 @@ async function recalculateRotation(bnName, date, shift){
 
   // Get BN's own break slots
   const breaks = await spGet(LISTS.bookings,
-    `NurseName eq '${esc(bnName)}' and SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+    `NurseName eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   const bnBreakSlots = new Set([...new Set(breaks.map(b => b.SlotTime))]);
 
   // Generate all available shift slots (excludes hard-blocked huddle window)
@@ -3310,10 +3310,10 @@ async function loadSlots(silent=false){
     // ── Sequential spGet: schedule first, then bookings (both dates for overlap BN breaks) ──
     const schedFloor = oppDt < dt ? oppDt : dt;
     const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`);
-    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`);
+    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
     // Also fetch opposite date bookings — needed for overlap BN breaks (e.g. Noc BN break at 7:55 AM
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
-    const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate ge '${oppDt}}' and SlotDate le '${{oppDt}}T23'`) : [];
+    const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`) : [];
     const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     // For Noc staff, the relevant Day BN schedule is today (not the Noc shift start date yesterday)
     const oppSchedDt = shift === 'Noc' ? today() : oppDt;
@@ -3886,7 +3886,7 @@ async function silentRefreshSlots(){
 
     // Sequential spGet: reliable vs concurrent requests to Apps Script
     const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
-    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`);
+    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
     const scheds = allSchedsForSilent.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
     const allBNBreaks = allBookingsRaw.filter(b => b.IsBNBreak);
@@ -4062,12 +4062,12 @@ async function submitClaims(){
   // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) ──
   let allBookingsToday;
   if(SIM_MODE){
-    const main = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`);
-    const noc  = needsBothDates ? await spGet(LISTS.bookings, `SlotDate ge '${nocDt}}' and SlotDate le '${{nocDt}}T23'`) : [];
+    const main = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
+    const noc  = needsBothDates ? await spGet(LISTS.bookings, `SlotDate ge '${nocDt}' and SlotDate le '${nocDt}T23'`) : [];
     allBookingsToday = [...main, ...noc];
   } else {
-    const queries = [{sheet:LISTS.bookings, filter:`SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`}];
-    if(needsBothDates) queries.push({sheet:LISTS.bookings, filter:`SlotDate ge '${nocDt}}' and SlotDate le '${{nocDt}}T23'`});
+    const queries = [{sheet:LISTS.bookings, filter:`SlotDate ge '${dt}' and SlotDate le '${dt}T23'`}];
+    if(needsBothDates) queries.push({sheet:LISTS.bookings, filter:`SlotDate ge '${nocDt}' and SlotDate le '${nocDt}T23'`});
     const r = await spBatchGet(queries);
     allBookingsToday = needsBothDates ? [...r[0], ...r[1]] : r[0];
   }
@@ -4159,8 +4159,8 @@ async function loadOtherSlots(silent=false){
     // Sequential spGet: schedule first, then bookings
     const otherFloor = nocDt < dt ? nocDt : dt;
     const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${otherFloor}'`);
-    const dayBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`);
-    const nocBookingsRaw = nocDt !== dt ? await spGet(LISTS.bookings, `SlotDate ge '${nocDt}}' and SlotDate le '${{nocDt}}T23'`) : [];
+    const dayBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
+    const nocBookingsRaw = nocDt !== dt ? await spGet(LISTS.bookings, `SlotDate ge '${nocDt}' and SlotDate le '${nocDt}T23'`) : [];
     const dayScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === 'Day');
     const nocScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === nocDt && s.ShiftType === 'Noc');
     const dayBookings = dayBookingsRaw.filter(b => b.Unit === S.unit && b.ShiftType === 'Day');
@@ -4363,9 +4363,9 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     let allBookingsToday = prefetchedBookings;
     if(!allBookingsToday){
       if(SIM_MODE){
-        allBookingsToday = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`);
+        allBookingsToday = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
       } else {
-        const r = await spBatchGet([{sheet:LISTS.bookings, filter:`SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23'`}]);
+        const r = await spBatchGet([{sheet:LISTS.bookings, filter:`SlotDate ge '${dt}' and SlotDate le '${dt}T23'`}]);
         allBookingsToday = r[0];
       }
     }
@@ -4553,7 +4553,7 @@ async function editAssign(id){
     const units = [];
     try { JSON.parse(s.Units||'[]').forEach(u => units.push(u)); } catch{}
     const bookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${s.ShiftDate}}' and SlotDate le '${{s.ShiftDate}}T23' and ShiftType eq '${s.ShiftType}'`);
+      `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
     const confirmed = bookings.filter(b =>
       !b.IsBNBreak && units.includes(b.Unit) && isConfirmed(b)
     );
@@ -4608,7 +4608,7 @@ async function markBNUnavailable(schedId, bnName, date, shift){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
   // Fetch context for the modal — existing bookings and same-wing BNs
   const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-  const allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}'`);
+  const allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
 
   // BN's own units
   const thisSched = allScheds.find(s => String(s.Id) === String(schedId));
@@ -4883,7 +4883,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // Get future uncovered claimed breaks for BN-A's units (main + supplemental)
     const now = nowMin();
     const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}'`);
+      `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
 
     // Only future uncovered claimed staff breaks on BN-A's units
     // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
@@ -5238,7 +5238,7 @@ async function loadSummary(){
   el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
 
   try{
-    let filter=`SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`;
+    let filter=`SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`;
     if(unit!=='All'){
       if(unit==='C_PAIR') filter+=` and (Unit eq '3C' or Unit eq '4C')`;
       else filter+=` and Unit eq '${esc(unit)}'`;
@@ -5249,7 +5249,7 @@ async function loadSummary(){
     const oppDt = shift === 'Day'
       ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
       : dt;
-    let oppFilter = `SlotDate ge '${oppDt}}' and SlotDate le '${{oppDt}}T23' and ShiftType eq '${oppShift}'`;
+    let oppFilter = `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23' and ShiftType eq '${oppShift}'`;
     if(unit!=='All'){
       if(unit==='C_PAIR') oppFilter+=` and (Unit eq '3C' or Unit eq '4C')`;
       else oppFilter += ` and Unit eq '${esc(unit)}'`;
@@ -5469,7 +5469,7 @@ async function saveAssign(){
       existing.forEach(s => { try { JSON.parse(s.Units||'[]').forEach(u => { if(!existingUnits.includes(u)) existingUnits.push(u); }); } catch{} });
       const removedUnits = existingUnits.filter(u => !units.includes(u));
       const addedUnits   = units.filter(u => !existingUnits.includes(u));
-      const staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`);
+      const staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
       const affectedBookings = staffBookings.filter(b =>
         !b.IsBNBreak && (removedUnits.includes(b.Unit) || addedUnits.includes(b.Unit))
       );
@@ -5624,7 +5624,7 @@ async function delAssign(id){
 
     // Find future affected staff bookings
     const now = nowMin();
-    const bookings = await spGet(LISTS.bookings, `SlotDate ge '${s.ShiftDate}}' and SlotDate le '${{s.ShiftDate}}T23' and ShiftType eq '${s.ShiftType}'`);
+    const bookings = await spGet(LISTS.bookings, `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
     const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
 
     // Get same-wing active BNs
@@ -5698,7 +5698,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
     // Get future claimed bookings on this unit
     const now = nowMin();
     const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(unit)}' and SlotDate ge '${date}}' and SlotDate le '${{date}}T23' and ShiftType eq '${shift}'`);
+      `Unit eq '${esc(unit)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
     const future = bookings.filter(b => !b.IsBNBreak && sortKey(b.SlotTime, shift) > nowKey(shift));
 
     // Get this BN's other units on this assignment
@@ -7230,7 +7230,7 @@ async function loadBNSlots(){
     // ── SINGLE ROUND TRIP: batch schedule + breaks ──
     let batchResults;
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const breaksFilter = `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`;
+    const breaksFilter = `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`;
     if(SIM_MODE){
       batchResults = await Promise.all([
         spGet(LISTS.schedule, schedFilter),
@@ -7506,14 +7506,14 @@ async function claimBNBreak(slotTime){
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const existing = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
     const uniqueTimes = new Set(existing.map(b => b.SlotTime));
 
     const units = await getBNUnits(BNS.name, dt, shift);
 
     // Warn if staff nurses already have this slot on any unit this BN covers
     const staffAtSlot = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
     const conflictingStaff = staffAtSlot.filter(b => !b.IsBNBreak && units.includes(b.Unit));
     if(conflictingStaff.length){
       const lines = conflictingStaff.map(b => {
@@ -7560,11 +7560,11 @@ async function cancelBNBreak(slotTime){
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const breaks = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
 
     // Warn if any confirmed/not-taken staff bookings exist for this slot
     const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
     const actioned = allBookings.filter(b =>
       !b.IsBNBreak && !isPending(b)
     );
@@ -7622,11 +7622,11 @@ async function clearBNBreaks(){
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const breaks = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
 
     // Warn if any confirmed/not-taken staff bookings exist
     const slotTimes = [...new Set(breaks.map(b => b.SlotTime))];
-    const allB = await spGet(LISTS.bookings, `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`);
+    const allB = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const actioned = allB.filter(b =>
       !b.IsBNBreak && slotTimes.includes(b.SlotTime) && !isPending(b)
     );
@@ -7694,7 +7694,7 @@ async function loadBNConfirm(){
   try {
     // ── SINGLE ROUND TRIP: schedule + bookings + notification state ──
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const bookFilter = `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`;
+    const bookFilter = `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`;
     const notifyKey = `slotNotify_${dt}_${shift}`;
     const notifyFilter = `Key eq '${esc(notifyKey)}'`;
     let results;
@@ -7869,7 +7869,7 @@ async function populateManualSlots(){
 
     // Get existing bookings on this unit to exclude already-claimed ones
     const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(unit)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`);
+      `Unit eq '${esc(unit)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const claimed = new Set(bookings.filter(b => !b.IsBNBreak).map(b => b.SlotTime));
 
     // Get BN's own break slots to show (blocked for staff but valid for manual entry)
@@ -7922,7 +7922,7 @@ async function saveManualBreak(){
   try {
     // Block if this nurse already has a manual break at the same time on any unit
     const existingAtTime = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(nurseName)}' and SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
+      `NurseName eq '${esc(nurseName)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
     if(existingAtTime.filter(b => !b.IsBNBreak).length){
       toast(`${nurseName} already has a break at ${fmt12(slotTime)} — a nurse can only be in one place at a time.`, true);
       return;
@@ -7966,7 +7966,7 @@ async function confirmAllBreaks(){
   try {
     const units = await getBNUnits(BNS.name, dt, shift);
     const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}}' and SlotDate le '${{dt}}T23' and ShiftType eq '${shift}'`);
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const pending = allBookings.filter(b =>
       !b.IsBNBreak && units.includes(b.Unit) && isPending(b)
     );
