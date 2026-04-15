@@ -3381,9 +3381,11 @@ async function loadSlots(silent=false){
         : '';
 
       // ── Shared: limited coverage calculation ──
-      const _oppUnitScheds = oppCoveringBanner.filter(s => {
+      // Only use oppCovering during the sign-up window → overlap window (e.g. 6:30–8:00 PM for Noc)
+      const _oppWindowOk = _oppWindowRelevant;
+      const _oppUnitScheds = _oppWindowOk ? oppCoveringBanner.filter(s => {
         try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
-      });
+      }) : [];
       const _calcLimited = () => {
         const _limOppBN = _oppUnitScheds[0].BreakNurseName;
         const _limRot = loadRotation(_limOppBN, oppSchedDt, oppShift);
