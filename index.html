@@ -6955,6 +6955,8 @@ async function acceptAllAndSave(){
     status.textContent = `⚠ Batch failed: ${e.message}. Try saving individually.`;
     console.error('acceptAllAndSave batch error:', e);
   }
+  // Reload full assignment list with buttons after save
+  loadAssignments();
 }
 
 function clearImportSel(i){
