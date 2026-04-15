@@ -4626,7 +4626,7 @@ async function markBNUnavailable(schedId, bnName, date, shift){
   try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
   // Staff bookings on this BN's units
-  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit));
+  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= today() && sortKey(b.SlotTime, shift) > nowKey(shift));
 
   // Same-wing BNs available to absorb
   const sameWingBNs = allScheds.filter(s =>
@@ -4856,10 +4856,13 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
 
     // Only future uncovered claimed staff breaks on BN-A's units
+    // Must also check SlotDate — sortKey is time-only and can't distinguish yesterday from today
+    const _todayStr = today();
     const uncovered = allBookings.filter(b =>
       !b.IsBNBreak &&
       bnAUnits.includes(b.Unit) &&
       !isConfirmed(b) &&
+      b.SlotDate >= _todayStr &&  // exclude past dates entirely
       sortKey(b.SlotTime, shift) > nowKey(shift)
     );
 
@@ -5593,7 +5596,7 @@ async function delAssign(id){
     // Find future affected staff bookings
     const now = nowMin();
     const bookings = await spGet(LISTS.bookings, `SlotDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= today() && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
 
     // Get same-wing active BNs
     const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
