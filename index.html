@@ -1904,12 +1904,33 @@ async function show3CMidShiftModal(){
     title.textContent = 'Close 3C for This Shift';
     subtitle.textContent = `${bnDisplay} is currently covering 3C. Remaining 3C slots will be cancelled.`;
 
-    // Pre-load 3C slots
-    const rotation = loadRotation(bnName, date, shift) || {};
-    const c3Slots = Object.entries(rotation)
-      .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
-      .map(([slot]) => String(slot).padStart(4,'0'))
-      .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+    // Fetch fresh rotation from Sheets — localStorage cache may be stale after open/close cycles
+    let c3Slots = [];
+    try {
+      const rotRecs = await spGet(LISTS.state, `Key eq 'rotation_${esc(bnName)}_${date}_${shift}'`);
+      if(rotRecs.length){
+        const freshRot = JSON.parse(rotRecs[0].Value || '{}');
+        c3Slots = Object.entries(freshRot)
+          .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
+          .map(([slot]) => String(slot).padStart(4,'0'))
+          .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+        // Update cache with fresh data
+        saveRotation(bnName, date, shift, freshRot);
+      } else {
+        // Fall back to cache
+        const rotation = loadRotation(bnName, date, shift) || {};
+        c3Slots = Object.entries(rotation)
+          .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
+          .map(([slot]) => String(slot).padStart(4,'0'))
+          .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+      }
+    } catch(e) {
+      const rotation = loadRotation(bnName, date, shift) || {};
+      c3Slots = Object.entries(rotation)
+        .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
+        .map(([slot]) => String(slot).padStart(4,'0'))
+        .sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+    }
     _c3Modal.slots = c3Slots.map(s => ({ time: s, unit: '4C' }));
 
     explanation.textContent = `${c3Slots.length} remaining 3C slot${c3Slots.length!==1?'s':''} will be cancelled. Choose how to reassign them.`;
