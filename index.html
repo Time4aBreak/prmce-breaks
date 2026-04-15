@@ -3683,7 +3683,11 @@ async function loadSlots(silent=false){
 
     // Only apply rotation filter if there are future rotation slots for this unit.
     // If all rotation slots are already past, this unit is done for the shift — show nothing.
-    const futureRotSlots = [...unitRotationSlots].filter(s => !isPast(s, shift));
+    const futureRotSlots = [...unitRotationSlots].filter(s => {
+      if(isPast(s, shift)) return false;
+      if(shift === 'Day' && toMin(s) >= SLOT_CUTOFF_DAY) return false; // past Day staff window
+      return true;
+    });
     const useRotation = hasAnyRotation && unitRotationSlots.size > 0;
     const unitDoneForShift = hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length === 0;
 
@@ -3722,9 +3726,11 @@ async function loadSlots(silent=false){
     }
 
     // Always include the nurse's own claimed slots even if outside the rotation window
+    // but respect shift cutoffs — don't surface post-cutoff slots to Day staff
     if(nurseName){
       bookings.forEach(b => {
         const normTime = String(b.SlotTime).padStart(4,'0');
+        if(shift === 'Day' && toMin(normTime) >= SLOT_CUTOFF_DAY) return; // outside Day window
         if(!b.IsBNBreak && b.NurseName === nurseName && !future.includes(normTime)){
           future.push(normTime);
         }
