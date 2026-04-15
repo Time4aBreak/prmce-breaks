@@ -4722,9 +4722,11 @@ function populateBNStartTimeSlots(){
   const saved = localStorage.getItem(getBNStartKey()) || '';
   // Only filter past slots if viewing today's shift — future dates show all slots
   const isToday = (BNS.date || today()) === shiftDate(shift);
+  // Only filter past slots if the shift is currently active
+  const _bnStartShiftActive = staffWindowOpen(shift);
   const slots = generateSlots(shift)
     .filter(s => getSlotTier(s, shift) !== 'hardBlocked')
-    .filter(s => !isToday || sortKey(s, shift) > nowKey(shift));
+    .filter(s => !isToday || !_bnStartShiftActive || sortKey(s, shift) > nowKey(shift));
   el.innerHTML = '<option value="">— full shift —</option>' +
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
