@@ -3563,9 +3563,10 @@ async function loadSlots(silent=false){
       ...covering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
         .map(c => c.BreakNurseName),
-      ...oppCovering
+      // Only include opp BN in meta during the overlap window
+      ...(overlapWindowActive(shift) ? oppCovering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
-        .map(c => c.BreakNurseName)
+        .map(c => c.BreakNurseName) : [])
     ])].join(', ');
     const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
     const firstName = document.getElementById('nurseName').value.trim();
