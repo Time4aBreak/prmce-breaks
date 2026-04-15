@@ -2787,6 +2787,13 @@ function updateNameCardState(){
 }
 
 function setNameCardEnabled(enabled){
+  // Never disable while user is actively typing in name or ext fields
+  if(!enabled){
+    const active = document.activeElement;
+    const nameInput = document.getElementById('nurseName');
+    const extInput  = document.getElementById('nurseExt');
+    if(active === nameInput || active === extInput) return;
+  }
   const nameInput = document.getElementById('nurseName');
   const extInput  = document.getElementById('nurseExt');
   const hint = document.getElementById('nameWindowHint');
@@ -5029,8 +5036,14 @@ function onNameInput(){
 }
 
 function onNameExtInput(){
-  if(S.unit) {
+  if(!S.unit) return;
+  const ext = document.getElementById('nurseExt').value.trim();
+  if(/^[0-9]{5}$/.test(ext)){
+    // Valid 5-digit ext — full reload to check bookings and update isMine
     loadSlots(true);
+  } else {
+    // Partial entry — re-render from cache instantly, no API call
+    renderSlotsFromCache();
   }
 }
 
