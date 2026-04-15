@@ -425,7 +425,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" id="clearAllBreaksBtn" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks()">Clear All My Breaks</button>
           <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Resetting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Reset this shift to default'})">Reset this shift to default</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="toggleSelfAvailability()">🏠 Mark unavailable</button>
+          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
         </div>
       </div>
 
@@ -4616,6 +4616,7 @@ function getUnitWing(unit){
 
 // Mark a BN unavailable from Admin tab
 async function markBNUnavailable(schedId, bnName, date, shift){
+  await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
   // Fetch context for the modal — existing bookings and same-wing BNs
   const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}'`);
   const allBookings = await spGet(LISTS.bookings, `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
@@ -4695,6 +4696,7 @@ Staff: ${nurseList}`;
 }
 
 async function markBNAvailable(schedId, bnName){
+  await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…'
   if(!await customConfirm(`Mark ${firstName(bnName)} as available again? This will reactivate their assignment.`,'Mark Available','Cancel')) return;
   try {
     // Check for supplemental records created during redistribution
@@ -4861,19 +4863,35 @@ function markCardUnavailableInDOM(bnName){
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
   try {
     // Get BN-A's units and mark record inactive
-    const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
-    if(!scheds.length) return;
-    const bnARecord = scheds[0];
+    // Fetch main record + all supplementals for this BN on this shift
+    const [mainRecs, suppRecs] = await Promise.all([
+      spGet(LISTS.schedule, `Id eq ${schedId}`),
+      spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
+    ]);
+    if(!mainRecs.length) return;
+    const bnARecord = mainRecs[0];
+
+    // Combine units from main assignment + any supplementals
     let bnAUnits = [];
     try { bnAUnits = JSON.parse(bnARecord.Units||'[]'); } catch{}
+    const suppToInactivate = suppRecs.filter(s =>
+      String(s.Id) !== String(schedId) && s.IsSupplemental == 1 && s.Status !== 'inactive'
+    );
+    suppToInactivate.forEach(s => {
+      try { JSON.parse(s.Units||'[]').forEach(u => { if(!bnAUnits.includes(u)) bnAUnits.push(u); }); } catch{}
+    });
 
-    // Mark BN-A inactive with timestamp
+    // Mark main assignment inactive
     await spPatch(LISTS.schedule, schedId, {
       Status: 'inactive',
       EndedAt: new Date().toISOString()
     });
+    // Also inactivate supplementals — their bookings will be included in redistribution below
+    for(const sup of suppToInactivate){
+      await spPatch(LISTS.schedule, sup.Id, { Status: 'inactive', EndedAt: new Date().toISOString() });
+    }
 
-    // Get future uncovered claimed breaks for BN-A's units
+    // Get future uncovered claimed breaks for BN-A's units (main + supplemental)
     const now = nowMin();
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
@@ -5582,8 +5600,8 @@ async function loadAssignments(){
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${!isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
-                ${!isInactive && !s.IsSupplemental && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
+                ${!isInactive && !s.IsSupplemental && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
               </div>
             </div>
