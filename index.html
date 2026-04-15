@@ -3284,12 +3284,15 @@ async function recalculateRotation(bnName, date, shift){
   return rotation;
 }
 
+let _loadSlotsGen = 0; // generation counter to discard stale async results
+
 async function loadSlots(silent=false){
   if(!S.unit) return;
   // Route Other shift to its own handler
   if(S.shift === 'Other'){
     return loadOtherSlots(silent);
   }
+  const _myGen = ++_loadSlotsGen; // capture generation at call time
   const loader=document.getElementById('slotsLoader');
   const list=document.getElementById('slotsList');
   const meta=document.getElementById('slotsMeta');
@@ -3846,6 +3849,7 @@ async function loadSlots(silent=false){
     }
 
     // Populate cache for instant pending re-renders
+    if(_myGen !== _loadSlotsGen){ return; } // stale — a newer call has started
     _slotRenderCache = {
       future, bMap, bnBreaks, nurseName, nurseExt: document.getElementById('nurseExt').value.trim(),
       covering, oppCovering, shift, overlapRange
