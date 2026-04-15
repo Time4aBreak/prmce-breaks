@@ -2612,10 +2612,10 @@ function updateNameCardVisibility(){
 }
 
 async function checkWrongUnit(selectedUnit){
-  const firstName = document.getElementById('nurseName').value.trim();
+  const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)) return;
-  const name = `${toTitleCase(firstName)} (${nurseExt})`;
+  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)) return;
+  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   const dt = today();
   try {
     let mine;
@@ -3558,9 +3558,9 @@ async function loadSlots(silent=false){
         .map(c => c.BreakNurseName) : [])
     ])].join(', ');
     const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
-    const firstName = document.getElementById('nurseName').value.trim();
+    const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = firstName && nurseExt ? `${toTitleCase(firstName)} (${nurseExt})` : '';
+    const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
 
     // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load
     await Promise.all([
@@ -3764,7 +3764,6 @@ async function loadSlots(silent=false){
     }
 
     // Build slot→BN map from rotations for per-slot BN display
-    // Use window.firstName to avoid collision with local var 'firstName'
     const _getBNFirst = n => { if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n]; const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
     const _slotBNMap = {};
     for(const sched of covering){
@@ -3904,9 +3903,9 @@ async function silentRefreshSlots(){
       allBNBreaks.filter(b => allBNNames.includes(b.NurseName)).map(b => b.SlotTime)
     );
 
-    const firstName = document.getElementById('nurseName').value.trim();
+    const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = firstName && nurseExt ? `${toTitleCase(firstName)} (${nurseExt})` : '';
+    const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
     const myTimes   = bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak).map(b => b.SlotTime);
 
     // Build fingerprint: slot:status pairs
@@ -4008,9 +4007,9 @@ function togglePending(slotTime, slotShift){
   if(S.pendingClaims.has(key)){
     S.pendingClaims.delete(key);
   } else {
-    const firstName = document.getElementById('nurseName').value.trim();
+    const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+    if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
       document.getElementById('nameExtHint').style.display = 'block';
       toast('Please enter your first name and a 5-digit Spectra extension.', true);
       return;
@@ -4046,14 +4045,14 @@ function updateSubmitBar(){
 }
 
 async function submitClaims(){
-  const firstName = document.getElementById('nurseName').value.trim();
+  const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
     toast('Please enter your first name and a 5-digit Spectra extension.', true);
     return;
   }
-  const name = `${toTitleCase(firstName)} (${nurseExt})`;
+  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   // For Other shift, slots may span two dates (Day date + Noc date)
   // Use both dates for the pre-fetch so race checks work correctly
   const dt = S.shift === 'Other' ? today() : shiftDate(S.shift);
@@ -4078,12 +4077,12 @@ async function submitClaims(){
     if(b.IsBNBreak) return false;
     if(b.Unit === S.unit) return false;
     const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
-    return m && m[1].trim().toLowerCase() === firstName.toLowerCase();
+    return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
   });
   if(otherUnitBookings.length){
     const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
     const floated = await customConfirm(
-      `${toTitleCase(firstName)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
+      `${toTitleCase(_nurseFirst)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
       `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
       `Go back to ${myOtherUnits.join(', ')}`
     );
@@ -4338,14 +4337,14 @@ async function loadOtherSlots(silent=false){
 }
 
 async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null){
-  const firstName = document.getElementById('nurseName').value.trim();
+  const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!firstName || !/^[0-9]{5}$/.test(nurseExt)){
+  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Please enter your first name and a 5-digit Spectra extension.', true); }
     return 'Name/ext missing';
   }
   document.getElementById('nameExtHint').style.display = 'none';
-  const name = `${toTitleCase(firstName)} (${nurseExt})`;
+  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   let dt;
   if(slotShiftOverride === 'Noc') dt = shiftDate('Noc');
   else if(slotShiftOverride === 'Day') dt = today();
@@ -4377,12 +4376,12 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
         if(b.IsBNBreak) return false;
         if(b.Unit === S.unit) return false;
         const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
-        return m && m[1].trim().toLowerCase() === firstName.toLowerCase();
+        return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
       });
       const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
       if(myOtherUnits.length){
         const floated = await customConfirm(
-          `${toTitleCase(firstName)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
+          `${toTitleCase(_nurseFirst)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
           `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
           `Go back to ${myOtherUnits.join(', ')}`
         );
@@ -4428,7 +4427,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
       IsOtherShift: (S.shift === 'Other') ? 1 : 0
     });
-    if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(firstName)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
+    if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(_nurseFirst)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
   }catch(e){
     if(!silent){
@@ -5144,15 +5143,15 @@ function clearNameExt(){
 }
 
 async function checkDuplicateExt(){
-  const firstName = document.getElementById('nurseName').value.trim();
+  const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!firstName || !/^\d{5}$/.test(nurseExt)) return;
+  if(!_nurseFirst || !/^\d{5}$/.test(nurseExt)) return;
   const dt = shiftDate(S.shift);
   try {
     const scheds = await spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${S.shift}'`);
     const conflict = scheds.find(s =>
       s.Status !== 'inactive' && s.Ext === nurseExt &&
-      s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(firstName.toLowerCase())
+      s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(_nurseFirst.toLowerCase())
     );
     if(conflict){
       if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${conflict.BreakNurseName}.`,'Take over extension','Cancel')){
