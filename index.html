@@ -4626,7 +4626,7 @@ async function markBNUnavailable(schedId, bnName, date, shift){
   try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
   // Staff bookings on this BN's units
-  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= today() && sortKey(b.SlotTime, shift) > nowKey(shift));
+  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift));
 
   // Same-wing BNs available to absorb
   const sameWingBNs = allScheds.filter(s =>
@@ -4660,13 +4660,36 @@ Staff: ${nurseList}`;
 
   if(!await customConfirm(msg, `Mark ${firstName(bnName)} unavailable`, 'Cancel')) return;
 
-  const redistribute = sameWingNames.length
-    ? await customConfirm(
-        `What would you like to do with ${firstName(bnName)}'s uncovered slots?`,
-        `Redistribute to ${sameWingNames.join('/')}`,
-        'Cancel all slots'
-      )
-    : false;
+  let redistribute = false;
+  if(sameWingNames.length){
+    const redistChoice = await new Promise(resolve => {
+      const modal = document.getElementById('customConfirmModal');
+      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(
+        `Assign ${firstName(bnName)}'s claims to ${sameWingNames.join('/')}'s open slots where eligible?`
+      );
+      document.getElementById('customConfirmOk').textContent = 'Yes';
+      document.getElementById('customConfirmCancel').textContent = `No, just cancel all ${firstName(bnName)}'s claims`;
+      // Add Go back button dynamically
+      const goBackBtn = document.createElement('button');
+      goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
+      goBackBtn.textContent = 'Go back';
+      const btnWrap = document.getElementById('customConfirmCancel').parentNode;
+      btnWrap.appendChild(goBackBtn);
+      modal.style.display = 'flex';
+      const cleanup = (result) => {
+        modal.style.display = 'none';
+        goBackBtn.remove();
+        document.getElementById('customConfirmOk').onclick = null;
+        document.getElementById('customConfirmCancel').onclick = null;
+        resolve(result);
+      };
+      document.getElementById('customConfirmOk').onclick = () => cleanup('yes');
+      document.getElementById('customConfirmCancel').onclick = () => cleanup('no');
+      goBackBtn.onclick = () => cleanup('back');
+    });
+    if(redistChoice === 'back') return;
+    redistribute = redistChoice === 'yes';
+  }
 
   await processBNUnavailability(schedId, bnName, date, shift, redistribute);
 }
@@ -4856,19 +4879,18 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
 
     // Only future uncovered claimed staff breaks on BN-A's units
-    // Must also check SlotDate — sortKey is time-only and can't distinguish yesterday from today
-    const _todayStr = today();
+    // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
     const uncovered = allBookings.filter(b =>
       !b.IsBNBreak &&
       bnAUnits.includes(b.Unit) &&
       !isConfirmed(b) &&
-      b.SlotDate >= _todayStr &&  // exclude past dates entirely
+      b.SlotDate >= shiftDate(shift) &&  // exclude dates before this shift started
       sortKey(b.SlotTime, shift) > nowKey(shift)
     );
 
     if(!uncovered.length){
       toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
-      markCardUnavailableInDOM(bnName);
+      loadAssignments();
       return;
     }
 
@@ -4889,7 +4911,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     if(!redistribute){
       const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
-      markCardUnavailableInDOM(bnName);
+      loadAssignments();
       return;
     }
 
@@ -4897,7 +4919,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       // No other BNs available — flag all
       const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
-      markCardUnavailableInDOM(bnName);
+      loadAssignments();
       return;
     }
 
@@ -5078,7 +5100,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     }
 
     // Update assignment display immediately, background refresh for full state
-    markCardUnavailableInDOM(bnName);
+    loadAssignments();
   } catch(e) { toast(e.message, true); }
 }
 
@@ -5331,7 +5353,7 @@ async function loadSummary(){
     staffBookings.forEach(b=>{
       const bn = getBNForBooking(b);
       const bnExt = getBNExtForBooking(b);
-      const bnUnavailable = bn && inactiveBNs.has(bn);
+      const bnUnavailable = bn && inactiveBNs.has(bn) && !isPast(b.SlotTime, shift);
       html+=`<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
         <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
         <div class="summ-unit">${b.Unit}</div>
@@ -5596,7 +5618,7 @@ async function delAssign(id){
     // Find future affected staff bookings
     const now = nowMin();
     const bookings = await spGet(LISTS.bookings, `SlotDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= today() && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
 
     // Get same-wing active BNs
     const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
