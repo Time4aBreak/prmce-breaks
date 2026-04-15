@@ -5893,6 +5893,10 @@ async function clearSimData(){
       await gasCall({action:'clearSheet', sheet:LISTS.schedule});
       await gasCall({action:'clearSheet', sheet:LISTS.bookings});
       await gasCall({action:'clearSheet', sheet:LISTS.state});
+      // Re-write defaults after clearing state sheet
+      await setState('unit3CDefault', 'closed');
+      localStorage.setItem('unit3CDefault', 'closed');
+      show3CDefaultToggle();
     } catch(e){ toast('Some sheets could not be cleared: ' + e.message, true); }
   }
   // Clear in-memory assignment display immediately
