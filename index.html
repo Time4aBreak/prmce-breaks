@@ -2179,6 +2179,13 @@ function c3ShowManualAssign(){
   renderC3SlotList();
   confirmBtn.textContent = 'Close 3C — apply slot assignments';
   confirmBtn.style.display = 'block';
+  // Hide the initial action buttons — user is now in manual assign mode
+  const actionDiv = document.getElementById('c3ActionBtns');
+  if(actionDiv){
+    actionDiv.innerHTML = `
+      <button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()">Close 3C — apply slot assignments</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — leave 3C as is</button>`;
+  }
 }
 
 function c3SetAllUnit(unit){
