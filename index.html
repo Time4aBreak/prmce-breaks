@@ -1810,11 +1810,26 @@ async function show3CMidShiftModal(){
   const explanation = document.getElementById('c3Explanation');
   const confirmBtn = document.getElementById('c3ConfirmBtn');
 
-  // Reset — guard nulls since close mode wipes c3ConfirmBtn from c3ActionBtns
+  // Reset — restore modal to clean state
+  // c3SlotListLabel may have been wiped by c3ShowManualAssign replacing slotWrap.innerHTML
+  if(slotWrap && !document.getElementById('c3SlotListLabel')){
+    slotWrap.innerHTML = `
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <div id="c3SlotListLabel" style="font-size:.85rem;font-weight:600;color:var(--text)"></div>
+        <div style="display:flex;gap:6px">
+          <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SelectAll()">Select All</button>
+          <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3ClearAll()">Clear All</button>
+        </div>
+      </div>
+      <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
+  }
+  // Re-query after potential restore
+  const _slotLabel2 = document.getElementById('c3SlotListLabel');
   if(cancelStep) cancelStep.style.display = 'none';
   if(slotWrap) slotWrap.style.display = 'none';
   if(wingWarn) wingWarn.style.display = 'none';
   if(confirmBtn) confirmBtn.style.display = 'none';
+  if(_slotLabel2) _slotLabel2.textContent = '';
   _c3Modal.cancelMode = null;
   _c3Modal.slots = [];
 
