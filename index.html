@@ -4203,6 +4203,7 @@ async function loadOtherSlots(silent=false){
       return m >= nowMAdj && m <= endAdj;
     })
     .filter(s => s.shift === 'Day' ? dayCovering.length > 0 : nocCovering.length > 0)
+    .filter(s => !(s.shift === 'Day' && toMin(s.time) >= getOverlapRange('Noc').max)) // Day BN coverage ends at evening overlap max (8:00 PM)
     .filter(s => {
       // Apply rotation filter — only show slots assigned to this unit
       if(s.shift === 'Day') return !useDayRotation || dayRotSlots.has(s.time);
@@ -4220,8 +4221,10 @@ async function loadOtherSlots(silent=false){
     // Use booking results from batch query above
     const allBookings = [...dayBookings, ...nocBookings];
 
-    // My bookings across both shifts
-    const nurseName = S.firstName && S.nurseExt ? `${S.firstName} (${S.nurseExt})` : null;
+    // My bookings across both shifts — read from DOM same as loadSlots
+    const _otherFirstName = document.getElementById('nurseName').value.trim();
+    const _otherExt       = document.getElementById('nurseExt').value.trim();
+    const nurseName = _otherFirstName && /^[0-9]{5}$/.test(_otherExt) ? `${toTitleCase(_otherFirstName)} (${_otherExt})` : null;
     const myBookings = nurseName ? allBookings.filter(b => b.NurseName === nurseName && !b.IsBNBreak) : [];
     const myTimes    = new Set(myBookings.map(b => b.SlotTime));
     const canClaimMore = myBookings.length < MAX_SLOTS;
