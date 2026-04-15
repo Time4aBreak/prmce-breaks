@@ -1900,11 +1900,11 @@ async function show3CMidShiftModal(){
     }
 
   } else {
-    // Close mode — always cancels remaining 3C slots
+    // Close mode — step 1: show choices only (no slot list visible)
     title.textContent = 'Close 3C for This Shift';
     subtitle.textContent = `${bnDisplay} is currently covering 3C. Remaining 3C slots will be cancelled.`;
 
-    // Pre-load 3C slots for manual assign path
+    // Pre-load 3C slots
     const rotation = loadRotation(bnName, date, shift) || {};
     const c3Slots = Object.entries(rotation)
       .filter(([slot, unit]) => unit === '3C' && !isPast(String(slot).padStart(4,'0'), shift))
@@ -1914,7 +1914,7 @@ async function show3CMidShiftModal(){
 
     explanation.textContent = `${c3Slots.length} remaining 3C slot${c3Slots.length!==1?'s':''} will be cancelled. Choose how to reassign them.`;
 
-    // Replace action buttons with close-specific options
+    // Step 1 buttons only — slot list hidden until user picks Manually assign
     const actionDiv = document.getElementById('c3ActionBtns');
     if(actionDiv){
       actionDiv.innerHTML = `
@@ -2161,26 +2161,26 @@ async function c3GiveAllTo4CAndConfirm(){
 
 function c3ShowManualAssign(){
   _c3Modal.cancelMode = 'cancel';
-  const slotWrap = document.getElementById('c3SlotListWrap');
-  const label = `Assign freed 3C slots (${_c3Modal.slots.length} slots):`;
-  slotWrap.innerHTML = `
+  // Replace entire modal inner content with step 2 — slot assignment view
+  const modal = document.getElementById('c3MidShiftModal');
+  const otherUnits = (_c3Modal.bnUnits||[]).flatMap(u => u === 'C_PAIR' ? ['4C'] : u === '3C' ? [] : [u]);
+  const allUnits = [...new Set(['4C', ...otherUnits])];
+  modal.querySelector('div').innerHTML = `
+    <div style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:6px">Assign freed 3C slots</div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Assign each slot to a unit, or leave unassigned to cancel it.</div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-      <div id="c3SlotListLabel" style="font-size:.85rem;font-weight:600;color:var(--text)">${label}</div>
+      <div style="font-size:.85rem;font-weight:600;color:var(--text)">${_c3Modal.slots.length} slot${_c3Modal.slots.length!==1?'s':''} to reassign:</div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('4C')">All to 4C</button>
         <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('')">Clear All</button>
       </div>
     </div>
-    <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
-  slotWrap.style.display = 'block';
-  renderC3SlotList();
-  // Replace action buttons — user is now in manual assign mode, only need confirm + cancel
-  const actionDiv = document.getElementById('c3ActionBtns');
-  if(actionDiv){
-    actionDiv.innerHTML = `
+    <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>
+    <div id="c3ActionBtns" style="display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()">Close 3C — apply slot assignments</button>
-      <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — leave 3C as is</button>`;
-  }
+      <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — leave 3C as is</button>
+    </div>`;
+  renderC3SlotList();
 }
 
 function c3SetAllUnit(unit){
