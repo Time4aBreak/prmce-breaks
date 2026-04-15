@@ -2162,13 +2162,10 @@ async function c3GiveAllTo4CAndConfirm(){
 function c3ShowManualAssign(){
   _c3Modal.cancelMode = 'cancel';
   const slotWrap = document.getElementById('c3SlotListWrap');
-  const slotLabel = document.getElementById('c3SlotListLabel');
-  const confirmBtn = document.getElementById('c3ConfirmBtn');
-  slotLabel.textContent = `Assign freed 3C slots (${_c3Modal.slots.length} slots):`;
-  // Replace sub-buttons with slot list header + select all/clear all
+  const label = `Assign freed 3C slots (${_c3Modal.slots.length} slots):`;
   slotWrap.innerHTML = `
     <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-      <div style="font-size:.85rem;font-weight:600;color:var(--text)">${slotLabel.textContent}</div>
+      <div id="c3SlotListLabel" style="font-size:.85rem;font-weight:600;color:var(--text)">${label}</div>
       <div style="display:flex;gap:6px">
         <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('4C')">All to 4C</button>
         <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3SetAllUnit('')">Clear All</button>
@@ -2177,9 +2174,7 @@ function c3ShowManualAssign(){
     <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
   slotWrap.style.display = 'block';
   renderC3SlotList();
-  confirmBtn.textContent = 'Close 3C — apply slot assignments';
-  confirmBtn.style.display = 'block';
-  // Hide the initial action buttons — user is now in manual assign mode
+  // Replace action buttons — user is now in manual assign mode, only need confirm + cancel
   const actionDiv = document.getElementById('c3ActionBtns');
   if(actionDiv){
     actionDiv.innerHTML = `
