@@ -4209,6 +4209,15 @@ async function loadOtherSlots(silent=false){
       if(s.shift === 'Day') return !useDayRotation || dayRotSlots.has(s.time);
       return !useNocRotation || nocRotSlots.has(s.time);
     })
+    .filter(s => {
+      // Hide slots where BN is on break — same as loadSlots
+      const _allOtherBNNames = [...new Set([...dayCovering, ...nocCovering].map(sc => sc.BreakNurseName))];
+      const _bnBreak = [...dayBookingsRaw, ...nocBookingsRaw].find(b =>
+        b.IsBNBreak && _allOtherBNNames.includes(b.NurseName) &&
+        String(b.SlotTime).padStart(4,'0') === s.time
+      );
+      return !_bnBreak;
+    })
     .sort((a,b) => a.sortM - b.sortM);
 
     if(!allSlots.length){
@@ -4362,7 +4371,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     const bnBreakConflict = slotBookings.find(b => b.IsBNBreak);
     if(bnBreakConflict){
       if(!silent){ toast(`${fmt12(slotTime)} is blocked — break nurse is on break at this time.`, true); loadSlots(); }
-      return `${fmt12(slotTime)} BN on break`;
+      return `BN on break`;
     }
 
     await spPost(LISTS.bookings,{
