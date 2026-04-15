@@ -1738,7 +1738,7 @@ function set3CDefaultVal(val, btn){
     _c3Modal.pendingVal = val;
     _c3Modal.pendingBtn = btn;
     // Fetch schedule to find C Wing BN
-    spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`).then(scheds => {
+    spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`).then(scheds => {
       const cWingBN = scheds.find(s => {
         try { const u = JSON.parse(s.Units||'[]'); return u.includes('4C') || u.includes('C_PAIR') || u.includes('3C'); } catch{ return false; }
       });
@@ -1780,7 +1780,7 @@ function set3CForDate(val, btn){
     _c3Modal.bnName = nurseName;
     _c3Modal.pendingVal = val;
     _c3Modal.pendingBtn = btn;
-    spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurseName||'')}'`).then(scheds => {
+    spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurseName||'')}'`).then(scheds => {
       _c3Modal.bnUnits = scheds.length ? (() => { try { return JSON.parse(scheds[0].Units||'[]'); } catch{ return []; } })() : S.aUnits || [];
       show3CMidShiftModal().catch(e => { console.error('3C modal error:', e); toast('Error: ' + e.message, true); });
     }).catch(e => { toast('Error loading schedule: ' + e.message, true); });
@@ -3258,7 +3258,7 @@ async function warmRotationCache(bnName, date, shift){
 async function recalculateRotation(bnName, date, shift){
   // Get BN's covered units
   const scheds = await spGet(LISTS.schedule,
-    `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
+    `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
   const rawUnits = [];
   scheds.forEach(s => {
     try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
@@ -4564,7 +4564,7 @@ async function editAssign(id){
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
     const allBNScheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}' and BreakNurseName eq '${esc(s.BreakNurseName)}'`);
+      `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}' and BreakNurseName eq '${esc(s.BreakNurseName)}'`);
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
     }))];
@@ -4607,7 +4607,7 @@ function getUnitWing(unit){
 async function markBNUnavailable(schedId, bnName, date, shift){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
   // Fetch context for the modal — existing bookings and same-wing BNs
-  const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}'`);
+  const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
   const allBookings = await spGet(LISTS.bookings, `SlotDate eq '${date}' and ShiftType eq '${shift}'`);
 
   // BN's own units
@@ -4693,7 +4693,7 @@ async function markBNAvailable(schedId, bnName){
     if(sched.length){
       const { ShiftDate, ShiftType } = sched[0];
       const allScheds = await spGet(LISTS.schedule,
-        `ShiftDate eq '${ShiftDate}' and ShiftType eq '${ShiftType}'`);
+        `ShiftDate ge '${ShiftDate.slice(0,10)}' and ShiftDate le '${ShiftDate.slice(0,10)}T23' and ShiftType eq '${ShiftType}'`);
       const suppls = allScheds.filter(s => s.IsSupplemental == 1);
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
@@ -4770,7 +4770,7 @@ async function toggleSelfAvailability(){
   if(!BNS.name){ toast('Select your name first', true); return; }
 
   const scheds = await spGet(LISTS.schedule,
-    `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+    `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
   const inactive = scheds.find(s => s.Status === 'inactive' && !s.IsSupplemental);
   const active   = scheds.find(s => s.Status !== 'inactive' && !s.IsSupplemental);
 
@@ -4780,7 +4780,7 @@ async function toggleSelfAvailability(){
     try {
       // Check for supplemental records created during redistribution
       const allScheds2 = await spGet(LISTS.schedule,
-        `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+        `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
       const suppls = allScheds2.filter(s => s.IsSupplemental == 1);
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
@@ -4855,7 +4855,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // Fetch main record + all supplementals for this BN on this shift
     const [mainRecs, suppRecs] = await Promise.all([
       spGet(LISTS.schedule, `Id eq ${schedId}`),
-      spGet(LISTS.schedule, `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
+      spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
     ]);
     if(!mainRecs.length) return;
     const bnARecord = mainRecs[0];
@@ -4903,7 +4903,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     // Get other active BNs on same wing
     const allScheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${date}' and ShiftType eq '${shift}'`);
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
     const bnAWings = [...new Set(bnAUnits.map(u => getUnitWing(u)))];
     const otherBNs = allScheds.filter(s =>
       s.BreakNurseName !== bnName &&
@@ -5148,7 +5148,7 @@ async function checkDuplicateExt(){
   if(!_nurseFirst || !/^\d{5}$/.test(nurseExt)) return;
   const dt = shiftDate(S.shift);
   try {
-    const scheds = await spGet(LISTS.schedule, `ShiftDate eq '${dt}' and ShiftType eq '${S.shift}'`);
+    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
     const conflict = scheds.find(s =>
       s.Status !== 'inactive' && s.Ext === nurseExt &&
       s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(_nurseFirst.toLowerCase())
@@ -5258,8 +5258,8 @@ async function loadSummary(){
     const queries = [
       {sheet:LISTS.bookings, filter},
       {sheet:LISTS.bookings, filter:oppFilter},
-      {sheet:LISTS.schedule, filter:`ShiftDate eq '${dt}' and ShiftType eq '${shift}'`},
-      {sheet:LISTS.schedule, filter:`ShiftDate eq '${oppDt}' and ShiftType eq '${oppShift}'`}
+      {sheet:LISTS.schedule, filter:`ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`},
+      {sheet:LISTS.schedule, filter:`ShiftDate ge '${oppDt}' and ShiftDate le '${oppDt}T23' and ShiftType eq '${oppShift}'`}
     ];
     let results;
     if(SIM_MODE){
@@ -5443,7 +5443,7 @@ async function saveAssign(){
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
     const allScheds = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const conflicts = [];
     allScheds
       .filter(s => s.BreakNurseName !== nurse && s.Status !== 'inactive')
@@ -5459,7 +5459,7 @@ async function saveAssign(){
 
     // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
     const existing = await spGet(LISTS.schedule,
-      `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
 
     // If editing an active shift, warn coordinator about rotation impact
     const isActiveShift = dt === shiftDate(shift) && staffWindowOpen(shift);
@@ -5628,7 +5628,7 @@ async function delAssign(id){
     const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
 
     // Get same-wing active BNs
-    const allScheds = await spGet(LISTS.schedule, `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
+    const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
     const bnAWings = [...new Set(units.map(u => getUnitWing(u)))];
     const sameWingBNs = allScheds.filter(s2 =>
       String(s2.Id) !== String(id) &&
@@ -5683,7 +5683,7 @@ async function delAssign(id){
     // Permanently delete the assignment and any supplementals
     await spDel(LISTS.schedule, id);
     const suppls = await spGet(LISTS.schedule,
-      `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
+      `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
     for(const sup of suppls.filter(x => x.IsSupplemental == 1)){
       // Keep supplementals — they represent real reassignments, just remove the CoveredFrom link
       await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
@@ -6999,7 +6999,7 @@ async function saveImportRow(i){
 
     // Check if assignment already exists for this nurse/date/shift — update if so
     const existing = await spGet(LISTS.schedule,
-      `ShiftDate eq '${date}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
 
     const isUpdate = existing.length > 0;
     if (isUpdate) {
@@ -7112,7 +7112,7 @@ function loadBNView(){
   // Save ext keyed to this shift and patch to schedule record
   localStorage.setItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`, resolvedExt);
   spGet(LISTS.schedule,
-    `ShiftDate eq '${BNS.date}' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`)
+    `ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`)
     .then(scheds => {
       const active = scheds.find(s => s.Status !== 'inactive');
       if(active) spPatch(LISTS.schedule, active.Id, { Ext: resolvedExt }).catch(()=>{});
@@ -7144,7 +7144,7 @@ function loadBNView(){
   (async () => {
     try {
       const check = await spGet(LISTS.schedule,
-        `ShiftDate eq '${BNS.date}' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
+        `ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
       if(!check.length){
         const upcoming = await spGet(LISTS.schedule,
           `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}'`);
@@ -7229,7 +7229,7 @@ async function loadBNSlots(){
 
     // ── SINGLE ROUND TRIP: batch schedule + breaks ──
     let batchResults;
-    const schedFilter = `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
+    const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
     const breaksFilter = `NurseName eq '${esc(BNS.name)}' and SlotDate eq '${dt}' and ShiftType eq '${shift}' and IsBNBreak eq 1`;
     if(SIM_MODE){
       batchResults = await Promise.all([
@@ -7397,7 +7397,7 @@ async function loadBNSlots(){
 // exportSimData removed — SIM_MODE export no longer needed in production
 async function getBNUnits(bnName, dt, shift){
   const scheds = await spGet(LISTS.schedule,
-    `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
+    `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
   const units = [];
   scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
   return units;
@@ -7691,7 +7691,7 @@ async function loadBNConfirm(){
 
   try {
     // ── SINGLE ROUND TRIP: schedule + bookings + notification state ──
-    const schedFilter = `ShiftDate eq '${dt}' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
+    const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
     const bookFilter = `SlotDate eq '${dt}' and ShiftType eq '${shift}'`;
     const notifyKey = `slotNotify_${dt}_${shift}`;
     const notifyFilter = `Key eq '${esc(notifyKey)}'`;
