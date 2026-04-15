@@ -7361,7 +7361,7 @@ async function loadBNSlots(){
       // Only flag start time on available slots — not on already-claimed breaks
       const isBeforeStart = !isMyBreak && _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
       const unitTag = isBeforeStart
-        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · starts later</span>`
+        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · ${firstName(BNS.name)}'s start: ${fmt12(_bnStartVal)}</span>`
         : assignedUnit
           ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay}</span>`
           : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
@@ -7373,7 +7373,7 @@ async function loadBNSlots(){
       return `<div class="slot-row ${rowCls}" style="${rowStyle}">
         <div class="slot-time" style="display:flex;align-items:center;${isPendingBreak?'color:var(--day);font-weight:700':''}">${fmt12(slot)}${unitTag}</div>
         <div class="slot-name ${isMyBreak||isPendingBreak?'filled':''}">
-          ${isMyBreak ? '🔒 Your break' : isPendingBreak ? '⏳ Staged' : isBeforeStart ? '' : assignedUnit ? 'Available' : ''}
+          ${isMyBreak ? `🔒 ${firstName(BNS.name)}'s break` : isPendingBreak ? '⏳ Staged' : isBeforeStart ? '' : assignedUnit ? 'Available' : ''}
         </div>
         <div>
           ${isMyBreak
