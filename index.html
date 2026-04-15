@@ -3584,6 +3584,20 @@ async function loadSlots(silent=false){
       }
     }
 
+    // Build opp BN (Day BN) rotation slots for overlap window filtering
+    // Overlap slots must follow the Day BN's rotation — not shared across all units
+    const oppRotationSlots = new Set();
+    let hasOppRotation = false;
+    for(const sched of oppCovering){
+      const oppRot = loadRotation(sched.BreakNurseName, oppSchedDt, oppShift);
+      if(oppRot){
+        hasOppRotation = true;
+        Object.entries(oppRot).forEach(([slot, unit]) => {
+          if(unit === S.unit) oppRotationSlots.add(String(slot).padStart(4,'0'));
+        });
+      }
+    }
+
     // Overlap: Day staff can use Noc BN slots 0635–0755; Noc staff can use Day BN slots 1835–1955
     const overlapRange = getOverlapRange(shift);
 
@@ -3688,6 +3702,7 @@ async function loadSlots(silent=false){
       const _isOverlap = isOverlapSlot(s, shift);
       if(!_isOverlap && isOverlapSlot(s, shift === 'Day' ? 'Noc' : 'Day')) return false;
       if(!_isOverlap && useRotation && !unitRotationSlots.has(s)) return false;
+      if(_isOverlap && hasOppRotation && !oppRotationSlots.has(s)) return false; // overlap slots respect Day BN rotation
       if(earliestBNStart !== null && sortKey(s, shift) < earliestBNStart) return false;
       return true;
     });
@@ -5042,14 +5057,11 @@ function onNameInput(){
 
 function onNameExtInput(){
   if(!S.unit) return;
+  // Always re-render from cache instantly — reads name/ext live from DOM
+  renderSlotsFromCache();
+  // When ext is complete, also do a background refresh to catch race conditions
   const ext = document.getElementById('nurseExt').value.trim();
-  if(/^[0-9]{5}$/.test(ext)){
-    // Valid 5-digit ext — full reload to check bookings and update isMine
-    loadSlots(true);
-  } else {
-    // Partial entry — re-render from cache instantly, no API call
-    renderSlotsFromCache();
-  }
+  if(/^[0-9]{5}$/.test(ext)) loadSlots(true);
 }
 
 function clearExtOnNameChange(){
