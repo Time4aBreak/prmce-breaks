@@ -928,7 +928,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div id="c3Explanation" style="font-size:.78rem;color:var(--muted);background:var(--bg);border-radius:8px;padding:8px 12px;margin-bottom:14px;line-height:1.5"></div>
 
     <!-- Action buttons -->
-    <div style="display:flex;flex-direction:column;gap:8px">
+    <div id="c3ActionBtns" style="display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()" style="display:none"></button>
       <button class="btn btn-ghost btn-sm" onclick="c3ApplyNextShift()">Apply to next covered shift only</button>
       <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — don't change 3C status</button>
@@ -1865,6 +1865,15 @@ async function show3CMidShiftModal(){
     explanation.textContent = '✓ Selected slots will show as available to 3C staff. Unselected slots remain available to 4C staff. Already-claimed 4C bookings are not affected.';
     confirmBtn.textContent = 'Open selected slots to 3C';
     confirmBtn.style.display = 'block';
+    // Restore action div in case it was replaced by a previous close-mode call
+    const _actDiv = document.getElementById('c3ActionBtns');
+    if(_actDiv && !document.getElementById('c3ConfirmBtn')){
+      _actDiv.innerHTML = `<button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()" style="display:none"></button>
+        <button class="btn btn-ghost btn-sm" onclick="c3ApplyNextShift()">Apply to next covered shift only</button>
+        <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — don’t change 3C status</button>`;
+      document.getElementById('c3ConfirmBtn').textContent = 'Open selected slots to 3C';
+      document.getElementById('c3ConfirmBtn').style.display = 'block';
+    }
 
   } else {
     // Close mode — always cancels remaining 3C slots
@@ -1882,7 +1891,7 @@ async function show3CMidShiftModal(){
     explanation.textContent = `${c3Slots.length} remaining 3C slot${c3Slots.length!==1?'s':''} will be cancelled. Choose how to reassign them.`;
 
     // Replace action buttons with close-specific options
-    const actionDiv = document.getElementById('c3MidShiftModal').querySelector('div[style*="flex-direction:column"]');
+    const actionDiv = document.getElementById('c3ActionBtns');
     if(actionDiv){
       actionDiv.innerHTML = `
         <button class="btn btn-primary btn-sm" onclick="c3GiveAllTo4CAndConfirm()">Give 3C's slots for the remainder of this shift to 4C</button>
@@ -2003,8 +2012,7 @@ function c3ManualAssign(){
 async function c3Confirm(){
   const { mode, date, shift, bnName, cancelMode, slots, pendingVal, pendingBtn, scope } = _c3Modal;
   const confirmBtn = document.getElementById('c3ConfirmBtn');
-  confirmBtn.disabled = true;
-  confirmBtn.textContent = 'Applying…';
+  if(confirmBtn){ confirmBtn.disabled = true; confirmBtn.textContent = 'Applying…'; }
 
   try {
     const rotation = loadRotation(bnName, date, shift) || {};
@@ -2071,7 +2079,7 @@ async function c3Confirm(){
   } catch(e){
     toast('Error: ' + e.message, true);
   } finally {
-    confirmBtn.disabled = false;
+    if(confirmBtn){ confirmBtn.disabled = false; }
     document.getElementById('c3MidShiftModal').style.display = 'none';
   }
 }
@@ -2100,6 +2108,8 @@ async function _recalcFutureRotations(currentDate, currentShift){
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${currentDate}'`);
   const future = scheds.filter(s => s.Status !== 'inactive' &&
     (s.ShiftDate > currentDate || (s.ShiftDate === currentDate && s.ShiftType !== currentShift)));
+  // Warm all BN defaults before calculating
+  await warmAllBNDefaults(future.map(s => ({ name: s.BreakNurseName, shift: s.ShiftType })));
   const rotationEntries = [];
   for(const s of future){
     try {
@@ -2810,6 +2820,23 @@ async function warmDefaultTemplate(name, shift){
     const remote = await getState(key);
     if(remote) localStorage.setItem(key, JSON.stringify(remote));
   } catch(e){}
+}
+
+// Warm all BN defaults from BNState for a list of {name, shift} pairs
+// Used by coordinator bulk operations to ensure BN defaults are available
+async function warmAllBNDefaults(pairs){
+  const missing = pairs.filter(({name, shift}) => {
+    const key = `bnDefault_${name}_${shift}`;
+    return !localStorage.getItem(key);
+  });
+  if(!missing.length) return;
+  await Promise.all(missing.map(async ({name, shift}) => {
+    try {
+      const key = `bnDefault_${name}_${shift}`;
+      const remote = await getState(key);
+      if(remote) localStorage.setItem(key, JSON.stringify(remote));
+    } catch(e){}
+  }));
 }
 
 function saveDefaultTemplate(){
@@ -5366,6 +5393,8 @@ async function saveAssign(){
     document.getElementById('aNurseText').value = '';
     document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
     // Auto-apply BN default template and calculate rotation — await so slots load after rotation is ready
+    // Warm BN default from BNState before using it
+    await warmDefaultTemplate(nurse, shift);
     const bnDef = getDefaultTemplate(nurse, shift);
     try {
       if(bnDef && bnDef.length > 0){
@@ -5643,6 +5672,10 @@ async function recalculateAllRotations(){
   if(!active.length){ toast('No upcoming assignments found', true); return; }
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
+
+  // Warm BN defaults from BNState before calculating — coordinator device may not have them
+  const pairs = active.map(s => ({ name: s.BreakNurseName, shift: s.ShiftType }));
+  await warmAllBNDefaults(pairs);
 
   // Compute all rotations client-side, then batch-save to BNState in one call
   const rotationEntries = [];
@@ -6663,6 +6696,10 @@ async function acceptAllAndSave(){
     status.textContent = `Saving ${records.length} assignments in one batch...`;
     await spBatchUpsert(LISTS.schedule, records);
 
+    // Warm BN defaults from BNState — coordinator device may not have them cached
+    const bnPairs = indices.map(i => ({ name: entriesToProcess[i].name, shift: entriesToProcess[i].shift }));
+    await warmAllBNDefaults(bnPairs);
+
     // Update UI for all saved entries
     indices.forEach(i => {
       const savedEl = document.getElementById(`saved-${i}`);
@@ -6874,6 +6911,8 @@ async function saveImportRow(i){
       toast(`✓ ${firstName(name)} saved for ${shift} on ${date}${splitNote}`);
     }
     // Immediately regenerate rotation — apply default breaks if BN has them set
+    // Warm BN default from BNState before using it
+    await warmDefaultTemplate(name, shift);
     const _bnDef = getDefaultTemplate(name, shift);
     if(_bnDef && _bnDef.length > 0){
       applyDefaultToShift(name, date, shift, _bnDef).catch(e => console.warn('Default apply failed:', e.message));
