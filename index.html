@@ -3776,7 +3776,7 @@ async function loadSlots(silent=false){
 
     // Build slot→BN map from rotations for per-slot BN display
     // Use window.firstName to avoid collision with local var 'firstName'
-    const _getBNFirst = n => firstName(n); // uses PREFERRED_NAMES lookup
+    const _getBNFirst = n => { if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n]; const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
     const _slotBNMap = {};
     for(const sched of covering){
       const rot = loadRotation(sched.BreakNurseName, dt, shift);
