@@ -2107,7 +2107,7 @@ function c3ApplyNextShift(){
 async function _recalcFutureRotations(currentDate, currentShift){
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${currentDate}'`);
   const future = scheds.filter(s => s.Status !== 'inactive' &&
-    (s.ShiftDate > currentDate || (s.ShiftDate === currentDate && s.ShiftType !== currentShift)));
+    (s.ShiftDate.slice(0,10) > currentDate || (s.ShiftDate.slice(0,10) === currentDate && s.ShiftType !== currentShift)));
   // Warm all BN defaults before calculating
   await warmAllBNDefaults(future.map(s => ({ name: s.BreakNurseName, shift: s.ShiftType })));
   const rotationEntries = [];
@@ -3325,10 +3325,10 @@ async function loadSlots(silent=false){
     // Also fetch opposite date bookings — needed for overlap BN breaks (e.g. Noc BN break at 7:55 AM
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
     const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate eq '${oppDt}'`) : [];
-    const scheds = allSchedsRaw.filter(s => s.ShiftDate === dt && s.ShiftType === shift);
+    const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     // For Noc staff, the relevant Day BN schedule is today (not the Noc shift start date yesterday)
     const oppSchedDt = shift === 'Noc' ? today() : oppDt;
-    const oppScheds = allSchedsRaw.filter(s => s.ShiftDate === oppSchedDt && s.ShiftType === oppShift);
+    const oppScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === oppSchedDt && s.ShiftType === oppShift);
 
     const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
     // Combine BN breaks from both dates so overlap BN breaks are visible
@@ -3370,7 +3370,7 @@ async function loadSlots(silent=false){
         const _fd2 = new Date(dt + 'T12:00:00'); _fd2.setDate(_fd2.getDate() + _d2);
         const _fds2 = _fd2.toISOString().slice(0,10);
         const _hasCov2 = allSchedsRaw.some(s =>
-          s.ShiftDate === _fds2 && s.ShiftType === shift && s.Status !== 'inactive' &&
+          s.ShiftDate.slice(0,10) === _fds2 && s.ShiftType === shift && s.Status !== 'inactive' &&
           (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
         );
         if(_hasCov2) _upcomingDates.push(_fds2);
@@ -3497,7 +3497,7 @@ async function loadSlots(silent=false){
           const _fd = new Date(dt + 'T12:00:00'); _fd.setDate(_fd.getDate() + _d);
           const _fds = _fd.toISOString().slice(0,10);
           const _hasCov = allSchedsRaw.some(s =>
-            s.ShiftDate === _fds && s.ShiftType === shift && s.Status !== 'inactive' &&
+            s.ShiftDate.slice(0,10) === _fds && s.ShiftType === shift && s.Status !== 'inactive' &&
             (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
           );
           if(_hasCov) _upcomingDates.push(_fds);
@@ -3656,7 +3656,7 @@ async function loadSlots(silent=false){
       const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
       if(ext) bnExtMap[s.BreakNurseName] = ext;
     });
-    const formatBNName = (name) => bnExtMap[name] ? `${name} · Ext. ${bnExtMap[name]}` : name;
+    const formatBNName = (name) => bnExtMap[name] ? `${firstName(name)} · Ext. ${bnExtMap[name]}` : firstName(name);
 
     const mainBNNames = [...new Set(covering
       .filter(s => s.Status !== 'inactive')
@@ -3699,7 +3699,7 @@ async function loadSlots(silent=false){
       return true;
     });
     const useRotation = hasAnyRotation && unitRotationSlots.size > 0;
-    const unitDoneForShift = hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length === 0;
+    const unitDoneForShift = shiftIsActive && hasAnyRotation && unitRotationSlots.size > 0 && futureRotSlots.length === 0;
 
     const future = allSlots.filter(s => {
       if(shiftIsActive && isPast(s, shift) && !bMap[s]) return false; // keep past claimed slots visible
@@ -3729,7 +3729,7 @@ async function loadSlots(silent=false){
         const _dfd = new Date(dt + 'T12:00:00'); _dfd.setDate(_dfd.getDate() + _di);
         const _dfds = _dfd.toISOString().slice(0,10);
         const _hasCov = allSchedsRaw.some(s =>
-          s.ShiftDate === _dfds && s.ShiftType === shift && s.Status !== 'inactive' &&
+          s.ShiftDate.slice(0,10) === _dfds && s.ShiftType === shift && s.Status !== 'inactive' &&
           (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
         );
         if(_hasCov) _doneUpcoming.push(_dfds);
@@ -3776,7 +3776,7 @@ async function loadSlots(silent=false){
 
     // Build slot→BN map from rotations for per-slot BN display
     // Use window.firstName to avoid collision with local var 'firstName'
-    const _getBNFirst = n => { const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
+    const _getBNFirst = n => firstName(n); // uses PREFERRED_NAMES lookup
     const _slotBNMap = {};
     for(const sched of covering){
       const rot = loadRotation(sched.BreakNurseName, dt, shift);
@@ -3899,7 +3899,7 @@ async function silentRefreshSlots(){
     // Sequential spGet: reliable vs concurrent requests to Apps Script
     const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
     const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
-    const scheds = allSchedsForSilent.filter(s => s.ShiftDate === dt && s.ShiftType === shift);
+    const scheds = allSchedsForSilent.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
     const allBNBreaks = allBookingsRaw.filter(b => b.IsBNBreak);
 
@@ -4173,8 +4173,8 @@ async function loadOtherSlots(silent=false){
     const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${otherFloor}'`);
     const dayBookingsRaw = await spGet(LISTS.bookings, `SlotDate eq '${dt}'`);
     const nocBookingsRaw = nocDt !== dt ? await spGet(LISTS.bookings, `SlotDate eq '${nocDt}'`) : [];
-    const dayScheds = allSchedsRaw.filter(s => s.ShiftDate === dt && s.ShiftType === 'Day');
-    const nocScheds = allSchedsRaw.filter(s => s.ShiftDate === nocDt && s.ShiftType === 'Noc');
+    const dayScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === 'Day');
+    const nocScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === nocDt && s.ShiftType === 'Noc');
     const dayBookings = dayBookingsRaw.filter(b => b.Unit === S.unit && b.ShiftType === 'Day');
     const nocBookings = (nocDt !== dt ? nocBookingsRaw : dayBookingsRaw).filter(b => b.Unit === S.unit && b.ShiftType === 'Noc');
 
@@ -7162,7 +7162,7 @@ function loadBNView(){
           `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}'`);
         const future = upcoming
           .filter(s => s.Status !== 'inactive' &&
-            (s.ShiftDate > BNS.date || (s.ShiftDate === BNS.date && s.ShiftType !== BNS.shift)))
+            (s.ShiftDate.slice(0,10) > BNS.date || (s.ShiftDate.slice(0,10) === BNS.date && s.ShiftType !== BNS.shift)))
           .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
         if(future.length){
           BNS.date  = future[0].ShiftDate;
@@ -7263,7 +7263,7 @@ async function loadBNSlots(){
         const upcoming = await spGet(LISTS.schedule,
           `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${dt}'`);
         const future = upcoming
-          .filter(s => s.Status !== 'inactive' && (s.ShiftDate > dt || (s.ShiftDate === dt && s.ShiftType !== shift)))
+          .filter(s => s.Status !== 'inactive' && (s.ShiftDate.slice(0,10) > dt || (s.ShiftDate.slice(0,10) === dt && s.ShiftType !== shift)))
           .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
         if(future.length){
           // Jump to next scheduled date/shift automatically
