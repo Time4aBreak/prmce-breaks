@@ -3913,7 +3913,12 @@ let _slotRenderCache = null; // { future, bMap, bnBreaks, nurseName, nurseExt, c
 
 function renderSlotsFromCache(){
   if(!_slotRenderCache){ loadSlots(true); return; } // fallback if no cache yet
-  const { future, bMap, bnBreaks, nurseName, nurseExt, covering, oppCovering, shift, overlapRange } = _slotRenderCache;
+  const { future, bMap, bnBreaks, covering, oppCovering, shift, overlapRange } = _slotRenderCache;
+  // Always read name/ext live from DOM — cache may be stale for overlap-only coverage
+  const _rsFirstName = document.getElementById('nurseName').value.trim();
+  const _rsExt       = document.getElementById('nurseExt').value.trim();
+  const nurseExt  = _rsExt;
+  const nurseName = _rsFirstName && /^[0-9]{5}$/.test(_rsExt) ? `${toTitleCase(_rsFirstName)} (${_rsExt})` : '';
   const list = document.getElementById('slotsList');
   if(!list) return;
   const myBookings = nurseName
