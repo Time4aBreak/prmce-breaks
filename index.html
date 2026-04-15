@@ -3713,7 +3713,22 @@ async function loadSlots(silent=false){
 
     // If this unit's rotation slots are all past, show no slots — unit is done for this shift
     if(unitDoneForShift){
-      list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for today's shift.</div>`;
+      // Build upcoming coverage dates — same logic as no-coverage banner
+      const _doneUpcoming = [];
+      for(let _di = 1; _di <= 7; _di++){
+        const _dfd = new Date(dt + 'T12:00:00'); _dfd.setDate(_dfd.getDate() + _di);
+        const _dfds = _dfd.toISOString().slice(0,10);
+        const _hasCov = allSchedsRaw.some(s =>
+          s.ShiftDate === _dfds && s.ShiftType === shift && s.Status !== 'inactive' &&
+          (() => { try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; } })()
+        );
+        if(_hasCov) _doneUpcoming.push(_dfds);
+      }
+      const _doneFmt = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
+      const _doneUpcomingHtml = _doneUpcoming.length
+        ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${escHTML(shift)} coverage: ${_doneUpcoming.map(_doneFmt).join(', ')}</div>`
+        : '';
+      list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for today's shift.${_doneUpcomingHtml}</div>`;
       loader.style.display = 'none';
       return;
     }
@@ -4654,7 +4669,7 @@ async function markBNAvailable(schedId, bnName){
       const { ShiftDate, ShiftType } = sched[0];
       const allScheds = await spGet(LISTS.schedule,
         `ShiftDate eq '${ShiftDate}' and ShiftType eq '${ShiftType}'`);
-      const suppls = allScheds.filter(s => s.IsSupplemental && s.CoveredFrom === bnName);
+      const suppls = allScheds.filter(s => s.IsSupplemental == 1);
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
         const keepRedist = await customConfirm(
@@ -4741,7 +4756,7 @@ async function toggleSelfAvailability(){
       // Check for supplemental records created during redistribution
       const allScheds2 = await spGet(LISTS.schedule,
         `ShiftDate eq '${dt}' and ShiftType eq '${shift}'`);
-      const suppls = allScheds2.filter(s => s.IsSupplemental && s.CoveredFrom === BNS.name);
+      const suppls = allScheds2.filter(s => s.IsSupplemental == 1);
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
         const keepRedist = await customConfirm(
@@ -5311,7 +5326,10 @@ async function loadSummary(){
           ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
           : (bn ? bn + (bnExt ? ` · ${bnExt}` : '') : '')
         }</div>
-        <div><button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')" title="Cancel this booking">✕</button></div>
+        <div>${!isPast(b.SlotTime, shift)
+          ? `<button class="btn btn-ghost btn-sm" style="color:var(--red);font-size:.72rem;padding:3px 8px" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`
+          : ''
+        }</div>
       </div>`;
     });
 
@@ -5623,7 +5641,7 @@ async function delAssign(id){
     await spDel(LISTS.schedule, id);
     const suppls = await spGet(LISTS.schedule,
       `ShiftDate eq '${s.ShiftDate}' and ShiftType eq '${s.ShiftType}'`);
-    for(const sup of suppls.filter(x => x.CoveredFrom === s.BreakNurseName)){
+    for(const sup of suppls.filter(x => x.IsSupplemental == 1)){
       // Keep supplementals — they represent real reassignments, just remove the CoveredFrom link
       await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
     }
