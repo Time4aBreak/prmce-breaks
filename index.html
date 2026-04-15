@@ -1810,11 +1810,11 @@ async function show3CMidShiftModal(){
   const explanation = document.getElementById('c3Explanation');
   const confirmBtn = document.getElementById('c3ConfirmBtn');
 
-  // Reset
-  cancelStep.style.display = 'none';
-  slotWrap.style.display = 'none';
-  wingWarn.style.display = 'none';
-  confirmBtn.style.display = 'none';
+  // Reset — guard nulls since close mode wipes c3ConfirmBtn from c3ActionBtns
+  if(cancelStep) cancelStep.style.display = 'none';
+  if(slotWrap) slotWrap.style.display = 'none';
+  if(wingWarn) wingWarn.style.display = 'none';
+  if(confirmBtn) confirmBtn.style.display = 'none';
   _c3Modal.cancelMode = null;
   _c3Modal.slots = [];
 
