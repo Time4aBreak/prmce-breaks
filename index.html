@@ -7316,7 +7316,9 @@ async function loadBNSlots(){
 
     const slots = generateSlots(shift);
     const bnBlocked = getBNHardBlocked(shift);
-    const displaySlots = (isToday ? slots.filter(s => !isPast(s, shift)) : slots)
+    // Only filter past slots if the shift is currently active — BNs need to set breaks before shift starts
+    const _shiftActive = staffWindowOpen(shift);
+    const displaySlots = (isToday && _shiftActive ? slots.filter(s => !isPast(s, shift)) : slots)
       .filter(s => !bnBlocked.includes(s));
 
     // Use pre-fetched BN breaks from batch query
