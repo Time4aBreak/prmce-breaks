@@ -3672,7 +3672,7 @@ async function loadSlots(silent=false){
     )] : [];
 
     const allBNDisplay = [...new Set([...mainBNNames, ...oppBNNamesList])].join(', ') || bnNames;
-    meta.textContent=`Break nurse for ${S.unit}: ${allBNDisplay}  ·  Slots are 15 min — claim up to 3 per shift`;
+    meta.textContent=`${allBNDisplay ? `Break nurse for ${S.unit}: ${allBNDisplay}` : `${S.unit} ${shift}`}  ·  Slots are 15 min — claim up to 3 per shift`;
 
     // Filter slots: must be future, not hard-blocked, and if rotation exists, must be this unit's turn
     // Also respect each covering BN's start time — hide slots before they arrive
@@ -3749,12 +3749,14 @@ async function loadSlots(silent=false){
         allSlots.slice(0,3).map(s => s+':'+(shiftIsActive && isPast(s,shift))));
     }
 
-    // Always include the nurse's own claimed slots even if outside the rotation window
-    // but respect shift cutoffs — don't surface post-cutoff slots to Day staff
+    // Include the nurse's own future claimed slots even if outside the rotation window
+    // Past slots are already kept by the main filter via bMap — don't add them again
+    // here or they can reappear after transfers/cancels change the bMap
     if(nurseName){
       bookings.forEach(b => {
         const normTime = String(b.SlotTime).padStart(4,'0');
         if(shift === 'Day' && toMin(normTime) >= SLOT_CUTOFF_DAY) return; // outside Day window
+        if(isPast(normTime, shift)) return; // past slots already handled by main filter
         if(!b.IsBNBreak && b.NurseName === nurseName && !future.includes(normTime)){
           future.push(normTime);
         }
@@ -3841,7 +3843,7 @@ async function loadSlots(silent=false){
           isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason ? `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : 'Available'))
         }</div>
         <div>
-          ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
+          ${isMine && !isPastSlot  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
           ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
           ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
         </div>
@@ -3999,7 +4001,7 @@ function renderSlotsFromCache(){
         isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
       }</div>
       <div>
-        ${isMine  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
+        ${isMine && !isPast(slot, shift)  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
         ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
         ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
       </div>
