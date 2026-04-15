@@ -1800,20 +1800,19 @@ function set3CForDate(val, btn){
 async function show3CMidShiftModal(){
   const { mode, date, shift, bnName, bnUnits } = _c3Modal;
   const modal = document.getElementById('c3MidShiftModal');
-  const title = document.getElementById('c3ModalTitle');
-  const subtitle = document.getElementById('c3ModalSubtitle');
-  const cancelStep = document.getElementById('c3CancelStep');
-  const slotWrap = document.getElementById('c3SlotListWrap');
-  const slotLabel = document.getElementById('c3SlotListLabel');
-  const slotList = document.getElementById('c3SlotList');
-  const wingWarn = document.getElementById('c3WingWarning');
-  const explanation = document.getElementById('c3Explanation');
-  const confirmBtn = document.getElementById('c3ConfirmBtn');
 
-  // Reset — restore modal to clean state
-  // c3SlotListLabel may have been wiped by c3ShowManualAssign replacing slotWrap.innerHTML
-  if(slotWrap && !document.getElementById('c3SlotListLabel')){
-    slotWrap.innerHTML = `
+  // Always rebuild modal inner HTML fresh — prevents stale DOM from previous sessions
+  modal.querySelector('div').innerHTML = `
+    <div id="c3ModalTitle" style="font-size:1rem;font-weight:700;color:var(--text);margin-bottom:6px"></div>
+    <div id="c3ModalSubtitle" style="font-size:.8rem;color:var(--muted);margin-bottom:14px;line-height:1.5"></div>
+    <div id="c3CancelStep" style="display:none;margin-bottom:14px">
+      <div style="font-size:.85rem;font-weight:600;color:var(--text);margin-bottom:8px">Existing 3C bookings:</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <button class="btn btn-ghost btn-sm" id="c3KeepClaimsBtn" onclick="c3SelectCancelMode('keep')">Keep all existing breaks</button>
+        <button class="btn btn-danger btn-sm" id="c3CancelClaimsBtn" onclick="c3SelectCancelMode('cancel')">Cancel remaining claims</button>
+      </div>
+    </div>
+    <div id="c3SlotListWrap" style="display:none">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <div id="c3SlotListLabel" style="font-size:.85rem;font-weight:600;color:var(--text)"></div>
         <div style="display:flex;gap:6px">
@@ -1821,15 +1820,25 @@ async function show3CMidShiftModal(){
           <button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="c3ClearAll()">Clear All</button>
         </div>
       </div>
-      <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>`;
-  }
-  // Re-query after potential restore
-  const _slotLabel2 = document.getElementById('c3SlotListLabel');
-  if(cancelStep) cancelStep.style.display = 'none';
-  if(slotWrap) slotWrap.style.display = 'none';
-  if(wingWarn) wingWarn.style.display = 'none';
-  if(confirmBtn) confirmBtn.style.display = 'none';
-  if(_slotLabel2) _slotLabel2.textContent = '';
+      <div id="c3SlotList" style="display:flex;flex-direction:column;gap:6px;max-height:40vh;overflow-y:auto;margin-bottom:12px"></div>
+    </div>
+    <div id="c3WingWarning" style="display:none;font-size:.78rem;color:#856404;background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:8px 12px;margin-bottom:12px"></div>
+    <div id="c3Explanation" style="font-size:.78rem;color:var(--muted);background:var(--bg);border-radius:8px;padding:8px 12px;margin-bottom:14px;line-height:1.5"></div>
+    <div id="c3ActionBtns" style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary btn-sm" id="c3ConfirmBtn" onclick="c3Confirm()" style="display:none"></button>
+      <button class="btn btn-ghost btn-sm" onclick="c3ApplyNextShift()">Apply to next covered shift only</button>
+      <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="c3Cancel()">Cancel — don't change 3C status</button>
+    </div>`;
+
+  const title = document.getElementById('c3ModalTitle');
+  const subtitle = document.getElementById('c3ModalSubtitle');
+  const cancelStep = document.getElementById('c3CancelStep');
+  const slotWrap = document.getElementById('c3SlotListWrap');
+  const slotLabel = document.getElementById('c3SlotListLabel');
+  const wingWarn = document.getElementById('c3WingWarning');
+  const explanation = document.getElementById('c3Explanation');
+  const confirmBtn = document.getElementById('c3ConfirmBtn');
+
   _c3Modal.cancelMode = null;
   _c3Modal.slots = [];
 
