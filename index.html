@@ -2582,18 +2582,7 @@ function pickUnit(u){
   if(_ubtn) _ubtn.classList.add('active');
   document.getElementById('shiftCard').style.display='block';
   document.getElementById('slotsWrap').style.display='block';
-  // Auto-switch to current Day/Noc shift when changing units (unless Other was intentionally set)
-  if(S.shift !== 'Other'){
-    const autoShift = detectShift();
-    if(S.shift !== autoShift){
-      S.shift = autoShift;
-      // Update shift button active state
-      ['Day','Noc','Other'].forEach(sh => {
-        const btn = document.getElementById(`shiftBtn${sh}`);
-        if(btn) btn.classList.toggle('active', sh === autoShift);
-      });
-    }
-  }
+  // Shift stays as user selected — no auto-override when changing units
   renderShiftPill();
   // Instantly show unit name in banner while API loads
   const banner = document.getElementById('coverageBanner');
