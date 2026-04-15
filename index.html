@@ -5600,14 +5600,14 @@ async function loadAssignments(){
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${!isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
-                ${!isInactive && !s.IsSupplemental && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${isInactive && s.ShiftDate >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
+                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
               </div>
             </div>
             <div class="unit-tags">${units.map(u=>
-              (!isInactive && s.ShiftDate >= shiftDate(s.ShiftType))
+              (!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType))
                 ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
                 : `<span class="tag">${u}</span>`
             ).join('')}</div>
