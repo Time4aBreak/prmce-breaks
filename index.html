@@ -1907,7 +1907,7 @@ async function show3CMidShiftModal(){
     // Fetch fresh rotation from Sheets — localStorage cache may be stale after open/close cycles
     let c3Slots = [];
     try {
-      const rotRecs = await spGet(LISTS.state, `Key eq 'rotation_${esc(bnName)}_${date}_${shift}'`);
+      const rotRecs = await spGet(LISTS.state, `Key eq 'bnRotation_${esc(bnName)}_${date}_${shift}'`);
       if(rotRecs.length){
         const freshRot = JSON.parse(rotRecs[0].Value || '{}');
         c3Slots = Object.entries(freshRot)
