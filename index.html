@@ -3349,8 +3349,14 @@ async function loadSlots(silent=false){
     const staffWindowClosed = !staffWindowOpen(shift);
     const inRelevantOverlap = overlapWindowActive(shift);
     // hasAnyCoverage: true if main BN covers this shift OR if there's overlap coverage scheduled
-    // oppCovering counts toward coverage even before window opens (shows limited/amber, not no coverage)
-    const _hasOppCoverage = oppCoveringBanner.some(s => {
+    // oppCovering counts from when the sign-up window opens until overlap ends
+    // For Noc: 6:30 PM to 8:00 PM. For Day: 6:30 AM to 8:00 AM.
+    // Prevents next-day's BN from showing as overlap coverage in the middle of the shift.
+    const _nowMOpp = nowMin();
+    const _overlapRng = getOverlapRange(shift);
+    const _signupOpen = shift === 'Noc' ? SIGNUP_OPEN_NOC : SIGNUP_OPEN_DAY;
+    const _oppWindowRelevant = _nowMOpp >= _signupOpen && _nowMOpp < _overlapRng.max;
+    const _hasOppCoverage = _oppWindowRelevant && oppCoveringBanner.some(s => {
       try { return JSON.parse(s.Units||'[]').includes(S.unit); } catch { return false; }
     });
     const hasAnyCoverage = covering.length > 0 || _hasOppCoverage;
