@@ -3659,6 +3659,7 @@ async function loadSlots(silent=false){
     const formatBNName = (name) => bnExtMap[name] ? `${name} · Ext. ${bnExtMap[name]}` : name;
 
     const mainBNNames = [...new Set(covering
+      .filter(s => s.Status !== 'inactive')
       .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
       .map(c => formatBNName(c.BreakNurseName))
     )];
