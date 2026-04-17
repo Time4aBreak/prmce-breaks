@@ -4606,7 +4606,7 @@ async function editAssign(id){
     );
 
     if(confirmed.length > 0){
-      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')) return;
+      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')){ loadAssignments(); return; }
     }
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
@@ -4636,7 +4636,7 @@ async function editAssign(id){
     const body = document.getElementById('assignFormBody');
     if(body && body.style.display === 'none') toggleAssignForm();
     toast(`Editing ${s.BreakNurseName} — modify units and click Save Assignment`);
-  } catch(e) { toast(e.message, true); }
+  } catch(e) { toast(e.message, true); loadAssignments(); }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -4701,7 +4701,7 @@ ${nurseLines}`;
 ⚠️ No other BNs are available on the same wing — all staff bookings will be cancelled.`;
   }
 
-  if(!await customConfirm(msg, `Mark ${firstName(bnName)} unavailable`, 'Cancel')) return;
+  if(!await customConfirm(msg, `Mark ${firstName(bnName)} unavailable`, 'Cancel')){ loadAssignments(); return; }
 
   let redistribute = false;
   if(sameWingNames.length){
@@ -4730,7 +4730,7 @@ ${nurseLines}`;
       document.getElementById('customConfirmCancel').onclick = () => cleanup('no');
       goBackBtn.onclick = () => cleanup('back');
     });
-    if(redistChoice === 'back') return;
+    if(redistChoice === 'back'){ loadAssignments(); return; }
     redistribute = redistChoice === 'yes';
   }
 
@@ -4763,7 +4763,7 @@ async function markBNAvailable(schedId, bnName){
     toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     await new Promise(r => setTimeout(r, 100));
     loadAssignments();
-  } catch(e){ toast(e.message, true); }
+  } catch(e){ toast(e.message, true); loadAssignments(); }
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
@@ -5667,7 +5667,7 @@ async function delAssign(id){
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
     if(!scheds.length){
-      if(!await customConfirm('Remove this assignment?','Remove','Cancel')) return;
+      if(!await customConfirm('Remove this assignment?','Remove','Cancel')){ loadAssignments(); return; }
       await spDel(LISTS.schedule, id);
       toast('Assignment removed.');
       loadAssignments();
@@ -5696,7 +5696,7 @@ async function delAssign(id){
     const sameWingFirstNames = sameWingBNs.map(b => firstName(b.BreakNurseName)).join(', ');
 
     if(!affected.length){
-      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')) return;
+      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')){ loadAssignments(); return; }
       await spDel(LISTS.schedule, id);
       toast(`${firstName(s.BreakNurseName)}'s assignment removed.`);
       loadAssignments();
@@ -5722,7 +5722,7 @@ async function delAssign(id){
       'Proceed & reassign',
       'Keep assignment'
     );
-    if(!proceed) return;
+    if(!proceed){ loadAssignments(); return; }
 
     // Run redistribution algorithm
     if(sameWingBNs.length){
@@ -5744,7 +5744,7 @@ async function delAssign(id){
     }
     toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify!`);
     loadAssignments();
-  } catch(e){ toast(e.message, true); }
+  } catch(e){ toast(e.message, true); loadAssignments(); }
 }
 
 async function closeUnit(schedId, unit, bnName, date, shift){
