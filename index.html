@@ -5537,9 +5537,9 @@ async function saveAssign(){
   const dt=document.getElementById('aDate').value;
   const shift=S.aShift;
   const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
-  if(!nurse)  { toast('Select a break nurse.',true); return; }
-  if(!dt)     { toast('Select a date.',true); return; }
-  if(!units.length){ toast('Select at least one unit.',true); return; }
+  if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
+  if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
+  if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
     const allScheds = await spGet(LISTS.schedule,
@@ -5554,7 +5554,7 @@ async function saveAssign(){
       });
     if(conflicts.length){
       const lines = conflicts.map(c => `• ${c.bn} already covers ${c.units.join(', ')}`).join('\n');
-      if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Continue','Cancel')) return;
+      if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Continue','Cancel')){ loadAssignments(); return; }
     }
 
     // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
@@ -5623,7 +5623,7 @@ async function saveAssign(){
       }
     } catch(e){ toast('Rotation error: ' + e.message, true); }
     loadAssignments();
-  }catch(e){ toast(e.message,true); }
+  }catch(e){ toast(e.message,true); loadAssignments(); }
 }
 
 let _viewRange = 'all';
@@ -5701,7 +5701,7 @@ async function loadAssignments(){
                 ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
                 ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
-                <button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>
+                ${s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>` : ''}
               </div>
             </div>
             <div class="unit-tags">${units.map(u=>
