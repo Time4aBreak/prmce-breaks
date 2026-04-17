@@ -5805,15 +5805,27 @@ async function confirmCloseUnit(schedId, unit, date, shift){
     // Cancel future bookings on closed unit
     for(const b of future) await spDel(LISTS.bookings, b.Id);
 
-    // Remove closed unit from assignment, optionally add redirect units
-    const newUnits = units.filter(u => u !== unit);
-    // Redirect units are already in remaining — just ensure they're included
+    // Remove closed unit, add any redirect units not already in assignment
+    const newUnits = [...new Set([...units.filter(u => u !== unit), ...redirectTo])];
     await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+
+    // Recalculate rotation with updated units
+    const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
+    if(sched.length){
+      const s = sched[0];
+      const bnName = s.BreakNurseName;
+      const bnDef = getDefaultTemplate(bnName, shift);
+      if(bnDef && bnDef.length > 0){
+        await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
+      } else {
+        await recalculateRotation(bnName, date, shift).catch(()=>{});
+      }
+    }
 
     const cancelled = future.length;
     const msg = cancelled
-      ? `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled${redirectTo.length ? ` · coverage redirected to ${redirectTo.join(', ')}` : ''}`
-      : `${unit} closed`;
+      ? `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled${redirectTo.length ? ` · slots redirected to ${redirectTo.join(', ')}` : ''}`
+      : `${unit} closed${redirectTo.length ? ` · slots redirected to ${redirectTo.join(', ')}` : ''}`;
     toast(msg);
     loadAssignments();
   } catch(e){ toast(e.message, true); }
