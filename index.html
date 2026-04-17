@@ -4684,8 +4684,7 @@ Covering: ${bnUnits.join(', ')}`;
       if(!nurseBookingMap[n]) nurseBookingMap[n] = [];
       nurseBookingMap[n].push(fmt12(b.SlotTime));
     });
-    const nurseLines = Object.entries(nurseBookingMap).map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('
-');
+    const nurseLines = Object.entries(nurseBookingMap).map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('\n');
     msg += `
 
 ⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected:
