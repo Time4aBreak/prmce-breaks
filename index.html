@@ -796,7 +796,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
       <div style="margin-top:10px">
         <button class="btn btn-ghost btn-sm" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
-        <button class="btn btn-ghost btn-sm" onclick="recalculateAllRotations()">↺ Recalculate all rotations</button>
+        <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations'})">↺ Recalculate all rotations</button>
       </div>
     </div>
 
@@ -817,8 +817,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div style="display:flex;align-items:center;gap:8px">
           <div class="toggle-row" style="gap:6px">
-            <div class="toggle-opt active" id="3cdef-closed" onclick="set3CDefaultVal('closed',this)" style="padding:5px 14px;font-size:.8rem">Closed</div>
-            <div class="toggle-opt" id="3cdef-open"   onclick="set3CDefaultVal('open',this)"   style="padding:5px 14px;font-size:.8rem">Open</div>
+            <div class="toggle-opt active" id="3cdef-closed" onclick="this.style.opacity='.5';set3CDefaultVal('closed',this)" style="padding:5px 14px;font-size:.8rem">Closed</div>
+            <div class="toggle-opt" id="3cdef-open"   onclick="this.style.opacity='.5';set3CDefaultVal('open',this)"   style="padding:5px 14px;font-size:.8rem">Open</div>
           </div>
         </div>
       </div>
@@ -976,8 +976,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn btn-primary" id="manageTransferBtn" onclick="manageSlotAction('transfer')">Transfer to another nurse</button>
-      <button class="btn btn-danger" onclick="manageSlotAction('cancel')">Cancel and reopen slot</button>
+      <button class="btn btn-primary" id="manageTransferBtn" onclick="this.disabled=true;this.textContent='Processing…';manageSlotAction('transfer')">Transfer to another nurse</button>
+      <button class="btn btn-danger" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Cancel this slot and reopen</button>
       <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
     </div>
   </div>
@@ -1846,7 +1846,9 @@ async function show3CMidShiftModal(){
 
   if(mode === 'open'){
     title.textContent = 'Open 3C for This Shift';
-    subtitle.textContent = `${bnDisplay} is currently covering ${bnUnits.filter(u=>u!=='C_PAIR').join(', ')}. Select which remaining open slots to make available for 3C staff.`;
+    const _c3OtherUnits = bnUnits.filter(u=>u!=='C_PAIR' && u!=='3C');
+    const _c3CandidateCount = _c3Modal.slots ? _c3Modal.slots.length : '?';
+    subtitle.textContent = `4C has ${_c3CandidateCount} remaining open slots. Select which to move to 3C.`;
 
     // Fetch bookings to determine available slots
     const [bookings, bnBreaks] = await Promise.all([
@@ -4676,12 +4678,18 @@ async function markBNUnavailable(schedId, bnName, date, shift){
 
 Covering: ${bnUnits.join(', ')}`;
   if(affectedBookings.length){
-    const slotList = [...new Set(affectedBookings.map(b => fmt12(b.SlotTime)))].join(', ');
-    const nurseList = [...new Set(affectedBookings.map(b => b.NurseName.split('(')[0].trim()))].join(', ');
+    const nurseBookingMap = {};
+    affectedBookings.forEach(b => {
+      const n = b.NurseName.split('(')[0].trim();
+      if(!nurseBookingMap[n]) nurseBookingMap[n] = [];
+      nurseBookingMap[n].push(fmt12(b.SlotTime));
+    });
+    const nurseLines = Object.entries(nurseBookingMap).map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('
+');
     msg += `
 
-⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected (${slotList})
-Staff: ${nurseList}`;
+⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected:
+${nurseLines}`;
   }
   if(sameWingNames.length){
     msg += `
@@ -4731,7 +4739,6 @@ Staff: ${nurseList}`;
 
 async function markBNAvailable(schedId, bnName){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…'
-  if(!await customConfirm(`Mark ${firstName(bnName)} as available again? This will reactivate their assignment.`,'Mark Available','Cancel')) return;
   try {
     // Check for supplemental records created during redistribution
     const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
@@ -5635,10 +5642,10 @@ async function loadAssignments(){
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
                 ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
-                <button class="btn btn-danger btn-sm" onclick="delAssign(${s.Id})">Remove</button>
+                <button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>
               </div>
             </div>
             <div class="unit-tags">${units.map(u=>
@@ -7409,8 +7416,15 @@ async function loadBNSlots(){
     const _bnStartVal = localStorage.getItem(`bnStart_${BNS.name}_${BNS.date || today()}_${shift}`);
     const _bnStartMin = _bnStartVal ? toMin(_bnStartVal) : null;
 
+    // Show start time banner once at top if set
+    const _startBanner = _bnStartMin !== null
+      ? `<div style="background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:.82rem">
+          🕐 ${firstName(BNS.name)}'s shift starts at ${fmt12(_bnStartVal)} — earlier slots are pre-shift
+         </div>`
+      : '';
+
     // Render a single unified slot list (applies to all covered units)
-    list.innerHTML = displaySlots.map(slot => {
+    list.innerHTML = _startBanner + displaySlots.map(slot => {
       const isMyBreak = bnBreakTimes.has(slot);
       const assignedUnit = bnRotation[slot];
       // For "Your break" slots, show the actual stored unit — not the rotation unit
@@ -7420,7 +7434,7 @@ async function loadBNSlots(){
       // Only flag start time on available slots — not on already-claimed breaks
       const isBeforeStart = !isMyBreak && _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
       const unitTag = isBeforeStart
-        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-size:.68rem;margin-left:6px;white-space:nowrap">${unitDisplay || '—'} · ${firstName(BNS.name)}'s start: ${fmt12(_bnStartVal)}</span>`
+        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay || '—'}</span>`
         : assignedUnit
           ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay}</span>`
           : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
