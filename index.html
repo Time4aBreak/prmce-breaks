@@ -1051,6 +1051,27 @@ function unitCoveredBy(sched, unit, date, shift){
   if(unit === '4C') return units.includes('C_PAIR') || units.includes('4C');
   return false;
 }
+
+// Return the full set of units a schedule entry covers, with C_PAIR expanded
+function getSchedUnits(sched, date, shift){
+  let raw = []; try { raw = JSON.parse(sched.Units||'[]'); } catch{}
+  return expandCPair(raw, date, shift);
+}
+
+// Check if the BN is already booked (non-break) at this slot time on any other unit.
+// Returns the conflicting booking, or null. Used to enforce one-break-at-a-time-per-BN.
+function findBNConflict(sched, slotTime, currentUnit, allBookings, date, shift){
+  if(!sched) return null;
+  const bnUnits = getSchedUnits(sched, date, shift);
+  const pad = String(slotTime).padStart(4,'0');
+  return allBookings.find(b =>
+    !b.IsBNBreak &&
+    String(b.SlotTime).padStart(4,'0') === pad &&
+    b.ShiftType === shift &&
+    bnUnits.includes(b.Unit) &&
+    b.Unit !== currentUnit
+  ) || null;
+}
 const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings', state:'BNState'};
 
 // ── Booking status helpers — consistent across old (IsCompleted) and new (BreakStatus) data ──
@@ -3847,6 +3868,17 @@ async function loadSlots(silent=false){
       // BN break — slot is simply hidden from staff view
       if (bnBreaks.has(slot)) return;
 
+      // BN-level slot uniqueness: if the BN covering this slot is already booked
+      // on a different unit at this slot time, hide the slot — a BN can only cover
+      // one break at a time. Protects against rotation/unit-edit races.
+      const _slotSched = isOverlap
+        ? oppCovering.find(s => unitCoveredBy(s, S.unit, oppSchedDt, oppShift))
+        : covering.find(s => unitCoveredBy(s, S.unit, dt, shift));
+      const _slotShift = isOverlap ? oppShift : shift;
+      const _slotDate  = isOverlap ? oppSchedDt : dt;
+      const _crossBooking = findBNConflict(_slotSched, slot, S.unit, allBookingsRaw, _slotDate, _slotShift);
+      if(_crossBooking && !booking) return; // hide only if slot would otherwise appear open on this unit
+
       // Sign-up window: current shift always open; next shift visible but locked until start
       const nowM_ = nowMin();
       const isCurrentShift = shift === 'Day'
@@ -4460,6 +4492,21 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     if(taken){
       if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true); loadSlots(); }
       return `${fmt12(slotTime)} already taken`;
+    }
+
+    // BN-level uniqueness: a BN can only cover one break at a time.
+    // If the BN covering this slot for S.unit is already booked on another unit
+    // at this slot time, block the claim.
+    const _claimScheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${slotShift}'`);
+    const _claimSched = _claimScheds.find(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, slotShift));
+    const _bnConflict = findBNConflict(_claimSched, slotTime, S.unit, allBookingsToday, dt, slotShift);
+    if(_bnConflict){
+      if(!silent){
+        toast(`${fmt12(slotTime)} is taken on ${_bnConflict.Unit}. Please choose another slot.`, true);
+        loadSlots();
+      }
+      return `${fmt12(slotTime)} taken on ${_bnConflict.Unit}`;
     }
 
     // BN break conflict check — from pre-fetched data
@@ -5516,6 +5563,7 @@ async function saveAssign(){
 
     // If editing an active shift, warn coordinator about rotation impact
     const isActiveShift = dt === shiftDate(shift) && staffWindowOpen(shift);
+    let bookingsToCancel = [];
     if(existing.length > 0 && isActiveShift){
       // Check for any existing staff bookings on this BN's units
       const existingUnits = [];
@@ -5523,26 +5571,35 @@ async function saveAssign(){
       const removedUnits = existingUnits.filter(u => !units.includes(u));
       const addedUnits   = units.filter(u => !existingUnits.includes(u));
       const staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-      const affectedBookings = staffBookings.filter(b =>
-        !b.IsBNBreak && (removedUnits.includes(b.Unit) || addedUnits.includes(b.Unit))
-      );
+      // Only count staff bookings on units being REMOVED (those will be cancelled)
+      bookingsToCancel = staffBookings.filter(b => !b.IsBNBreak && removedUnits.includes(b.Unit));
 
       let warningLines = [];
       if(removedUnits.length) warningLines.push(`Units removed: ${removedUnits.join(', ')}`);
       if(addedUnits.length)   warningLines.push(`Units added: ${addedUnits.join(', ')}`);
-      if(affectedBookings.length){
-        const names = [...new Set(affectedBookings.map(b => b.NurseName.split('(')[0].trim()))];
-        warningLines.push(`Staff with existing bookings on affected units: ${names.join(', ')}`);
-        warningLines.push(`Their bookings will remain but may no longer match the break nurse rotation.`);
+      if(bookingsToCancel.length){
+        const byNurse = {};
+        bookingsToCancel.forEach(b => {
+          if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
+          byNurse[b.NurseName].push(fmt12(b.SlotTime));
+        });
+        const nurseLines = Object.entries(byNurse)
+          .map(([n, times]) => `• ${formatNurse(n)} — ${times.join(', ')}`)
+          .join('\n');
+        warningLines.push(`Affected staff:\n${nurseLines}`);
+        warningLines.push(`These slots will be cancelled. Please let them know!`);
       }
-      warningLines.push(`The rotation will recalculate for the new unit set. Breaks already taken will not be reshuffled.`);
 
-      const warnMsg = 'This shift is already active.\n\n' + warningLines.join('\n\n');
+      const warnMsg = warningLines.join('\n\n');
       if(!await customConfirm(warnMsg, 'Update assignment', 'Cancel')) return;
     }
 
     if(existing.length > 0){
       for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
+    }
+    // Cancel staff bookings on removed units
+    if(bookingsToCancel.length){
+      for(const b of bookingsToCancel) await spDel(LISTS.bookings, b.Id);
     }
     await spPost(LISTS.schedule,{
       Title:`${nurse}-${dt}-${shift}`,
