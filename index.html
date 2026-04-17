@@ -4796,9 +4796,9 @@ async function markBNAvailable(schedId, bnName){
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
         const keepRedist = await customConfirm(
-          `${suppFirstNames} took over coverage while ${firstName(bnName)} was unavailable.\n\nKeep their coverage, or revert to ${firstName(bnName)}'s original assignment?`,
+          `${suppFirstNames} took over coverage while ${firstName(bnName)} was unavailable.`,
           `Keep ${suppFirstNames}'s coverage`,
-          `Revert to ${firstName(bnName)}'s original`
+          `Restore ${firstName(bnName)}'s assignments`
         );
         if(!keepRedist){
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
@@ -4885,9 +4885,9 @@ async function toggleSelfAvailability(){
       if(suppls.length){
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
         const keepRedist = await customConfirm(
-          `${suppFirstNames} took over while you were unavailable.\n\nKeep their coverage, or revert to yours?`,
+          `${suppFirstNames} took over coverage while you were unavailable.`,
           `Keep ${suppFirstNames}'s coverage`,
-          `Revert to yours`
+          `Restore your assignments`
         );
         if(!keepRedist){
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
