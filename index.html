@@ -5901,9 +5901,17 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       : '<div style="font-size:.82rem;color:var(--muted)">No pending bookings on this unit.</div>';
 
     const ALL_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
+    const isUnitInactive = (u) => u === '3C' && !is3COpen(date, shift);
     const redirectOptions = ALL_UNITS
       .filter(u => u !== unit)
-      .map(u => `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}"${remaining.includes(u) ? ' checked' : ''}> ${u}</label>`).join('');
+      .map(u => {
+        const inactive = isUnitInactive(u);
+        // Pre-check already-assigned units UNLESS they're inactive (e.g. 3C when closed)
+        const checked = remaining.includes(u) && !inactive;
+        const style = inactive ? 'opacity:.45' : '';
+        const title = inactive ? ' title="3C is closed for this shift"' : '';
+        return `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px;${style}"${title}><input type="checkbox" value="${u}"${checked ? ' checked' : ''}${inactive ? ' disabled' : ''}> ${u}${inactive ? ' (closed)' : ''}</label>`;
+      }).join('');
 
     const existing = document.getElementById('closeUnitModal');
     if(existing) existing.remove();
@@ -5919,8 +5927,8 @@ async function closeUnit(schedId, unit, bnName, date, shift){
           <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">⚠️ ${future.length} pending booking${future.length!==1?'s':''} will be cancelled:</div>
           <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto">${bookingHtml}</div>
         ` : `<div style="margin-bottom:14px">${bookingHtml}</div>`}
-        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Redirect extra coverage to:</div>
-          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:4px">${redirectOptions}</div>
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Which units should ${firstName(bnName)} cover going forward?</div>
+          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px">${redirectOptions}</div>
         <div style="display:flex;gap:8px;justify-content:flex-end">
           <button class="btn btn-ghost btn-sm" onclick="document.getElementById('closeUnitModal').remove()">Cancel</button>
           <button class="btn btn-danger btn-sm" onclick="confirmCloseUnit(${schedId},'${unit}','${date}','${shift}')">Close Unit</button>
@@ -5952,9 +5960,10 @@ async function confirmCloseUnit(schedId, unit, date, shift){
 
     // Recalculate rotation with updated units
     const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
+    let bnName = '';
     if(sched.length){
       const s = sched[0];
-      const bnName = s.BreakNurseName;
+      bnName = s.BreakNurseName;
       const bnDef = getDefaultTemplate(bnName, shift);
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
@@ -5964,9 +5973,14 @@ async function confirmCloseUnit(schedId, unit, date, shift){
     }
 
     const cancelled = future.length;
-    const msg = cancelled
-      ? `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled${redirectTo.length ? ` · slots redirected to ${redirectTo.join(', ')}` : ''}`
-      : `${unit} closed${redirectTo.length ? ` · slots redirected to ${redirectTo.join(', ')}` : ''}`;
+    const coveredStr = redirectTo.length ? redirectTo.join(', ') : 'no units';
+    const bnDisplay = bnName ? firstName(bnName) : 'BN';
+    let msg;
+    if(cancelled){
+      msg = `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled · ${bnDisplay} now covers ${coveredStr}`;
+    } else {
+      msg = `${unit} closed · ${bnDisplay} now covers ${coveredStr}`;
+    }
     toast(msg);
     loadAssignments();
   } catch(e){ toast(e.message, true); }
