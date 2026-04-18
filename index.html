@@ -2400,6 +2400,9 @@ function init(){
   S.shift = detectShift();
   renderShiftPill();
 
+  // Warm user-saved preferred names
+  warmPreferredNames().catch(()=>{});
+
   // Set today's date on all pickers
   // Covering tab uses shiftDate so Noc after midnight shows the correct shift date
   const t=today();
@@ -5469,7 +5472,7 @@ async function loadSummary(){
       const bnNames = [...new Set([...scheds,...oppScheds].map(s => s.BreakNurseName).filter(Boolean))].sort();
       const curVal = bnSel.value;
       bnSel.innerHTML = '<option value="All">All Break Nurses</option>' +
-        bnNames.map(n => `<option value="${n}"${n===curVal?' selected':''}>${n}</option>`).join('');
+        bnNames.map(n => `<option value="${n}"${n===curVal?' selected':''}>${firstName(n)}</option>`).join('');
     }
 
     // Filter by BN if selected
@@ -5514,7 +5517,7 @@ async function loadSummary(){
         <div class="summ-nurse">${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}</div>
         <div class="summ-bn">${bnUnavailable
           ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
-          : (bn ? bn + (bnExt ? ` · ${bnExt}` : '') : '')
+          : (bn ? firstName(bn) + (bnExt ? ` · ${bnExt}` : '') : '')
         }</div>
         <div>${!isPast(b.SlotTime, shift)
           ? `<button class="btn btn-ghost btn-sm" style="color:var(--red);font-size:.72rem;padding:3px 8px" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`
@@ -5739,9 +5742,12 @@ async function loadAssignments(){
           const statusBadge = isInactive
             ? `<span style="font-size:.7rem;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 6px;border-radius:4px;margin-left:6px">UNAVAILABLE</span>`
             : (s.IsSupplemental ? `<span style="font-size:.7rem;font-weight:700;color:var(--teal-dk);background:var(--teal-lt);padding:2px 6px;border-radius:4px;margin-left:6px">SUPPLEMENTAL</span>` : '');
+          const _displayName = firstName(s.BreakNurseName);
+          const _fullName = s.BreakNurseName;
+          const _showBoth = _displayName !== _fullName.split(',')[1]?.trim().split(' ')[0];
           return `<div class="sched-card${isInactive?' sched-inactive':''}">
             <div class="sched-card-hd">
-              <span><strong>${s.BreakNurseName}</strong>${statusBadge}&nbsp;
+              <span><strong>${_displayName}</strong>${_showBoth ? ` <span style="color:var(--muted);font-size:.78rem;font-weight:400">· ${_fullName}</span>` : ''}${statusBadge}&nbsp;
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -6120,7 +6126,9 @@ let _toastT;
 // ── Preferred display names ───────────────────────────
 // Maps full name (as stored in Sheets) → preferred first name shown throughout the app.
 // Add entries here whenever a BN goes by a different name than their legal first name.
-const PREFERRED_NAMES = {
+// User-editable preferred names, seeded with defaults.
+// Persisted to localStorage + BNState. Merged at init via warmPreferredNames().
+const PREFERRED_NAMES_DEFAULTS = {
   'Rivera, Christlyne J': 'Jhaiz',
   'Rivera, Christlyne':   'Jhaiz',
   'Samra, Akdeep K':      'Deepi',
@@ -6128,6 +6136,40 @@ const PREFERRED_NAMES = {
   'Yago, Leonel Richie':  'Leo',
   'Yago, Leonel':         'Leo',
 };
+let PREFERRED_NAMES = {...PREFERRED_NAMES_DEFAULTS};
+try {
+  const saved = JSON.parse(localStorage.getItem('bnPreferredNames') || '{}');
+  Object.assign(PREFERRED_NAMES, saved);
+} catch {}
+
+async function warmPreferredNames(){
+  try {
+    const remote = await getState('bnPreferredNames');
+    if(remote && typeof remote === 'object'){
+      localStorage.setItem('bnPreferredNames', JSON.stringify(remote));
+      Object.assign(PREFERRED_NAMES, PREFERRED_NAMES_DEFAULTS, remote);
+    }
+  } catch {}
+}
+
+function setPreferredName(fullName, preferred){
+  const saved = JSON.parse(localStorage.getItem('bnPreferredNames') || '{}');
+  const trimmed = (preferred || '').trim();
+  if(trimmed){
+    saved[fullName] = trimmed;
+    PREFERRED_NAMES[fullName] = trimmed;
+  } else {
+    delete saved[fullName];
+    // Fall back to default if one exists, otherwise clear
+    if(PREFERRED_NAMES_DEFAULTS[fullName]){
+      PREFERRED_NAMES[fullName] = PREFERRED_NAMES_DEFAULTS[fullName];
+    } else {
+      delete PREFERRED_NAMES[fullName];
+    }
+  }
+  localStorage.setItem('bnPreferredNames', JSON.stringify(saved));
+  setState('bnPreferredNames', saved).catch(()=>{});
+}
 
 // fmt24 removed — time formatting replaced by fmt12 throughout
 // isSignupWindowOpen, getBreakStatus removed — replaced by inline banner logic in loadSlots
@@ -9108,7 +9150,7 @@ function populateNurseDropdown(){
 
   if (filtered.length) {
     sel.innerHTML = '<option value="">— Select break nurse —</option>' +
-      filtered.map(n => `<option value="${n}">${n}</option>`).join('');
+      filtered.map(n => `<option value="${n}">${firstName(n) !== n ? firstName(n) + ' · ' + n : n}</option>`).join('');
   } else if (date) {
     sel.innerHTML = '<option value="">No break nurses scheduled for this date/shift</option>';
   } else {
@@ -9125,12 +9167,17 @@ function renderImportedNamesList(){
     el.innerHTML = '<div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div>';
     return;
   }
-  el.innerHTML = importedNames.map(n =>
-    `<div class="roster-row">
-      <span style="font-weight:500">${n}</span>
-      <button class="btn btn-danger btn-sm" onclick="removeImportedName('${n.replace(/'/g,"\'")}')">Remove</button>
-    </div>`
-  ).join('');
+  el.innerHTML = importedNames.map(n => {
+    const pref = PREFERRED_NAMES[n] || '';
+    const esc = n.replace(/'/g,"\\'");
+    return `<div class="roster-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      <span style="font-weight:500;flex:1;min-width:140px">${n}</span>
+      <input type="text" value="${pref}" placeholder="Preferred name"
+        onblur="setPreferredName('${esc}', this.value); renderImportedNamesList();"
+        style="padding:6px 8px;font-size:.85rem;width:130px"/>
+      <button class="btn btn-danger btn-sm" onclick="removeImportedName('${esc}')">Remove</button>
+    </div>`;
+  }).join('');
 }
 
 function removeImportedName(name){
