@@ -4755,17 +4755,14 @@ ${nurseLines}`;
 ⚠️ No other BNs are available on the same wing — all staff bookings will be cancelled.`;
   }
 
-  if(!await customConfirm(msg, `Mark ${firstName(bnName)} unavailable`, 'Cancel')){ loadAssignments(); return; }
-
   let redistribute = false;
   if(sameWingNames.length){
-    const redistChoice = await new Promise(resolve => {
+    // Single 3-way modal: Give to same-wing BN / Cancel all / Go back
+    const choice = await new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal');
-      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(
-        `Assign ${firstName(bnName)}'s claims to ${sameWingNames.join('/')}'s open slots where eligible?`
-      );
-      document.getElementById('customConfirmOk').textContent = 'Yes';
-      document.getElementById('customConfirmCancel').textContent = `No, just cancel all ${firstName(bnName)}'s claims`;
+      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
+      document.getElementById('customConfirmOk').textContent = `Give eligible bookings to ${sameWingNames.join('/')}`;
+      document.getElementById('customConfirmCancel').textContent = `Cancel all affected bookings`;
       // Add Go back button dynamically
       const goBackBtn = document.createElement('button');
       goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
@@ -4780,12 +4777,15 @@ ${nurseLines}`;
         document.getElementById('customConfirmCancel').onclick = null;
         resolve(result);
       };
-      document.getElementById('customConfirmOk').onclick = () => cleanup('yes');
-      document.getElementById('customConfirmCancel').onclick = () => cleanup('no');
+      document.getElementById('customConfirmOk').onclick = () => cleanup('give');
+      document.getElementById('customConfirmCancel').onclick = () => cleanup('cancel');
       goBackBtn.onclick = () => cleanup('back');
     });
-    if(redistChoice === 'back'){ loadAssignments(); return; }
-    redistribute = redistChoice === 'yes';
+    if(choice === 'back'){ loadAssignments(); return; }
+    redistribute = choice === 'give';
+  } else {
+    // No same-wing BN available — single confirmation
+    if(!await customConfirm(msg, `Cancel all affected bookings`, 'Go back')){ loadAssignments(); return; }
   }
 
   await processBNUnavailability(schedId, bnName, date, shift, redistribute);
@@ -4907,18 +4907,33 @@ async function toggleSelfAvailability(){
       updateSelfAvailBtn(false);
     } catch(e){ toast(e.message, true); }
   } else if(active){
-    // Mark unavailable
-    const confirmedSelf = await customConfirm(
-      `Mark ${firstName(BNS.name)} as unavailable for the ${shift} shift?`,
-      'Mark unavailable',
-      'Cancel'
-    );
-    if(!confirmedSelf) return;
-    const redistributeSelf = await customConfirm(
-      `What would you like to do with your uncovered breaks?`,
-      'Redistribute eligible slots',
-      'Cancel all slots'
-    );
+    // Mark unavailable — single 3-way modal
+    const choice = await new Promise(resolve => {
+      const modal = document.getElementById('customConfirmModal');
+      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(
+        `Mark ${firstName(BNS.name)} as unavailable for the ${shift} shift?\n\nWhat would you like to do with your uncovered breaks?`
+      );
+      document.getElementById('customConfirmOk').textContent = 'Redistribute eligible slots';
+      document.getElementById('customConfirmCancel').textContent = 'Cancel all slots';
+      const goBackBtn = document.createElement('button');
+      goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
+      goBackBtn.textContent = 'Go back';
+      const btnWrap = document.getElementById('customConfirmCancel').parentNode;
+      btnWrap.appendChild(goBackBtn);
+      modal.style.display = 'flex';
+      const cleanup = (result) => {
+        modal.style.display = 'none';
+        goBackBtn.remove();
+        document.getElementById('customConfirmOk').onclick = null;
+        document.getElementById('customConfirmCancel').onclick = null;
+        resolve(result);
+      };
+      document.getElementById('customConfirmOk').onclick = () => cleanup('redistribute');
+      document.getElementById('customConfirmCancel').onclick = () => cleanup('cancel');
+      goBackBtn.onclick = () => cleanup('back');
+    });
+    if(choice === 'back') return;
+    const redistributeSelf = choice === 'redistribute';
     await processBNUnavailability(active.Id, BNS.name, dt, shift, redistributeSelf);
     updateSelfAvailBtn(true);
   } else {
