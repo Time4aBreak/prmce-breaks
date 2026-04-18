@@ -5627,7 +5627,7 @@ async function saveAssign(){
         if(overlap.length) conflicts.push({ bn: s.BreakNurseName, units: overlap });
       });
     if(conflicts.length){
-      const lines = conflicts.map(c => `• ${c.bn} already covers ${c.units.join(', ')}`).join('\n');
+      const lines = conflicts.map(c => `• ${firstName(c.bn)} already covers ${c.units.join(', ')}`).join('\n');
       if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Continue','Cancel')){ loadAssignments(); return; }
     }
 
@@ -5680,7 +5680,7 @@ async function saveAssign(){
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
       Units:JSON.stringify(units)
     });
-    toast(existing.length > 0 ? `Coverage updated for ${nurse}!` : `Coverage saved for ${nurse}!`);
+    toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     S.aUnits=[];
     S.editingAssignId = null;
     document.getElementById('aNurseText').value = '';
