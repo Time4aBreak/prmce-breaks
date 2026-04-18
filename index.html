@@ -3621,13 +3621,13 @@ async function loadSlots(silent=false){
     const unitBNNames = [...new Set([
       ...covering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
-        .map(c => c.BreakNurseName),
+        .map(c => firstName(c.BreakNurseName)),
       // Only include opp BN in meta during the overlap window
       ...(overlapWindowActive(shift) ? oppCovering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
-        .map(c => c.BreakNurseName) : [])
+        .map(c => firstName(c.BreakNurseName)) : [])
     ])].join(', ');
-    const bnNames = unitBNNames || [...new Set(covering.map(c=>c.BreakNurseName))].join(', ');
+    const bnNames = unitBNNames || [...new Set(covering.map(c=>firstName(c.BreakNurseName)))].join(', ');
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
@@ -4690,7 +4690,7 @@ async function editAssign(id){
     if(assignCard) assignCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
     const body = document.getElementById('assignFormBody');
     if(body && body.style.display === 'none') toggleAssignForm();
-    toast(`Editing ${s.BreakNurseName} — modify units and click Save Assignment`);
+    toast(`Editing ${firstName(s.BreakNurseName)} — modify units and click Save Assignment`);
   } catch(e) { toast(e.message, true); loadAssignments(); }
 }
 
@@ -5262,7 +5262,7 @@ async function checkDuplicateExt(){
       s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(_nurseFirst.toLowerCase())
     );
     if(conflict){
-      if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${conflict.BreakNurseName}.`,'Take over extension','Cancel')){
+      if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${firstName(conflict.BreakNurseName)}.`,'Take over extension','Cancel')){
         document.getElementById('nurseExt').value = '';
         document.getElementById('nurseExt').focus();
       }
@@ -7101,7 +7101,7 @@ async function acceptAllAndSave(){
             const icon=shiftIcon(s.ShiftType, 14, s.ShiftDate);
             return `<div class="sched-card">
               <div class="sched-card-hd">
-                <span><strong>${escHTML(s.BreakNurseName)}</strong>&nbsp;
+                <span><strong>${escHTML(firstName(s.BreakNurseName))}</strong>${firstName(s.BreakNurseName) !== s.BreakNurseName ? ` <span style="color:var(--muted);font-size:.78rem;font-weight:400">· ${escHTML(s.BreakNurseName)}</span>` : ''}&nbsp;
                   <span style="color:var(--muted);font-size:.85rem;display:inline-flex;align-items:center;gap:3px">${icon} ${s.ShiftType}</span>
                 </span>
               </div>
@@ -8377,7 +8377,7 @@ function renderVolBN(bookings, scheds){
       : _rptVolBNShift === 'Day' ? counts.day : counts.noc;
     return `<div class="rpt-row">
       <div style="min-width:20px;font-size:.72rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
-      <div class="rpt-row-lbl">${bn.split(',')[0]}</div>
+      <div class="rpt-row-lbl">${firstName(bn)}</div>
       <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(val/maxVal*100)}%"></div></div></div>
       <div style="text-align:right">
         <div class="rpt-row-val">${val}</div>
@@ -8741,7 +8741,7 @@ async function loadReports(){
     if (bnSorted.length) {
       document.getElementById('rptBNList').innerHTML = bnSorted.map(([bn,n]) => `
         <div class="rpt-row">
-          <div class="rpt-row-lbl">${bn}</div>
+          <div class="rpt-row-lbl">${firstName(bn)}</div>
           <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(n/maxBN*100)}%"></div></div></div>
           <div class="rpt-row-val" style="min-width:30px;text-align:right">${n}</div>
         </div>`).join('');
