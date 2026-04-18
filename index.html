@@ -5743,11 +5743,9 @@ async function loadAssignments(){
             ? `<span style="font-size:.7rem;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 6px;border-radius:4px;margin-left:6px">UNAVAILABLE</span>`
             : (s.IsSupplemental ? `<span style="font-size:.7rem;font-weight:700;color:var(--teal-dk);background:var(--teal-lt);padding:2px 6px;border-radius:4px;margin-left:6px">SUPPLEMENTAL</span>` : '');
           const _displayName = firstName(s.BreakNurseName);
-          const _fullName = s.BreakNurseName;
-          const _showBoth = _displayName !== _fullName.split(',')[1]?.trim().split(' ')[0];
           return `<div class="sched-card${isInactive?' sched-inactive':''}">
             <div class="sched-card-hd">
-              <span><strong>${_displayName}</strong>${_showBoth ? ` <span style="color:var(--muted);font-size:.78rem;font-weight:400">· ${_fullName}</span>` : ''}${statusBadge}&nbsp;
+              <span><strong>${_displayName}</strong>${statusBadge}&nbsp;
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
@@ -7101,7 +7099,7 @@ async function acceptAllAndSave(){
             const icon=shiftIcon(s.ShiftType, 14, s.ShiftDate);
             return `<div class="sched-card">
               <div class="sched-card-hd">
-                <span><strong>${escHTML(firstName(s.BreakNurseName))}</strong>${firstName(s.BreakNurseName) !== s.BreakNurseName ? ` <span style="color:var(--muted);font-size:.78rem;font-weight:400">· ${escHTML(s.BreakNurseName)}</span>` : ''}&nbsp;
+                <span><strong>${escHTML(firstName(s.BreakNurseName))}</strong>&nbsp;
                   <span style="color:var(--muted);font-size:.85rem;display:inline-flex;align-items:center;gap:3px">${icon} ${s.ShiftType}</span>
                 </span>
               </div>
@@ -7278,7 +7276,7 @@ function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
   if (!sel) return;
   sel.innerHTML = '<option value="">— Select your name —</option>' +
-    importedNames.map(n => `<option value="${n}">${n}</option>`).join('');
+    importedNames.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
 }
 
 function loadBNView(){
@@ -9150,7 +9148,7 @@ function populateNurseDropdown(){
 
   if (filtered.length) {
     sel.innerHTML = '<option value="">— Select break nurse —</option>' +
-      filtered.map(n => `<option value="${n}">${firstName(n) !== n ? firstName(n) + ' · ' + n : n}</option>`).join('');
+      filtered.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
   } else if (date) {
     sel.innerHTML = '<option value="">No break nurses scheduled for this date/shift</option>';
   } else {
