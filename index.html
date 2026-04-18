@@ -977,7 +977,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
       <button class="btn btn-primary" id="manageTransferBtn" onclick="this.disabled=true;this.textContent='Processing…';manageSlotAction('transfer')">Transfer to another nurse</button>
-      <button class="btn btn-danger" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Cancel this slot and reopen</button>
+      <button class="btn btn-danger" id="manageCancelBtn" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Cancel this slot and reopen</button>
       <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
     </div>
   </div>
@@ -4547,7 +4547,12 @@ function manageMySlot(bookingId, slotTime, nurseName){
   document.getElementById('manageSlotTitle').textContent = `Manage your ${fmt12(slotTime)} break`;
   document.getElementById('manageSlotInfo').textContent = `${S.unit} · ${nurseName}`;
   document.getElementById('manageTransferSection').style.display = 'none';
-  document.getElementById('manageTransferBtn').textContent = 'Transfer to another nurse';
+  const transferBtn = document.getElementById('manageTransferBtn');
+  transferBtn.textContent = 'Transfer to another nurse';
+  transferBtn.disabled = false;
+  const cancelBtn = document.getElementById('manageCancelBtn');
+  cancelBtn.textContent = 'Cancel this slot and reopen';
+  cancelBtn.disabled = false;
   document.getElementById('transferName').value = '';
   document.getElementById('transferExt').value = '';
   document.getElementById('transferErr').style.display = 'none';
