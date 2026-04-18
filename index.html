@@ -755,8 +755,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <!-- 3C status toggle -->
         <div id="threeCToggleRow" style="margin-bottom:12px;padding:10px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
           <div>
-            <div style="font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">3C Status for this date</div>
-            <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Override the global default for this specific date/shift</div>
+            <div style="font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Is 3C Open for this shift?</div>
+            <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Overrides the default status set below for this shift</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
             <span id="threeCStatusLabel" style="font-size:.8rem;font-weight:600"></span>
@@ -4793,6 +4793,7 @@ ${nurseLines}`;
 
 async function markBNAvailable(schedId, bnName){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…'
+  showBusy(`Reactivating ${firstName(bnName)}…`);
   try {
     // Check for supplemental records created during redistribution
     const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
@@ -4802,22 +4803,25 @@ async function markBNAvailable(schedId, bnName){
         `ShiftDate ge '${ShiftDate.slice(0,10)}' and ShiftDate le '${ShiftDate.slice(0,10)}T23' and ShiftType eq '${ShiftType}'`);
       const suppls = allScheds.filter(s => s.IsSupplemental == 1);
       if(suppls.length){
+        hideBusy(); // let user see the decision modal clearly
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
         const keepRedist = await customConfirm(
           `${suppFirstNames} took over coverage while ${firstName(bnName)} was unavailable.`,
           `Keep ${suppFirstNames}'s coverage`,
           `Restore ${firstName(bnName)}'s assignments`
         );
+        showBusy(keepRedist ? `Keeping ${suppFirstNames}'s coverage…` : `Restoring ${firstName(bnName)}'s assignments…`);
         if(!keepRedist){
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
         }
       }
     }
     await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
+    hideBusy();
     toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     await new Promise(r => setTimeout(r, 100));
     loadAssignments();
-  } catch(e){ toast(e.message, true); loadAssignments(); }
+  } catch(e){ hideBusy(); toast(e.message, true); loadAssignments(); }
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
@@ -4973,6 +4977,7 @@ function markCardUnavailableInDOM(bnName){
 // showReassignModal + handleReassignConfirm removed — modal-based reassign flow
 // replaced by processBNUnavailability + customConfirm (inline redistribution algorithm)
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
+  showBusy(redistribute ? `Redistributing ${firstName(bnName)}'s breaks…` : `Cancelling ${firstName(bnName)}'s breaks…`);
   try {
     // Get BN-A's units and mark record inactive
     // Fetch main record + all supplementals for this BN on this shift
@@ -4980,7 +4985,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       spGet(LISTS.schedule, `Id eq ${schedId}`),
       spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
     ]);
-    if(!mainRecs.length) return;
+    if(!mainRecs.length){ hideBusy(); return; }
     const bnARecord = mainRecs[0];
 
     // Combine units from main assignment + any supplementals
@@ -5019,6 +5024,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     );
 
     if(!uncovered.length){
+      hideBusy();
       toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
       loadAssignments();
       return;
@@ -5039,6 +5045,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     // If cancel all chosen, skip redistribution entirely
     if(!redistribute){
+      hideBusy();
       const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
       loadAssignments();
@@ -5046,6 +5053,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     }
 
     if(!otherBNs.length){
+      hideBusy();
       // No other BNs available — flag all
       const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
@@ -5219,6 +5227,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     }
 
     // Show results
+    hideBusy();
     let msg = `${firstName(bnName)} marked unavailable.`;
     if(absorbed.length) msg += `\n\n✓ ${absorbed.length} break${absorbed.length!==1?'s':''} redistributed.`;
     if(flaggedNurses.length){
@@ -5231,7 +5240,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     // Update assignment display immediately, background refresh for full state
     loadAssignments();
-  } catch(e) { toast(e.message, true); }
+  } catch(e) { hideBusy(); toast(e.message, true); }
 }
 
 
@@ -5770,11 +5779,15 @@ async function loadAssignments(){
                 ${s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>` : ''}
               </div>
             </div>
-            <div class="unit-tags">${units.map(u=>
-              (!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType))
-                ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
-                : `<span class="tag">${u}</span>`
-            ).join('')}</div>
+            <div class="unit-tags">${units.map(u => {
+              // Grey out 3C when it's closed for this shift — assignment exists but unit inactive
+              const is3CInactive = u === '3C' && !is3COpen(s.ShiftDate.slice(0,10), s.ShiftType);
+              const tagStyle = is3CInactive ? 'opacity:.45' : '';
+              const canClose = !isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType);
+              return canClose
+                ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px;${tagStyle}">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
+                : `<span class="tag" style="${tagStyle}">${u}</span>`;
+            }).join('')}</div>
           </div>`;
         }).join('')}
       </div>`;
@@ -5872,7 +5885,6 @@ async function delAssign(id){
 async function closeUnit(schedId, unit, bnName, date, shift){
   try {
     // Get future claimed bookings on this unit
-    const now = nowMin();
     const bookings = await spGet(LISTS.bookings,
       `Unit eq '${esc(unit)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
     const future = bookings.filter(b => !b.IsBNBreak && sortKey(b.SlotTime, shift) > nowKey(shift));
@@ -6347,6 +6359,35 @@ function toast(msg,err=false){
   t.classList.add('show');
   clearTimeout(_toastT);
   _toastT=setTimeout(()=>t.classList.remove('show'),6400);
+}
+
+// Global busy overlay — shown during multi-step async operations so the user
+// knows the app is working and not frozen.
+function showBusy(msg){
+  let el = document.getElementById('busyOverlay');
+  if(!el){
+    el = document.createElement('div');
+    el.id = 'busyOverlay';
+    el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9999;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
+    el.innerHTML = `<div style="background:var(--card);border-radius:14px;padding:22px 28px;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;align-items:center;gap:14px;max-width:320px">
+      <div style="width:22px;height:22px;border:3px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite"></div>
+      <div id="busyMsg" style="font-size:.95rem;font-weight:500;color:var(--text)"></div>
+    </div>`;
+    document.body.appendChild(el);
+    // Inject keyframes once
+    if(!document.getElementById('busyKeyframes')){
+      const style = document.createElement('style');
+      style.id = 'busyKeyframes';
+      style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+      document.head.appendChild(style);
+    }
+  }
+  document.getElementById('busyMsg').textContent = msg || 'Working…';
+  el.style.display = 'flex';
+}
+function hideBusy(){
+  const el = document.getElementById('busyOverlay');
+  if(el) el.style.display = 'none';
 }
 
 // ═══════════════════════════════════════════════════════
