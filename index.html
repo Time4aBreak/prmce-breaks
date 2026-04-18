@@ -5376,6 +5376,14 @@ async function loadSummary(){
     }
     const [bookings, oppBookings, scheds, oppScheds] = results;
 
+    // Warm rotation cache for all active BNs so slot-level attribution works
+    await Promise.all([
+      ...scheds.filter(s => s.Status !== 'inactive')
+        .map(s => warmRotationCache(s.BreakNurseName, dt, shift).catch(()=>{})),
+      ...oppScheds.filter(s => s.Status !== 'inactive')
+        .map(s => warmRotationCache(s.BreakNurseName, oppDt, oppShift).catch(()=>{}))
+    ]);
+
     // For Noc shift view: evening overlap bookings are stored as ShiftType='Noc'
     // so they're already in the main bookings query — no oppBookings needed for Noc
     // For Day shift view: morning overlap bookings are stored as ShiftType='Noc' (previous day)
@@ -5409,16 +5417,50 @@ async function loadSummary(){
       }); }catch{}
     });
 
+    // Build rotation-based slot→BN lookup for units covered by multiple BNs.
+    // unitBN only holds one BN per unit — when two BNs share a unit (e.g. after
+    // redistribution, or dual assignments) we must consult each BN's rotation
+    // to see which slots belong to whom.
+    // Key format: `${unit}|${slotTime}` → BN name / ext
+    const slotOwnerBN = {}, slotOwnerExt = {};
+    const oppSlotOwnerBN = {}, oppSlotOwnerExt = {};
+    const fillSlotOwner = (schedList, targetBN, targetExt, dateForRot, shiftForRot) => {
+      schedList.forEach(s => {
+        if(s.Status === 'inactive') return;
+        const rot = loadRotation(s.BreakNurseName, dateForRot, shiftForRot);
+        if(!rot) return;
+        const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+        Object.entries(rot).forEach(([slot, u]) => {
+          const key = `${u}|${String(slot).padStart(4,'0')}`;
+          // First active BN whose rotation assigns this slot to this unit wins
+          if(!targetBN[key]){
+            targetBN[key] = s.BreakNurseName;
+            if(ext) targetExt[key] = ext;
+          }
+        });
+      });
+    };
+    fillSlotOwner(scheds, slotOwnerBN, slotOwnerExt, dt, shift);
+    fillSlotOwner(oppScheds, oppSlotOwnerBN, oppSlotOwnerExt, oppDt, oppShift);
+
     // Helper: get covering BN for a booking — overlap slots use opp BN map
     const getBNForBooking = (b) => {
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
-      return isOverlap ? (oppUnitBN[b.Unit] || unitBN[b.Unit]) : unitBN[b.Unit];
+      const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
+      if(isOverlap){
+        return oppSlotOwnerBN[key] || oppUnitBN[b.Unit] || unitBN[b.Unit];
+      }
+      return slotOwnerBN[key] || unitBN[b.Unit];
     };
     const getBNExtForBooking = (b) => {
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
-      return isOverlap ? (oppUnitBNExt[b.Unit] || unitBNExt[b.Unit]) : unitBNExt[b.Unit];
+      const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
+      if(isOverlap){
+        return oppSlotOwnerExt[key] || oppUnitBNExt[b.Unit] || unitBNExt[b.Unit];
+      }
+      return slotOwnerExt[key] || unitBNExt[b.Unit];
     };
 
     // Populate BN filter dropdown
