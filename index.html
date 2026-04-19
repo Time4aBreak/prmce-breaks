@@ -2367,9 +2367,10 @@ async function cancelScheduled3CChange(effectiveAt){
   toast('Scheduled change cancelled');
 }
 
-// Periodic tick — re-renders status display and staff unit grid when a
-// scheduled change boundary is crossed, so admin and staff see updates
-// without manual refresh.
+// Fast UI tick — runs every 15 seconds. If status has flipped since last check,
+// immediately re-render status line, staff unit grid, sign-up slots, and admin
+// cards. Rotation recomputation (heavier, does network writes) still runs on
+// the flip.
 let _3CTickLastStatus = null;
 function _3CTick(){
   const nowStatus = effective3CStatusAt(new Date());
@@ -2378,7 +2379,6 @@ function _3CTick(){
     return;
   }
   if(nowStatus !== _3CTickLastStatus){
-    const prevStatus = _3CTickLastStatus;
     _3CTickLastStatus = nowStatus;
     show3CDefaultToggle();
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
@@ -2388,8 +2388,8 @@ function _3CTick(){
     // or disappear from rotation automatically at boundary crossings.
     recompute3CAffectedRotations().catch(()=>{});
   } else {
-    // Even if status didn't flip, if a scheduled entry was crossed re-render the status line
-    // so "Scheduled: ... at ..." updates when the time arrives
+    // Even if status didn't flip, re-render status line so the "Scheduled: ..."
+    // line updates when the time arrives
     show3CDefaultToggle();
   }
 }
@@ -2413,10 +2413,10 @@ async function recompute3CAffectedRotations(){
     }));
   } catch(e){ /* silent */ }
 }
-// Start ticking once per minute after page loads
+// Start ticking every 15 seconds so status transitions feel responsive
 if(typeof window !== 'undefined' && !window._3CTickStarted){
   window._3CTickStarted = true;
-  setInterval(_3CTick, 60 * 1000);
+  setInterval(_3CTick, 15 * 1000);
 }
 
 // ── 3C Status Change Modal chain ────────────────────────
@@ -2699,12 +2699,19 @@ async function commit3CChange(){
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
       toast(`3C closing ${when} · ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''} cancelled · please notify nurses`);
     } else {
+      // Opening — recompute rotations for any active assignment with 3C in units
+      // so 3C slots appear in their rotation immediately.
+      showBusy('Updating rotations…');
+      await recompute3CAffectedRotations();
       hideBusy();
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
       toast(`3C opening ${when}`);
     }
 
     show3CDefaultToggle();
+    // Sync the ticker's tracked status so the next tick doesn't re-trigger
+    // recomputation based on a status change commit just handled.
+    _3CTickLastStatus = effective3CStatusAt(new Date());
     // Re-render shortly after in case an in-flight warm overwrote the display
     setTimeout(show3CDefaultToggle, 500);
     setTimeout(show3CDefaultToggle, 2000);
