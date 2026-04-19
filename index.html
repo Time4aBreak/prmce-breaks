@@ -2339,9 +2339,46 @@ function show3CDefaultToggle(){
   };
   let html = `Currently <strong>${currentStatus === 'open' ? 'Open' : 'Closed'}</strong>`;
   if(next){
-    html += ` · Scheduled: <strong>${next.status === 'open' ? 'Open' : 'Closed'}</strong> at ${fmt(next.effectiveAt)}`;
+    html += `<br><span style="font-size:.82rem">Scheduled: <strong>${next.status === 'open' ? 'Open' : 'Closed'}</strong> at ${fmt(next.effectiveAt)} · <a href="#" onclick="event.preventDefault();cancelScheduled3CChange('${next.effectiveAt}')" style="color:var(--red);text-decoration:underline">Cancel</a></span>`;
   }
   line.innerHTML = html;
+}
+
+// Cancel a future-scheduled 3C change (remove its entry from the schedule)
+async function cancelScheduled3CChange(effectiveAt){
+  if(!await customConfirm('Cancel this scheduled 3C change?', 'Yes, cancel it', 'Go back')) return;
+  const list = get3CSchedule().filter(e => e.effectiveAt !== effectiveAt);
+  set3CSchedule(list);
+  show3CDefaultToggle();
+  toast('Scheduled change cancelled');
+}
+
+// Periodic tick — re-renders status display and staff unit grid when a
+// scheduled change boundary is crossed, so admin and staff see updates
+// without manual refresh.
+let _3CTickLastStatus = null;
+function _3CTick(){
+  const nowStatus = effective3CStatusAt(new Date());
+  if(_3CTickLastStatus === null){
+    _3CTickLastStatus = nowStatus;
+    return;
+  }
+  if(nowStatus !== _3CTickLastStatus){
+    _3CTickLastStatus = nowStatus;
+    show3CDefaultToggle();
+    if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
+    if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
+    if(typeof loadAssignments === 'function') loadAssignments();
+  } else {
+    // Even if status didn't flip, if a scheduled entry was crossed re-render the status line
+    // so "Scheduled: ... at ..." updates when the time arrives
+    show3CDefaultToggle();
+  }
+}
+// Start ticking once per minute after page loads
+if(typeof window !== 'undefined' && !window._3CTickStarted){
+  window._3CTickStarted = true;
+  setInterval(_3CTick, 60 * 1000);
 }
 
 // ── 3C Status Change Modal chain ────────────────────────
@@ -2509,6 +2546,7 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
     const headerText = targetStatus === 'closed'
       ? `Closing 3C ${isNow ? 'now' : `at ${_fmt3CDateTime(effectiveAt)}`} will:`
       : `Opening 3C ${isNow ? 'now' : `at ${_fmt3CDateTime(effectiveAt)}`}`;
+    const nothingAffected = targetStatus === 'closed' && !affectedBookings.length && !bnImpacts.length;
 
     // Store for confirm handler
     window._pending3CChange = { effectiveAt, effectiveIso, targetStatus, affectedBookings, bnImpacts };
@@ -2519,19 +2557,26 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     let body = `<div style="font-weight:700;font-size:1rem;margin-bottom:14px">${headerText}</div>`;
     if(targetStatus === 'closed'){
-      body += `<div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Cancel ${affectedBookings.length} booking${affectedBookings.length!==1?'s':''}:</div>
+      if(nothingAffected){
+        body += `<div style="background:var(--bg);border-radius:8px;padding:14px;margin-bottom:16px;font-size:.88rem;color:var(--muted);text-align:center">
+          No currently affected bookings or BN coverage.
+        </div>`;
+      } else {
+        body += `<div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Cancel ${affectedBookings.length} booking${affectedBookings.length!==1?'s':''}:</div>
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:120px;overflow-y:auto;font-size:.82rem">${bookingLines}</div>
                <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Affected BNs:</div>
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:140px;overflow-y:auto;font-size:.82rem">${bnLines}</div>`;
+      }
     } else {
       body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">3C will open ${effectiveLabel}. No automatic reassignments — admin will need to assign a BN to cover 3C.</div>`;
     }
 
+    const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? 'Confirm & Notify Nurses' : 'Confirm';
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" onclick="commit3CChange()">Confirm${targetStatus==='closed' && affectedBookings.length ? ' & Notify Nurses' : ''}</button>
+          <button type="button" class="btn btn-primary" onclick="commit3CChange()">${confirmLabel}</button>
           <button type="button" class="btn btn-ghost" onclick="_close3CModal()">Go back</button>
         </div>
       </div>`;
