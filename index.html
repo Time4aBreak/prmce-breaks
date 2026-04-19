@@ -9878,8 +9878,43 @@ function addNamesToRoster(names){
 
 
 
-function syncNurseInput(val){
+async function syncNurseInput(val){
   document.getElementById('aNurseText').value = '';
+  if(!val) return;
+
+  // Look up this BN's existing assignment for the selected date + shift
+  const date = document.getElementById('aDate').value;
+  const shift = S.aShift;
+  if(!date || !shift) return;
+
+  try {
+    const scheds = await spGet(LISTS.schedule,
+      `BreakNurseName eq '${esc(val)}' and ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const active = scheds.filter(s => s.Status !== 'inactive' && !s.IsSupplemental);
+
+    if(active.length){
+      // Consolidate units across records (shouldn't be multiple, but just in case)
+      const allUnits = [...new Set(active.flatMap(s => {
+        try { return JSON.parse(s.Units || '[]'); } catch { return []; }
+      }))];
+      // Pre-select units in the grid
+      S.aUnits = [...allUnits];
+      document.querySelectorAll('.uc').forEach(c => {
+        const u = c.id.replace('au-','');
+        c.classList.toggle('on', S.aUnits.includes(u));
+      });
+      // Track editing so saveAssign patches instead of posting new
+      S.editingAssignId = active[0].Id;
+      toast(`Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`);
+    } else {
+      // No existing assignment — clear unit grid and exit edit mode
+      S.aUnits = [];
+      S.editingAssignId = null;
+      document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
+    }
+  } catch(e){
+    console.warn('syncNurseInput lookup failed:', e.message);
+  }
 }
 
 function toggleBNList(){
