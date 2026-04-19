@@ -6673,17 +6673,9 @@ async function closeUnit(schedId, unit, bnName, date, shift){
     // Is this shift active right now?
     const isActiveShift = date === shiftDate(shift) && staffWindowOpen(shift);
 
-    // Check whether another BN already covers this unit on this shift —
-    // if yes, bookings transfer implicitly via display attribution.
+    // Fetch active schedules for takeover picker candidates
     const allScheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-    const otherCoverage = allScheds.find(s =>
-      s.Id !== schedId &&
-      s.BreakNurseName !== bnName &&
-      s.Status !== 'inactive' &&
-      !s.IsSupplemental &&
-      (() => { try { return JSON.parse(s.Units||'[]').includes(unit); } catch { return false; } })()
-    );
     hideBusy();
 
     // Case 1 — No future bookings: simple confirm, just remove the unit
@@ -6698,22 +6690,9 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       return;
     }
 
-    // Case 2 — Future bookings exist + another BN already covers unit:
-    // transfer implicitly, no picker needed
-    if(otherCoverage){
-      const msg = `${futureOnUnit.length} future booking${futureOnUnit.length!==1?'s':''} on ${unit} will transfer to ${firstName(otherCoverage.BreakNurseName)}.\n\nRemove ${unit} from ${firstName(bnName)}?`;
-      if(!await customConfirm(msg, 'Remove', 'Cancel')) return;
-      showBusy(`Transferring ${unit} to ${firstName(otherCoverage.BreakNurseName)}…`);
-      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
-      await _recomputeAfterCloseUnit(bnName, date, shift);
-      hideBusy();
-      toast(`${unit} transferred to ${firstName(otherCoverage.BreakNurseName)}`);
-      loadAssignments();
-      return;
-    }
-
-    // Case 3 — Future bookings, no other coverage:
-    // If shift is active, use takeover picker. Otherwise, warn & cancel all.
+    // Case 2 — Future bookings exist on active shift: use takeover picker.
+    // Candidate BNs already covering the same unit surface at the top ("can cover all"),
+    // but admin always picks explicitly — no silent auto-transfers.
     if(isActiveShift){
       const result = await promptUnitTakeover({
         unit,
@@ -6761,8 +6740,8 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       return;
     }
 
-    // Case 4 — Future-shift unit removal with bookings and no other coverage:
-    // Just confirm + cancel bookings (no takeover flow for non-active shifts)
+    // Case 3 — Future-shift (not-yet-active) unit removal with bookings:
+    // No takeover picker for non-active shifts — just confirm + cancel bookings
     const lines = futureOnUnit.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
     const msg = `${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} on ${unit} will be cancelled:\n\n${lines}\n\nRemove ${unit} from ${firstName(bnName)}?`;
     if(!await customConfirm(msg, 'Remove & cancel bookings', 'Cancel')) return;
