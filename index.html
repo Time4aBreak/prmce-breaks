@@ -2668,6 +2668,9 @@ async function commit3CChange(){
     }
 
     show3CDefaultToggle();
+    // Re-render shortly after in case an in-flight warm overwrote the display
+    setTimeout(show3CDefaultToggle, 500);
+    setTimeout(show3CDefaultToggle, 2000);
     loadAssignments();
     if(typeof loadSlots === 'function') loadSlots().catch(()=>{});
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
