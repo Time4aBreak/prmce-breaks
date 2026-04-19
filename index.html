@@ -2351,13 +2351,12 @@ async function cancelScheduled3CChange(effectiveAt){
 // cards. Rotation recomputation (heavier, does network writes) still runs on
 // the flip.
 let _3CTickLastStatus = null;
-function _3CTick(){
+async function _3CTick(){
   const nowStatus = effective3CStatusAt(new Date());
+  const statusFlipped = _3CTickLastStatus !== null && nowStatus !== _3CTickLastStatus;
   if(_3CTickLastStatus === null){
     _3CTickLastStatus = nowStatus;
-    return;
-  }
-  if(nowStatus !== _3CTickLastStatus){
+  } else if(statusFlipped){
     _3CTickLastStatus = nowStatus;
     show3CDefaultToggle();
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
@@ -2367,9 +2366,29 @@ function _3CTick(){
     // or disappear from rotation automatically at boundary crossings.
     recompute3CAffectedRotations().catch(()=>{});
   } else {
-    // Even if status didn't flip, re-render status line so the "Scheduled: ..."
-    // line updates when the time arrives
     show3CDefaultToggle();
+  }
+
+  // Staff-side: also refresh the "3C manually assigned" flag so the 3C button
+  // appears/disappears on Sign Up when admin makes an assignment from another
+  // device without the staff needing to re-tap a unit.
+  // Only runs when Sign Up tab is visible.
+  const signupVisible = document.getElementById('tab-staff') && document.getElementById('tab-staff').classList.contains('active');
+  if(signupVisible && S.shift){
+    try {
+      const dt = shiftDate(S.shift);
+      const scheds = await spGet(LISTS.schedule,
+        `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
+      const newFlag = scheds.some(s => {
+        if(s.Status === 'inactive') return false;
+        try { const u = JSON.parse(s.Units||'[]'); return u.includes('3C') || u.includes('C_PAIR'); }
+        catch { return false; }
+      });
+      if(newFlag !== _3CManuallyAssigned){
+        _3CManuallyAssigned = newFlag;
+        buildStaffUnitGrid();
+      }
+    } catch(e){ /* silent */ }
   }
 }
 
