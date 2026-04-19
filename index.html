@@ -752,21 +752,6 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           </div>
         </div>
 
-        <!-- 3C status toggle -->
-        <div id="threeCToggleRow" style="margin-bottom:12px;padding:10px 12px;background:var(--bg);border-radius:8px;border:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
-          <div>
-            <div style="font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.06em">Is 3C Open for this shift?</div>
-            <div style="font-size:.75rem;color:var(--muted);margin-top:2px">Overrides the default status set below for this shift</div>
-          </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <span id="threeCStatusLabel" style="font-size:.8rem;font-weight:600"></span>
-            <div class="toggle-row" style="gap:6px">
-              <div class="toggle-opt" id="3c-closed" onclick="set3CForDate('closed',this)" style="padding:5px 12px;font-size:.78rem">Closed</div>
-              <div class="toggle-opt" id="3c-open"   onclick="set3CForDate('open',this)"   style="padding:5px 12px;font-size:.78rem">Open</div>
-            </div>
-          </div>
-        </div>
-
         <div style="margin-bottom:12px">
           <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Break Nurse</label>
           <select id="aNurse" onchange="syncNurseInput(this.value)" style="margin-bottom:6px"><option value="">— Select from imported schedule —</option></select>
@@ -1075,17 +1060,11 @@ function effective3CStatusAt(datetime){
 function is3COpenAt(datetime){ return effective3CStatusAt(datetime) === 'open'; }
 
 function get3CStatus(date, shift){
-  // Per-shift override wins
-  const key = `unit3C_${date}_${shift}`;
-  const override = localStorage.getItem(key);
-  if(override) return override;
-  // Otherwise use scheduled/default at shift start
+  // Per-shift overrides are deprecated — always resolve via scheduled/global.
   return effective3CStatusAt(shiftStartDateTime(date, shift));
 }
 function set3CStatus(date, shift, val){
-  const key = `unit3C_${date}_${shift}`;
-  localStorage.setItem(key, val);
-  setState(key, val).catch(()=>{});
+  // Deprecated — kept as no-op so old callers don't throw.
 }
 function is3COpen(date, shift){ return get3CStatus(date, shift) === 'open'; }
 
@@ -2782,45 +2761,188 @@ async function promptReassignBN(impact){
   });
 }
 
+// ── Unit takeover picker ──────────────────────────────────
+// Called when admin removes a unit from an assignment during an active shift.
+// Shows future bookings on the removed unit, lists candidate BNs (same-wing first),
+// computes per-slot compatibility for each candidate, and lets admin pick who
+// takes over. Returns { targetBN, transferredBookings, cancelledBookings } or null
+// if admin chose "Cancel all" or dismissed.
+async function promptUnitTakeover({ unit, outgoingBN, date, shift, bookings, allScheds, allBookings }){
+  // Candidates: any active non-outgoing BN on this shift
+  const activeBNs = allScheds.filter(s =>
+    s.BreakNurseName !== outgoingBN &&
+    s.Status !== 'inactive' &&
+    !s.IsSupplemental
+  );
+  if(!activeBNs.length){
+    // No candidates — caller handles with cancel flow
+    return { targetBN: null, transferredBookings: [], cancelledBookings: bookings };
+  }
+
+  const unitWing = getUnitWing(unit);
+
+  // For each candidate, compute which bookings they can take
+  const candidateInfo = activeBNs.map(s => {
+    const bnName = s.BreakNurseName;
+    let bnUnits = []; try { bnUnits = JSON.parse(s.Units||'[]'); } catch{}
+    // BN's own breaks at specific times
+    const bnBreakTimes = new Set(
+      allBookings
+        .filter(b => b.IsBNBreak && b.NurseName === bnName)
+        .map(b => String(b.SlotTime).padStart(4,'0'))
+    );
+    // Slot times where this BN already has a staff booking on another unit (they're busy)
+    const bnBusySlots = new Set(
+      allBookings
+        .filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit))
+        .map(b => String(b.SlotTime).padStart(4,'0'))
+    );
+    // Check each outgoing booking
+    const canTake = [];
+    const conflicts = [];
+    for(const b of bookings){
+      const t = String(b.SlotTime).padStart(4,'0');
+      if(bnBreakTimes.has(t)){
+        conflicts.push({ booking: b, reason: `${firstName(bnName)} has own break at ${fmt12(t)}` });
+      } else if(bnBusySlots.has(t)){
+        conflicts.push({ booking: b, reason: `${firstName(bnName)} is on another unit at ${fmt12(t)}` });
+      } else {
+        canTake.push(b);
+      }
+    }
+    const sameWing = bnUnits.some(u => getUnitWing(u) === unitWing);
+    return { bnName, schedId: s.Id, bnUnits, canTake, conflicts, sameWing };
+  });
+
+  // Sort: same-wing first, then by most coverage possible
+  candidateInfo.sort((a,b) => {
+    if(a.sameWing !== b.sameWing) return a.sameWing ? -1 : 1;
+    return b.canTake.length - a.canTake.length;
+  });
+
+  // Show picker modal
+  return new Promise(resolve => {
+    const existing = document.getElementById('unitTakeoverModal');
+    if(existing) existing.remove();
+
+    const options = candidateInfo.map((c, i) => {
+      const badge = c.sameWing
+        ? '<span style="font-size:.7rem;font-weight:600;color:var(--teal-dk);background:var(--teal-lt);padding:2px 6px;border-radius:4px;margin-left:6px">Same wing</span>'
+        : '';
+      const summary = c.conflicts.length
+        ? `<span style="color:var(--muted);font-size:.82rem">can cover ${c.canTake.length} of ${bookings.length} · ${c.conflicts.length} conflict${c.conflicts.length!==1?'s':''}</span>`
+        : `<span style="color:var(--green);font-size:.82rem">can cover all ${c.canTake.length} booking${c.canTake.length!==1?'s':''}</span>`;
+      return `<label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px;cursor:pointer">
+        <input type="radio" name="takeoverBN" value="${i}" style="margin-top:3px"/>
+        <div style="flex:1">
+          <div style="font-weight:600">${firstName(c.bnName)}${badge}</div>
+          <div style="margin-top:2px">${summary}</div>
+        </div>
+      </label>`;
+    }).join('');
+
+    const modal = document.createElement('div');
+    modal.id = 'unitTakeoverModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    modal.innerHTML = `
+      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Who covers ${unit} now?</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${bookings.length} future booking${bookings.length!==1?'s':''} on ${unit} will be reassigned</div>
+        <div id="takeoverOptions">${options}</div>
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;margin-top:8px;margin-bottom:16px;cursor:pointer">
+          <input type="radio" name="takeoverBN" value="cancel" style="margin-top:3px"/>
+          <div style="flex:1">
+            <div style="font-weight:600">No one — cancel all ${unit} bookings</div>
+          </div>
+        </label>
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button type="button" class="btn btn-primary" id="_takeoverNextBtn">Next</button>
+          <button type="button" class="btn btn-ghost" id="_takeoverCancelBtn">Go back</button>
+        </div>
+      </div>`;
+    document.body.appendChild(modal);
+
+    document.getElementById('_takeoverCancelBtn').onclick = () => {
+      modal.remove();
+      resolve(null); // admin aborted
+    };
+
+    document.getElementById('_takeoverNextBtn').onclick = () => {
+      const picked = modal.querySelector('input[name="takeoverBN"]:checked');
+      if(!picked){ toast('Pick an option', true); return; }
+      if(picked.value === 'cancel'){
+        modal.remove();
+        resolve({ targetBN: null, transferredBookings: [], cancelledBookings: bookings });
+        return;
+      }
+      const c = candidateInfo[parseInt(picked.value, 10)];
+      // Show confirmation with breakdown
+      modal.querySelector('div > div').innerHTML = `
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Transfer ${unit} to ${firstName(c.bnName)}?</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
+        ${c.canTake.length ? `
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:6px">✓ Will transfer:</div>
+          <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto;font-size:.82rem">
+            ${c.canTake.map(b => `• ${b.NurseName} — ${fmt12(b.SlotTime)}`).join('<br>')}
+          </div>
+        ` : ''}
+        ${c.conflicts.length ? `
+          <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;color:var(--red)">✗ Will cancel — ${firstName(c.bnName)} unavailable at these times:</div>
+          <div style="background:var(--red-lt);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto;font-size:.82rem">
+            ${c.conflicts.map(x => `• ${x.booking.NurseName} — ${fmt12(x.booking.SlotTime)} (${x.reason})`).join('<br>')}
+          </div>
+          <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">Please notify the affected nurses.</div>
+        ` : ''}
+        <div style="display:flex;flex-direction:column;gap:8px">
+          <button type="button" class="btn btn-primary" id="_takeoverConfirmBtn">Confirm</button>
+          <button type="button" class="btn btn-ghost" id="_takeoverBackBtn">Go back</button>
+        </div>
+      `;
+      document.getElementById('_takeoverConfirmBtn').onclick = () => {
+        modal.remove();
+        resolve({
+          targetBN: c.bnName,
+          targetSchedId: c.schedId,
+          targetUnits: c.bnUnits,
+          transferredBookings: c.canTake,
+          cancelledBookings: c.conflicts.map(x => x.booking)
+        });
+      };
+      document.getElementById('_takeoverBackBtn').onclick = () => {
+        modal.remove();
+        // Re-open picker by recursing
+        promptUnitTakeover({ unit, outgoingBN, date, shift, bookings, allScheds, allBookings }).then(resolve);
+      };
+    };
+  });
+}
+
 function set3CForDate(val, btn){
-  const date  = document.getElementById('aDate').value;
-  const shift = S.aShift;
-  if(!date){ toast('Select a date first', true); return; }
-  set3CStatus(date, shift, val);
-  const c3Closed = document.getElementById('3c-closed');
-  const c3Open = document.getElementById('3c-open');
-  if(c3Closed) c3Closed.classList.remove('active');
-  if(c3Open) c3Open.classList.remove('active');
-  if(btn) btn.classList.add('active');
-  update3CToggle();
-  buildStaffUnitGrid(); // refresh staff unit grid
+  // No-op: per-shift Closed/Open toggle buttons removed.
+  // Use the 3C Global Status card instead.
 }
 
 function update3CToggle(){
-  const date  = document.getElementById('aDate').value;
-  const shift = S.aShift;
-  if(!date) return;
-  const status = get3CStatus(date, shift);
-  const closedBtn = document.getElementById('3c-closed');
-  const openBtn   = document.getElementById('3c-open');
-  const label     = document.getElementById('threeCStatusLabel');
-  if(closedBtn) closedBtn.classList.toggle('active', status === 'closed');
-  if(openBtn)   openBtn.classList.toggle('active',   status === 'open');
-  if(label){
-    const isOverride = localStorage.getItem(`unit3C_${date}_${shift}`) !== null;
-    label.textContent = isOverride ? `(overridden: ${status})` : `(default: ${status})`;
-    label.style.color = status === 'open' ? 'var(--green)' : 'var(--muted)';
-  }
+  // No-op: the per-shift 3C toggle card has been removed.
+  // 3C status is now managed via the 3C Global Status card + scheduled entries,
+  // and manual admin assignment automatically exposes 3C to staff.
 }
 
 // ── Build staff unit grid (hides 3C when closed) ─────
+// Cached: is 3C manually assigned to any BN on the current shift?
+// Set by loadSlots/loadAssignments after fetching schedules, read by buildStaffUnitGrid.
+let _3CManuallyAssigned = false;
+
 function buildStaffUnitGrid(){
   const ug = document.getElementById('unitGrid');
   if(!ug) return;
   ug.innerHTML = '';
   const dt = shiftDate(S.shift), shift = S.shift;
+  // Show 3C if either globally open at this moment OR any BN manually assigned
+  // to cover 3C on this shift (admin override case).
+  const show3C = is3COpenAt(new Date()) || _3CManuallyAssigned;
   STAFF_UNITS.forEach(u => {
-    if(u === '3C' && !is3COpenAt(new Date())) return; // hide 3C when currently closed
+    if(u === '3C' && !show3C) return;
     const b = document.createElement('button');
     b.className = 'unit-btn'; b.textContent = u; b.id = `ub-${u}`;
     b.onclick = () => pickUnit(u);
@@ -3917,6 +4039,14 @@ async function loadSlots(silent=false){
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
     const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`) : [];
     const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
+    // Update cached flag: any active BN on this shift has 3C in their units?
+    const prev3CManual = _3CManuallyAssigned;
+    _3CManuallyAssigned = scheds.some(s => {
+      if(s.Status === 'inactive') return false;
+      try { const u = JSON.parse(s.Units || '[]'); return u.includes('3C') || u.includes('C_PAIR'); }
+      catch { return false; }
+    });
+    if(prev3CManual !== _3CManuallyAssigned) buildStaffUnitGrid();
     // For Noc staff, the relevant Day BN schedule is today (not the Noc shift start date yesterday)
     const oppSchedDt = shift === 'Noc' ? today() : oppDt;
     const oppScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === oppSchedDt && s.ShiftType === oppShift);
@@ -4217,9 +4347,10 @@ async function loadSlots(silent=false){
     let allSlots = [...new Set([...overlapSlots, ...mainSlots])];
     allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
 
-    // For 3C only: filter out any slot times that fall after a scheduled closure.
-    // Slot datetime is the shift's date + slot HHMM (with midnight wrap on Noc).
-    if(S.unit === '3C'){
+    // For 3C only: filter out slot times that fall after a scheduled closure —
+    // but skip this filter when a BN is manually assigned to 3C on this shift
+    // (manual assignment overrides the global closed status for staff visibility).
+    if(S.unit === '3C' && !_3CManuallyAssigned){
       allSlots = allSlots.filter(slotTime => {
         const slotDt = slotDateTime(dt, slotTime, shift);
         return is3COpenAt(slotDt);
@@ -6179,43 +6310,121 @@ async function saveAssign(){
     // If editing an active shift, warn coordinator about rotation impact
     const isActiveShift = dt === shiftDate(shift) && staffWindowOpen(shift);
     let bookingsToCancel = [];
+    let takeoverResults = []; // [{unit, targetBN, targetSchedId, targetUnits, transferredBookings, cancelledBookings}]
+
     if(existing.length > 0 && isActiveShift){
       // Check for any existing staff bookings on this BN's units
       const existingUnits = [];
       existing.forEach(s => { try { JSON.parse(s.Units||'[]').forEach(u => { if(!existingUnits.includes(u)) existingUnits.push(u); }); } catch{} });
       const removedUnits = existingUnits.filter(u => !units.includes(u));
       const addedUnits   = units.filter(u => !existingUnits.includes(u));
-      const staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-      // Only count staff bookings on units being REMOVED (those will be cancelled)
-      bookingsToCancel = staffBookings.filter(b => !b.IsBNBreak && removedUnits.includes(b.Unit));
+      // Determine which removed units still have coverage from another BN on this shift.
+      // Those transfer implicitly via display-time attribution — no picker needed.
+      const otherBNUnits = new Set();
+      allScheds
+        .filter(s => s.BreakNurseName !== nurse && s.Status !== 'inactive' && !s.IsSupplemental)
+        .forEach(s => {
+          try { JSON.parse(s.Units||'[]').forEach(u => otherBNUnits.add(u)); } catch{}
+        });
+      const trulyRemovedUnits = removedUnits.filter(u => !otherBNUnits.has(u));
+      const implicitTransferUnits = removedUnits.filter(u => otherBNUnits.has(u));
 
+      const staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+
+      // For each truly removed unit with future bookings, prompt admin for takeover
+      for(const unit of trulyRemovedUnits){
+        const unitFutureBookings = staffBookings.filter(b =>
+          !b.IsBNBreak &&
+          b.Unit === unit &&
+          sortKey(b.SlotTime, shift) > nowKey(shift)
+        );
+        if(!unitFutureBookings.length) continue; // nothing to reassign
+
+        const result = await promptUnitTakeover({
+          unit,
+          outgoingBN: nurse,
+          date: dt,
+          shift,
+          bookings: unitFutureBookings,
+          allScheds,
+          allBookings: staffBookings
+        });
+
+        if(result === null){
+          // Admin aborted — cancel the whole save
+          loadAssignments();
+          return;
+        }
+        takeoverResults.push({ unit, ...result });
+      }
+
+      // Implicit transfers + truly-removed-with-no-bookings just need a simple warning
       let warningLines = [];
       if(removedUnits.length) warningLines.push(`Units removed: ${removedUnits.join(', ')}`);
       if(addedUnits.length)   warningLines.push(`Units added: ${addedUnits.join(', ')}`);
-      if(bookingsToCancel.length){
-        const byNurse = {};
-        bookingsToCancel.forEach(b => {
-          if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
-          byNurse[b.NurseName].push(fmt12(b.SlotTime));
-        });
-        const nurseLines = Object.entries(byNurse)
-          .map(([n, times]) => `• ${formatNurse(n)} — ${times.join(', ')}`)
-          .join('\n');
-        warningLines.push(`Affected staff:\n${nurseLines}`);
-        warningLines.push(`These slots will be cancelled. Please let them know!`);
+
+      if(implicitTransferUnits.length){
+        const implicitTransferBookings = staffBookings.filter(b =>
+          !b.IsBNBreak &&
+          implicitTransferUnits.includes(b.Unit) &&
+          sortKey(b.SlotTime, shift) > nowKey(shift)
+        );
+        if(implicitTransferBookings.length){
+          const takeoverBN = {};
+          implicitTransferUnits.forEach(u => {
+            const bn = allScheds.find(s =>
+              s.BreakNurseName !== nurse && s.Status !== 'inactive' && !s.IsSupplemental &&
+              (() => { try { return JSON.parse(s.Units||'[]').includes(u); } catch { return false; } })()
+            );
+            if(bn) takeoverBN[u] = firstName(bn.BreakNurseName);
+          });
+          const lines = implicitTransferUnits
+            .filter(u => takeoverBN[u])
+            .map(u => `• ${u} bookings will transfer to ${takeoverBN[u]}`)
+            .join('\n');
+          if(lines) warningLines.push(`Coverage transfer:\n${lines}`);
+        }
       }
 
-      const warnMsg = warningLines.join('\n\n');
-      if(!await customConfirm(warnMsg, 'Update assignment', 'Cancel')) return;
+      // Show a confirmation if we have anything to report beyond takeover picker results
+      if(warningLines.length && (implicitTransferUnits.length || addedUnits.length || removedUnits.length > takeoverResults.length)){
+        if(!await customConfirm(warningLines.join('\n\n'), 'Update assignment', 'Cancel')){ loadAssignments(); return; }
+      }
+
+      // Collect cancellations from takeover results
+      for(const r of takeoverResults){
+        if(r.targetBN === null){
+          // Admin picked "cancel all" for this unit
+          bookingsToCancel = bookingsToCancel.concat(r.cancelledBookings);
+        } else {
+          // Some may still be cancelled (conflicts)
+          bookingsToCancel = bookingsToCancel.concat(r.cancelledBookings);
+        }
+      }
     }
 
     if(existing.length > 0){
       for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
     }
-    // Cancel staff bookings on removed units
+    // Cancel staff bookings on removed units (from takeovers + no-transfer cases)
     if(bookingsToCancel.length){
       for(const b of bookingsToCancel) await spDel(LISTS.bookings, b.Id);
     }
+
+    // Apply takeover unit additions — for each BN that's taking over a unit,
+    // patch their assignment to include the new unit and recompute their rotation.
+    for(const r of takeoverResults){
+      if(!r.targetBN || !r.targetSchedId) continue;
+      const newTargetUnits = [...new Set([...(r.targetUnits || []), r.unit])];
+      await spPatch(LISTS.schedule, r.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+      const targetDef = getDefaultTemplate(r.targetBN, shift);
+      if(targetDef && targetDef.length > 0){
+        await applyDefaultToShift(r.targetBN, dt, shift, targetDef).catch(()=>{});
+      } else {
+        await recalculateRotation(r.targetBN, dt, shift).catch(()=>{});
+      }
+    }
+
     await spPost(LISTS.schedule,{
       Title:`${nurse}-${dt}-${shift}`,
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
