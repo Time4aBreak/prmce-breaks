@@ -1008,12 +1008,12 @@ function set3CSchedule(entries){
   // Entries: array of {effectiveAt: ISO string, status: 'open'|'closed'}
   const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
   localStorage.setItem('unit3CSchedule', JSON.stringify(sorted));
-  setState('unit3CSchedule', JSON.stringify(sorted)).catch(()=>{});
+  return setState('unit3CSchedule', JSON.stringify(sorted)); // return promise so callers can await
 }
-function add3CScheduleEntry(effectiveAt, status){
+async function add3CScheduleEntry(effectiveAt, status){
   const list = get3CSchedule();
   list.push({ effectiveAt, status });
-  set3CSchedule(list);
+  await set3CSchedule(list);
 }
 // Returns the next scheduled change after the given datetime (or null)
 function nextScheduled3CChange(fromDate){
@@ -1083,17 +1083,21 @@ function is3COpen(date, shift){ return get3CStatus(date, shift) === 'open'; }
 async function warm3CStatus(date, shift){
   const key = `unit3C_${date}_${shift}`;
   try {
-    // Per-shift override
+    // Per-shift override (only if local doesn't have one)
     if(!localStorage.getItem(key)){
       const remote = await getState(key);
       if(remote !== null) localStorage.setItem(key, remote);
     }
-    // Global default
+    // Global default — BNState is source of truth
     const def = await getState('unit3CDefault');
     if(def !== null) localStorage.setItem('unit3CDefault', def);
-    // Schedule list
-    const schedRaw = await getState('unit3CSchedule');
-    if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
+    // Schedule list — only warm from BNState if local doesn't have a valid list.
+    // After the first set3CSchedule write, local is kept in sync with every edit,
+    // so pulling from BNState could overwrite an in-flight write-not-yet-confirmed.
+    if(!localStorage.getItem('unit3CSchedule')){
+      const schedRaw = await getState('unit3CSchedule');
+      if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
+    }
     // Refresh toggle if admin panel is visible
     show3CDefaultToggle();
   } catch(e){}
@@ -2348,7 +2352,7 @@ function show3CDefaultToggle(){
 async function cancelScheduled3CChange(effectiveAt){
   if(!await customConfirm('Cancel this scheduled 3C change?', 'Yes, cancel it', 'Go back')) return;
   const list = get3CSchedule().filter(e => e.effectiveAt !== effectiveAt);
-  set3CSchedule(list);
+  await set3CSchedule(list);
   show3CDefaultToggle();
   toast('Scheduled change cancelled');
 }
@@ -2401,8 +2405,15 @@ function _close3CModal(){
   if(m) m.remove();
 }
 
-function open3CStatusModal(){
+async function open3CStatusModal(){
   _close3CModal();
+  // Cross-device sync: pull latest schedule from BNState before rendering
+  try {
+    const schedRaw = await getState('unit3CSchedule');
+    if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
+  } catch(e){}
+  show3CDefaultToggle();
+
   const currentStatus = effective3CStatusAt(new Date());
   const targetStatus = currentStatus === 'open' ? 'closed' : 'open';
   const verb = targetStatus === 'open' ? 'Open' : 'Close';
@@ -2593,8 +2604,9 @@ async function commit3CChange(){
   _close3CModal();
   showBusy('Applying 3C change…');
   try {
-    // 1. Add schedule entry
-    add3CScheduleEntry(pending.effectiveIso, pending.targetStatus);
+    // 1. Add schedule entry (await so BNState write completes before any
+    //    warm3CStatus call can pull back a stale value)
+    await add3CScheduleEntry(pending.effectiveIso, pending.targetStatus);
 
     // 2. For closures, cancel affected bookings (parallel) + update each BN's assignment
     if(pending.targetStatus === 'closed'){
