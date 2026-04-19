@@ -2794,14 +2794,21 @@ async function promptUnitTakeover({ unit, outgoingBN, date, shift, bookings, all
     !s.IsSupplemental
   );
   if(!activeBNs.length){
-    // No candidates — caller handles with cancel flow
+    // No other BNs on shift — confirm direct cancellation
+    const lines = bookings.map(b => `• ${b.NurseName} — ${fmt12(b.SlotTime)}`).join('\n');
+    const ok = await customConfirm(
+      `No other break nurses are on this shift.\n\nAll ${bookings.length} booking${bookings.length!==1?'s':''} on ${unit} will be cancelled:\n\n${lines}`,
+      'Cancel bookings',
+      'Go back'
+    );
+    if(!ok) return null;
     return { targetBN: null, transferredBookings: [], cancelledBookings: bookings };
   }
 
   const unitWing = getUnitWing(unit);
 
   // For each candidate, compute which bookings they can take
-  const candidateInfo = activeBNs.map(s => {
+  const allCandidates = activeBNs.map(s => {
     const bnName = s.BreakNurseName;
     let bnUnits = []; try { bnUnits = JSON.parse(s.Units||'[]'); } catch{}
     // BN's own breaks at specific times
@@ -2832,6 +2839,22 @@ async function promptUnitTakeover({ unit, outgoingBN, date, shift, bookings, all
     const sameWing = bnUnits.some(u => getUnitWing(u) === unitWing);
     return { bnName, schedId: s.Id, bnUnits, canTake, conflicts, sameWing };
   });
+
+  // Only candidates who can cover at least 1 booking are genuine transfer targets.
+  // BNs who can cover 0 are effectively cancellations — use the "cancel all" option.
+  const candidateInfo = allCandidates.filter(c => c.canTake.length > 0);
+
+  // If nobody can take any booking, explain and confirm cancellation directly
+  if(!candidateInfo.length){
+    const lines = bookings.map(b => `• ${b.NurseName} — ${fmt12(b.SlotTime)}`).join('\n');
+    const ok = await customConfirm(
+      `No other BN on this shift is free at these times:\n\n${lines}\n\nAll ${bookings.length} booking${bookings.length!==1?'s':''} will be cancelled.`,
+      'Cancel bookings',
+      'Go back'
+    );
+    if(!ok) return null;
+    return { targetBN: null, transferredBookings: [], cancelledBookings: bookings };
+  }
 
   // Sort: same-wing first, then by most coverage possible
   candidateInfo.sort((a,b) => {
@@ -5382,6 +5405,7 @@ async function editAssign(id){
     const body = document.getElementById('assignFormBody');
     if(body && body.style.display === 'none') toggleAssignForm();
     toast(`Editing ${firstName(s.BreakNurseName)} — modify units and click Save Assignment`);
+    loadAssignments(); // refresh so Edit button label resets
   } catch(e) { toast(e.message, true); loadAssignments(); }
 }
 
