@@ -2378,16 +2378,40 @@ function _3CTick(){
     return;
   }
   if(nowStatus !== _3CTickLastStatus){
+    const prevStatus = _3CTickLastStatus;
     _3CTickLastStatus = nowStatus;
     show3CDefaultToggle();
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
     if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
     if(typeof loadAssignments === 'function') loadAssignments();
+    // Recompute rotations for BNs with 3C in their units — so 3C slots appear
+    // or disappear from rotation automatically at boundary crossings.
+    recompute3CAffectedRotations().catch(()=>{});
   } else {
     // Even if status didn't flip, if a scheduled entry was crossed re-render the status line
     // so "Scheduled: ... at ..." updates when the time arrives
     show3CDefaultToggle();
   }
+}
+
+async function recompute3CAffectedRotations(){
+  try {
+    const t = shiftDate(detectShift());
+    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    const active = scheds.filter(s => {
+      if(s.Status === 'inactive') return false;
+      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+      return units.includes('3C') || units.includes('C_PAIR');
+    });
+    await Promise.all(active.map(async (s) => {
+      const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
+      if(bnDef && bnDef.length > 0){
+        await applyDefaultToShift(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType, bnDef).catch(()=>{});
+      } else {
+        await recalculateRotation(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType).catch(()=>{});
+      }
+    }));
+  } catch(e){ /* silent */ }
 }
 // Start ticking once per minute after page loads
 if(typeof window !== 'undefined' && !window._3CTickStarted){
@@ -2643,15 +2667,18 @@ async function commit3CChange(){
           const sched = await spGet(LISTS.schedule, `Id eq ${i.schedId}`);
           if(!sched.length) return;
           let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
+          // Normalize legacy C_PAIR → ['3C','4C'] (so 3C stays visible as greyed-out tag
+          // when closed). We keep 3C in the Units array intentionally — closure is
+          // reflected by is3COpen() / rotation exclusion, not by stripping units.
           const hasC_PAIR = units.includes('C_PAIR');
-          let newUnits;
           if(hasC_PAIR){
-            newUnits = units.filter(u => u !== 'C_PAIR' && u !== '3C');
-            if(!newUnits.includes('4C')) newUnits.push('4C');
-          } else {
-            newUnits = units.filter(u => u !== '3C');
+            const migrated = units.filter(u => u !== 'C_PAIR');
+            if(!migrated.includes('3C')) migrated.push('3C');
+            if(!migrated.includes('4C')) migrated.push('4C');
+            await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(migrated) });
           }
-          await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(newUnits) });
+          // Recompute rotation — 3C will be excluded naturally because is3COpen
+          // returns false for this shift after the schedule entry is saved.
           const bnDef = getDefaultTemplate(i.bn, i.shift);
           if(bnDef && bnDef.length > 0){
             await applyDefaultToShift(i.bn, i.date, i.shift, bnDef).catch(()=>{});
