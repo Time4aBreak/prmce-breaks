@@ -6422,6 +6422,8 @@ async function saveAssign(){
       }
     }
 
+    showBusy(existing.length > 0 ? `Updating ${firstName(nurse)}'s assignment…` : `Saving assignment for ${firstName(nurse)}…`);
+
     if(existing.length > 0){
       for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
     }
@@ -6449,7 +6451,6 @@ async function saveAssign(){
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
       Units:JSON.stringify(units)
     });
-    toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     S.aUnits=[];
     S.editingAssignId = null;
     document.getElementById('aNurseText').value = '';
@@ -6465,8 +6466,10 @@ async function saveAssign(){
         await recalculateRotation(nurse, dt, shift);
       }
     } catch(e){ toast('Rotation error: ' + e.message, true); }
+    hideBusy();
+    toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     loadAssignments();
-  }catch(e){ toast(e.message,true); loadAssignments(); }
+  }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); }
 }
 
 let _viewRange = 'all';
@@ -6652,107 +6655,141 @@ async function delAssign(id){
 }
 
 async function closeUnit(schedId, unit, bnName, date, shift){
+  showBusy('Loading…');
   try {
-    // Get future claimed bookings on this unit
-    const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(unit)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
-    const future = bookings.filter(b => !b.IsBNBreak && sortKey(b.SlotTime, shift) > nowKey(shift));
-
-    // Get this BN's other units on this assignment
+    // Get this BN's current units
     const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
-    if(!scheds.length){ toast('Assignment not found', true); return; }
+    if(!scheds.length){ hideBusy(); toast('Assignment not found', true); return; }
     let units = []; try { units = JSON.parse(scheds[0].Units||'[]'); } catch{}
-    const remaining = units.filter(u => u !== unit);
+    const newUnits = units.filter(u => u !== unit);
 
-    // Build modal content
-    const bookingHtml = future.length
-      ? future.map(b => `<div style="font-size:.82rem">• ${b.NurseName} at ${fmt12(b.SlotTime)}</div>`).join('')
-      : '<div style="font-size:.82rem;color:var(--muted)">No pending bookings on this unit.</div>';
+    // Get all future bookings on this unit (for this date/shift)
+    const allBookings = await spGet(LISTS.bookings,
+      `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const futureOnUnit = allBookings.filter(b =>
+      !b.IsBNBreak && b.Unit === unit && sortKey(b.SlotTime, shift) > nowKey(shift)
+    );
 
-    const ALL_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
-    const isUnitInactive = (u) => u === '3C' && !is3COpen(date, shift);
-    const redirectOptions = ALL_UNITS
-      .filter(u => u !== unit)
-      .map(u => {
-        const inactive = isUnitInactive(u);
-        // Pre-check already-assigned units UNLESS they're inactive (e.g. 3C when closed)
-        const checked = remaining.includes(u) && !inactive;
-        const style = inactive ? 'opacity:.45' : '';
-        const title = inactive ? ' title="3C is closed for this shift"' : '';
-        return `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px;${style}"${title}><input type="checkbox" value="${u}"${checked ? ' checked' : ''}${inactive ? ' disabled' : ''}> ${u}${inactive ? ' (closed)' : ''}</label>`;
-      }).join('');
+    // Is this shift active right now?
+    const isActiveShift = date === shiftDate(shift) && staffWindowOpen(shift);
 
-    const existing = document.getElementById('closeUnitModal');
-    if(existing) existing.remove();
+    // Check whether another BN already covers this unit on this shift —
+    // if yes, bookings transfer implicitly via display attribution.
+    const allScheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const otherCoverage = allScheds.find(s =>
+      s.Id !== schedId &&
+      s.BreakNurseName !== bnName &&
+      s.Status !== 'inactive' &&
+      !s.IsSupplemental &&
+      (() => { try { return JSON.parse(s.Units||'[]').includes(unit); } catch { return false; } })()
+    );
+    hideBusy();
 
-    const modal = document.createElement('div');
-    modal.id = 'closeUnitModal';
-    modal.style.cssText = `position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px`;
-    modal.innerHTML = `
-      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Close Unit: ${unit}</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${firstName(bnName)} · ${shift} · ${date}</div>
-        ${future.length ? `
-          <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">⚠️ ${future.length} pending booking${future.length!==1?'s':''} will be cancelled:</div>
-          <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:14px;max-height:100px;overflow-y:auto">${bookingHtml}</div>
-        ` : `<div style="margin-bottom:14px">${bookingHtml}</div>`}
-        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Which units should ${firstName(bnName)} cover going forward?</div>
-          <div id="redirectUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px">${redirectOptions}</div>
-        <div style="display:flex;gap:8px;justify-content:flex-end">
-          <button class="btn btn-ghost btn-sm" onclick="document.getElementById('closeUnitModal').remove()">Cancel</button>
-          <button class="btn btn-danger btn-sm" onclick="confirmCloseUnit(${schedId},'${unit}','${date}','${shift}')">Close Unit</button>
-        </div>
-      </div>`;
-    document.body.appendChild(modal);
+    // Case 1 — No future bookings: simple confirm, just remove the unit
+    if(!futureOnUnit.length){
+      if(!await customConfirm(`Remove ${unit} from ${firstName(bnName)}?`, 'Remove', 'Cancel')) return;
+      showBusy(`Removing ${unit} from ${firstName(bnName)}…`);
+      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+      await _recomputeAfterCloseUnit(bnName, date, shift);
+      hideBusy();
+      toast(`${unit} removed from ${firstName(bnName)}`);
+      loadAssignments();
+      return;
+    }
 
-    window._closeUnitData = { future, units, remaining };
-  } catch(e){ toast(e.message, true); }
+    // Case 2 — Future bookings exist + another BN already covers unit:
+    // transfer implicitly, no picker needed
+    if(otherCoverage){
+      const msg = `${futureOnUnit.length} future booking${futureOnUnit.length!==1?'s':''} on ${unit} will transfer to ${firstName(otherCoverage.BreakNurseName)}.\n\nRemove ${unit} from ${firstName(bnName)}?`;
+      if(!await customConfirm(msg, 'Remove', 'Cancel')) return;
+      showBusy(`Transferring ${unit} to ${firstName(otherCoverage.BreakNurseName)}…`);
+      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+      await _recomputeAfterCloseUnit(bnName, date, shift);
+      hideBusy();
+      toast(`${unit} transferred to ${firstName(otherCoverage.BreakNurseName)}`);
+      loadAssignments();
+      return;
+    }
+
+    // Case 3 — Future bookings, no other coverage:
+    // If shift is active, use takeover picker. Otherwise, warn & cancel all.
+    if(isActiveShift){
+      const result = await promptUnitTakeover({
+        unit,
+        outgoingBN: bnName,
+        date,
+        shift,
+        bookings: futureOnUnit,
+        allScheds,
+        allBookings
+      });
+      if(result === null) return; // admin dismissed
+
+      const busyMsg = result.targetBN
+        ? `Transferring ${unit} to ${firstName(result.targetBN)}…`
+        : `Cancelling ${result.cancelledBookings.length} booking${result.cancelledBookings.length!==1?'s':''}…`;
+      showBusy(busyMsg);
+      // Apply takeover: add unit to target BN (if any), cancel conflicting bookings
+      for(const b of result.cancelledBookings) await spDel(LISTS.bookings, b.Id);
+      if(result.targetBN && result.targetSchedId){
+        const newTargetUnits = [...new Set([...(result.targetUnits || []), unit])];
+        await spPatch(LISTS.schedule, result.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+        const targetDef = getDefaultTemplate(result.targetBN, shift);
+        if(targetDef && targetDef.length > 0){
+          await applyDefaultToShift(result.targetBN, date, shift, targetDef).catch(()=>{});
+        } else {
+          await recalculateRotation(result.targetBN, date, shift).catch(()=>{});
+        }
+      }
+      // Remove unit from outgoing BN
+      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+      await _recomputeAfterCloseUnit(bnName, date, shift);
+      hideBusy();
+      const transferCount = result.transferredBookings.length;
+      const cancelCount = result.cancelledBookings.length;
+      let msg;
+      if(result.targetBN){
+        msg = `${unit} → ${firstName(result.targetBN)}`;
+        if(transferCount) msg += ` · ${transferCount} booking${transferCount!==1?'s':''} transferred`;
+        if(cancelCount) msg += ` · ${cancelCount} cancelled`;
+      } else {
+        msg = `${unit} closed · ${cancelCount} booking${cancelCount!==1?'s':''} cancelled`;
+      }
+      toast(msg);
+      loadAssignments();
+      return;
+    }
+
+    // Case 4 — Future-shift unit removal with bookings and no other coverage:
+    // Just confirm + cancel bookings (no takeover flow for non-active shifts)
+    const lines = futureOnUnit.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
+    const msg = `${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} on ${unit} will be cancelled:\n\n${lines}\n\nRemove ${unit} from ${firstName(bnName)}?`;
+    if(!await customConfirm(msg, 'Remove & cancel bookings', 'Cancel')) return;
+    showBusy(`Cancelling ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''}…`);
+    for(const b of futureOnUnit) await spDel(LISTS.bookings, b.Id);
+    await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
+    await _recomputeAfterCloseUnit(bnName, date, shift);
+    hideBusy();
+    toast(`${unit} removed · ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} cancelled`);
+    loadAssignments();
+  } catch(e){ hideBusy(); toast(e.message, true); }
 }
 
+async function _recomputeAfterCloseUnit(bnName, date, shift){
+  const bnDef = getDefaultTemplate(bnName, shift);
+  if(bnDef && bnDef.length > 0){
+    await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
+  } else {
+    await recalculateRotation(bnName, date, shift).catch(()=>{});
+  }
+}
+
+// Deprecated — the old Close Unit modal with redirect checkboxes. New closeUnit
+// flow handles everything inline or via promptUnitTakeover.
 async function confirmCloseUnit(schedId, unit, date, shift){
   const modal = document.getElementById('closeUnitModal');
-  const { future, units } = window._closeUnitData || {};
-
-  // Get checked redirect units
-  const checkboxes = modal.querySelectorAll('#redirectUnits input[type=checkbox]');
-  const redirectTo = [...checkboxes].filter(c => c.checked).map(c => c.value);
-
-  modal.remove();
-
-  try {
-    // Cancel future bookings on closed unit
-    for(const b of future) await spDel(LISTS.bookings, b.Id);
-
-    // Remove closed unit, add any redirect units not already in assignment
-    const newUnits = [...new Set([...units.filter(u => u !== unit), ...redirectTo])];
-    await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
-
-    // Recalculate rotation with updated units
-    const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
-    let bnName = '';
-    if(sched.length){
-      const s = sched[0];
-      bnName = s.BreakNurseName;
-      const bnDef = getDefaultTemplate(bnName, shift);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
-      } else {
-        await recalculateRotation(bnName, date, shift).catch(()=>{});
-      }
-    }
-
-    const cancelled = future.length;
-    const coveredStr = redirectTo.length ? redirectTo.join(', ') : 'no units';
-    const bnDisplay = bnName ? firstName(bnName) : 'BN';
-    let msg;
-    if(cancelled){
-      msg = `${unit} closed · ${cancelled} booking${cancelled!==1?'s':''} cancelled · ${bnDisplay} now covers ${coveredStr}`;
-    } else {
-      msg = `${unit} closed · ${bnDisplay} now covers ${coveredStr}`;
-    }
-    toast(msg);
-    loadAssignments();
-  } catch(e){ toast(e.message, true); }
+  if(modal) modal.remove();
 }
 async function recalculateAllRotations(){
   if(!await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
@@ -10115,6 +10152,7 @@ async function syncNurseInput(val){
   const shift = S.aShift;
   if(!date || !shift) return;
 
+  showBusy(`Loading ${firstName(val)}'s assignment…`);
   try {
     const scheds = await spGet(LISTS.schedule,
       `BreakNurseName eq '${esc(val)}' and ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
@@ -10133,14 +10171,17 @@ async function syncNurseInput(val){
       });
       // Track editing so saveAssign patches instead of posting new
       S.editingAssignId = active[0].Id;
+      hideBusy();
       toast(`Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`);
     } else {
       // No existing assignment — clear unit grid and exit edit mode
       S.aUnits = [];
       S.editingAssignId = null;
       document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
+      hideBusy();
     }
   } catch(e){
+    hideBusy();
     console.warn('syncNurseInput lookup failed:', e.message);
   }
 }
