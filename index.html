@@ -2411,11 +2411,11 @@ function _3CScheduleLater(targetStatus){
       <div style="display:flex;gap:8px;margin-bottom:18px">
         <div style="flex:1">
           <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Date</label>
-          <input type="date" id="_3cSchedDate" value="${defDate}" style="width:100%"/>
+          <input type="date" id="_3cSchedDate" value="${defDate}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
         </div>
         <div style="flex:1">
           <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Time</label>
-          <input type="time" id="_3cSchedTime" value="${defTime}" style="width:100%"/>
+          <input type="time" id="_3cSchedTime" value="${defTime}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
@@ -2551,40 +2551,47 @@ async function commit3CChange(){
     // 1. Add schedule entry
     add3CScheduleEntry(pending.effectiveIso, pending.targetStatus);
 
-    // 2. For closures, cancel affected bookings
+    // 2. For closures, cancel affected bookings (parallel) + update each BN's assignment
     if(pending.targetStatus === 'closed'){
-      for(const b of pending.affectedBookings){
-        await spDel(LISTS.bookings, b.Id);
+      if(pending.affectedBookings.length){
+        showBusy(`Cancelling ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''}…`);
+        await Promise.all(pending.affectedBookings.map(b => spDel(LISTS.bookings, b.Id)));
       }
 
-      // 3. For each BN with other units, remove 3C from their assignment and redistribute rotation
+      // 3. For each BN with other units, remove 3C + redistribute rotation.
+      // Do these in parallel per-BN since they affect different records.
       const reassignNeeded = [];
+      const bnUpdates = [];
       for(const i of pending.bnImpacts){
         if(i.hasOtherUnits){
-          // Remove 3C from this BN's units
+          bnUpdates.push(i);
+        } else {
+          reassignNeeded.push(i);
+        }
+      }
+
+      if(bnUpdates.length){
+        showBusy(`Updating ${bnUpdates.length} BN assignment${bnUpdates.length!==1?'s':''}…`);
+        await Promise.all(bnUpdates.map(async (i) => {
           const sched = await spGet(LISTS.schedule, `Id eq ${i.schedId}`);
-          if(!sched.length) continue;
+          if(!sched.length) return;
           let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
           const hasC_PAIR = units.includes('C_PAIR');
           let newUnits;
           if(hasC_PAIR){
-            // Expand C_PAIR → 4C only (drop 3C)
             newUnits = units.filter(u => u !== 'C_PAIR' && u !== '3C');
             if(!newUnits.includes('4C')) newUnits.push('4C');
           } else {
             newUnits = units.filter(u => u !== '3C');
           }
           await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(newUnits) });
-          // Redistribute rotation
           const bnDef = getDefaultTemplate(i.bn, i.shift);
           if(bnDef && bnDef.length > 0){
             await applyDefaultToShift(i.bn, i.date, i.shift, bnDef).catch(()=>{});
           } else {
             await recalculateRotation(i.bn, i.date, i.shift).catch(()=>{});
           }
-        } else {
-          reassignNeeded.push(i);
-        }
+        }));
       }
 
       hideBusy();
