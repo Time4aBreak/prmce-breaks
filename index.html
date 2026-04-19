@@ -997,9 +997,85 @@ function set3CDefault(val){
   localStorage.setItem('unit3CDefault', val);
   setState('unit3CDefault', val).catch(()=>{});
 }
+
+// ── 3C schedule (list of {effectiveAt, status}) ─────────
+// Sorted ascending by effectiveAt. `effective3CStatusAt(datetime)` walks
+// the list and returns the most recent entry's status at or before datetime.
+function get3CSchedule(){
+  try {
+    const raw = localStorage.getItem('unit3CSchedule');
+    if(!raw) return [];
+    const arr = JSON.parse(raw);
+    return Array.isArray(arr) ? arr : [];
+  } catch { return []; }
+}
+function set3CSchedule(entries){
+  // Entries: array of {effectiveAt: ISO string, status: 'open'|'closed'}
+  const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
+  localStorage.setItem('unit3CSchedule', JSON.stringify(sorted));
+  setState('unit3CSchedule', JSON.stringify(sorted)).catch(()=>{});
+}
+function add3CScheduleEntry(effectiveAt, status){
+  const list = get3CSchedule();
+  list.push({ effectiveAt, status });
+  set3CSchedule(list);
+}
+// Returns the next scheduled change after the given datetime (or null)
+function nextScheduled3CChange(fromDate){
+  const now = fromDate || new Date();
+  const nowIso = toLocalIso(now);
+  return get3CSchedule().find(e => e.effectiveAt > nowIso) || null;
+}
+
+// Convert a Date to a local-time ISO-ish string "YYYY-MM-DDTHH:MM" for comparison.
+// We store and compare as local times (PST/PDT) consistently.
+function toLocalIso(d){
+  const p = n => String(n).padStart(2,'0');
+  return `${d.getFullYear()}-${p(d.getMonth()+1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+// Parse "YYYY-MM-DDTHH:MM" as local time
+function parseLocalIso(s){
+  const [dPart, tPart] = s.split('T');
+  const [y,m,d] = dPart.split('-').map(Number);
+  const [hh,mm] = (tPart||'00:00').split(':').map(Number);
+  return new Date(y, m-1, d, hh, mm);
+}
+
+// Compute the start datetime of a given shift on a given date (YYYY-MM-DD).
+// Day shift starts 06:30, Noc starts 20:00. Used to resolve 3C status for a shift.
+function shiftStartDateTime(date, shift){
+  const [y,m,d] = date.split('-').map(Number);
+  if(shift === 'Noc') return new Date(y, m-1, d, 20, 0);
+  // Day or Other
+  return new Date(y, m-1, d, 6, 30);
+}
+
+// ── Core resolver: 3C status at a specific moment ──────
+// Per-shift override wins (admin explicitly set this one shift).
+// Otherwise walk the schedule timeline, find most recent entry ≤ datetime.
+// Fallback to global default.
+function effective3CStatusAt(datetime){
+  const dt = datetime instanceof Date ? datetime : parseLocalIso(datetime);
+  const dtIso = toLocalIso(dt);
+  // Walk schedule: find last entry with effectiveAt <= dt
+  const schedule = get3CSchedule();
+  let scheduled = null;
+  for(const e of schedule){
+    if(e.effectiveAt <= dtIso) scheduled = e;
+    else break;
+  }
+  if(scheduled) return scheduled.status;
+  return get3CDefault();
+}
+function is3COpenAt(datetime){ return effective3CStatusAt(datetime) === 'open'; }
+
 function get3CStatus(date, shift){
+  // Per-shift override wins
   const key = `unit3C_${date}_${shift}`;
-  return localStorage.getItem(key) || get3CDefault();
+  const override = localStorage.getItem(key);
+  if(override) return override;
+  // Otherwise use scheduled/default at shift start
+  return effective3CStatusAt(shiftStartDateTime(date, shift));
 }
 function set3CStatus(date, shift, val){
   const key = `unit3C_${date}_${shift}`;
@@ -1008,17 +1084,21 @@ function set3CStatus(date, shift, val){
 }
 function is3COpen(date, shift){ return get3CStatus(date, shift) === 'open'; }
 
-// Warm 3C status from backend for a given date/shift
+// Warm 3C state from backend
 async function warm3CStatus(date, shift){
   const key = `unit3C_${date}_${shift}`;
-  if(localStorage.getItem(key)) return;
   try {
-    const remote = await getState(key);
-    if(remote !== null) localStorage.setItem(key, remote);
-    // Always fetch unit3CDefault from BNState — source of truth is Sheets, not localStorage
+    // Per-shift override
+    if(!localStorage.getItem(key)){
+      const remote = await getState(key);
+      if(remote !== null) localStorage.setItem(key, remote);
+    }
+    // Global default
     const def = await getState('unit3CDefault');
-    const resolved = (def !== null) ? def : 'closed';
-    localStorage.setItem('unit3CDefault', resolved);
+    if(def !== null) localStorage.setItem('unit3CDefault', def);
+    // Schedule list
+    const schedRaw = await getState('unit3CSchedule');
+    if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
     // Refresh toggle if admin panel is visible
     show3CDefaultToggle();
   } catch(e){}
@@ -1484,6 +1564,23 @@ function shiftDate(shift){
 function nowMin(){
   const n = new Date();
   return n.getHours()*60 + n.getMinutes();
+}
+
+// Convert a slot (YYYY-MM-DD, HHMM, shift) to an actual Date.
+// Noc slots that fall between midnight and shift end (08:30 next day)
+// belong to the next calendar day, so we bump the date.
+function slotDateTime(shiftDateStr, slotTime, shift){
+  const t = String(slotTime).padStart(4, '0');
+  const hh = parseInt(t.slice(0,2), 10);
+  const mm = parseInt(t.slice(2,4), 10);
+  const [y, m, d] = shiftDateStr.split('-').map(Number);
+  // Noc wraps past midnight: if slot time < 20:00, it's the next day
+  if(shift === 'Noc' && (hh < 20)){
+    const next = new Date(y, m-1, d, hh, mm);
+    next.setDate(next.getDate() + 1);
+    return next;
+  }
+  return new Date(y, m-1, d, hh, mm);
 }
 
 // ── Shift icons ─────────────────────────────────────────
@@ -2277,7 +2374,7 @@ function buildStaffUnitGrid(){
   ug.innerHTML = '';
   const dt = shiftDate(S.shift), shift = S.shift;
   STAFF_UNITS.forEach(u => {
-    if(u === '3C' && !is3COpen(dt, shift)) return; // hide 3C when closed
+    if(u === '3C' && !is3COpenAt(new Date())) return; // hide 3C when currently closed
     const b = document.createElement('button');
     b.className = 'unit-btn'; b.textContent = u; b.id = `ub-${u}`;
     b.onclick = () => pickUnit(u);
@@ -3671,8 +3768,17 @@ async function loadSlots(silent=false){
     }
 
     // Merge and sort all slots by time-of-day (handling midnight wrap for Noc)
-    const allSlots = [...new Set([...overlapSlots, ...mainSlots])];
+    let allSlots = [...new Set([...overlapSlots, ...mainSlots])];
     allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
+
+    // For 3C only: filter out any slot times that fall after a scheduled closure.
+    // Slot datetime is the shift's date + slot HHMM (with midnight wrap on Noc).
+    if(S.unit === '3C'){
+      allSlots = allSlots.filter(slotTime => {
+        const slotDt = slotDateTime(dt, slotTime, shift);
+        return is3COpenAt(slotDt);
+      });
+    }
 
     const bMap    = {};
     bookings.forEach(b => { if (!b.IsBNBreak) bMap[String(b.SlotTime).padStart(4,'0')] = b; });
