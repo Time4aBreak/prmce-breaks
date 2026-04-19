@@ -998,17 +998,27 @@ function set3CDefault(val){
 // the list and returns the most recent entry's status at or before datetime.
 function get3CSchedule(){
   try {
-    const raw = localStorage.getItem('unit3CSchedule');
+    let raw = localStorage.getItem('unit3CSchedule');
     if(!raw) return [];
-    const arr = JSON.parse(raw);
-    return Array.isArray(arr) ? arr : [];
+    let parsed = JSON.parse(raw);
+    // Self-heal: if parsed is a string, it was double-stringified — unwrap once more
+    if(typeof parsed === 'string'){
+      try { parsed = JSON.parse(parsed); } catch { parsed = []; }
+      // Write back the cleaned version
+      localStorage.setItem('unit3CSchedule', JSON.stringify(parsed));
+      setState('unit3CSchedule', parsed).catch(()=>{});
+    }
+    return Array.isArray(parsed) ? parsed : [];
   } catch { return []; }
 }
 function set3CSchedule(entries){
   // Entries: array of {effectiveAt: ISO string, status: 'open'|'closed'}
   const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
+  // setState stringifies internally and keeps localStorage in sync as cache.
+  // Also pre-populate localStorage synchronously so subsequent reads see the new value
+  // before the BNState round-trip completes.
   localStorage.setItem('unit3CSchedule', JSON.stringify(sorted));
-  return setState('unit3CSchedule', JSON.stringify(sorted)); // return promise so callers can await
+  return setState('unit3CSchedule', sorted); // pass the array, NOT a stringified array
 }
 async function add3CScheduleEntry(effectiveAt, status){
   const list = get3CSchedule();
