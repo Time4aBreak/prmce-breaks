@@ -432,10 +432,15 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <!-- Confirm staff breaks -->
       <div id="bnConfirmWrap" style="display:none">
         <div class="card">
-          <div class="bn-card-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-            <div class="card-label" style="margin:0">✅ Staff Breaks Taken</div>
-            <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='✓ Taken All'})">✓ Taken All</button>
+          <div class="bn-card-hd" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:8px;flex-wrap:wrap">
+            <div class="card-label" style="margin:0;display:flex;align-items:center;gap:8px">
+              <span>📋 Productivity Log</span>
+              <span id="prodLogCount" style="display:none;font-size:.72rem;font-weight:600;color:var(--teal-dk);background:var(--teal-mid);padding:2px 8px;border-radius:10px"></span>
+            </div>
+            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+              <button class="btn btn-primary btn-sm" id="prodLogSubmit" onclick="submitStagedActions()" style="display:none">Submit changes</button>
+              <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()" style="display:none;color:var(--muted)">✕ Clear</button>
+              <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
               <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
             </div>
           </div>
@@ -1641,24 +1646,22 @@ function generateSlots(shift){
 // ── Hard-blocked slots ───────────────────────────────
 // These are never shown to staff regardless of rotation.
 // 0755 is only blocked on weekdays (huddle Mon-Fri); unblocked on weekends
+// 0815 (Noc) and 2015 (Day) = last-before-clockout slots, blocked for staff
+// all days — a break here would end at clock-out time with no buffer.
 const HARD_BLOCKED_SLOTS = {
-  Noc: ['0635', '0655', '1835', '1855'], // shift change slots — 0755 added dynamically on weekdays
-  Day: ['0635', '0655', '1835', '1855']  // shift change (0630) + shift change (1830)
+  Noc: ['0635', '0655', '1835', '1855', '0815'], // shift change + clock-out buffer
+  Day: ['0635', '0655', '1835', '1855', '2015']  // shift change + clock-out buffer
 };
 
 // Slots the BN themselves cannot take as a break (separate from staff hard-blocks)
 function getBNHardBlocked(shift){
-  // Returns slots to HIDE entirely from the BN's break slot list
-  // 0815 (Noc) and 2015 (Day) are hard-blocked for staff — remove from BN list too
-  // 0755 weekdays: Noc BN must be at huddle — blocked for BN breaks
-  // 0635, 0655 (Noc), 1835, 1855 (Day): hard-blocked for staff but BNs CAN use these
+  // BNs can technically take a break at any staff-blocked slot except:
+  //   - 0755 weekday Noc: BN must be at huddle
+  // 0815 and 2015 are blocked for staff (no one to cover) but a BN on
+  // their own break doesn't need coverage, so those aren't BN-blocked.
   const dow = new Date().getDay();
   const isWeekday = dow >= 1 && dow <= 5;
-  if(shift === 'Noc'){
-    return isWeekday ? ['0755', '0815'] : ['0815'];
-  } else {
-    return ['2015'];
-  }
+  return (shift === 'Noc' && isWeekday) ? ['0755'] : [];
 }
 
 function getDayHardBlocked(){
@@ -1671,7 +1674,9 @@ function getDayHardBlocked(){
 function getNocHardBlocked(){
   const dow = new Date().getDay(); // 0=Sun, 6=Sat
   const isWeekday = dow >= 1 && dow <= 5;
-  return isWeekday ? [...HARD_BLOCKED_SLOTS.Noc, '0755'] : [...HARD_BLOCKED_SLOTS.Noc, '0815'];
+  // 0755 weekday only — Noc BN at huddle, can't run a break then.
+  // 0815 is in base HARD_BLOCKED_SLOTS.Noc (clock-out buffer, all days).
+  return isWeekday ? [...HARD_BLOCKED_SLOTS.Noc, '0755'] : [...HARD_BLOCKED_SLOTS.Noc];
 }
 
 // Day staff overlap window extends to 0815 on weekends (0815 slot blocked — last valid is 0755)
@@ -2743,6 +2748,20 @@ async function validatePortalPassword(pw){
 }
 
 function showSubTab(name, btn){
+  // Warn if leaving a sub-tab with staged Productivity Log changes.
+  // The My Shift tab hosts the Productivity Log, so the risk is navigating
+  // away from 'bn' with unsaved changes.
+  if(typeof _prodLogStaged !== 'undefined' && _prodLogStaged.size > 0){
+    const activeSub = document.querySelector('.subtab.active');
+    const isLeavingBN = activeSub && activeSub.id === 'subtab-bn' && name !== 'bn';
+    if(isLeavingBN){
+      if(!confirm(`You have ${_prodLogStaged.size} unsaved Productivity Log change${_prodLogStaged.size!==1?'s':''}. Leaving this tab will discard them. Continue?`)){
+        return;
+      }
+      _prodLogStaged.clear();
+      _prodLogUpdateHeader();
+    }
+  }
   document.querySelectorAll('.subtab').forEach(t => { t.style.display='none'; t.classList.remove('active'); });
   document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
   const panel = document.getElementById(`subtab-${name}`);
@@ -2803,6 +2822,18 @@ function showSubTab(name, btn){
 }
 
 function showTab(name, btn){
+  // Warn if leaving the Portal tab with staged Productivity Log changes.
+  if(typeof _prodLogStaged !== 'undefined' && _prodLogStaged.size > 0){
+    const currentTab = document.querySelector('.tab.active');
+    const isLeavingPortal = currentTab && currentTab.id === 'tab-portal' && name !== 'portal';
+    if(isLeavingPortal){
+      if(!confirm(`You have ${_prodLogStaged.size} unsaved Productivity Log change${_prodLogStaged.size!==1?'s':''}. Leaving this tab will discard them. Continue?`)){
+        return;
+      }
+      _prodLogStaged.clear();
+      _prodLogUpdateHeader();
+    }
+  }
   document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
   document.querySelectorAll('.nav-tab').forEach(t=>t.classList.remove('active'));
   const tabEl = document.getElementById(`tab-${name}`);
@@ -8468,6 +8499,105 @@ async function clearBNBreaks(){
 // ═══════════════════════════════════════════════════════
 // BREAK CONFIRMATION (BN confirms staff breaks)
 // ═══════════════════════════════════════════════════════
+
+// Productivity Log staging state.
+//   Map<bookingId, {action, nurseName, slotTime, unit}>
+// action is one of 'confirmed' | 'not_taken' | 'cancelled'.
+// Staged changes don't hit the backend until the BN taps Submit.
+const _prodLogStaged = new Map();
+
+function _prodLogCountEl(){ return document.getElementById('prodLogCount'); }
+function _prodLogSubmitBtn(){ return document.getElementById('prodLogSubmit'); }
+function _prodLogClearBtn(){ return document.getElementById('prodLogClear'); }
+
+function _prodLogUpdateHeader(){
+  const n = _prodLogStaged.size;
+  const countEl = _prodLogCountEl();
+  const submit = _prodLogSubmitBtn();
+  const clear = _prodLogClearBtn();
+  if(countEl){
+    countEl.textContent = n === 0 ? '' : `${n} pending`;
+    countEl.style.display = n === 0 ? 'none' : 'inline-block';
+  }
+  if(submit){
+    submit.disabled = n === 0;
+    submit.style.display = n === 0 ? 'none' : 'inline-flex';
+  }
+  if(clear){
+    clear.style.display = n === 0 ? 'none' : 'inline-flex';
+  }
+  // beforeunload warning while staged changes exist
+  if(n > 0){
+    if(!window._prodLogBeforeUnload){
+      window._prodLogBeforeUnload = (e) => { e.preventDefault(); e.returnValue = ''; return ''; };
+      window.addEventListener('beforeunload', window._prodLogBeforeUnload);
+    }
+  } else {
+    if(window._prodLogBeforeUnload){
+      window.removeEventListener('beforeunload', window._prodLogBeforeUnload);
+      window._prodLogBeforeUnload = null;
+    }
+  }
+}
+
+// Stage an action on a booking. If the action is already staged, unstage it
+// (tap-to-toggle). If a different action is staged, switch to the new one.
+function stageBreakAction(id, action, nurseName, slotTime, unit){
+  const existing = _prodLogStaged.get(id);
+  if(existing && existing.action === action){
+    _prodLogStaged.delete(id);
+  } else {
+    _prodLogStaged.set(id, { action, nurseName, slotTime, unit });
+  }
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
+function clearStagedActions(){
+  if(_prodLogStaged.size === 0) return;
+  _prodLogStaged.clear();
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
+async function submitStagedActions(){
+  if(_prodLogStaged.size === 0) return;
+  const total = _prodLogStaged.size;
+  const submit = _prodLogSubmitBtn();
+  if(submit){ submit.disabled = true; submit.textContent = 'Submitting…'; }
+  let okCount = 0, failCount = 0;
+  const errors = [];
+  // Iterate a snapshot so concurrent taps don't mutate underfoot
+  const entries = [..._prodLogStaged.entries()];
+  for(const [id, info] of entries){
+    try {
+      if(info.action === 'confirmed'){
+        await spPatch(LISTS.bookings, id, { BreakStatus: 'confirmed', IsCompleted: 1 });
+      } else if(info.action === 'not_taken'){
+        await spPatch(LISTS.bookings, id, { BreakStatus: 'not_taken', IsCompleted: 0 });
+      } else if(info.action === 'cancelled'){
+        await spDel(LISTS.bookings, id);
+      }
+      _prodLogStaged.delete(id);
+      okCount++;
+    } catch(e){
+      failCount++;
+      errors.push(`${formatNurse(info.nurseName)} ${fmt12(info.slotTime)}: ${e.message}`);
+    }
+  }
+  _prodLogUpdateHeader();
+  if(failCount === 0){
+    toast(`✓ ${okCount} change${okCount!==1?'s':''} saved.`);
+  } else {
+    toast(`${okCount} of ${total} saved. ${failCount} failed.`, true);
+    console.warn('Staged action failures:', errors);
+  }
+  if(submit){ submit.textContent = 'Submit changes'; }
+  loadBNConfirm();
+  loadSummary();
+  if(S.unit) loadSlots(true);
+}
+
 async function loadBNConfirm(){
   const wrap = document.getElementById('bnConfirmWrap');
   const list = document.getElementById('bnConfirmList');
@@ -8478,9 +8608,27 @@ async function loadBNConfirm(){
   const dt = BNS.date || today(), shift = BNS.shift;
 
   try {
-    // ── SINGLE ROUND TRIP: schedule + bookings + notification state ──
+    // ── Productivity Log booking scope ──────────────────────────────────
+    // The log shows bookings THIS BN is responsible for covering. That includes:
+    //   1. Own-shift bookings on the BN's responsible units, EXCEPT
+    //      overlap-window bookings which are covered by the opposite shift's tail BN
+    //   2. Opposite-shift bookings in the overlap window where this BN is the tail:
+    //      - Noc tail BN covers Day bookings in morning overlap (0630-0800/0815) on D+1
+    //      - Day tail BN covers Noc bookings in evening overlap (1830-2000) on same day
+    // ─────────────────────────────────────────────────────────────────────
+
+    // Widen SlotDate range: Noc BN tail covers Day overlap on the NEXT calendar
+    // day. Day BN sees evening overlap Noc bookings on the SAME day.
+    const nextDt = (function(d){
+      const x = new Date(d + 'T12:00:00');
+      x.setDate(x.getDate() + 1);
+      return x.toISOString().slice(0, 10);
+    })(dt);
+    const maxDt = shift === 'Noc' ? nextDt : dt;
+
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const bookFilter = `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`;
+    // Note: no ShiftType filter on bookings — we need both shifts for overlap attribution.
+    const bookFilter = `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`;
     const notifyKey = `slotNotify_${dt}_${shift}`;
     const notifyFilter = `Key eq '${esc(notifyKey)}'`;
     let results;
@@ -8503,10 +8651,41 @@ async function loadBNConfirm(){
 
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
 
+    // Responsible units: combine main assignment units + supplemental units
+    // this BN is currently covering. Supplementals mean the BN owns overlap
+    // attribution on those units too.
     const units = [];
     scheds.filter(s => s.Status !== 'inactive').forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
+    const responsibleUnits = new Set(units);
 
-    const staffBookings = allBookings.filter(b => !b.IsBNBreak && units.includes(b.Unit));
+    // Overlap-aware coverage predicate: does THIS BN actually cover this booking?
+    const bnCovers = (b) => {
+      if(b.IsBNBreak) return false;
+      if(!responsibleUnits.has(b.Unit)) return false;
+      const bDate = (b.SlotDate || '').slice(0, 10);
+
+      // Same-shift, same-date: this BN covers — UNLESS the slot is in the
+      // overlap window, in which case the OPPOSITE shift's tail BN covers.
+      if(b.ShiftType === shift && bDate === dt){
+        if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;   // morning overlap → Noc tail
+        if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;   // evening overlap → Day tail
+        return true;
+      }
+
+      // Cross-shift overlap: this BN is the tail covering the opposite shift.
+      // Noc BN on shiftStartDate D covers Day overlap bookings on D+1 morning.
+      if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt){
+        return isOverlapSlot(b.SlotTime, 'Day');
+      }
+      // Day BN on shiftStartDate D covers Noc overlap bookings on same day evening.
+      if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt){
+        return isOverlapSlot(b.SlotTime, 'Noc');
+      }
+
+      return false;
+    };
+
+    const staffBookings = allBookings.filter(bnCovers);
 
     if (!staffBookings.length) {
       list.innerHTML = '<div class="empty" style="padding:8px 0">No staff breaks claimed yet for your units on this shift.</div>';
@@ -8579,24 +8758,46 @@ async function loadBNConfirm(){
     list.innerHTML = notifyHtml + staffBookings.map(b => {
       const bConfirmed  = isConfirmed(b);
       const bNotTaken   = isNotTaken(b);
+      const staged      = _prodLogStaged.get(b.Id);
 
       let rowClass = 'open';
       let statusHtml = '';
+      let stagedLeftBorder = ''; // Visual indicator for pending staged state
+
       if(bConfirmed){
+        // Persistent ✓ Taken — tapping undo clears it immediately (not staged).
         rowClass = 'confirmed';
         statusHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else if(bNotTaken){
+        // Persistent ✗ Not Taken — tapping undo clears it immediately.
         rowClass = '';
         statusHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
           <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
       } else {
-        statusHtml = `<button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';setBreakStatus(${b.Id},'confirmed').finally(()=>{this.disabled=false;this.textContent='✓ Taken'})" style="margin-right:4px">✓ Taken</button>
-          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Saving…';setBreakStatus(${b.Id},'not_taken').finally(()=>{this.disabled=false;this.textContent='✗ Not Taken'})" style="margin-right:4px">✗ Not Taken</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`;
+        // Staged buttons: highlight which one is selected, if any.
+        // Tapping the selected button unstages (toggle).
+        // Tapping a different button switches the staged action.
+        const stagedAction = staged ? staged.action : null;
+        const takenCls = stagedAction === 'confirmed' ? 'btn-success' : 'btn-ghost';
+        const notTakenCls = stagedAction === 'not_taken' ? 'btn-primary' : 'btn-ghost';
+        const cancelCls = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
+        const takenStyle = stagedAction === 'confirmed' ? '' : '';
+        const notTakenStyle = stagedAction === 'not_taken' ? '' : 'color:var(--muted)';
+        const cancelStyle = stagedAction === 'cancelled' ? '' : 'color:var(--muted)';
+
+        // Left-edge border coloring based on staged state
+        if(stagedAction === 'confirmed')   stagedLeftBorder = 'border-left:4px solid var(--green)';
+        else if(stagedAction === 'not_taken') stagedLeftBorder = 'border-left:4px solid var(--muted)';
+        else if(stagedAction === 'cancelled') stagedLeftBorder = 'border-left:4px solid var(--red)';
+
+        const esc = (s) => String(s).replace(/'/g, "\\'");
+        statusHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${takenStyle}">✓ Taken</button>
+          <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}">✗ Not Taken</button>
+          <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`;
       }
 
-      return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px">
+      return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
         <div class="slot-time">${fmt12(b.SlotTime)}</div>
         <div class="slot-name filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></div>
         <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${statusHtml}</div>
@@ -8604,6 +8805,7 @@ async function loadBNConfirm(){
     }).join('');
 
     wrap.style.display = 'block';
+    _prodLogUpdateHeader();
   } catch(e) {
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     wrap.style.display = 'block';
@@ -8751,11 +8953,36 @@ async function confirmAllBreaks(){
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
     const units = await getBNUnits(BNS.name, dt, shift);
+    const responsibleUnits = new Set(units);
+    // Match the widened query used by loadBNConfirm so overlap bookings
+    // this BN actually covers are included in "Submit all as Taken".
+    const nextDt = (function(d){
+      const x = new Date(d + 'T12:00:00');
+      x.setDate(x.getDate() + 1);
+      return x.toISOString().slice(0, 10);
+    })(dt);
+    const maxDt = shift === 'Noc' ? nextDt : dt;
     const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    const pending = allBookings.filter(b =>
-      !b.IsBNBreak && units.includes(b.Unit) && isPending(b)
-    );
+      `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
+    // Overlap-aware coverage predicate (same as loadBNConfirm)
+    const bnCovers = (b) => {
+      if(b.IsBNBreak) return false;
+      if(!responsibleUnits.has(b.Unit)) return false;
+      const bDate = (b.SlotDate || '').slice(0, 10);
+      if(b.ShiftType === shift && bDate === dt){
+        if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
+        if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;
+        return true;
+      }
+      if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt){
+        return isOverlapSlot(b.SlotTime, 'Day');
+      }
+      if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt){
+        return isOverlapSlot(b.SlotTime, 'Noc');
+      }
+      return false;
+    };
+    const pending = allBookings.filter(b => bnCovers(b) && isPending(b));
     for(const b of pending){
       await spPatch(LISTS.bookings, b.Id, { BreakStatus: 'confirmed', IsCompleted: 1 });
     }
