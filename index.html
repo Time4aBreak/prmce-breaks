@@ -5397,28 +5397,85 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       return;
     }
 
-    // Count claimed breaks per BN for tiebreaking
-    const bnClaimCounts = {};
-    for(const bn of otherBNs){
-      const bnBookings = allBookings.filter(b => {
-        let units = []; try { units = JSON.parse(bn.Units||'[]'); } catch{}
-        return !b.IsBNBreak && units.includes(b.Unit);
-      });
-      bnClaimCounts[bn.BreakNurseName] = bnBookings.length;
-    }
-    otherBNs.sort((a,b) => (bnClaimCounts[a.BreakNurseName]||0) - (bnClaimCounts[b.BreakNurseName]||0));
+    // ── v4 absorption rules — safe pass ─────────────────
+    //
+    // "Truly free at slot T" for BN X means:
+    //   - T is not past
+    //   - T is not X's own break
+    //   - T has no claimed staff booking on any of X's responsible units
+    //     (responsible = original assignment + any prior supplementals)
+    //
+    // Per-subrun rules (subrun = consecutive slots one BN absorbs):
+    //   - Multi-slot (2+): BN must be truly free at every slot in the subrun
+    //   - Single-slot: BN truly free at T AND (T+1 is X's own break OR
+    //     unclaimed on X's responsible units, OR T is shift's last slot)
+    //
+    // Selection: when multiple BNs qualify, prefer the one with the most
+    // free slot-times in the shift (responsible-units-aware, largest first).
+    //
+    // Run-splitting is allowed — different BNs can absorb different subruns
+    // of the same nurse/unit run. Each subrun evaluated independently.
+    // ─────────────────────────────────────────────────────
 
-    // Get each BN's open slots — any slot where they don't have a BN break
-    // Don't restrict by rotation since they may get new units via supplemental assignment
-    const bnOpenSlots = {};
+    // Pre-compute helpers used by the v4 logic.
+    const allShiftSlots = generateSlots(shift);
+    const shiftLastSlot = allShiftSlots[allShiftSlots.length - 1];
+
+    // responsibleUnits(bn) = bn's main units + any supplemental units they already hold
+    const responsibleUnitsFor = (bnRecord) => {
+      const bnName2 = bnRecord.BreakNurseName;
+      const units = new Set();
+      try { JSON.parse(bnRecord.Units || '[]').forEach(u => units.add(u)); } catch{}
+      // Add units from any active supplementals this BN holds for the same shift
+      allScheds.forEach(s => {
+        if(s.BreakNurseName !== bnName2) return;
+        if(s.IsSupplemental != 1) return;
+        if(s.Status === 'inactive') return;
+        try { JSON.parse(s.Units || '[]').forEach(u => units.add(u)); } catch{}
+      });
+      return units;
+    };
+
+    // busySlotTimes(bn) = slot-times where BN is occupied on any responsible unit
+    //   (own breaks + claimed staff bookings at that slot on a responsible unit).
+    // This is "not truly free" — used for both the free-slots count and the T+1 check.
+    const bnResponsibleUnits = {};
+    const bnBreakSets = {};
+    const bnBusySlotTimes = {};  // bn -> Set of slot-times
+    const bnClaimedByUnitSlot = {}; // bn -> Set of "unit|slot" for claimed lookups
     for(const bn of otherBNs){
       const bnName2 = bn.BreakNurseName;
-      const bnBreaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bnName2).map(b => b.SlotTime);
-      const allSlots = generateSlots(shift);
-      bnOpenSlots[bnName2] = allSlots.filter(s =>
-        !bnBreaks.includes(s) && sortKey(s, shift) > nowKey(shift)
+      const respUnits = responsibleUnitsFor(bn);
+      bnResponsibleUnits[bnName2] = respUnits;
+
+      const breaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bnName2).map(b => b.SlotTime);
+      bnBreakSets[bnName2] = new Set(breaks);
+
+      const busy = new Set(breaks);  // own breaks count as busy
+      const claimedSet = new Set();
+      allBookings.forEach(b => {
+        if(b.IsBNBreak) return;
+        if(!respUnits.has(b.Unit)) return;
+        busy.add(b.SlotTime);
+        claimedSet.add(`${b.Unit}|${b.SlotTime}`);
+      });
+      bnBusySlotTimes[bnName2] = busy;
+      bnClaimedByUnitSlot[bnName2] = claimedSet;
+    }
+
+    // Truly-free slot-times for each BN (future slots only, excluding busy times)
+    const bnFreeSlots = {};  // bn -> Array of slot-times
+    for(const bn of otherBNs){
+      const bnName2 = bn.BreakNurseName;
+      const busy = bnBusySlotTimes[bnName2];
+      bnFreeSlots[bnName2] = allShiftSlots.filter(s =>
+        !busy.has(s) && sortKey(s, shift) > nowKey(shift)
       );
     }
+
+    // Sort BNs by free-slot-times count descending (most free first).
+    // This matches "most coverage capacity" — BN with the most slack to absorb.
+    otherBNs.sort((a,b) => (bnFreeSlots[b.BreakNurseName]?.length||0) - (bnFreeSlots[a.BreakNurseName]?.length||0));
 
     // Group uncovered by unit
     const byUnit = {};
@@ -5430,18 +5487,21 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     const absorbed = []; // {booking, bnName}
     const flaggedNurses = []; // bookings that couldn't be covered
 
-    // Helper: check if a BN has the next slot open or it's their own break
-    const bnHasNextSlotOpen = (bnName2, slotTime, bnBreakTimes) => {
+    // Check if a slot+1 passes the single-slot buffer rule for a given BN.
+    // T+1 must be: shift's-last-slot (so no T+1 exists), BN's own break,
+    // or unclaimed on BN's responsible units.
+    const passesT1BufferCheck = (bnName2, slotTime) => {
+      if(slotTime === shiftLastSlot) return true;
       const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
-      return bnOpenSlots[bnName2].includes(nextSlot) || bnBreakTimes.has(nextSlot);
+      if(bnBreakSets[bnName2].has(nextSlot)) return true;
+      // Check if any responsible unit has a claimed booking at nextSlot
+      const respUnits = bnResponsibleUnits[bnName2];
+      const claimed = bnClaimedByUnitSlot[bnName2];
+      for(const u of respUnits){
+        if(claimed.has(`${u}|${nextSlot}`)) return false;
+      }
+      return true;
     };
-
-    // Pre-build BN break time sets
-    const bnBreakSets = {};
-    for(const bn of otherBNs){
-      const bnBreaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bn.BreakNurseName).map(b => b.SlotTime);
-      bnBreakSets[bn.BreakNurseName] = new Set(bnBreaks);
-    }
 
     for(const [unit, bookings] of Object.entries(byUnit)){
       bookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
@@ -5456,7 +5516,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       for(const [nurseName2, nurseBookings] of Object.entries(byNurse)){
         nurseBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
 
-        // Split into consecutive runs (20-min intervals)
+        // Split into consecutive runs (SLOT_IV-min intervals)
         const runs = [];
         let currentRun = [nurseBookings[0]];
         for(let i = 1; i < nurseBookings.length; i++){
@@ -5471,69 +5531,79 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
         }
         runs.push(currentRun);
 
-        // Evaluate each run independently
+        // Evaluate each run independently (run-splitting allowed)
         for(const run of runs){
-          const runSlots = run.map(b => b.SlotTime);
-          const isLastInRun = (idx) => idx === runSlots.length - 1;
-          const isSingle = runSlots.length === 1;
-
-          // Try to absorb each slot — can use different BNs per slot
-          // but each BN must have next slot open (or own break) unless it's the last in run
-          const runAssignments = []; // [{booking, bnName}]
+          // Greedy left-to-right: for each unabsorbed slot, find the longest
+          // consecutive subrun starting here that some BN can absorb.
+          // Then commit that subrun to the best BN. Repeat until run is consumed.
+          let cursor = 0;
+          const runAssignments = []; // {booking, bnName}
           let runFailed = false;
 
-          // Track which open slots get used during this run evaluation
-          const tempUsed = {}; // bnName -> Set of slots used
-
-          for(let i = 0; i < run.length; i++){
-            const b = run[i];
-            const slotTime = b.SlotTime;
-            const isLast = isLastInRun(i);
-            let assigned = false;
+          while(cursor < run.length){
+            // Find best (BN, subrunLen) starting at cursor.
+            // Prefer longer subruns (fewer single-slot absorptions = fewer
+            // T+1 buffer constraints) and, among ties, the BN with more free slots.
+            let bestBN = null, bestLen = 0, bestBNFree = -1;
 
             for(const bn of otherBNs){
               const bnName2 = bn.BreakNurseName;
-              const used = tempUsed[bnName2] || new Set();
-              const available = bnOpenSlots[bnName2].filter(s => !used.has(s));
+              const freeSet = new Set(bnFreeSlots[bnName2]);
 
-              if(!available.includes(slotTime)) continue;
+              // How many consecutive slots from cursor can this BN take?
+              let len = 0;
+              for(let i = cursor; i < run.length; i++){
+                if(freeSet.has(run[i].SlotTime)) len++;
+                else break;
+              }
+              if(len === 0) continue;
 
-            // If not last in run: next slot must be open or BN's own break
-            // If single slot: next slot must be available to BN (open, claimed, or BN's own break)
-            if(!isLast || isSingle){
-              const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
-              const nextIsBNBreak = bnBreakSets[bnName2].has(nextSlot);
-              if(isSingle){
-                // Next slot must exist and be available to this BN (not already used by BN elsewhere)
-                const nextAvailable = bnOpenSlots[bnName2].includes(nextSlot) || nextIsBNBreak;
-                if(!nextAvailable) continue;
-              } else {
-                // Non-last in run: next slot must be open for this BN or their own break
-                if(!bnHasNextSlotOpen(bnName2, slotTime, bnBreakSets[bnName2])){
-                  const nextUsedByThis = runAssignments.some(a => a.bnName === bnName2 && a.booking.SlotTime === nextSlot);
-                  if(!nextUsedByThis) continue;
-                }
+              // For single-slot subruns, T+1 buffer check must pass
+              if(len === 1){
+                const t = run[cursor].SlotTime;
+                if(!passesT1BufferCheck(bnName2, t)) continue;
+              }
+
+              // This BN can absorb `len` consecutive slots from cursor.
+              // Greedy: prefer longer subrun, then more-free BN
+              const bnFreeCount = bnFreeSlots[bnName2].length;
+              if(len > bestLen || (len === bestLen && bnFreeCount > bestBNFree)){
+                bestBN = bnName2;
+                bestLen = len;
+                bestBNFree = bnFreeCount;
               }
             }
 
-              // This BN can take this slot
-              if(!tempUsed[bnName2]) tempUsed[bnName2] = new Set();
-              tempUsed[bnName2].add(slotTime);
-              runAssignments.push({ booking: b, bnName: bnName2 });
-              assigned = true;
+            if(!bestBN){
+              // No BN can absorb the slot at cursor — whole run fails
+              runFailed = true;
               break;
             }
 
-            if(!assigned){ runFailed = true; break; }
+            // Commit subrun
+            for(let i = cursor; i < cursor + bestLen; i++){
+              runAssignments.push({ booking: run[i], bnName: bestBN });
+              // Remove from free slots so subsequent iterations don't reuse
+              bnFreeSlots[bestBN] = bnFreeSlots[bestBN].filter(s => s !== run[i].SlotTime);
+              // Also update the busy set — this slot is now claimed on the absorbed unit
+              bnBusySlotTimes[bestBN].add(run[i].SlotTime);
+              bnClaimedByUnitSlot[bestBN].add(`${run[i].Unit}|${run[i].SlotTime}`);
+            }
+            cursor += bestLen;
           }
 
           if(!runFailed && runAssignments.length === run.length){
-            // Commit this run — remove used slots from bnOpenSlots
+            // Commit run to absorbed list
             runAssignments.forEach(({ booking, bnName: assignedBN }) => {
               absorbed.push({ booking, bnName: assignedBN });
-              bnOpenSlots[assignedBN] = bnOpenSlots[assignedBN].filter(s => s !== booking.SlotTime);
             });
           } else {
+            // Roll back any partial commits for this run
+            runAssignments.forEach(({ booking, bnName: assignedBN }) => {
+              bnFreeSlots[assignedBN].push(booking.SlotTime);
+              bnBusySlotTimes[assignedBN].delete(booking.SlotTime);
+              bnClaimedByUnitSlot[assignedBN].delete(`${booking.Unit}|${booking.SlotTime}`);
+            });
             run.forEach(b => flaggedNurses.push(b));
           }
         }
