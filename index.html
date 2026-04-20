@@ -5401,7 +5401,7 @@ async function editAssign(id){
     );
 
     if(confirmed.length > 0){
-      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')){ loadAssignments(); return; }
+      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')) return;
     }
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
@@ -5420,7 +5420,6 @@ async function editAssign(id){
     await populateNurseDropdown();
     const sel = document.getElementById('aNurse');
     if(sel){
-      // If BN is in dropdown options, select them; otherwise fall back to text
       const hasOption = [...sel.options].some(o => o.value === s.BreakNurseName);
       if(hasOption){
         sel.value = s.BreakNurseName;
@@ -5448,8 +5447,14 @@ async function editAssign(id){
     const body = document.getElementById('assignFormBody');
     if(body && body.style.display === 'none') toggleAssignForm();
     toast(`Editing ${firstName(s.BreakNurseName)} — modify units and click Save Assignment`);
-    loadAssignments(); // refresh so Edit button label resets
-  } catch(e) { toast(e.message, true); loadAssignments(); }
+  } catch(e){
+    toast(e.message, true);
+  } finally {
+    // Always refresh the assignment cards — ensures the Edit button that
+    // was set to "Loading…" resets on every exit path (success, early return,
+    // user cancel, or error).
+    loadAssignments();
+  }
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5466,87 +5471,93 @@ function getUnitWing(unit){
 // Mark a BN unavailable from Admin tab
 async function markBNUnavailable(schedId, bnName, date, shift){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
-  // Fetch context for the modal — existing bookings and same-wing BNs
-  const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-  const allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+  try {
+    // Fetch context for the modal — existing bookings and same-wing BNs
+    const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
 
-  // BN's own units
-  const thisSched = allScheds.find(s => String(s.Id) === String(schedId));
-  let bnUnits = [];
-  try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
+    // BN's own units
+    const thisSched = allScheds.find(s => String(s.Id) === String(schedId));
+    let bnUnits = [];
+    try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
-  // Staff bookings on this BN's units
-  const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift));
+    // Staff bookings on this BN's units
+    const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift));
 
-  // Same-wing BNs available to absorb
-  const sameWingBNs = allScheds.filter(s =>
-    s.BreakNurseName !== bnName &&
-    s.Status !== 'inactive' &&
-    (() => { try { const u = JSON.parse(s.Units||'[]'); return u.some(x => bnUnits.some(y => getWing(x)!=='?' && getWing(x)===getWing(y))); } catch { return false; } })()
-  );
-  const sameWingNames = [...new Set(sameWingBNs.map(s => firstName(s.BreakNurseName)))];
+    // Same-wing BNs available to absorb
+    const sameWingBNs = allScheds.filter(s =>
+      s.BreakNurseName !== bnName &&
+      s.Status !== 'inactive' &&
+      (() => { try { const u = JSON.parse(s.Units||'[]'); return u.some(x => bnUnits.some(y => getWing(x)!=='?' && getWing(x)===getWing(y))); } catch { return false; } })()
+    );
+    const sameWingNames = [...new Set(sameWingBNs.map(s => firstName(s.BreakNurseName)))];
 
-  // Build modal message
-  let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
+    // Build modal message
+    let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
 
 Covering: ${bnUnits.join(', ')}`;
-  if(affectedBookings.length){
-    const nurseBookingMap = {};
-    affectedBookings.forEach(b => {
-      const n = b.NurseName.split('(')[0].trim();
-      if(!nurseBookingMap[n]) nurseBookingMap[n] = [];
-      nurseBookingMap[n].push(fmt12(b.SlotTime));
-    });
-    const nurseLines = Object.entries(nurseBookingMap).map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('\n');
-    msg += `
+    if(affectedBookings.length){
+      const nurseBookingMap = {};
+      affectedBookings.forEach(b => {
+        const n = b.NurseName.split('(')[0].trim();
+        if(!nurseBookingMap[n]) nurseBookingMap[n] = [];
+        nurseBookingMap[n].push(fmt12(b.SlotTime));
+      });
+      const nurseLines = Object.entries(nurseBookingMap).map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('\n');
+      msg += `
 
 ⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected:
 ${nurseLines}`;
-  }
-  if(sameWingNames.length){
-    msg += `
+    }
+    if(sameWingNames.length){
+      msg += `
 
 ↺ ${sameWingNames.join(', ')} ${sameWingNames.length===1?'is':'are'} on the same wing and can absorb eligible slots.`;
-  } else {
-    msg += `
+    } else {
+      msg += `
 
 ⚠️ No other BNs are available on the same wing — all staff bookings will be cancelled.`;
-  }
+    }
 
-  let redistribute = false;
-  if(sameWingNames.length){
-    // Single 3-way modal: Give to same-wing BN / Cancel all / Go back
-    const choice = await new Promise(resolve => {
-      const modal = document.getElementById('customConfirmModal');
-      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
-      document.getElementById('customConfirmOk').textContent = `Give eligible bookings to ${sameWingNames.join('/')}`;
-      document.getElementById('customConfirmCancel').textContent = `Cancel all affected bookings`;
-      // Add Go back button dynamically
-      const goBackBtn = document.createElement('button');
-      goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
-      goBackBtn.textContent = 'Go back';
-      const btnWrap = document.getElementById('customConfirmCancel').parentNode;
-      btnWrap.appendChild(goBackBtn);
-      modal.style.display = 'flex';
-      const cleanup = (result) => {
-        modal.style.display = 'none';
-        goBackBtn.remove();
-        document.getElementById('customConfirmOk').onclick = null;
-        document.getElementById('customConfirmCancel').onclick = null;
-        resolve(result);
-      };
-      document.getElementById('customConfirmOk').onclick = () => cleanup('give');
-      document.getElementById('customConfirmCancel').onclick = () => cleanup('cancel');
-      goBackBtn.onclick = () => cleanup('back');
-    });
-    if(choice === 'back'){ loadAssignments(); return; }
-    redistribute = choice === 'give';
-  } else {
-    // No same-wing BN available — single confirmation
-    if(!await customConfirm(msg, `Cancel all affected bookings`, 'Go back')){ loadAssignments(); return; }
-  }
+    let redistribute = false;
+    if(sameWingNames.length){
+      // Single 3-way modal: Give to same-wing BN / Cancel all / Go back
+      const choice = await new Promise(resolve => {
+        const modal = document.getElementById('customConfirmModal');
+        document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
+        document.getElementById('customConfirmOk').textContent = `Give eligible bookings to ${sameWingNames.join('/')}`;
+        document.getElementById('customConfirmCancel').textContent = `Cancel all affected bookings`;
+        const goBackBtn = document.createElement('button');
+        goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
+        goBackBtn.textContent = 'Go back';
+        const btnWrap = document.getElementById('customConfirmCancel').parentNode;
+        btnWrap.appendChild(goBackBtn);
+        modal.style.display = 'flex';
+        const cleanup = (result) => {
+          modal.style.display = 'none';
+          goBackBtn.remove();
+          document.getElementById('customConfirmOk').onclick = null;
+          document.getElementById('customConfirmCancel').onclick = null;
+          resolve(result);
+        };
+        document.getElementById('customConfirmOk').onclick = () => cleanup('give');
+        document.getElementById('customConfirmCancel').onclick = () => cleanup('cancel');
+        goBackBtn.onclick = () => cleanup('back');
+      });
+      if(choice === 'back') return;
+      redistribute = choice === 'give';
+    } else {
+      if(!await customConfirm(msg, `Cancel all affected bookings`, 'Go back')) return;
+    }
 
-  await processBNUnavailability(schedId, bnName, date, shift, redistribute);
+    await processBNUnavailability(schedId, bnName, date, shift, redistribute);
+  } catch(e){
+    toast(e.message, true);
+  } finally {
+    // Ensure "Processing…" button resets on any exit path. processBNUnavailability
+    // also calls loadAssignments at its end; calling twice is cheap.
+    loadAssignments();
+  }
 }
 
 async function markBNAvailable(schedId, bnName){
@@ -6666,10 +6677,9 @@ async function delAssign(id){
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
     if(!scheds.length){
-      if(!await customConfirm('Remove this assignment?','Remove','Cancel')){ loadAssignments(); return; }
+      if(!await customConfirm('Remove this assignment?','Remove','Cancel')) return;
       await spDel(LISTS.schedule, id);
       toast('Assignment removed.');
-      loadAssignments();
       return;
     }
     const s = scheds[0];
@@ -6695,10 +6705,9 @@ async function delAssign(id){
     const sameWingFirstNames = sameWingBNs.map(b => firstName(b.BreakNurseName)).join(', ');
 
     if(!affected.length){
-      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')){ loadAssignments(); return; }
+      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')) return;
       await spDel(LISTS.schedule, id);
       toast(`${firstName(s.BreakNurseName)}'s assignment removed.`);
-      loadAssignments();
       return;
     }
 
@@ -6706,7 +6715,7 @@ async function delAssign(id){
     const byNurse = {};
     affected.forEach(b => {
       if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
-      byNurse[b.NurseName].push(`${b.Unit} at ${fmt12(b.SlotTime)}`); // formatNurse applied at render
+      byNurse[b.NurseName].push(`${b.Unit} at ${fmt12(b.SlotTime)}`);
     });
     const affectedLines = Object.entries(byNurse)
       .map(([n, slots]) => `• ${formatNurse(n)} — ${slots.join(', ')}`)
@@ -6721,15 +6730,13 @@ async function delAssign(id){
       'Proceed & reassign',
       'Keep assignment'
     );
-    if(!proceed){ loadAssignments(); return; }
+    if(!proceed) return;
 
     // Run redistribution algorithm
     if(sameWingBNs.length){
-      // Temporarily mark inactive so processBNUnavailability can redistribute
       await spPatch(LISTS.schedule, id, { Status: 'inactive' });
-      await processBNUnavailability(id, s.BreakNurseName, s.ShiftDate, s.ShiftType, true); // redistribute by default on remove
+      await processBNUnavailability(id, s.BreakNurseName, s.ShiftDate, s.ShiftType, true);
     } else {
-      // No same-wing BNs — just cancel all bookings
       for(const b of affected) await spDel(LISTS.bookings, b.Id);
     }
 
@@ -6738,12 +6745,14 @@ async function delAssign(id){
     const suppls = await spGet(LISTS.schedule,
       `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
     for(const sup of suppls.filter(x => x.IsSupplemental == 1)){
-      // Keep supplementals — they represent real reassignments, just remove the CoveredFrom link
       await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
     }
     toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify!`);
+  } catch(e){
+    toast(e.message, true);
+  } finally {
     loadAssignments();
-  } catch(e){ toast(e.message, true); loadAssignments(); }
+  }
 }
 
 async function closeUnit(schedId, unit, bnName, date, shift){
