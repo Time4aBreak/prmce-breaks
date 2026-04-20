@@ -5527,11 +5527,36 @@ async function markBNAvailable(schedId, bnName){
         );
         showBusy(keepRedist ? `Keeping ${suppFirstNames}'s coverage…` : `Restoring ${firstName(bnName)}'s assignments…`);
         if(!keepRedist){
+          // Delete supplementals AND recompute rotations for those BNs so their
+          // absorbed slots drop out of rotation (otherwise fillSlotOwner keeps
+          // attributing those slots to them even though the supplemental is gone).
+          const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
+          for(const otherBN of affectedBNs){
+            const bnDef = getDefaultTemplate(otherBN, ShiftType);
+            const d = ShiftDate.slice(0,10);
+            if(bnDef && bnDef.length > 0){
+              await applyDefaultToShift(otherBN, d, ShiftType, bnDef).catch(()=>{});
+            } else {
+              await recalculateRotation(otherBN, d, ShiftType).catch(()=>{});
+            }
+          }
         }
       }
     }
     await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
+    // Also recompute the restored BN's own rotation so their units are properly
+    // reflected in their rotation after reactivation.
+    if(sched.length){
+      const { ShiftDate, ShiftType } = sched[0];
+      const d = ShiftDate.slice(0,10);
+      const bnDef = getDefaultTemplate(bnName, ShiftType);
+      if(bnDef && bnDef.length > 0){
+        await applyDefaultToShift(bnName, d, ShiftType, bnDef).catch(()=>{});
+      } else {
+        await recalculateRotation(bnName, d, ShiftType).catch(()=>{});
+      }
+    }
     hideBusy();
     toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     await new Promise(r => setTimeout(r, 100));
