@@ -5385,9 +5385,26 @@ async function editAssign(id){
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
     }))];
 
-    document.getElementById('aNurseText').value = s.BreakNurseName;
     document.getElementById('aDate').value = s.ShiftDate;
     setAShift(s.ShiftType);
+
+    // Populate dropdown for this date+shift (now includes manually-assigned BNs),
+    // then pre-select this BN. Leave the manual text field blank — the dropdown
+    // shows the preferred name, which is friendlier than the UKG full name.
+    await populateNurseDropdown();
+    const sel = document.getElementById('aNurse');
+    if(sel){
+      // If BN is in dropdown options, select them; otherwise fall back to text
+      const hasOption = [...sel.options].some(o => o.value === s.BreakNurseName);
+      if(hasOption){
+        sel.value = s.BreakNurseName;
+        document.getElementById('aNurseText').value = '';
+      } else {
+        document.getElementById('aNurseText').value = s.BreakNurseName;
+      }
+    } else {
+      document.getElementById('aNurseText').value = s.BreakNurseName;
+    }
 
     // Pre-select all consolidated units
     S.aUnits = [...allUnits];
@@ -10030,7 +10047,7 @@ function saveImportedNames(){
   localStorage.setItem('bnImportedNames', JSON.stringify(importedNames)); setState('bnImportedNames', importedNames).catch(()=>{});
 }
 
-function populateNurseDropdown(){
+async function populateNurseDropdown(){
   const sel = document.getElementById('aNurse');
   if (!sel) return;
   const prev = sel.value;
@@ -10040,26 +10057,42 @@ function populateNurseDropdown(){
                 ? 'Day' : 'Noc';
 
   // Filter importEntries to only nurses scheduled on this date+shift
-  let filtered = [];
+  let fromImport = [];
   if (date && importEntries.length) {
-    filtered = [...new Set(
+    fromImport = [...new Set(
       importEntries
         .filter(e => e.date === date && e.shift === shift)
         .map(e => e.name)
         .filter(Boolean)
-    )].sort();
+    )];
   }
 
-  if (filtered.length) {
+  // Also include BNs who have an actual assignment on this date+shift
+  // (manually added, not from UKG import) so they show up for editing.
+  let fromScheds = [];
+  if (date) {
+    try {
+      const scheds = await spGet(LISTS.schedule,
+        `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+      fromScheds = [...new Set(scheds
+        .filter(s => s.Status !== 'inactive' && !s.IsSupplemental)
+        .map(s => s.BreakNurseName)
+        .filter(Boolean))];
+    } catch(e){ /* silent — fall back to imports only */ }
+  }
+
+  const combined = [...new Set([...fromImport, ...fromScheds])].sort();
+
+  if (combined.length) {
     sel.innerHTML = '<option value="">— Select break nurse —</option>' +
-      filtered.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
+      combined.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
   } else if (date) {
-    sel.innerHTML = '<option value="">No break nurses scheduled for this date/shift</option>';
+    sel.innerHTML = '<option value="">No break nurses on this date/shift — type a name below</option>';
   } else {
     sel.innerHTML = '<option value="">— Select a date first —</option>';
   }
 
-  if (prev && filtered.includes(prev)) sel.value = prev;
+  if (prev && combined.includes(prev)) sel.value = prev;
 }
 
 function renderImportedNamesList(){
