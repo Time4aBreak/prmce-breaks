@@ -1760,6 +1760,32 @@ function staffWindowOpen(viewingShift){
     : (m >= SIGNUP_OPEN_NOC || m < getDayOverlapMax());
 }
 
+// True if an assignment's shift has fully ended (post-clockout). Used to hide
+// management buttons on past shifts that happen to still be "today's date."
+// Day shift ends at 20:30 (same day). Noc shift ends at 08:30 (next day).
+function shiftIsOver(shiftDateStr, shiftType){
+  if(!shiftDateStr) return false;
+  const d = shiftDateStr.slice(0,10);
+  const td = today();
+  // If the shift date is in the future, not over
+  if(d > td) return false;
+  // If the shift date is in the past (and not a Noc spilling into today), it's over
+  if(d < td){
+    // Exception: Noc shift starting yesterday is still running until 08:30 today
+    if(shiftType === 'Noc'){
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yStr = `${yesterday.getFullYear()}-${String(yesterday.getMonth()+1).padStart(2,'0')}-${String(yesterday.getDate()).padStart(2,'0')}`;
+      if(d === yStr && nowMin() < BN_CLOCKOUT_NOC) return false;
+    }
+    return true;
+  }
+  // Shift is today — check clockout time
+  if(shiftType === 'Day') return nowMin() >= BN_CLOCKOUT_DAY;
+  // Noc shift starting today — not over until 08:30 tomorrow, which is never "today"
+  return false;
+}
+
 function getSlotOwnerShift(slotTime, viewingShift){
   // Returns which BN shift is responsible for this slot from the viewer's perspective.
   // Overlap slots belong to the opposite shift's BN.
@@ -6611,17 +6637,17 @@ async function loadAssignments(){
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
-                ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
-                ${s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) ? `<button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>` : ''}
+                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
+                ${s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>` : ''}
               </div>
             </div>
             <div class="unit-tags">${units.map(u => {
               // Grey out 3C when it's closed for this shift — assignment exists but unit inactive
               const is3CInactive = u === '3C' && !is3COpen(s.ShiftDate.slice(0,10), s.ShiftType);
               const tagStyle = is3CInactive ? 'opacity:.45' : '';
-              const canClose = !isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType);
+              const canClose = !isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType);
               return canClose
                 ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px;${tagStyle}">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
                 : `<span class="tag" style="${tagStyle}">${u}</span>`;
