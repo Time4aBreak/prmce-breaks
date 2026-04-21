@@ -1106,7 +1106,7 @@ function findBNConflict(sched, slotTime, currentUnit, allBookings, date, shift){
   const bnUnits = getSchedUnits(sched, date, shift);
   const pad = String(slotTime).padStart(4,'0');
   return allBookings.find(b =>
-    !b.IsBNBreak &&
+    isStaffBooking(b) &&
     String(b.SlotTime).padStart(4,'0') === pad &&
     b.ShiftType === shift &&
     bnUnits.includes(b.Unit) &&
@@ -1119,6 +1119,14 @@ const LISTS = {roster:'BNRoster', schedule:'BNSchedule', bookings:'BNBookings', 
 function isConfirmed(b)  { return b.BreakStatus === 'confirmed' || (b.IsCompleted == 1 && b.BreakStatus !== 'not_taken'); }
 function isNotTaken(b)   { return b.BreakStatus === 'not_taken'; }
 function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
+
+// Apps Script's normalizeValue() coerces every cell to a string before return.
+// That means IsBNBreak comes back as the string "0" or "1" (not a number) —
+// and "0" is truthy in JS. A plain `if(isBNBreak(b))` check silently misfires
+// for any row that explicitly stores 0. These helpers handle both forms and
+// also the blank-cell case (old staff bookings have no IsBNBreak value).
+function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
+function isStaffBooking(b){ return b && !isBNBreak(b); }
 
 // Slot constants
 // Day:  first slot 08:35, last 20:15 (ends 20:30). 36 slots × 20 min = 700 min span.
@@ -2065,7 +2073,7 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
       const allBookings = await spGet(LISTS.bookings,
         `Unit eq '3C' and SlotDate ge '${todayStr}'`);
       affectedBookings = allBookings.filter(b => {
-        if(b.IsBNBreak) return false;
+        if(isBNBreak(b)) return false;
         const slotDt = slotDateTime(b.SlotDate.slice(0,10), b.SlotTime, b.ShiftType);
         return slotDt >= effectiveAt;
       });
@@ -2341,13 +2349,13 @@ async function promptUnitTakeover({ unit, outgoingBN, date, shift, bookings, all
     // BN's own breaks at specific times
     const bnBreakTimes = new Set(
       allBookings
-        .filter(b => b.IsBNBreak && b.NurseName === bnName)
+        .filter(b => isBNBreak(b) && b.NurseName === bnName)
         .map(b => String(b.SlotTime).padStart(4,'0'))
     );
     // Slot times where this BN already has a staff booking on another unit (they're busy)
     const bnBusySlots = new Set(
       allBookings
-        .filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit))
+        .filter(b => isStaffBooking(b) && bnUnits.includes(b.Unit))
         .map(b => String(b.SlotTime).padStart(4,'0'))
     );
     // Check each outgoing booking
@@ -2951,7 +2959,7 @@ async function checkWrongUnit(selectedUnit){
       mine = await spGet(LISTS.bookings,
         `NurseName eq '${esc(name)}' and SlotDate ge '${shiftDate(S.shift)}' and SlotDate le '${shiftDate(S.shift)}T23' and ShiftType eq '${S.shift}'`);
     }
-    const otherUnits = [...new Set(mine.filter(b => !b.IsBNBreak && b.Unit !== selectedUnit).map(b => b.Unit))];
+    const otherUnits = [...new Set(mine.filter(b => isStaffBooking(b) && b.Unit !== selectedUnit).map(b => b.Unit))];
     if(otherUnits.length){
       toast(`⚠️ You have breaks booked on ${otherUnits.join(', ')} — are you on the right unit?`, true);
     }
@@ -3652,11 +3660,11 @@ async function loadSlots(silent=false){
     const oppSchedDt = shift === 'Noc' ? today() : oppDt;
     const oppScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === oppSchedDt && s.ShiftType === oppShift);
 
-    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
+    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && isStaffBooking(b));
     // Combine BN breaks from both dates so overlap BN breaks are visible
     const allBNBreaks = [
-      ...allBookingsRaw.filter(b => b.IsBNBreak),
-      ...oppBookingsRaw.filter(b => b.IsBNBreak)
+      ...allBookingsRaw.filter(b => isBNBreak(b)),
+      ...oppBookingsRaw.filter(b => isBNBreak(b))
     ];
 
     const covering = scheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, shift));
@@ -3717,7 +3725,7 @@ async function loadSlots(silent=false){
         let _limLast = _limSlots.length ? _limSlots[_limSlots.length - 1] : null;
         if(_limRot){
           const _limBNBreaks = new Set([...allBookingsRaw,...oppBookingsRaw]
-            .filter(b => b.IsBNBreak && b.NurseName===_limOppBN)
+            .filter(b => isBNBreak(b) && b.NurseName===_limOppBN)
             .map(b => String(b.SlotTime).padStart(4,'0')));
           const _unitLimSlots = _limSlots.filter(s => _limRot[s]===S.unit && !_limBNBreaks.has(s));
           if(_unitLimSlots.length){
@@ -3785,7 +3793,7 @@ async function loadSlots(silent=false){
             // Get overlap slots assigned to this unit, excluding BN's own break slots
             const _bnBreakTimes = new Set(
               [...allBookingsRaw, ...oppBookingsRaw]
-                .filter(b => b.IsBNBreak && b.NurseName === _oppBNName)
+                .filter(b => isBNBreak(b) && b.NurseName === _oppBNName)
                 .map(b => String(b.SlotTime).padStart(4,'0'))
             );
             const _unitOverlapSlots = _overlapSlots.filter(s =>
@@ -3959,7 +3967,7 @@ async function loadSlots(silent=false){
     }
 
     const bMap    = {};
-    bookings.forEach(b => { if (!b.IsBNBreak) bMap[String(b.SlotTime).padStart(4,'0')] = b; });
+    bookings.forEach(b => { if (isStaffBooking(b)) bMap[String(b.SlotTime).padStart(4,'0')] = b; });
 
     // Block slots where ANY BN covering this unit has marked their own break
     const allBNNames = [
@@ -3973,7 +3981,7 @@ async function loadSlots(silent=false){
 
     // Fetch THIS nurse's bookings — count per shift type separately (max 3 per shift)
     const myBookings = nurseName
-      ? bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak)
+      ? bookings.filter(b => b.NurseName===nurseName && isStaffBooking(b))
       : [];
     const myTimes = myBookings.map(b=>String(b.SlotTime).padStart(4,'0'));
     // For overlap slots (stored as opposite ShiftType), count against that shift's quota
@@ -4092,7 +4100,7 @@ async function loadSlots(silent=false){
         const normTime = String(b.SlotTime).padStart(4,'0');
         if(shift === 'Day' && toMin(normTime) >= SLOT_CUTOFF_DAY) return; // outside Day window
         if(isPast(normTime, shift)) return; // past slots already handled by main filter
-        if(!b.IsBNBreak && b.NurseName === nurseName && !future.includes(normTime)){
+        if(isStaffBooking(b) && b.NurseName === nurseName && !future.includes(normTime)){
           future.push(normTime);
         }
       });
@@ -4245,8 +4253,8 @@ async function silentRefreshSlots(){
     const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
     const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
     const scheds = allSchedsForSilent.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
-    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && !b.IsBNBreak);
-    const allBNBreaks = allBookingsRaw.filter(b => b.IsBNBreak);
+    const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && isStaffBooking(b));
+    const allBNBreaks = allBookingsRaw.filter(b => isBNBreak(b));
 
     const covering = scheds.filter(s => unitCoveredBy(s, S.unit, dt, shift));
     if(!covering.length) return;
@@ -4255,7 +4263,7 @@ async function silentRefreshSlots(){
 
     // Build a lightweight state fingerprint from current bookings
     const bMap = {};
-    bookings.forEach(b => { if(!b.IsBNBreak) bMap[b.SlotTime] = b.NurseName; });
+    bookings.forEach(b => { if(isStaffBooking(b)) bMap[b.SlotTime] = b.NurseName; });
     const bnBreakTimes = new Set(
       allBNBreaks.filter(b => allBNNames.includes(b.NurseName)).map(b => b.SlotTime)
     );
@@ -4263,7 +4271,7 @@ async function silentRefreshSlots(){
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
-    const myTimes   = bookings.filter(b => b.NurseName===nurseName && !b.IsBNBreak).map(b => b.SlotTime);
+    const myTimes   = bookings.filter(b => b.NurseName===nurseName && isStaffBooking(b)).map(b => b.SlotTime);
 
     // Build fingerprint: slot:status pairs
     const rotation = loadRotation(covering[0]?.BreakNurseName, dt, shift);
@@ -4315,7 +4323,7 @@ function renderSlotsFromCache(){
   const list = document.getElementById('slotsList');
   if(!list) return;
   const myBookings = nurseName
-    ? Object.values(bMap).filter(b => b.NurseName === nurseName && !b.IsBNBreak)
+    ? Object.values(bMap).filter(b => b.NurseName === nurseName && isStaffBooking(b))
     : [];
   const mySameShift = myBookings.filter(b => b.ShiftType === shift);
   const canClaimMore = mySameShift.length < MAX_SLOTS;
@@ -4431,7 +4439,7 @@ async function submitClaims(){
 
   // Float check — once before the batch
   const otherUnitBookings = allBookingsToday.filter(b => {
-    if(b.IsBNBreak) return false;
+    if(isBNBreak(b)) return false;
     if(b.Unit === S.unit) return false;
     const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
     return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
@@ -4618,7 +4626,7 @@ async function loadOtherSlots(silent=false){
       // Hide slots where BN is on break — same as loadSlots
       const _allOtherBNNames = [...new Set([...dayCovering, ...nocCovering].map(sc => sc.BreakNurseName))];
       const _bnBreak = [...dayBookingsRaw, ...nocBookingsRaw].find(b =>
-        b.IsBNBreak && _allOtherBNNames.includes(b.NurseName) &&
+        isBNBreak(b) && _allOtherBNNames.includes(b.NurseName) &&
         String(b.SlotTime).padStart(4,'0') === s.time
       );
       return !_bnBreak;
@@ -4639,7 +4647,7 @@ async function loadOtherSlots(silent=false){
     const _otherFirstName = document.getElementById('nurseName').value.trim();
     const _otherExt       = document.getElementById('nurseExt').value.trim();
     const nurseName = _otherFirstName && /^[0-9]{5}$/.test(_otherExt) ? `${toTitleCase(_otherFirstName)} (${_otherExt})` : null;
-    const myBookings = nurseName ? allBookings.filter(b => b.NurseName === nurseName && !b.IsBNBreak) : [];
+    const myBookings = nurseName ? allBookings.filter(b => b.NurseName === nurseName && isStaffBooking(b)) : [];
     const myTimes    = new Set(myBookings.map(b => b.SlotTime));
     const canClaimMore = myBookings.length < MAX_SLOTS;
 
@@ -4652,12 +4660,12 @@ async function loadOtherSlots(silent=false){
     meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
 
     list.innerHTML = allSlots.map(({time, shift: slotShift}) => {
-      const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && !b.IsBNBreak);
+      const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && isStaffBooking(b));
       const isMine  = myTimes.has(time);
       const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
 
       if(isMine){
-        const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===nurseName && !b.IsBNBreak);
+        const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===nurseName && isStaffBooking(b));
         return `<div class="slot-row mine" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:2px solid var(--teal);margin-bottom:6px;background:var(--teal-lt)">
           <div class="slot-time" style="font-weight:700;color:var(--teal-dk)">${fmt12(time)}</div>
           <div class="slot-name filled">${nurseName}</div>
@@ -4730,7 +4738,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // Float check — only on individual claims (not silent/batch)
     if(!silent){
       const otherUnitBookings = allBookingsToday.filter(b => {
-        if(b.IsBNBreak) return false;
+        if(isBNBreak(b)) return false;
         if(b.Unit === S.unit) return false;
         const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
         return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
@@ -4755,7 +4763,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
 
     // Max check — from pre-fetched data
     const staffMine = allBookingsToday.filter(b =>
-      b.NurseName === name && b.Unit === S.unit && b.ShiftType === slotShift && !b.IsBNBreak
+      b.NurseName === name && b.Unit === S.unit && b.ShiftType === slotShift && isStaffBooking(b)
     );
     if(staffMine.length >= MAX_SLOTS){
       if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`, true);
@@ -4766,7 +4774,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     const slotBookings = allBookingsToday.filter(b =>
       b.Unit === S.unit && b.SlotTime === slotTime && b.ShiftType === slotShift
     );
-    const taken = slotBookings.find(b => !b.IsBNBreak);
+    const taken = slotBookings.find(b => isStaffBooking(b));
     if(taken){
       if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true); loadSlots(); }
       return `${fmt12(slotTime)} already taken`;
@@ -4788,7 +4796,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     }
 
     // BN break conflict check — from pre-fetched data
-    const bnBreakConflict = slotBookings.find(b => b.IsBNBreak);
+    const bnBreakConflict = slotBookings.find(b => isBNBreak(b));
     if(bnBreakConflict){
       if(!silent){ toast(`${fmt12(slotTime)} is blocked — break nurse is on break at this time.`, true); loadSlots(); }
       return `BN on break`;
@@ -4932,7 +4940,7 @@ async function editAssign(id){
     const bookings = await spGet(LISTS.bookings,
       `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
     const confirmed = bookings.filter(b =>
-      !b.IsBNBreak && units.includes(b.Unit) && isConfirmed(b)
+      isStaffBooking(b) && units.includes(b.Unit) && isConfirmed(b)
     );
 
     if(confirmed.length > 0){
@@ -5017,7 +5025,7 @@ async function markBNUnavailable(schedId, bnName, date, shift){
     try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
     // Staff bookings on this BN's units
-    const affectedBookings = allBookings.filter(b => !b.IsBNBreak && bnUnits.includes(b.Unit) && b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift));
+    const affectedBookings = allBookings.filter(b => isStaffBooking(b) && bnUnits.includes(b.Unit) && b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift));
 
     // Same-wing BNs available to absorb
     const sameWingBNs = allScheds.filter(s =>
@@ -5393,7 +5401,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // Only future uncovered claimed staff breaks on BN-A's units
     // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
     const uncovered = allBookings.filter(b =>
-      !b.IsBNBreak &&
+      isStaffBooking(b) &&
       bnAUnits.includes(b.Unit) &&
       !isConfirmed(b) &&
       b.SlotDate >= shiftDate(shift) &&  // exclude dates before this shift started
@@ -5489,13 +5497,13 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       const respUnits = responsibleUnitsFor(bn);
       bnResponsibleUnits[bnName2] = respUnits;
 
-      const breaks = allBookings.filter(b => b.IsBNBreak && b.NurseName === bnName2).map(b => b.SlotTime);
+      const breaks = allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName2).map(b => b.SlotTime);
       bnBreakSets[bnName2] = new Set(breaks);
 
       const busy = new Set(breaks);  // own breaks count as busy
       const claimedSet = new Set();
       allBookings.forEach(b => {
-        if(b.IsBNBreak) return;
+        if(isBNBreak(b)) return;
         if(!respUnits.has(b.Unit)) return;
         busy.add(b.SlotTime);
         claimedSet.add(`${b.Unit}|${b.SlotTime}`);
@@ -5965,11 +5973,11 @@ async function loadSummary(){
       return bn === bnFilter;
     });
 
-    const staffBookings = filteredBookings.filter(b => !b.IsBNBreak);
+    const staffBookings = filteredBookings.filter(b => isStaffBooking(b));
     // Deduplicate BN breaks by NurseName+SlotTime — stored once per unit but should display once
     const bnBreakSeen = new Set();
     const bnOwnBreaks = filteredBookings.filter(b => {
-      if(!b.IsBNBreak) return false;
+      if(isStaffBooking(b)) return false;
       const key = `${b.NurseName}|${b.SlotTime}`;
       if(bnBreakSeen.has(key)) return false;
       bnBreakSeen.add(key);
@@ -6122,7 +6130,7 @@ async function saveAssign(){
       // For each truly removed unit with future bookings, prompt admin for takeover
       for(const unit of trulyRemovedUnits){
         const unitFutureBookings = staffBookings.filter(b =>
-          !b.IsBNBreak &&
+          isStaffBooking(b) &&
           b.Unit === unit &&
           sortKey(b.SlotTime, shift) > nowKey(shift)
         );
@@ -6153,7 +6161,7 @@ async function saveAssign(){
 
       if(implicitTransferUnits.length){
         const implicitTransferBookings = staffBookings.filter(b =>
-          !b.IsBNBreak &&
+          isStaffBooking(b) &&
           implicitTransferUnits.includes(b.Unit) &&
           sortKey(b.SlotTime, shift) > nowKey(shift)
         );
@@ -6354,7 +6362,7 @@ async function delAssign(id){
     // Find future affected staff bookings
     const now = nowMin();
     const bookings = await spGet(LISTS.bookings, `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
-    const affected = bookings.filter(b => !b.IsBNBreak && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+    const affected = bookings.filter(b => isStaffBooking(b) && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
 
     // Get same-wing active BNs
     const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
@@ -6434,7 +6442,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
     const futureOnUnit = allBookings.filter(b =>
-      !b.IsBNBreak && b.Unit === unit && sortKey(b.SlotTime, shift) > nowKey(shift)
+      isStaffBooking(b) && b.Unit === unit && sortKey(b.SlotTime, shift) > nowKey(shift)
     );
 
     // Is this shift active right now?
@@ -8367,7 +8375,7 @@ async function claimBNBreak(slotTime){
     // Warn if staff nurses already have this slot on any unit this BN covers
     const staffAtSlot = await spGet(LISTS.bookings,
       `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
-    const conflictingStaff = staffAtSlot.filter(b => !b.IsBNBreak && units.includes(b.Unit));
+    const conflictingStaff = staffAtSlot.filter(b => isStaffBooking(b) && units.includes(b.Unit));
     if(conflictingStaff.length){
       const lines = conflictingStaff.map(b => {
         const match = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
@@ -8419,7 +8427,7 @@ async function cancelBNBreak(slotTime){
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
     const actioned = allBookings.filter(b =>
-      !b.IsBNBreak && !isPending(b)
+      isStaffBooking(b) && !isPending(b)
     );
     if(actioned.length > 0){
       const names = actioned.map(b => {
@@ -8483,7 +8491,7 @@ async function clearBNBreaks(){
     const slotTimes = [...new Set(breaks.map(b => b.SlotTime))];
     const allB = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const actioned = allB.filter(b =>
-      !b.IsBNBreak && slotTimes.includes(b.SlotTime) && !isPending(b)
+      isStaffBooking(b) && slotTimes.includes(b.SlotTime) && !isPending(b)
     );
     if(actioned.length > 0){
       const actionLines = actioned.map(b => {
@@ -8945,7 +8953,7 @@ async function loadBNConfirm(){
 
     // Overlap-aware coverage predicate: does THIS BN actually cover this booking?
     const bnCovers = (b) => {
-      if(b.IsBNBreak) return false;
+      if(isBNBreak(b)) return false;
       if(!responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
 
@@ -9052,9 +9060,10 @@ async function loadBNConfirm(){
       const bookingBySlot = {};
       staffBookings.forEach(b => { bookingBySlot[normSlot(b.SlotTime)] = b; });
 
-      // BN's own breaks (from allBookings)
+      // BN's own breaks (from allBookings) — use isBNBreak helper since
+      // Sheets returns the field as string "0"/"1" not number.
       const ownBreakSlots = new Set(
-        allBookings.filter(b => b.IsBNBreak && b.NurseName === BNS.name).map(b => normSlot(b.SlotTime))
+        allBookings.filter(b => isBNBreak(b) && b.NurseName === BNS.name).map(b => normSlot(b.SlotTime))
       );
 
       // Rotation: slotTime -> unit for this BN
@@ -9251,10 +9260,10 @@ async function populateManualSlots(){
     // Get existing bookings on this unit to exclude already-claimed ones
     const bookings = await spGet(LISTS.bookings,
       `Unit eq '${esc(unit)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    const claimed = new Set(bookings.filter(b => !b.IsBNBreak).map(b => b.SlotTime));
+    const claimed = new Set(bookings.filter(b => isStaffBooking(b)).map(b => b.SlotTime));
 
     // Get BN's own break slots to show (blocked for staff but valid for manual entry)
-    const bnBreaks = new Set(bookings.filter(b => b.IsBNBreak).map(b => b.SlotTime));
+    const bnBreaks = new Set(bookings.filter(b => isBNBreak(b)).map(b => b.SlotTime));
 
     const available = allSlots.filter(s => !claimed.has(s));
     if(!available.length){
@@ -9304,7 +9313,7 @@ async function saveManualBreak(){
     // Block if this nurse already has a manual break at the same time on any unit
     const existingAtTime = await spGet(LISTS.bookings,
       `NurseName eq '${esc(nurseName)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
-    if(existingAtTime.filter(b => !b.IsBNBreak).length){
+    if(existingAtTime.filter(b => isStaffBooking(b)).length){
       toast(`${nurseName} already has a break at ${fmt12(slotTime)} — a nurse can only be in one place at a time.`, true);
       return;
     }
@@ -9359,7 +9368,7 @@ async function confirmAllBreaks(){
       `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
     // Overlap-aware coverage predicate (same as loadBNConfirm)
     const bnCovers = (b) => {
-      if(b.IsBNBreak) return false;
+      if(isBNBreak(b)) return false;
       if(!responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
@@ -9405,7 +9414,7 @@ function renderUtilization(bookings, scheds, filter){
   const list = document.getElementById('rptUtilList');
   if(!list) return;
 
-  const staffBookings = bookings.filter(b => !b.IsBNBreak);
+  const staffBookings = bookings.filter(b => isStaffBooking(b));
   const confirmed  = staffBookings.filter(b => isConfirmed(b));
   const notTaken   = staffBookings.filter(b => isNotTaken(b));
   const pending    = staffBookings.filter(b => isPending(b));
@@ -9530,7 +9539,7 @@ function renderVolBN(bookings, scheds){
   const list = document.getElementById('rptVolBNList');
   if(!list) return;
 
-  const staffBookings = bookings.filter(b => !b.IsBNBreak);
+  const staffBookings = bookings.filter(b => isStaffBooking(b));
   const confirmed = staffBookings.filter(b => isConfirmed(b));
 
   // Build schedMap: unit+date+shift -> BN
@@ -9581,7 +9590,7 @@ function renderEngagement(bookings, scheds){
   const list = document.getElementById('rptEngList');
   if(!list) return;
 
-  const staffBookings = bookings.filter(b => !b.IsBNBreak);
+  const staffBookings = bookings.filter(b => isStaffBooking(b));
 
   // Calculate offered slots per unit using block rotation
   // For each assignment, calculate how many slots were offered to each unit
@@ -9658,7 +9667,7 @@ function renderPopularity(bookings){
   const list = document.getElementById('rptPopList');
   if(!list) return;
 
-  const staffBookings = bookings.filter(b => !b.IsBNBreak);
+  const staffBookings = bookings.filter(b => isStaffBooking(b));
   const filtered = _rptPopFilter === 'both' ? staffBookings
     : staffBookings.filter(b => b.ShiftType === _rptPopFilter);
 
@@ -9776,7 +9785,7 @@ async function loadReports(){
     // Fetch all bookings in range
     const bookings = await spGet(LISTS.bookings,
       `SlotDate ge '${from}' and SlotDate le '${to}'`);
-    const staffBookings   = bookings.filter(b => !b.IsBNBreak);
+    const staffBookings   = bookings.filter(b => isStaffBooking(b));
     const confirmedBookings = staffBookings.filter(b => isConfirmed(b));
     const notTakenBookings  = staffBookings.filter(b => isNotTaken(b));
     const cancelledCount    = bookings.filter(b => b.IsCancelled == 1 || b.BreakStatus === 'cancelled').length;
