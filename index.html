@@ -8367,8 +8367,12 @@ async function claimBNBreak(slotTime){
       SlotDate: dt, ShiftType: shift, IsBNBreak: 1
     });
     toast(`🔒 ${fmt12(slotTime)} blocked`);
-    // Short delay before reload — Sheets needs a moment to commit the write
-    setTimeout(() => loadBNSlots(), 1500);
+    // Short delay before reload — Sheets needs a moment to commit the write.
+    // Preserve scroll position so the page doesn't jump to the bottom.
+    const _sy = window.scrollY;
+    setTimeout(() => {
+      loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
+    }, 1500);
   } catch(e) { toast(e.message, true); }
 }
 
@@ -8430,7 +8434,9 @@ async function cancelBNBreak(slotTime){
     } else {
       toast(`${fmt12(slotTime)} removed`);
     }
-    loadBNSlots();
+    // Preserve scroll position so the page doesn't jump to the bottom.
+    const _sy = window.scrollY;
+    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
   } catch(e) { toast(e.message, true); }
 }
 
@@ -8488,7 +8494,8 @@ async function clearBNBreaks(){
     }
     const clearBtn = document.getElementById('clearAllBreaksBtn');
     if(clearBtn){ clearBtn.disabled=false; clearBtn.textContent='Clear All My Breaks'; }
-    loadBNSlots();
+    const _sy = window.scrollY;
+    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
   } catch(e) {
     toast(e.message, true);
     const clearBtn = document.getElementById('clearAllBreaksBtn');
