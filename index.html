@@ -3345,7 +3345,7 @@ async function applyDefaultToAll(){
   }
 }
 
-async function applyDefaultToShift(name, date, shift, defaultSlots){
+async function applyDefaultToShift(name, date, shift, defaultSlots, force=false){
   const units = await getBNUnits(name, date, shift);
   if(!units.length) return;
 
@@ -3354,16 +3354,34 @@ async function applyDefaultToShift(name, date, shift, defaultSlots){
   const shiftIsToday = date === shiftDate(shift);
   const shiftAlreadyStarted = shiftIsToday && staffWindowOpen(shift);
 
-  // Remove existing BN breaks — batchDelete if multiple, single spDel if just one
+  // Check whether this BN already has breaks set for THIS specific shift.
+  // If they do, preserve them — they represent the BN's intentional state
+  // (e.g. a mid-shift adjustment) and must not be overwritten by the default
+  // when admin edits the assignment. Default seeding applies only when
+  // no breaks exist yet for this BN/date/shift.
+  //
+  // `force=true` overrides this preservation (used by explicit user-initiated
+  // "Reset this shift to default" / "Reset ALL upcoming shifts" actions).
   const existing = await spGet(LISTS.bookings,
     `NurseName eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
-  if(existing.length > 1){
-    await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
-      ids: encodeURIComponent(JSON.stringify(existing.map(b=>b.Id))) });
-  } else {
-    for(const b of existing) await spDel(LISTS.bookings, b.Id);
+
+  if(existing.length && !force){
+    // Preserve existing breaks. Just recalculate rotation so unit assignments
+    // match the (possibly updated) unit set, using the BN's current break
+    // times as fixed exclusions. No writes to bookings.
+    await recalculateRotation(name, date, shift).catch(()=>{});
+    return;
   }
 
+  // Either no existing breaks, OR this is an explicit reset — wipe and seed.
+  if(existing.length){
+    if(existing.length > 1){
+      await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
+        ids: encodeURIComponent(JSON.stringify(existing.map(b=>b.Id))) });
+    } else {
+      for(const b of existing) await spDel(LISTS.bookings, b.Id);
+    }
+  }
   if(shiftAlreadyStarted){
     // Shift already started — save breaks using existing rotation, no recalc
     const rotKey = `bnRotation_${name}_${date}_${shift}`;
@@ -3425,7 +3443,7 @@ async function resetShiftToDefault(){
     toast('No default schedule set for ' + shift + ' shift', true); return;
   }
   if(!await customConfirm('Reset this shift to your default break schedule?','Reset','Cancel')) return;
-  await applyDefaultToShift(name, dt, shift, def);
+  await applyDefaultToShift(name, dt, shift, def, true);
   toast('Shift reset to default');
   loadBNSlots();
 }
@@ -3447,7 +3465,7 @@ async function resetAllToDefault(){
   for(const sched of upcoming){
     const def = sched.ShiftType === 'Day' ? dayDef : nocDef;
     if(!def.length) continue;
-    await applyDefaultToShift(name, sched.ShiftDate.slice(0,10), sched.ShiftType, def);
+    await applyDefaultToShift(name, sched.ShiftDate.slice(0,10), sched.ShiftType, def, true);
     applied++;
   }
   toast(`✓ Reset ${applied} upcoming shift${applied!==1?'s':''} to default`);
