@@ -1625,6 +1625,77 @@ function detectShift(){
   return (m >= 390 && m < 1110) ? 'Day' : 'Noc';
 }
 
+// BN-specific time-based shift detector. Unlike detectShift() which uses
+// staff clock-in boundaries (06:30 / 18:30), BNs have different hours:
+//   Day BN: 08:00 (480) – 20:30 (1230)
+//   Noc BN: 20:00 (1200) – 08:30 (510 next day)
+// The two 30-min overlap windows (08:00-08:30 and 20:00-20:30) default to the
+// INCOMING shift since the outgoing BN is wrapping up.
+// Prefer detectBNShiftForName() when the BN is known — it uses their actual
+// schedule record which handles boundary ambiguity without guessing.
+function detectBNShift(){
+  const m = nowMin();
+  return (m >= 8*60 && m < 20*60 + 30) ? 'Day' : 'Noc';
+}
+
+// Schedule-aware BN shift detection. Looks up the BN's active schedule
+// records covering "right now" and returns {shift, date} for the one whose
+// window is currently live. Falls back to null if none found; caller should
+// then use detectBNShift() for a time-based guess.
+async function detectBNShiftForName(name){
+  if(!name) return null;
+  try {
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2,'0');
+    const toDate = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    // Look back 1 day: a Noc shift that started yesterday evening may still
+    // be active (runs until 08:30 the next morning).
+    const y = new Date(now); y.setDate(now.getDate() - 1);
+    const yStr = toDate(y);
+    const todayStr = toDate(now);
+
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${yStr}' and ShiftDate le '${todayStr}T23' and BreakNurseName eq '${esc(name)}'`);
+    const candidates = scheds.filter(s => s.Status !== 'inactive');
+    if(!candidates.length) return null;
+
+    // Pick the schedule whose window is currently live.
+    //   Day: 08:00 – 20:30 on ShiftDate
+    //   Noc: 20:00 on ShiftDate – 08:30 next day
+    const live = candidates.filter(s => {
+      const sd = (s.ShiftDate || '').slice(0, 10);
+      if(!sd) return false;
+      const start = new Date(sd + 'T12:00:00');
+      if(s.ShiftType === 'Day'){
+        const s0 = new Date(start); s0.setHours(8, 0, 0, 0);
+        const s1 = new Date(start); s1.setHours(20, 30, 0, 0);
+        return now >= s0 && now < s1;
+      } else if(s.ShiftType === 'Noc'){
+        const s0 = new Date(start); s0.setHours(20, 0, 0, 0);
+        const s1 = new Date(start); s1.setDate(s1.getDate() + 1); s1.setHours(8, 30, 0, 0);
+        return now >= s0 && now < s1;
+      }
+      return false;
+    });
+
+    if(live.length === 0) return null;
+    // If more than one is live (unusual — shouldn't happen in practice), pick
+    // the one whose start is most recent, i.e. the just-started shift.
+    live.sort((a, b) => {
+      const aStart = new Date((a.ShiftDate || '').slice(0,10) + 'T12:00:00');
+      if(a.ShiftType === 'Day') aStart.setHours(8, 0, 0, 0);
+      else aStart.setHours(20, 0, 0, 0);
+      const bStart = new Date((b.ShiftDate || '').slice(0,10) + 'T12:00:00');
+      if(b.ShiftType === 'Day') bStart.setHours(8, 0, 0, 0);
+      else bStart.setHours(20, 0, 0, 0);
+      return bStart - aStart;
+    });
+    return { shift: live[0].ShiftType, date: (live[0].ShiftDate || '').slice(0, 10) };
+  } catch(e){
+    return null;
+  }
+}
+
 function toMin(hhmm){
   return parseInt(hhmm.slice(0,2))*60 + parseInt(hhmm.slice(2,4));
 }
@@ -7927,7 +7998,7 @@ function populateBNDropdown(){
     importedNames.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
 }
 
-function loadBNView(){
+async function loadBNView(){
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first.', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
@@ -7947,8 +8018,24 @@ function loadBNView(){
     if(_cw) _cw.style.display = 'none';
   }
 
-  // Restore saved ext for this BN if available
-  const savedExt = localStorage.getItem(`bnExt_${name}_${shiftDate(detectShift())}_${detectShift()}`);
+  // Resolve the BN's current shift+date. First try schedule-based lookup
+  // (most accurate — handles overlap windows, doubles, and boundary cases),
+  // then fall back to BN-hour time boundaries if no active schedule found.
+  let resolvedShift = null, resolvedDate = null;
+  try {
+    const lookup = await detectBNShiftForName(name);
+    if(lookup){
+      resolvedShift = lookup.shift;
+      resolvedDate  = lookup.date;
+    }
+  } catch(e){ /* fall through to time-based guess */ }
+  if(!resolvedShift){
+    resolvedShift = detectBNShift();
+    resolvedDate  = shiftDate(resolvedShift);
+  }
+
+  // Restore saved ext for this BN if available (key is shift-scoped)
+  const savedExt = localStorage.getItem(`bnExt_${name}_${resolvedDate}_${resolvedShift}`);
   const resolvedExt = ext || savedExt || '';
 
   // Require ext — prompt if not entered and not saved
@@ -7964,8 +8051,8 @@ function loadBNView(){
 
   BNS.name  = name;
   BNS.ext   = resolvedExt;
-  BNS.shift = detectShift();
-  BNS.date  = shiftDate(BNS.shift);
+  BNS.shift = resolvedShift;
+  BNS.date  = resolvedDate;
   BNS.defaultShift = BNS.shift;
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
