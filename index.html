@@ -7918,6 +7918,8 @@ function loadBNView(){
   BNS.shift = detectShift();
   BNS.date  = shiftDate(BNS.shift);
   BNS.defaultShift = BNS.shift;
+  // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
+  _prodLogResetShiftState();
 
   // Save ext keyed to this shift and patch to schedule record
   localStorage.setItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`, resolvedExt);
@@ -8003,6 +8005,8 @@ function onBNDateChange(){
 function flipBNShift(){
   BNS.shift = BNS.shift==='Day' ? 'Noc' : 'Day';
   BNS.pendingBreaks.clear(); updateBNSubmitBar();
+  // Clear Productivity Log state so stale expand/copy-last doesn't leak across shifts.
+  _prodLogResetShiftState();
   renderBNShiftPill();
   loadBNSlots();
 }
@@ -8307,16 +8311,25 @@ async function submitBNBreaks(){
   const btn = document.getElementById('bnSubmitBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
   BNS.pendingBreaks.clear();
-  updateBNSubmitBar(); // hides bar — but btn stays visible via submitBtn above... 
-  // Actually keep bar visible until done
+  updateBNSubmitBar(); // hides bar — but btn stays visible via submitBtn above...
   const bar = document.getElementById('bnSubmitBar');
   const lbl = document.getElementById('bnSubmitBarLabel');
   if(bar){ bar.style.display = 'flex'; }
   if(lbl){ lbl.textContent = `Submitting ${slots.length} break${slots.length!==1?'s':''}…`; }
+  // Capture scroll once, before any slot writes begin. Each claimBNBreak
+  // no longer reloads the list — we reload once after the whole batch
+  // completes to avoid repeated layout changes jumping the page.
+  const _sy = window.scrollY;
   for(const slot of slots){
     await claimBNBreak(slot);
   }
   if(bar) bar.style.display = 'none';
+  // Single refresh at the end, after Sheets has committed all writes.
+  // The setTimeout preserves the original 1.5s buffer that individual
+  // claimBNBreak had, ensuring Sheets has flushed before reading back.
+  setTimeout(() => {
+    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
+  }, 1500);
 }
 
 async function claimBNBreak(slotTime){
@@ -8367,12 +8380,8 @@ async function claimBNBreak(slotTime){
       SlotDate: dt, ShiftType: shift, IsBNBreak: 1
     });
     toast(`🔒 ${fmt12(slotTime)} blocked`);
-    // Short delay before reload — Sheets needs a moment to commit the write.
-    // Preserve scroll position so the page doesn't jump to the bottom.
-    const _sy = window.scrollY;
-    setTimeout(() => {
-      loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
-    }, 1500);
+    // NOTE: caller (submitBNBreaks) handles the single loadBNSlots refresh after
+    // all slots commit, preserving scroll position once instead of per-slot.
   } catch(e) { toast(e.message, true); }
 }
 
@@ -8513,9 +8522,30 @@ async function clearBNBreaks(){
 // Staged changes don't hit the backend until the BN taps Submit.
 const _prodLogStaged = new Map();
 
+// Which unclaimed slots currently have their inline claim form expanded.
+// Set<slotTime>. Cleared when shift changes.
+const _prodLogExpanded = new Set();
+
+// Persistent input state for expanded unclaimed rows so background refreshes
+// don't wipe what the BN is typing.
+//   Map<slotTime, {name, ext}>
+const _prodLogInputs = new Map();
+
+// Last successfully submitted walk-up claim for this shift, for "Copy last".
+// Cleared when shift changes.
+let _prodLogLastClaim = null;  // {name, ext}
+
 function _prodLogCountEl(){ return document.getElementById('prodLogCount'); }
 function _prodLogSubmitBtn(){ return document.getElementById('prodLogSubmit'); }
 function _prodLogClearBtn(){ return document.getElementById('prodLogClear'); }
+
+// Reset per-shift state (expand, inputs, last-claim). Called when BN changes
+// name/date/shift so nothing leaks across shifts.
+function _prodLogResetShiftState(){
+  _prodLogExpanded.clear();
+  _prodLogInputs.clear();
+  _prodLogLastClaim = null;
+}
 
 function _prodLogUpdateHeader(){
   const n = _prodLogStaged.size;
@@ -8560,8 +8590,111 @@ function stageBreakAction(id, action, nurseName, slotTime, unit){
   loadBNConfirm();
 }
 
-// Stage a walk-up break claim on an unclaimed past slot.
-// Reads name/ext from the inline inputs on the slot row.
+// ── Unclaimed row expand/collapse ─────────────────────────
+// An unclaimed row starts collapsed, showing a "+ Claim" button. Tapping it
+// expands the row to reveal name + ext inputs (plus an "Apply to more"
+// checkbox and a "Copy last" hint if a prior claim was submitted this shift).
+// Any number of rows can be expanded; tapping "+ Claim" again collapses
+// that row. Inputs persist across re-renders via _prodLogInputs.
+
+function toggleUnclaimedExpand(slotTime){
+  if(_prodLogExpanded.has(slotTime)){
+    // Collapsing — snapshot any typed values so they're not lost if the user
+    // re-expands later, then remove from expanded set.
+    _prodLogCaptureInputs(slotTime);
+    _prodLogExpanded.delete(slotTime);
+  } else {
+    _prodLogExpanded.add(slotTime);
+  }
+  loadBNConfirm().then(() => {
+    if(_prodLogExpanded.has(slotTime)){
+      // Focus the name input after expand
+      const nameInput = document.getElementById(`claimName_${slotTime}`);
+      nameInput?.focus();
+    }
+  });
+}
+
+// Snapshot current input values from DOM into _prodLogInputs so they survive
+// re-renders. Called on collapse, before re-render, and on input blur.
+function _prodLogCaptureInputs(slotTime){
+  const nameInput = document.getElementById(`claimName_${slotTime}`);
+  const extInput  = document.getElementById(`claimExt_${slotTime}`);
+  if(!nameInput && !extInput) return;
+  const name = (nameInput?.value || '').trim();
+  const ext  = (extInput?.value  || '').trim();
+  if(name || ext){
+    _prodLogInputs.set(slotTime, { name, ext });
+  } else {
+    _prodLogInputs.delete(slotTime);
+  }
+}
+
+// Capture inputs for all currently expanded rows before a full re-render.
+function _prodLogCaptureAllInputs(){
+  _prodLogExpanded.forEach(slot => _prodLogCaptureInputs(slot));
+}
+
+// Autofill inputs from "Copy last" (previous walk-up claim this shift).
+function applyCopyLast(slotTime){
+  if(!_prodLogLastClaim) return;
+  const nameInput = document.getElementById(`claimName_${slotTime}`);
+  const extInput  = document.getElementById(`claimExt_${slotTime}`);
+  if(nameInput) nameInput.value = _prodLogLastClaim.name || '';
+  if(extInput)  extInput.value  = _prodLogLastClaim.ext  || '';
+  // Persist in the input state map too
+  _prodLogInputs.set(slotTime, {
+    name: _prodLogLastClaim.name || '',
+    ext:  _prodLogLastClaim.ext  || ''
+  });
+  // Focus the ext input for easy edit if needed
+  extInput?.focus();
+}
+
+// Toggle the "Apply to more slots" chip picker visibility for a row.
+function toggleApplyMore(slotTime){
+  const wrap = document.getElementById(`applyMoreWrap_${slotTime}`);
+  const cb   = document.getElementById(`applyMoreCheck_${slotTime}`);
+  if(!wrap) return;
+  wrap.style.display = cb?.checked ? 'flex' : 'none';
+  // Update the button label based on checked chips
+  updateLogBreakButton(slotTime);
+}
+
+// Toggle a chip in the "Apply to more" picker.
+function toggleApplyMoreChip(slotTime, chipSlot){
+  const chip = document.getElementById(`chip_${slotTime}_${chipSlot}`);
+  if(!chip) return;
+  const isSelected = chip.classList.toggle('selected');
+  if(isSelected){
+    chip.style.background = 'var(--teal-mid)';
+    chip.style.borderColor = 'var(--teal-dk)';
+    chip.style.color = 'var(--teal-dk)';
+    chip.style.fontWeight = '600';
+  } else {
+    chip.style.background = 'var(--bg)';
+    chip.style.borderColor = 'var(--border)';
+    chip.style.color = '';
+    chip.style.fontWeight = '';
+  }
+  updateLogBreakButton(slotTime);
+}
+
+// Update "✓ Log break" / "✓ Log to N slots" label based on checked chips.
+function updateLogBreakButton(slotTime){
+  const btn = document.getElementById(`logBreakBtn_${slotTime}`);
+  if(!btn) return;
+  const wrap = document.getElementById(`applyMoreWrap_${slotTime}`);
+  const cb   = document.getElementById(`applyMoreCheck_${slotTime}`);
+  let n = 1;
+  if(cb?.checked && wrap){
+    const selected = wrap.querySelectorAll('.chip.selected');
+    n = 1 + selected.length;
+  }
+  btn.textContent = n === 1 ? '✓ Log break' : `✓ Log to ${n} slots`;
+}
+
+// Stage a walk-up break claim from inputs. Supports "Apply to more" fanout.
 function stageClaimFromInputs(slotTime, unit){
   const nameInput = document.getElementById(`claimName_${slotTime}`);
   const extInput  = document.getElementById(`claimExt_${slotTime}`);
@@ -8577,13 +8710,41 @@ function stageClaimFromInputs(slotTime, unit){
     extInput?.focus();
     return;
   }
+
+  // Gather additional slots from "Apply to more" chip picker (if checked)
+  const cb = document.getElementById(`applyMoreCheck_${slotTime}`);
+  const extraSlots = [];  // [{slot, unit}]
+  if(cb?.checked){
+    const wrap = document.getElementById(`applyMoreWrap_${slotTime}`);
+    wrap?.querySelectorAll('.chip.selected').forEach(chip => {
+      const s = chip.dataset.slot;
+      const u = chip.dataset.unit;
+      if(s) extraSlots.push({ slot: s, unit: u });
+    });
+  }
+
+  // Stage the primary slot
   const key = `unclaimed:${slotTime}`;
   _prodLogStaged.set(key, { action: 'claim', nurseName, slotTime, unit, ext });
+  // Stage each extra slot with the same name/ext
+  extraSlots.forEach(({slot, unit: u}) => {
+    const k = `unclaimed:${slot}`;
+    _prodLogStaged.set(k, { action: 'claim', nurseName, slotTime: slot, unit: u, ext });
+  });
+
+  // Clear expand/input state for all affected slots (they're now staged, not expanded)
+  _prodLogExpanded.delete(slotTime);
+  _prodLogInputs.delete(slotTime);
+  extraSlots.forEach(({slot}) => {
+    _prodLogExpanded.delete(slot);
+    _prodLogInputs.delete(slot);
+  });
+
   _prodLogUpdateHeader();
   loadBNConfirm();
 }
 
-// Unstage a walk-up claim (restore the input form for that slot).
+// Unstage a walk-up claim (restore the collapsed unclaimed state).
 function unstageClaim(slotTime){
   const key = `unclaimed:${slotTime}`;
   _prodLogStaged.delete(key);
@@ -8640,6 +8801,9 @@ async function submitStagedActions(){
           BreakStatus: 'confirmed',
           IsBNBreak: 0
         });
+        // Remember the last successfully submitted claim for "Copy last" on
+        // subsequent unclaimed rows this shift.
+        _prodLogLastClaim = { name: info.nurseName, ext: info.ext || '' };
       }
       _prodLogStaged.delete(id);
       okCount++;
@@ -8666,6 +8830,10 @@ async function loadBNConfirm(){
   const list = document.getElementById('bnConfirmList');
   const loader = document.getElementById('bnConfirmLoader');
   if (!wrap || !BNS.name) return;
+
+  // Snapshot any typed inputs before we re-render — they're stored in
+  // _prodLogInputs and restored into the new inputs' value attribute.
+  _prodLogCaptureAllInputs();
 
   loader.style.display = 'inline-block';
   const dt = BNS.date || today(), shift = BNS.shift;
@@ -8838,6 +9006,15 @@ async function loadBNConfirm(){
 
       const esc = (s) => String(s).replace(/'/g, "\\'");
 
+      // Precompute "compatible unclaimed slots" list for Apply-to-more chip picker.
+      // A slot is compatible if: no booking exists, not own break, not hard-blocked,
+      // and not already staged for a different action.
+      const compatibleUnclaimed = allSlots.filter(s =>
+        !bookingBySlot[s] &&
+        !ownBreakSlots.has(s) &&
+        !hardBlockedSet.has(s)
+      );
+
       return allSlots.map(slot => {
         const b = bookingBySlot[slot];
         const isOwnBreak = ownBreakSlots.has(slot);
@@ -8905,30 +9082,50 @@ async function loadBNConfirm(){
         else {
           // Show unit from rotation (if any), otherwise show as generic unclaimed
           const unitLabel = rotationUnit ? `· ${rotationUnit}` : '';
+          const stagedClaim = staged && staged.action === 'claim' ? staged : null;
 
-          if(isPast){
-            // Past unclaimed — BN can log a walk-up break inline.
-            const stagedClaim = staged && staged.action === 'claim' ? staged : null;
-            if(stagedClaim){
-              // Show staged claim
-              stagedLeftBorder = 'border-left:4px solid var(--teal)';
-              centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
-                <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
-              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Unstage</button>`;
-            } else {
-              // Input form for walk-up claim
-              centerHtml = `<span style="color:var(--muted);font-size:.82rem">Unclaimed ${unitLabel}</span>
-                <div style="display:flex;gap:4px;margin-top:4px">
-                  <input type="text" id="claimName_${slot}" placeholder="Nurse name" style="flex:1;min-width:80px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
-                  <input type="text" id="claimExt_${slot}" placeholder="Ext (opt)" maxlength="5" style="width:72px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
-                </div>`;
-              actionHtml = `<button class="btn btn-primary btn-sm" onclick="stageClaimFromInputs('${slot}','${esc(rotationUnit || '')}')">✓ Log break</button>`;
-            }
+          if(stagedClaim){
+            // Staged walk-up claim — teal border, compact display, Unstage button
+            stagedLeftBorder = 'border-left:4px solid var(--teal)';
+            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
+              <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Unstage</button>`;
+          } else if(_prodLogExpanded.has(slot)){
+            // Expanded inline-claim form with Copy last + Apply to more
+            const savedInputs = _prodLogInputs.get(slot) || { name: '', ext: '' };
+            // Build chip picker HTML for all other compatible unclaimed slots
+            const chipOptions = compatibleUnclaimed.filter(s => s !== slot);
+            const chipHtml = chipOptions.map(s => {
+              const u = rotation[s] || '';
+              return `<span id="chip_${slot}_${s}" class="chip" data-slot="${s}" data-unit="${esc(u)}" onclick="toggleApplyMoreChip('${slot}','${s}')" style="display:inline-flex;align-items:center;padding:4px 10px;border:1px solid var(--border);border-radius:12px;font-size:.75rem;cursor:pointer;user-select:none;background:var(--bg)">${fmt12(s)}${u ? ` · ${u}` : ''}</span>`;
+            }).join(' ');
+
+            const copyLastBtn = _prodLogLastClaim
+              ? `<button type="button" class="btn btn-ghost btn-sm" onclick="applyCopyLast('${slot}')" style="font-size:.72rem;padding:3px 8px;color:var(--teal-dk);margin-bottom:6px">↑ Copy last: ${_prodLogLastClaim.name}${_prodLogLastClaim.ext ? ` (${_prodLogLastClaim.ext})` : ''}</button>`
+              : '';
+
+            centerHtml = `<span style="color:var(--muted);font-size:.82rem">Unclaimed ${unitLabel}</span>
+              ${copyLastBtn ? `<div style="margin-top:4px">${copyLastBtn}</div>` : ''}
+              <div style="display:flex;gap:4px;margin-top:6px">
+                <input type="text" id="claimName_${slot}" placeholder="Nurse name" value="${escHTML(savedInputs.name)}" oninput="_prodLogCaptureInputs('${slot}')" style="flex:1;min-width:80px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+                <input type="text" id="claimExt_${slot}" placeholder="Ext" maxlength="5" value="${escHTML(savedInputs.ext)}" oninput="_prodLogCaptureInputs('${slot}')" style="width:72px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+              </div>
+              <div style="font-size:.7rem;color:var(--muted);margin-top:4px">Ext enables the staff nurse to manage their break from the Sign Up tab.</div>
+              ${chipOptions.length ? `<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.78rem;color:var(--muted);cursor:pointer">
+                <input type="checkbox" id="applyMoreCheck_${slot}" onchange="toggleApplyMore('${slot}')" style="cursor:pointer">
+                Apply to more slots
+              </label>
+              <div id="applyMoreWrap_${slot}" style="display:none;flex-wrap:wrap;gap:4px;margin-top:6px">${chipHtml}</div>` : ''}`;
+
+            actionHtml = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
+              <button class="btn btn-primary btn-sm" id="logBreakBtn_${slot}" onclick="stageClaimFromInputs('${slot}','${esc(rotationUnit || '')}')">✓ Log break</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="toggleUnclaimedExpand('${slot}')">✕ Collapse</button>
+            </div>`;
           } else {
-            // Future unclaimed — informational only
+            // Collapsed unclaimed row — "+ Claim" button expands the form
             rowClass = '';
             centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
-            actionHtml = '';
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>`;
           }
         }
 
