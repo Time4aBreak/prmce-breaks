@@ -395,37 +395,40 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
       <!-- Custom break schedule for this shift -->
       <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
-          <div class="card-label" style="margin:0">🗓 Breaker's Breaks</div>
+        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleBNBreakCard()">
           <div style="display:flex;align-items:center;gap:8px">
+            <div class="card-label" style="margin:0">🗓 Breaker's Breaks</div>
             <span id="bnBreakCount" style="font-size:.75rem;color:var(--muted)"></span>
             <span id="bnLoader" style="display:none"><div class="spinner"></div></span>
           </div>
+          <span id="bnBreakChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
         </div>
-        <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
-          Select your break slots for this shift. These will be blocked for all units you cover.
-        </p>
-        <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
-        <div id="bnSlotsList"></div>
-        <!-- BN break submit bar -->
-        <div id="bnSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--day-lt);border-radius:10px;border:1.5px solid var(--day);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-          <span id="bnSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--day)"></span>
-          <div style="display:flex;gap:8px">
-            <button class="btn btn-ghost btn-sm" onclick="clearBNPending()">Clear</button>
-            <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" id="bnSubmitBtn" onclick="submitBNBreaks()">Submit breaks</button>
+        <div id="bnBreakBody" style="display:none;margin-top:12px">
+          <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
+            Select your break slots for this shift. These will be blocked for all units you cover.
+          </p>
+          <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
+          <div id="bnSlotsList"></div>
+          <!-- BN break submit bar -->
+          <div id="bnSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--day-lt);border-radius:10px;border:1.5px solid var(--day);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <span id="bnSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--day)"></span>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" onclick="clearBNPending()">Clear</button>
+              <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" id="bnSubmitBtn" onclick="submitBNBreaks()">Submit breaks</button>
+            </div>
           </div>
-        </div>
-        <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-          <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
-          <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
-            <option value="">— full shift —</option>
-          </select>
-          <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
-        </div>
-        <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-ghost btn-sm" id="clearAllBreaksBtn" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks()">Clear All My Breaks</button>
-          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Resetting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Reset this shift to default'})">Reset this shift to default</button>
-          <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
+          <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
+            <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
+              <option value="">— full shift —</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
+          </div>
+          <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" id="clearAllBreaksBtn" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks()">Clear All My Breaks</button>
+            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Resetting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Reset this shift to default'})">Reset this shift to default</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
+          </div>
         </div>
       </div>
 
@@ -438,13 +441,20 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               <span id="prodLogCount" style="display:none;font-size:.72rem;font-weight:600;color:var(--teal-dk);background:var(--teal-mid);padding:2px 8px;border-radius:10px"></span>
             </div>
             <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <button class="btn btn-primary btn-sm" id="prodLogSubmit" onclick="submitStagedActions()" style="display:none">Submit changes</button>
-              <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()" style="display:none;color:var(--muted)">✕ Clear</button>
               <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
               <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
             </div>
           </div>
           <div id="bnConfirmList"></div>
+          <!-- Productivity Log submit bar — matches Breaker's Breaks pattern, sits at
+               the bottom of the slot list. Auto-appears when any action is staged. -->
+          <div id="prodLogSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--teal-mid);border-radius:10px;border:1.5px solid var(--teal);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+            <span id="prodLogSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()">Clear</button>
+              <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="submitStagedActions()">Submit breaks</button>
+            </div>
+          </div>
           <!-- Manual break entry — persistent, not recreated on refresh -->
           <div style="margin-top:10px">
             <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()" id="bnManualAddBtn">+ Add Manual Break</button>
@@ -5741,6 +5751,19 @@ function toggleAssignForm(){
   if(chev) chev.textContent = open ? '▼' : '▲';
 }
 
+// Collapse/expand the Breaker's Breaks card (defaults to collapsed).
+// Card body contains the slot list, submit bar, start time, and action
+// buttons — collapsing gives the BN a shorter-scroll view of My Shift
+// when they don't need to touch their own break plan.
+function toggleBNBreakCard(){
+  const body = document.getElementById('bnBreakBody');
+  const chev = document.getElementById('bnBreakChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chev) chev.textContent = open ? '▼' : '▲';
+}
+
 function toggleExtractedRows(){
   const wrap = document.getElementById('importRowsWrap');
   const chev = document.getElementById('extractedChevron');
@@ -8550,18 +8573,36 @@ function _prodLogResetShiftState(){
 function _prodLogUpdateHeader(){
   const n = _prodLogStaged.size;
   const countEl = _prodLogCountEl();
-  const submit = _prodLogSubmitBtn();
-  const clear = _prodLogClearBtn();
   if(countEl){
     countEl.textContent = n === 0 ? '' : `${n} pending`;
     countEl.style.display = n === 0 ? 'none' : 'inline-block';
   }
-  if(submit){
-    submit.disabled = n === 0;
-    submit.style.display = n === 0 ? 'none' : 'inline-flex';
-  }
-  if(clear){
-    clear.style.display = n === 0 ? 'none' : 'inline-flex';
+  // Sticky submit bar at bottom of slot list (matches Breaker's Breaks pattern).
+  // Counts breakdown: Taken / Not Taken / Cancel / Claim (walk-up).
+  const bar = document.getElementById('prodLogSubmitBar');
+  const label = document.getElementById('prodLogSubmitBarLabel');
+  if(bar){
+    if(n === 0){
+      bar.style.display = 'none';
+    } else {
+      bar.style.display = 'flex';
+      if(label){
+        // Summarize staged actions for the bar label.
+        let taken = 0, notTaken = 0, cancel = 0, claim = 0;
+        _prodLogStaged.forEach(info => {
+          if(info.action === 'confirmed')      taken++;
+          else if(info.action === 'not_taken') notTaken++;
+          else if(info.action === 'cancelled') cancel++;
+          else if(info.action === 'claim')     claim++;
+        });
+        const parts = [];
+        if(taken)    parts.push(`${taken} taken`);
+        if(notTaken) parts.push(`${notTaken} not taken`);
+        if(cancel)   parts.push(`${cancel} cancel`);
+        if(claim)    parts.push(`${claim} claim${claim!==1?'s':''}`);
+        label.textContent = `${n} break${n!==1?'s':''} staged: ${parts.join(', ')}`;
+      }
+    }
   }
   // beforeunload warning while staged changes exist
   if(n > 0){
@@ -8789,11 +8830,19 @@ async function submitStagedActions(){
           nxt.setDate(nxt.getDate() + 1);
           slotDate = nxt.toISOString().slice(0,10);
         }
+        // Ensure a unit is set — rotation might not have one for every slot.
+        // Fall back to any of the BN's responsible units so the booking
+        // re-surfaces on query in loadBNConfirm/Sign Up.
+        let unit = info.unit;
+        if(!unit){
+          const bnUnits = await getBNUnits(BNS.name, dt, shift);
+          unit = bnUnits[0] || '';
+        }
         const nurseDisplay = info.ext ? `${info.nurseName} (${info.ext})` : info.nurseName;
         await spPost(LISTS.bookings, {
-          Title: `${info.nurseName}-${slotDate}-${info.slotTime}-${info.unit || ''}`,
+          Title: `${info.nurseName}-${slotDate}-${info.slotTime}-${unit}`,
           NurseName: nurseDisplay,
-          Unit: info.unit || '',
+          Unit: unit,
           SlotDate: slotDate,
           SlotTime: info.slotTime,
           ShiftType: shift,
@@ -8814,15 +8863,20 @@ async function submitStagedActions(){
   }
   _prodLogUpdateHeader();
   if(failCount === 0){
-    toast(`✓ ${okCount} change${okCount!==1?'s':''} saved.`);
+    toast(`✓ ${okCount} break${okCount!==1?'s':''} saved.`);
   } else {
     toast(`${okCount} of ${total} saved. ${failCount} failed.`, true);
     console.warn('Staged action failures:', errors);
   }
-  if(submit){ submit.textContent = 'Submit changes'; }
-  loadBNConfirm();
-  loadSummary();
-  if(S.unit) loadSlots(true);
+  if(submit){ submit.textContent = 'Submit breaks'; }
+  // Short delay so Sheets has time to commit walk-up claim writes before we
+  // re-query — otherwise the re-render may show stale state with slots
+  // still appearing unclaimed.
+  setTimeout(() => {
+    loadBNConfirm();
+    loadSummary();
+    if(S.unit) loadSlots(true);
+  }, 1200);
 }
 
 async function loadBNConfirm(){
@@ -8988,13 +9042,19 @@ async function loadBNConfirm(){
       const allSlots = generateSlots(shift);
       const nowSortKey = nowKey(shift);
 
+      // Helper to normalize a SlotTime into the 4-digit string form used by
+      // allSlots / rotation keys. Sheets strips leading zeros on numeric
+      // cells, so a 00:15 slot comes back as `15` or `"15"` — without
+      // padding here, the lookup misses and the slot renders as unclaimed.
+      const normSlot = (s) => String(s).padStart(4, '0');
+
       // Build lookup: slotTime -> booking for this BN's responsible units
       const bookingBySlot = {};
-      staffBookings.forEach(b => { bookingBySlot[b.SlotTime] = b; });
+      staffBookings.forEach(b => { bookingBySlot[normSlot(b.SlotTime)] = b; });
 
       // BN's own breaks (from allBookings)
       const ownBreakSlots = new Set(
-        allBookings.filter(b => b.IsBNBreak && b.NurseName === BNS.name).map(b => b.SlotTime)
+        allBookings.filter(b => b.IsBNBreak && b.NurseName === BNS.name).map(b => normSlot(b.SlotTime))
       );
 
       // Rotation: slotTime -> unit for this BN
@@ -9089,7 +9149,7 @@ async function loadBNConfirm(){
             stagedLeftBorder = 'border-left:4px solid var(--teal)';
             centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
-            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Unstage</button>`;
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Deselect</button>`;
           } else if(_prodLogExpanded.has(slot)){
             // Expanded inline-claim form with Copy last + Apply to more
             const savedInputs = _prodLogInputs.get(slot) || { name: '', ext: '' };
