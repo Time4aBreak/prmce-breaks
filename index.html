@@ -8734,11 +8734,17 @@ function _prodLogUpdateHeader(){
 // Stage an action on a booking. If the action is already staged, unstage it
 // (tap-to-toggle). If a different action is staged, switch to the new one.
 function stageBreakAction(id, action, nurseName, slotTime, unit){
-  const existing = _prodLogStaged.get(id);
+  // Keys in _prodLogStaged must match how lookups are done elsewhere.
+  // b.Id comes back from Sheets as a string (Apps Script normalizeValue
+  // coerces all cells to strings), but when the onclick handler inlines
+  // ${b.Id} into HTML without quotes, JS parses it as a number. Coerce
+  // to string here so set/get both use the same key type.
+  const key = String(id);
+  const existing = _prodLogStaged.get(key);
   if(existing && existing.action === action){
-    _prodLogStaged.delete(id);
+    _prodLogStaged.delete(key);
   } else {
-    _prodLogStaged.set(id, { action, nurseName, slotTime, unit });
+    _prodLogStaged.set(key, { action, nurseName, slotTime, unit });
   }
   _prodLogUpdateHeader();
   loadBNConfirm();
