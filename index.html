@@ -8690,6 +8690,17 @@ function _prodLogUpdateHeader(){
     countEl.textContent = n === 0 ? '' : `${n} pending`;
     countEl.style.display = n === 0 ? 'none' : 'inline-block';
   }
+  // Ensure the submit button is enabled whenever there are staged items.
+  // Belt-and-suspenders: submitStagedActions also resets on completion, but
+  // reflecting staged-count here means accidental disabled states get cleared
+  // on the next stage tap too.
+  const submitBtn = _prodLogSubmitBtn();
+  if(submitBtn){
+    submitBtn.disabled = n === 0;
+    if(n > 0 && submitBtn.textContent !== 'Submit breaks' && submitBtn.textContent !== 'Submitting…'){
+      submitBtn.textContent = 'Submit breaks';
+    }
+  }
   // Sticky submit bar at bottom of slot list (matches Breaker's Breaks pattern).
   // Counts breakdown: Taken / Not Taken / Cancel / Claim (walk-up).
   const bar = document.getElementById('prodLogSubmitBar');
@@ -8987,7 +8998,10 @@ async function submitStagedActions(){
     toast(`${okCount} of ${total} saved. ${failCount} failed.`, true);
     console.warn('Staged action failures:', errors);
   }
-  if(submit){ submit.textContent = 'Submit breaks'; }
+  if(submit){
+    submit.textContent = 'Submit breaks';
+    submit.disabled = false;
+  }
   // Short delay so Sheets has time to commit walk-up claim writes before we
   // re-query — otherwise the re-render may show stale state with slots
   // still appearing unclaimed.
