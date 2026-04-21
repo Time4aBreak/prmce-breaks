@@ -8553,6 +8553,37 @@ function stageBreakAction(id, action, nurseName, slotTime, unit){
   loadBNConfirm();
 }
 
+// Stage a walk-up break claim on an unclaimed past slot.
+// Reads name/ext from the inline inputs on the slot row.
+function stageClaimFromInputs(slotTime, unit){
+  const nameInput = document.getElementById(`claimName_${slotTime}`);
+  const extInput  = document.getElementById(`claimExt_${slotTime}`);
+  const nurseName = (nameInput?.value || '').trim();
+  const ext       = (extInput?.value  || '').trim();
+  if(!nurseName){
+    toast('Enter nurse name', true);
+    nameInput?.focus();
+    return;
+  }
+  if(ext && !/^\d{5}$/.test(ext)){
+    toast('Ext must be 5 digits (or leave blank)', true);
+    extInput?.focus();
+    return;
+  }
+  const key = `unclaimed:${slotTime}`;
+  _prodLogStaged.set(key, { action: 'claim', nurseName, slotTime, unit, ext });
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
+// Unstage a walk-up claim (restore the input form for that slot).
+function unstageClaim(slotTime){
+  const key = `unclaimed:${slotTime}`;
+  _prodLogStaged.delete(key);
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
 function clearStagedActions(){
   if(_prodLogStaged.size === 0) return;
   _prodLogStaged.clear();
@@ -8577,6 +8608,31 @@ async function submitStagedActions(){
         await spPatch(LISTS.bookings, id, { BreakStatus: 'not_taken', IsCompleted: 0 });
       } else if(info.action === 'cancelled'){
         await spDel(LISTS.bookings, id);
+      } else if(info.action === 'claim'){
+        // Walk-up claim: create a new booking record, already confirmed.
+        const dt = BNS.date || today();
+        const shift = BNS.shift;
+        // Compute SlotDate — Noc slots past midnight belong to next calendar day
+        const slotMin = toMin(info.slotTime);
+        let slotDate = dt;
+        if(shift === 'Noc' && slotMin < 12*60){
+          // After midnight — next day
+          const nxt = new Date(dt + 'T12:00:00');
+          nxt.setDate(nxt.getDate() + 1);
+          slotDate = nxt.toISOString().slice(0,10);
+        }
+        const nurseDisplay = info.ext ? `${info.nurseName} (${info.ext})` : info.nurseName;
+        await spPost(LISTS.bookings, {
+          Title: `${info.nurseName}-${slotDate}-${info.slotTime}-${info.unit || ''}`,
+          NurseName: nurseDisplay,
+          Unit: info.unit || '',
+          SlotDate: slotDate,
+          SlotTime: info.slotTime,
+          ShiftType: shift,
+          IsCompleted: 1,
+          BreakStatus: 'confirmed',
+          IsBNBreak: 0
+        });
       }
       _prodLogStaged.delete(id);
       okCount++;
@@ -8686,14 +8742,6 @@ async function loadBNConfirm(){
     };
 
     const staffBookings = allBookings.filter(bnCovers);
-
-    if (!staffBookings.length) {
-      list.innerHTML = '<div class="empty" style="padding:8px 0">No staff breaks claimed yet for your units on this shift.</div>';
-      wrap.style.display = 'block';
-      loader.style.display = 'none';
-      return;
-    }
-
     staffBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
 
     // ── Load notifications from batch result ──
@@ -8755,54 +8803,135 @@ async function loadBNConfirm(){
       notifyHtml += `</div>`;
     }
 
-    list.innerHTML = notifyHtml + staffBookings.map(b => {
-      const bConfirmed  = isConfirmed(b);
-      const bNotTaken   = isNotTaken(b);
-      const staged      = _prodLogStaged.get(b.Id);
+    list.innerHTML = notifyHtml + (() => {
+      // ── Per-slot activity log ───────────────────────────────────────────
+      // One row per slot-time in the shift. Each row shows what this BN
+      // was (or will be) doing at that slot: giving a break, on own break,
+      // or unclaimed with inline claim action.
+      // ─────────────────────────────────────────────────────────────────────
 
-      let rowClass = 'open';
-      let statusHtml = '';
-      let stagedLeftBorder = ''; // Visual indicator for pending staged state
+      const allSlots = generateSlots(shift);
+      const nowSortKey = nowKey(shift);
 
-      if(bConfirmed){
-        // Persistent ✓ Taken — tapping undo clears it immediately (not staged).
-        rowClass = 'confirmed';
-        statusHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
-          <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
-      } else if(bNotTaken){
-        // Persistent ✗ Not Taken — tapping undo clears it immediately.
-        rowClass = '';
-        statusHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
-          <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
-      } else {
-        // Staged buttons: highlight which one is selected, if any.
-        // Tapping the selected button unstages (toggle).
-        // Tapping a different button switches the staged action.
-        const stagedAction = staged ? staged.action : null;
-        const takenCls = stagedAction === 'confirmed' ? 'btn-success' : 'btn-ghost';
-        const notTakenCls = stagedAction === 'not_taken' ? 'btn-primary' : 'btn-ghost';
-        const cancelCls = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
-        const takenStyle = stagedAction === 'confirmed' ? '' : '';
-        const notTakenStyle = stagedAction === 'not_taken' ? '' : 'color:var(--muted)';
-        const cancelStyle = stagedAction === 'cancelled' ? '' : 'color:var(--muted)';
+      // Build lookup: slotTime -> booking for this BN's responsible units
+      const bookingBySlot = {};
+      staffBookings.forEach(b => { bookingBySlot[b.SlotTime] = b; });
 
-        // Left-edge border coloring based on staged state
-        if(stagedAction === 'confirmed')   stagedLeftBorder = 'border-left:4px solid var(--green)';
-        else if(stagedAction === 'not_taken') stagedLeftBorder = 'border-left:4px solid var(--muted)';
-        else if(stagedAction === 'cancelled') stagedLeftBorder = 'border-left:4px solid var(--red)';
+      // BN's own breaks (from allBookings)
+      const ownBreakSlots = new Set(
+        allBookings.filter(b => b.IsBNBreak && b.NurseName === BNS.name).map(b => b.SlotTime)
+      );
 
-        const esc = (s) => String(s).replace(/'/g, "\\'");
-        statusHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${takenStyle}">✓ Taken</button>
-          <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}">✗ Not Taken</button>
-          <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`;
-      }
+      // Rotation: slotTime -> unit for this BN
+      const rotation = loadRotation(BNS.name, dt, shift) || {};
 
-      return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
-        <div class="slot-time">${fmt12(b.SlotTime)}</div>
-        <div class="slot-name filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></div>
-        <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${statusHtml}</div>
-      </div>`;
-    }).join('');
+      // Hard-blocked slots for this shift
+      const hardBlocked = shift === 'Day' ? getDayHardBlocked() : getNocHardBlocked();
+      const hardBlockedSet = new Set(hardBlocked);
+
+      const esc = (s) => String(s).replace(/'/g, "\\'");
+
+      return allSlots.map(slot => {
+        const b = bookingBySlot[slot];
+        const isOwnBreak = ownBreakSlots.has(slot);
+        const isHardBlocked = hardBlockedSet.has(slot);
+        const rotationUnit = rotation[slot];  // the unit where this BN was scheduled
+        const isPast = sortKey(slot, shift) <= nowSortKey;
+        const staged = b ? _prodLogStaged.get(b.Id) : _prodLogStaged.get(`unclaimed:${slot}`);
+
+        let rowClass = 'open';
+        let centerHtml = '';
+        let actionHtml = '';
+        let stagedLeftBorder = '';
+
+        // ── State 1: Own break ─────────────────────────────────────────────
+        if(isOwnBreak){
+          rowClass = '';
+          centerHtml = `<span style="font-weight:600">☕ My break</span>`;
+          actionHtml = ''; // managed via My Normal Break Times card
+        }
+        // ── State 2: Hard-blocked ──────────────────────────────────────────
+        else if(isHardBlocked){
+          const reasonMap = {
+            '0635': 'Shift change', '0655': 'Shift change',
+            '1835': 'Shift change', '1855': 'Shift change',
+            '0755': 'Huddle',
+            '0815': 'Clock-out buffer', '2015': 'Clock-out buffer'
+          };
+          rowClass = '';
+          centerHtml = `<span style="color:var(--muted)">— ${reasonMap[slot] || 'Blocked'} —</span>`;
+          actionHtml = '';
+        }
+        // ── State 3: Claimed booking exists ────────────────────────────────
+        else if(b){
+          const bConfirmed = isConfirmed(b);
+          const bNotTaken  = isNotTaken(b);
+
+          if(bConfirmed){
+            rowClass = 'confirmed';
+            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            actionHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
+              <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
+          } else if(bNotTaken){
+            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            actionHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
+              <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
+          } else {
+            // Pending — staging buttons
+            const stagedAction = staged ? staged.action : null;
+            const takenCls   = stagedAction === 'confirmed' ? 'btn-success' : 'btn-ghost';
+            const notTakenCls = stagedAction === 'not_taken' ? 'btn-primary' : 'btn-ghost';
+            const cancelCls  = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
+            const notTakenStyle = stagedAction === 'not_taken' ? '' : 'color:var(--muted)';
+            const cancelStyle   = stagedAction === 'cancelled' ? '' : 'color:var(--muted)';
+            if(stagedAction === 'confirmed')      stagedLeftBorder = 'border-left:4px solid var(--green)';
+            else if(stagedAction === 'not_taken') stagedLeftBorder = 'border-left:4px solid var(--muted)';
+            else if(stagedAction === 'cancelled') stagedLeftBorder = 'border-left:4px solid var(--red)';
+
+            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px">✓ Taken</button>
+              <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}">✗ Not Taken</button>
+              <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`;
+          }
+        }
+        // ── State 4: Unclaimed ─────────────────────────────────────────────
+        else {
+          // Show unit from rotation (if any), otherwise show as generic unclaimed
+          const unitLabel = rotationUnit ? `· ${rotationUnit}` : '';
+
+          if(isPast){
+            // Past unclaimed — BN can log a walk-up break inline.
+            const stagedClaim = staged && staged.action === 'claim' ? staged : null;
+            if(stagedClaim){
+              // Show staged claim
+              stagedLeftBorder = 'border-left:4px solid var(--teal)';
+              centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
+                <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Unstage</button>`;
+            } else {
+              // Input form for walk-up claim
+              centerHtml = `<span style="color:var(--muted);font-size:.82rem">Unclaimed ${unitLabel}</span>
+                <div style="display:flex;gap:4px;margin-top:4px">
+                  <input type="text" id="claimName_${slot}" placeholder="Nurse name" style="flex:1;min-width:80px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+                  <input type="text" id="claimExt_${slot}" placeholder="Ext (opt)" maxlength="5" style="width:72px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+                </div>`;
+              actionHtml = `<button class="btn btn-primary btn-sm" onclick="stageClaimFromInputs('${slot}','${esc(rotationUnit || '')}')">✓ Log break</button>`;
+            }
+          } else {
+            // Future unclaimed — informational only
+            rowClass = '';
+            centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
+            actionHtml = '';
+          }
+        }
+
+        return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
+          <div class="slot-time">${fmt12(slot)}</div>
+          <div>${centerHtml}</div>
+          <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${actionHtml}</div>
+        </div>`;
+      }).join('');
+    })();
 
     wrap.style.display = 'block';
     _prodLogUpdateHeader();
