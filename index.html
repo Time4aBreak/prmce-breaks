@@ -8993,7 +8993,20 @@ async function submitStagedActions(){
   }
   _prodLogUpdateHeader();
   if(failCount === 0){
-    toast(`✓ ${okCount} break${okCount!==1?'s':''} saved.`);
+    // Count each action type to build an accurate toast.
+    let taken = 0, notTaken = 0, cancel = 0, claim = 0;
+    entries.forEach(([, info]) => {
+      if(info.action === 'confirmed')      taken++;
+      else if(info.action === 'not_taken') notTaken++;
+      else if(info.action === 'cancelled') cancel++;
+      else if(info.action === 'claim')     claim++;
+    });
+    const parts = [];
+    if(taken)    parts.push(`${taken} taken`);
+    if(notTaken) parts.push(`${notTaken} not taken`);
+    if(cancel)   parts.push(`${cancel} cancelled`);
+    if(claim)    parts.push(`${claim} manual claim${claim!==1?'s':''}`);
+    toast(`✓ ${parts.join(', ')}`);
   } else {
     toast(`${okCount} of ${total} saved. ${failCount} failed.`, true);
     console.warn('Staged action failures:', errors);
