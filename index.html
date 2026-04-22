@@ -4514,13 +4514,26 @@ function togglePending(slotTime, slotShift){
     S.pendingClaims.add(key);
   }
   updateSubmitBar();
-  renderSlotsFromCache(); // instant local re-render — no network call needed
+  // Re-render via the correct path for the current shift mode.
+  // 'Other' has its own renderer (loadOtherSlots); Day/Noc use the fast
+  // local cache renderer. Calling renderSlotsFromCache for Other shift
+  // would re-render using the Day/Noc rules (staffWindowOpen check) and
+  // incorrectly lock the unpending slots.
+  if(S.shift === 'Other'){
+    loadOtherSlots(true);
+  } else {
+    renderSlotsFromCache(); // instant local re-render — no network call needed
+  }
 }
 
 function clearPending(){
   S.pendingClaims.clear();
   updateSubmitBar();
-  renderSlotsFromCache();
+  if(S.shift === 'Other'){
+    loadOtherSlots(true);
+  } else {
+    renderSlotsFromCache();
+  }
 }
 
 function updateSubmitBar(){
