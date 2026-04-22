@@ -1128,6 +1128,12 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
 
+// Normalize a SlotTime into the 4-digit string form used as keys throughout
+// the app. Sheets strips leading zeros on numeric cells, so a 00:15 slot
+// comes back as `15` or `"15"`. Every lookup must pad to ensure "0015"
+// matches "15", "0015", 15, and 0015.
+function normSlot(s){ return String(s).padStart(4, '0'); }
+
 // Slot constants
 // Day:  first slot 08:35, last 20:15 (ends 20:30). 36 slots × 20 min = 700 min span.
 // Noc:  first slot 20:35, last 08:15 next day (ends 08:30). Same 36 slots.
@@ -9438,13 +9444,9 @@ async function loadBNConfirm(){
       const allSlots = generateSlots(shift);
       const nowSortKey = nowKey(shift);
 
-      // Helper to normalize a SlotTime into the 4-digit string form used by
-      // allSlots / rotation keys. Sheets strips leading zeros on numeric
-      // cells, so a 00:15 slot comes back as `15` or `"15"` — without
-      // padding here, the lookup misses and the slot renders as unclaimed.
-      const normSlot = (s) => String(s).padStart(4, '0');
-
-      // Build lookup: slotTime -> booking for this BN's responsible units
+      // Build lookup: slotTime -> booking for this BN's responsible units.
+      // Uses module-level normSlot() helper to pad leading zeros that Sheets
+      // strips on numeric cells.
       const bookingBySlot = {};
       staffBookings.forEach(b => { bookingBySlot[normSlot(b.SlotTime)] = b; });
 
