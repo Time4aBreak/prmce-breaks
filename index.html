@@ -2851,6 +2851,12 @@ function showSubTab(name, btn){
       _prodLogUpdateHeader();
     }
   }
+
+  // Stop any active polling — the appropriate poller will restart below
+  // based on which subtab we're switching to.
+  stopProdLogPolling();
+  stopCoveragePolling();
+
   document.querySelectorAll('.subtab').forEach(t => { t.style.display='none'; t.classList.remove('active'); });
   document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
   const panel = document.getElementById(`subtab-${name}`);
@@ -2865,8 +2871,19 @@ function showSubTab(name, btn){
     document.getElementById('summDate').value = curDate;
     hiShift('sDay','sNoc', curShift);
     loadSummary();
+    // Start 10s background polling so admin sees staff/BN changes live.
+    _coverageLastFingerprint = null;
+    startCoveragePolling();
   }
-  if(name==='bn') populateBNDropdown();
+  if(name==='bn'){
+    populateBNDropdown();
+    // Start polling if a BN is already signed in; otherwise wait until they
+    // sign in (loadBNView also calls startProdLogPolling after successful load).
+    if(BNS && BNS.name){
+      _prodLogLastFingerprint = null;
+      startProdLogPolling();
+    }
+  }
   if(name==='reports'){
     // Auto-bypass reports gate if portal already unlocked
     if(PORTAL.level){
@@ -2929,6 +2946,13 @@ function showTab(name, btn){
   if(tabEl) tabEl.classList.add('active');
   (btn||document.getElementById(`nt-${name}`))?.classList.add('active');
 
+  // Stop Portal-tab polling when leaving the Portal. showSubTab will restart
+  // whichever poller is appropriate when returning to Portal.
+  if(name !== 'portal'){
+    stopProdLogPolling();
+    stopCoveragePolling();
+  }
+
   // Scroll to top on every tab switch
   window.scrollTo({ top: 0, behavior: 'smooth' });
 
@@ -2968,6 +2992,15 @@ function showTab(name, btn){
       localStorage.setItem('unit3CDefault', resolved);
       show3CDefaultToggle();
     }).catch(() => { show3CDefaultToggle(); });
+
+    // If a BN is already signed in to My Shift, refresh their view so any
+    // changes made on the Sign Up tab (or by other users) while they were
+    // away surface immediately. Staged Productivity Log actions and typed
+    // claim-form inputs survive the re-render via _prodLogStaged / _prodLogInputs.
+    if(BNS && BNS.name){
+      loadBNConfirm();
+      loadBNSlots();
+    }
   }
 }
 
@@ -7021,7 +7054,7 @@ function toast(msg,err=false){
   t.textContent=(err?'⚠ ':'')+msg; t.className='toast'+(err?' err':'');
   t.classList.add('show');
   clearTimeout(_toastT);
-  _toastT=setTimeout(()=>t.classList.remove('show'),6400);
+  _toastT=setTimeout(()=>t.classList.remove('show'),8000);
 }
 
 // Global busy overlay — shown during multi-step async operations so the user
@@ -8349,6 +8382,14 @@ async function loadBNSlots(){
   // Restore scroll position — prevents page jumping on break add/remove
   requestAnimationFrame(() => window.scrollTo({ top: _scrollY, behavior: 'instant' }));
   loadBNConfirm();
+  // Kick off Productivity Log polling now that a BN is loaded. If user
+  // is on a different subtab, showSubTab's stop-on-exit logic has already
+  // handled polling state — startProdLogPolling only acts if visible.
+  const activeSub = document.querySelector('.subtab.active');
+  if(activeSub && activeSub.id === 'subtab-bn'){
+    _prodLogLastFingerprint = null;
+    startProdLogPolling();
+  }
 }
 
 // Helper: get BN's covered units for a given date/shift
@@ -8671,23 +8712,79 @@ const _prodLogInputs = new Map();
 // Cleared when shift changes.
 let _prodLogLastClaim = null;  // {name, ext}
 
+// ── Background polling ────────────────────────────────────
+// Productivity Log and Coverage tabs poll every 10s while visible to surface
+// changes other users make (staff claiming slots, admins cancelling, etc.).
+// Pausing conditions: document.hidden (browser tab backgrounded), user leaves
+// the subtab, or BN's shift ends. Conflict detection on each poll reconciles
+// queued actions against current backend state — see handleQueueConflicts().
+const POLL_INTERVAL_MS = 10000;
+let _prodLogPollTmr = null;
+let _prodLogLastFingerprint = null;
+let _coverageTmr = null;
+let _coverageLastFingerprint = null;
+
+function startProdLogPolling(){
+  stopProdLogPolling();
+  if(document.hidden) return; // visibilitychange listener will start when visible
+  _prodLogPollTmr = setInterval(silentRefreshProdLog, POLL_INTERVAL_MS);
+}
+function stopProdLogPolling(){
+  if(_prodLogPollTmr){ clearInterval(_prodLogPollTmr); _prodLogPollTmr = null; }
+}
+function startCoveragePolling(){
+  stopCoveragePolling();
+  if(document.hidden) return;
+  _coverageTmr = setInterval(silentRefreshCoverage, POLL_INTERVAL_MS);
+}
+function stopCoveragePolling(){
+  if(_coverageTmr){ clearInterval(_coverageTmr); _coverageTmr = null; }
+}
+
+// Tab/visibility coordination: pause polling when the browser tab is hidden,
+// resume when it becomes visible. Prevents needless backend calls and battery
+// drain while user is in another app.
+if(typeof window !== 'undefined' && !window._pollVisStarted){
+  window._pollVisStarted = true;
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden){
+      stopProdLogPolling();
+      stopCoveragePolling();
+    } else {
+      // Re-check which subtab is active and restart the appropriate poller.
+      const activeSub = document.querySelector('.subtab.active');
+      if(activeSub){
+        if(activeSub.id === 'subtab-bn' && BNS && BNS.name){
+          // Immediate refresh then start polling
+          silentRefreshProdLog();
+          startProdLogPolling();
+        } else if(activeSub.id === 'subtab-summary'){
+          silentRefreshCoverage();
+          startCoveragePolling();
+        }
+      }
+    }
+  });
+}
+
 function _prodLogCountEl(){ return document.getElementById('prodLogCount'); }
 function _prodLogSubmitBtn(){ return document.getElementById('prodLogSubmit'); }
 function _prodLogClearBtn(){ return document.getElementById('prodLogClear'); }
 
-// Reset per-shift state (expand, inputs, last-claim). Called when BN changes
-// name/date/shift so nothing leaks across shifts.
+// Reset per-shift state (expand, inputs, last-claim, polling fingerprint).
+// Called when BN changes name/date/shift so nothing leaks across shifts.
 function _prodLogResetShiftState(){
   _prodLogExpanded.clear();
   _prodLogInputs.clear();
   _prodLogLastClaim = null;
+  _prodLogLastFingerprint = null; // force a full re-render on next poll
 }
 
 function _prodLogUpdateHeader(){
   const n = _prodLogStaged.size;
   const countEl = _prodLogCountEl();
   if(countEl){
-    countEl.textContent = n === 0 ? '' : `${n} pending`;
+    countEl.textContent = n === 0 ? '' : `${n} queued`;
     countEl.style.display = n === 0 ? 'none' : 'inline-block';
   }
   // Ensure the submit button is enabled whenever there are staged items.
@@ -8724,7 +8821,7 @@ function _prodLogUpdateHeader(){
         if(notTaken) parts.push(`${notTaken} not taken`);
         if(cancel)   parts.push(`${cancel} cancel`);
         if(claim)    parts.push(`${claim} claim${claim!==1?'s':''}`);
-        label.textContent = `${n} break${n!==1?'s':''} staged: ${parts.join(', ')}`;
+        label.textContent = `${n} break${n!==1?'s':''} queued: ${parts.join(', ')}`;
       }
     }
   }
@@ -9023,6 +9120,159 @@ async function submitStagedActions(){
     loadSummary();
     if(S.unit) loadSlots(true);
   }, 1200);
+}
+
+// Check queued actions against current backend state. For any queue entry
+// whose booking has been modified externally (deleted, confirmed, status
+// changed) or whose target unclaimed slot has been taken by staff, remove
+// the queue entry and collect a toast to inform the BN.
+//
+// Returns the number of queue entries removed (0 = no conflicts).
+function handleQueueConflicts(freshBookings){
+  if(_prodLogStaged.size === 0) return 0;
+  const toasts = [];
+  const bookingById = new Map();
+  freshBookings.forEach(b => bookingById.set(String(b.Id), b));
+
+  // Also index by slot for unclaimed:slot key lookups
+  const staffBySlot = new Map();
+  freshBookings.forEach(b => {
+    if(isStaffBooking(b)) staffBySlot.set(normSlot(b.SlotTime), b);
+  });
+
+  const toRemove = [];
+  _prodLogStaged.forEach((info, key) => {
+    if(key.startsWith('unclaimed:')){
+      const slot = key.slice(10);
+      const conflictBooking = staffBySlot.get(normSlot(slot));
+      if(conflictBooking){
+        // Case A (manual claim) / Case B (+ My Break on unclaimed slot)
+        const claimerFirst = firstName(conflictBooking.NurseName);
+        const when = fmt12(slot);
+        if(info.action === 'claim'){
+          toasts.push(`${claimerFirst} claimed ${when} while ${info.nurseName} was in queue`);
+        } else {
+          // '+ My Break' staged for BN's own break (future unified flow)
+          toasts.push(`${claimerFirst} claimed ${when} while your break was in queue`);
+        }
+        toRemove.push(key);
+      }
+    } else {
+      // Queued action on an existing booking (✓ Taken / ✗ Not Taken / ✕ Cancel)
+      const booking = bookingById.get(String(key));
+      if(!booking){
+        // Case C: booking deleted
+        const when = fmt12(info.slotTime);
+        const who  = firstName(info.nurseName);
+        toasts.push(`${who}'s ${when} has been modified while queued`);
+        toRemove.push(key);
+      } else {
+        // Cases D/E/F: booking exists but status may have changed
+        const nowConfirmed = isConfirmed(booking);
+        const nowNotTaken  = isNotTaken(booking);
+        const queuedAction = info.action;
+        let conflict = false;
+        if(queuedAction === 'cancelled' && (nowConfirmed || nowNotTaken)) conflict = true;
+        else if(queuedAction === 'not_taken' && nowConfirmed)              conflict = true;
+        else if(queuedAction === 'confirmed' && (nowConfirmed || nowNotTaken)){
+          // If it's already confirmed, queue is redundant/moot. If now not_taken,
+          // queued ✓ Taken would flip it — still a "modified" state change.
+          conflict = true;
+        }
+        if(conflict){
+          const when = fmt12(info.slotTime);
+          const who  = firstName(info.nurseName);
+          toasts.push(`${who}'s ${when} has been modified while queued`);
+          toRemove.push(key);
+        }
+      }
+    }
+  });
+
+  toRemove.forEach(k => _prodLogStaged.delete(k));
+  // Fire each toast sequentially. Toast component replaces the previous one,
+  // so show at most one composite toast if multiple conflicts occurred.
+  if(toasts.length === 1){
+    toast(toasts[0], true);
+  } else if(toasts.length > 1){
+    toast(`${toasts.length} queued changes reconciled`, true);
+    console.info('[prodLog poll] conflicts resolved:', toasts);
+  }
+  return toRemove.length;
+}
+
+// Silent Productivity Log refresh — same query as loadBNConfirm but with
+// fingerprint-based skip (re-render only if data changed), conflict handling
+// for queued items, and no loader/spinner visibility to keep UX quiet.
+async function silentRefreshProdLog(){
+  if(document.hidden) return;
+  const wrap = document.getElementById('bnConfirmWrap');
+  if(!wrap || !BNS.name) return;
+  // Don't refresh if the subtab isn't actually visible — a race on timer start/stop
+  const activeSub = document.querySelector('.subtab.active');
+  if(!activeSub || activeSub.id !== 'subtab-bn') return;
+  // Skip if shift is over — no more changes to track
+  try { if(typeof shiftIsOver === 'function' && shiftIsOver(BNS.date, BNS.shift)) { stopProdLogPolling(); return; } } catch{}
+
+  try {
+    const dt = BNS.date || today(), shift = BNS.shift;
+    const nextDt = (function(d){
+      const x = new Date(d + 'T12:00:00');
+      x.setDate(x.getDate() + 1);
+      return x.toISOString().slice(0, 10);
+    })(dt);
+    const maxDt = shift === 'Noc' ? nextDt : dt;
+    const bookings = await spGet(LISTS.bookings,
+      `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
+
+    // Build fingerprint from all booking fields that affect rendering
+    const fp = bookings.map(b =>
+      `${b.Id}:${normSlot(b.SlotTime)}:${b.Unit}:${b.BreakStatus||''}:${b.IsCompleted||''}:${b.IsBNBreak||''}`
+    ).sort().join('|');
+
+    // Handle conflicts first — this may remove queue entries and show toasts,
+    // which should happen regardless of whether the fingerprint changed.
+    const conflictsResolved = handleQueueConflicts(bookings);
+
+    // Re-render only if fingerprint changed OR conflicts were resolved (which
+    // modified the queue and needs a fresh render to reflect removed states).
+    if(fp !== _prodLogLastFingerprint || conflictsResolved > 0){
+      _prodLogLastFingerprint = fp;
+      loadBNConfirm();
+    }
+  } catch(e){
+    // Silent failure — next poll will retry
+    console.warn('[prodLog poll] refresh failed:', e.message);
+  }
+}
+
+// Silent Coverage refresh — calls loadSummary with fingerprint diff to skip
+// re-render when nothing changed. Coverage tab doesn't have a queue, so no
+// conflict handling needed.
+async function silentRefreshCoverage(){
+  if(document.hidden) return;
+  const listEl = document.getElementById('summList');
+  if(!listEl) return;
+  const activeSub = document.querySelector('.subtab.active');
+  if(!activeSub || activeSub.id !== 'subtab-summary') return;
+  try {
+    const dt = document.getElementById('summDate')?.value || today();
+    const shift = S.summShift || detectShift();
+    const bookings = await spGet(LISTS.bookings,
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const fp = [
+      ...bookings.map(b => `${b.Id}:${b.Unit}:${normSlot(b.SlotTime)}:${b.BreakStatus||''}:${b.IsCompleted||''}`),
+      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}`)
+    ].sort().join('|');
+    if(fp !== _coverageLastFingerprint){
+      _coverageLastFingerprint = fp;
+      loadSummary();
+    }
+  } catch(e){
+    console.warn('[coverage poll] refresh failed:', e.message);
+  }
 }
 
 async function loadBNConfirm(){
