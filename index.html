@@ -440,11 +440,19 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               <span>📋 Productivity Log</span>
               <span id="prodLogCount" style="display:none;font-size:.72rem;font-weight:600;color:var(--teal-dk);background:var(--teal-mid);padding:2px 8px;border-radius:10px"></span>
             </div>
-            <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-              <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
-              <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
-            </div>
+            <span id="bnConfirmLoader" style="display:none"><div class="spinner"></div></span>
           </div>
+
+          <!-- Shift-level action buttons — top row. Matches bottom row below.
+               Functions route through existing handlers (clearBNBreaks, etc).
+               "Set to My Normal Breaks" replaces the older "Reset" wording. -->
+          <div class="prodlog-action-row" style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
+            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false;_b.textContent='🏠 Mark unavailable'})">🏠 Mark unavailable</button>
+            <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
+          </div>
+
           <div id="bnConfirmList"></div>
           <!-- Productivity Log submit bar — matches Breaker's Breaks pattern, sits at
                the bottom of the slot list. Auto-appears when any action is staged. -->
@@ -454,6 +462,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()">Clear</button>
               <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="submitStagedActions()">Submit breaks</button>
             </div>
+          </div>
+
+          <!-- Shift-level action buttons — bottom row (identical to top). -->
+          <div class="prodlog-action-row" style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
+            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false;_b.textContent='🏠 Mark unavailable'})">🏠 Mark unavailable</button>
+            <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
           </div>
           <!-- Manual break entry — persistent, not recreated on refresh -->
           <div style="margin-top:10px">
@@ -1536,6 +1552,42 @@ function shiftDate(shift){
   return today();
 }
 
+// Staff-perspective variant of shiftDate. BN/admin code uses the regular
+// shiftDate (08:30 BN boundary) because BNs are still working until then.
+// Staff Sign Up uses this helper so nurses see the UPCOMING shift as soon as
+// their own staff shift has ended (06:30 boundary), rather than seeing a
+// finished shift with no claimable slots.
+//
+// Noc  before 06:30 → yesterday (currently-running Noc)
+// Noc  06:30–23:59  → today     (tonight's upcoming Noc; 18:30+ it's started)
+// Day  before 18:30 → today     (today's Day — running or upcoming)
+// Day  18:30+        → tomorrow  (tomorrow's upcoming Day)
+function staffShiftDate(shift){
+  if(shift === 'Other') return today();
+  const pad = (n) => String(n).padStart(2,'0');
+  const toDateStr = (d) => `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+  const m = nowMin();
+  const now = new Date();
+
+  if(shift === 'Noc'){
+    if(m < 390){ // before 06:30 AM — Noc staff shift still active from yesterday
+      const y = new Date(now); y.setDate(now.getDate() - 1);
+      return toDateStr(y);
+    }
+    return today(); // 06:30+ → tonight's upcoming Noc (or currently-running if 18:30+)
+  }
+
+  if(shift === 'Day'){
+    if(m >= 1110){ // 18:30+ — Day shift done, next is tomorrow
+      const t = new Date(now); t.setDate(now.getDate() + 1);
+      return toDateStr(t);
+    }
+    return today(); // before 18:30 → today's Day (running or upcoming)
+  }
+
+  return today();
+}
+
 function nowMin(){
   const n = new Date();
   return n.getHours()*60 + n.getMinutes();
@@ -1988,7 +2040,7 @@ async function _3CTick(){
   const signupVisible = document.getElementById('tab-staff') && document.getElementById('tab-staff').classList.contains('active');
   if(signupVisible && S.shift){
     try {
-      const dt = shiftDate(S.shift);
+      const dt = staffShiftDate(S.shift);
       const scheds = await spGet(LISTS.schedule,
         `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
       const newFlag = scheds.some(s => {
@@ -2591,7 +2643,7 @@ function buildStaffUnitGrid(){
   const ug = document.getElementById('unitGrid');
   if(!ug) return;
   ug.innerHTML = '';
-  const dt = shiftDate(S.shift), shift = S.shift;
+  const dt = staffShiftDate(S.shift), shift = S.shift;
   // Show 3C if either globally open at this moment OR any BN manually assigned
   // to cover 3C on this shift (admin override case).
   const show3C = is3COpenAt(new Date()) || _3CManuallyAssigned;
@@ -3068,7 +3120,7 @@ async function checkWrongUnit(selectedUnit){
       mine = [...d, ...n];
     } else {
       mine = await spGet(LISTS.bookings,
-        `NurseName eq '${esc(name)}' and SlotDate ge '${shiftDate(S.shift)}' and SlotDate le '${shiftDate(S.shift)}T23' and ShiftType eq '${S.shift}'`);
+        `NurseName eq '${esc(name)}' and SlotDate ge '${staffShiftDate(S.shift)}' and SlotDate le '${staffShiftDate(S.shift)}T23' and ShiftType eq '${S.shift}'`);
     }
     const otherUnits = [...new Set(mine.filter(b => isStaffBooking(b) && b.Unit !== selectedUnit).map(b => b.Unit))];
     if(otherUnits.length){
@@ -3769,7 +3821,7 @@ async function loadSlots(silent=false){
   if(!silent) { list.innerHTML=''; list.dataset.lastHtml=''; }
 
   try {
-    const dt=shiftDate(S.shift), shift=S.shift;
+    const dt=staffShiftDate(S.shift), shift=S.shift;
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
     const oppDt = shift === 'Day'
       ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
@@ -4382,7 +4434,7 @@ async function silentRefreshSlots(){
   if(!list) return;
 
   try {
-    const dt = shiftDate(S.shift), shift = S.shift;
+    const dt = staffShiftDate(S.shift), shift = S.shift;
 
     // Sequential spGet: reliable vs concurrent requests to Apps Script
     const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
@@ -4571,8 +4623,8 @@ async function submitClaims(){
   const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   // For Other shift, slots may span two dates (Day date + Noc date)
   // Use both dates for the pre-fetch so race checks work correctly
-  const dt = S.shift === 'Other' ? today() : shiftDate(S.shift);
-  const nocDt = shiftDate('Noc');
+  const dt = S.shift === 'Other' ? today() : staffShiftDate(S.shift);
+  const nocDt = staffShiftDate('Noc');
   const needsBothDates = S.shift === 'Other' && nocDt !== dt;
 
   // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) ──
@@ -4916,9 +4968,9 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   document.getElementById('nameExtHint').style.display = 'none';
   const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   let dt;
-  if(slotShiftOverride === 'Noc') dt = shiftDate('Noc');
+  if(slotShiftOverride === 'Noc') dt = staffShiftDate('Noc');
   else if(slotShiftOverride === 'Day') dt = today();
-  else dt = shiftDate(S.shift);
+  else dt = staffShiftDate(S.shift);
 
   let slotShift;
   if(slotShiftOverride){
