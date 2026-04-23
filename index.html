@@ -375,7 +375,6 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     </div>
 
-    
     <!-- My Default Schedule -->
     <div id="bnShiftWrap" style="display:none">
       <div class="card">
@@ -8827,8 +8826,17 @@ async function clearBNBreaks(){
     }
     const clearBtn = document.getElementById('clearAllBreaksBtn');
     if(clearBtn){ clearBtn.disabled=false; clearBtn.textContent='Clear All My Breaks'; }
+    // Clear in-memory staged state — clearBNBreaks removed backend records,
+    // so any staged "+ My Break" selections would now be meaningless and shouldn't
+    // persist into the re-render.
+    if(BNS.pendingBreaks) BNS.pendingBreaks.clear();
     const _sy = window.scrollY;
-    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
+    // Brief delay so Sheets has time to commit the batchDelete before the next
+    // query runs — without it, loadBNSlots / loadBNConfirm can read stale data
+    // and render cleared slots as still having breaks.
+    setTimeout(() => {
+      loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
+    }, 1200);
   } catch(e) {
     toast(e.message, true);
     const clearBtn = document.getElementById('clearAllBreaksBtn');
