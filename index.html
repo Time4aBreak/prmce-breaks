@@ -3037,6 +3037,7 @@ function pickUnit(u){
   const slotsList = document.getElementById('slotsList');
   if(slotsList){ slotsList.innerHTML = ''; slotsList.dataset.lastHtml = ''; }
   _slotRenderCache = null;
+  _otherSlotRenderCache = null;
   updateNameCardState();
   updateNameCardVisibility();
   checkWrongUnit(u);
@@ -3155,6 +3156,10 @@ function populateOtherEndTimes(){
 
 function selectStaffShift(sh){
   S.shift = sh;
+  // Clear both render caches when shift mode changes — data from the prior
+  // shift mode isn't valid for the new one.
+  _slotRenderCache = null;
+  _otherSlotRenderCache = null;
   const ow = document.getElementById('otherEndWrap');
   if(ow) ow.style.display = sh === 'Other' ? 'block' : 'none';
   if(sh === 'Other') populateOtherEndTimes();
@@ -3188,6 +3193,7 @@ function selectStaffShift(sh){
     }
     document.getElementById('slotsList').innerHTML = '';
     _slotRenderCache = null;
+    _otherSlotRenderCache = null;
     loadSlots();
   }
 }
@@ -3199,8 +3205,9 @@ function onOtherEndTimeChange(){
   renderShiftPill();
   S.pendingClaims.clear();
   updateSubmitBar();
-  // Clear cache and stop timer so stale data doesn't overwrite fresh load
+  // Clear caches and stop timer so stale data doesn't overwrite fresh load
   _slotRenderCache = null;
+  _otherSlotRenderCache = null;
   clearInterval(S.refreshTmr);
   if(S.unit){ updateNameCardVisibility(); loadSlots(); }
 }
@@ -4439,6 +4446,11 @@ async function silentRefreshSlots(){
 // ── Pending claim basket (Submit flow) ───────────────
 // Cache for instant pending re-renders (populated by loadSlots after each full load)
 let _slotRenderCache = null; // { future, bMap, bnBreaks, nurseName, nurseExt, covering, oppCovering, shift, overlapRange, canClaimMore }
+// Other-shift equivalent: caches the full render context from loadOtherSlots
+// so togglePending can re-render instantly (no network round trip) when the
+// user picks/deselects slots. Populated at the end of loadOtherSlots, cleared
+// when shift or unit or end time changes so stale data never renders.
+let _otherSlotRenderCache = null; // { allSlots, allBookings, nurseName, activeDayBN, activeNocBN, myBookingsCount }
 
 function renderSlotsFromCache(){
   if(!_slotRenderCache){ loadSlots(true); return; } // fallback if no cache yet
@@ -4515,14 +4527,12 @@ function togglePending(slotTime, slotShift){
   }
   updateSubmitBar();
   // Re-render via the correct path for the current shift mode.
-  // 'Other' has its own renderer (loadOtherSlots); Day/Noc use the fast
-  // local cache renderer. Calling renderSlotsFromCache for Other shift
-  // would re-render using the Day/Noc rules (staffWindowOpen check) and
-  // incorrectly lock the unpending slots.
+  // Both paths are now network-free local renders using their respective
+  // caches — Day/Noc via _slotRenderCache, Other via _otherSlotRenderCache.
   if(S.shift === 'Other'){
-    loadOtherSlots(true);
+    renderOtherSlotsFromCache();
   } else {
-    renderSlotsFromCache(); // instant local re-render — no network call needed
+    renderSlotsFromCache();
   }
 }
 
@@ -4530,7 +4540,7 @@ function clearPending(){
   S.pendingClaims.clear();
   updateSubmitBar();
   if(S.shift === 'Other'){
-    loadOtherSlots(true);
+    renderOtherSlotsFromCache();
   } else {
     renderSlotsFromCache();
   }
@@ -4788,58 +4798,85 @@ async function loadOtherSlots(silent=false){
     const _otherFirstName = document.getElementById('nurseName').value.trim();
     const _otherExt       = document.getElementById('nurseExt').value.trim();
     const nurseName = _otherFirstName && /^[0-9]{5}$/.test(_otherExt) ? `${toTitleCase(_otherFirstName)} (${_otherExt})` : null;
-    const myBookings = nurseName ? allBookings.filter(b => b.NurseName === nurseName && isStaffBooking(b)) : [];
-    const myTimes    = new Set(myBookings.map(b => b.SlotTime));
-    const canClaimMore = myBookings.length < MAX_SLOTS;
 
     // Only show BN names for shifts that have slots in the filtered list
     const hasDay = allSlots.some(s => s.shift === 'Day');
     const hasNoc = allSlots.some(s => s.shift === 'Noc');
     const activeDayBN = hasDay ? dayCovering.map(s => firstName(s.BreakNurseName)).join(', ') : '';
     const activeNocBN = hasNoc ? nocCovering.map(s => firstName(s.BreakNurseName)).join(', ') : '';
-    const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
-    meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
 
-    list.innerHTML = allSlots.map(({time, shift: slotShift}) => {
-      const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && isStaffBooking(b));
-      const isMine  = myTimes.has(time);
-      const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
+    // Cache everything togglePending / renderOtherSlotsFromCache will need so
+    // subsequent pending-toggles are instant (no network round trip).
+    _otherSlotRenderCache = {
+      allSlots, allBookings, nurseName, activeDayBN, activeNocBN
+    };
 
-      if(isMine){
-        const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===nurseName && isStaffBooking(b));
-        return `<div class="slot-row mine" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:2px solid var(--teal);margin-bottom:6px;background:var(--teal-lt)">
-          <div class="slot-time" style="font-weight:700;color:var(--teal-dk)">${fmt12(time)}</div>
-          <div class="slot-name filled">${nurseName}</div>
-          ${myBooking ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${myBooking.Id}','${time}','${escHTML(nurseName)}')">✕ Manage</button>` : ''}
-        </div>`;
-      }
-      if(booking){
-        return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg);opacity:.6">
-          <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
-          <div class="slot-name" style="color:var(--muted)">Taken</div>
-        </div>`;
-      }
-      if(!canClaimMore && !S.pendingClaims.has(time)){
-        return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
-          <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
-          <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${MAX_SLOTS} slots reached</div>
-        </div>`;
-      }
-      const pendingKey = `${time}|${slotShift}`;
-      const isPending = S.pendingClaims.has(pendingKey);
-
-      return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
-        <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
-        <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
-        <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'✕ Deselect':'+  Select'}</button>
-      </div>`;
-    }).join('');
-
+    renderOtherSlotsFromCache();
     loader.style.display = 'none';
   } catch(e){
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     loader.style.display = 'none';
   }
+}
+
+// Fast local re-render for Other shift — no network call. Uses the cache
+// populated by the last loadOtherSlots(). Called on every togglePending/
+// clearPending for Other shift to avoid sluggish repeat queries.
+function renderOtherSlotsFromCache(){
+  if(!_otherSlotRenderCache){ loadOtherSlots(true); return; } // fallback if no cache yet
+  const { allSlots, allBookings, nurseName, activeDayBN, activeNocBN } = _otherSlotRenderCache;
+  const list = document.getElementById('slotsList');
+  const meta = document.getElementById('slotsMeta');
+  if(!list) return;
+
+  // Re-compute per-render state (name/ext may have changed; pending set changes
+  // on every tap). Pull name fresh each call to stay current.
+  const _rFirstName = document.getElementById('nurseName').value.trim();
+  const _rExt       = document.getElementById('nurseExt').value.trim();
+  const curName = _rFirstName && /^[0-9]{5}$/.test(_rExt) ? `${toTitleCase(_rFirstName)} (${_rExt})` : nurseName;
+  const myBookings = curName ? allBookings.filter(b => b.NurseName === curName && isStaffBooking(b)) : [];
+  const myTimes    = new Set(myBookings.map(b => b.SlotTime));
+  // canClaimMore factors in both existing bookings AND pending selections so
+  // locking kicks in the moment the user picks their 3rd slot in the UI.
+  const canClaimMore = (myBookings.length + S.pendingClaims.size) < MAX_SLOTS;
+
+  const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
+  if(meta) meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
+
+  list.innerHTML = allSlots.map(({time, shift: slotShift}) => {
+    const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && isStaffBooking(b));
+    const isMine  = myTimes.has(time);
+    const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
+    const pendingKey = `${time}|${slotShift}`;
+    const isPending = S.pendingClaims.has(pendingKey);
+
+    if(isMine){
+      const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===curName && isStaffBooking(b));
+      return `<div class="slot-row mine" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:2px solid var(--teal);margin-bottom:6px;background:var(--teal-lt)">
+        <div class="slot-time" style="font-weight:700;color:var(--teal-dk)">${fmt12(time)}</div>
+        <div class="slot-name filled">${curName}</div>
+        ${myBooking ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${myBooking.Id}','${time}','${escHTML(curName)}')">✕ Manage</button>` : ''}
+      </div>`;
+    }
+    if(booking){
+      return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg);opacity:.6">
+        <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
+        <div class="slot-name" style="color:var(--muted)">Taken</div>
+      </div>`;
+    }
+    if(!canClaimMore && !isPending){
+      return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
+        <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
+        <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${MAX_SLOTS} slots reached</div>
+      </div>`;
+    }
+
+    return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
+      <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
+      <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
+      <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'✕ Deselect':'+  Select'}</button>
+    </div>`;
+  }).join('');
 }
 
 async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null){
