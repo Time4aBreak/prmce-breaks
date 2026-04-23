@@ -4726,11 +4726,13 @@ async function loadOtherSlots(silent=false){
       const rot = loadRotation(sched.BreakNurseName, nocDt, 'Noc');
       if(rot){ nocHasRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) nocRotSlots.add(sl); }); }
     }
-    // Only apply rotation filter if there are future rotation slots for this unit
-    const futureDayRot = [...dayRotSlots].filter(s => !isPast(s,'Day'));
-    const futureNocRot = [...nocRotSlots].filter(s => !isPast(s,'Noc'));
-    const useDayRotation = dayHasRotation && dayRotSlots.size > 0 && futureDayRot.length > 0;
-    const useNocRotation = nocHasRotation && nocRotSlots.size > 0 && futureNocRot.length > 0;
+    // Only apply rotation filter if the BN has rotation data for this unit.
+    // Match loadSlots's rule: if rotation exists and this unit has any slots in
+    // it (past or future), trust it — the rotation represents the BN's full
+    // shift assignment, and out-of-rotation slots shouldn't be claimable even
+    // if all rotation slots for this unit are now in the past.
+    const useDayRotation = dayHasRotation && dayRotSlots.size > 0;
+    const useNocRotation = nocHasRotation && nocRotSlots.size > 0;
 
     // Generate all slots from both shifts
     const daySlots = generateSlots('Day').filter(s => getSlotTier(s,'Day') !== 'hardBlocked');
