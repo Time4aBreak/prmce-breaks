@@ -929,7 +929,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn btn-primary" id="manageTransferBtn" onclick="this.disabled=true;this.textContent='Processing…';manageSlotAction('transfer')">Transfer to another nurse</button>
+      <button class="btn btn-primary" id="manageTransferBtn" onclick="manageSlotAction('transfer')">Transfer to another nurse</button>
       <button class="btn btn-danger" id="manageCancelBtn" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Give up this break time</button>
       <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
     </div>
@@ -5051,6 +5051,8 @@ async function manageSlotAction(action){
       return;
     }
     const newNurseName = `${toTitleCase(newName)} (${newExt})`;
+    const transferBtn = document.getElementById('manageTransferBtn');
+    if(transferBtn){ transferBtn.disabled = true; transferBtn.textContent = 'Processing…'; }
     try {
       // Update the booking to the new nurse
       await spPatch(LISTS.bookings, bookingId, { NurseName: newNurseName });
@@ -5074,7 +5076,11 @@ async function manageSlotAction(action){
       toast(`✓ ${fmt12(slotTime)} transferred to ${toTitleCase(newName)}`);
       loadSlots();
       if(document.getElementById('summList')) loadSummary();
-    } catch(e){ toast(e.message, true); }
+    } catch(e){
+      toast(e.message, true);
+      // Restore button state on error so user can retry
+      if(transferBtn){ transferBtn.disabled = false; transferBtn.textContent = 'Confirm transfer'; }
+    }
   }
 
   if(action === 'cancel'){
@@ -5098,7 +5104,12 @@ async function manageSlotAction(action){
       toast(`✓ ${fmt12(slotTime)} break given up — now open for others.`);
       loadSlots();
       if(document.getElementById('summList')) loadSummary();
-    } catch(e){ toast(e.message, true); }
+    } catch(e){
+      toast(e.message, true);
+      // Restore cancel button on error so user can retry
+      const cancelBtn = document.getElementById('manageCancelBtn');
+      if(cancelBtn){ cancelBtn.disabled = false; cancelBtn.textContent = 'Give up this break time'; }
+    }
   }
 }
 
