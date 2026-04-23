@@ -8484,10 +8484,30 @@ async function loadBNSlots(){
          </div>`
       : '';
 
+    // Display-only fallback rotation for slots missing from the saved one.
+    // The saved rotation excludes slots that were BN-breaks at the time it
+    // was calculated, so if the BN clears a break mid-shift, that slot shows
+    // "—" instead of a unit. We recalculate a rotation with an empty
+    // breaks set — purely for display — to fill in unit labels on those
+    // slots. We DO NOT save this; existing bookings keep their attribution
+    // per the saved rotation.
+    let _fallbackRotation = null;
+    const _rawUnitsForFallback = [];
+    scheds.forEach(s => {
+      try { JSON.parse(s.Units||'[]').forEach(u => { if(!_rawUnitsForFallback.includes(u)) _rawUnitsForFallback.push(u); }); } catch{}
+    });
+    if(_rawUnitsForFallback.length){
+      const _expandedUnits = expandCPair(_rawUnitsForFallback, dt, shift);
+      const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
+      _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
+    }
+
     // Render a single unified slot list (applies to all covered units)
     list.innerHTML = _startBanner + displaySlots.map(slot => {
       const isMyBreak = bnBreakTimes.has(slot);
-      const assignedUnit = bnRotation[slot];
+      // Prefer the saved rotation; fall back to the display-only rotation for
+      // slots missing from the saved map (e.g., cleared BN-breaks mid-shift).
+      const assignedUnit = bnRotation[slot] || (_fallbackRotation ? _fallbackRotation[slot] : undefined);
       // For "Your break" slots, show the actual stored unit — not the rotation unit
       const displayUnit = isMyBreak ? (bnBreakUnits[slot] || assignedUnit) : assignedUnit;
       const unitDisplay = displayUnit ? (displayUnit === 'C_PAIR' ? '3C/4C' : displayUnit) : null;
@@ -8799,6 +8819,7 @@ async function clearBNBreaks(){
         ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
     }
     // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
+    // so existing staff bookings keep their BN attribution.
 
     // Collect all stored cancelled bookings across all cleared slots
     const slotTimes2 = [...new Set(breaks.map(b => b.SlotTime))];
