@@ -4692,6 +4692,15 @@ async function loadOtherSlots(silent=false){
     warm3CStatus(dt, 'Day').catch(()=>{});
 
     // ── Update coverage banner from loadOtherSlots data ──
+    // Three states:
+    //   1. No schedules at all for this unit → red "no Break Relief"
+    //   2. Schedules exist but filter produces zero claimable slots → yellow
+    //      "no Break Relief for the selected shift" (coverage ended, rotation
+    //      has no future slots for this unit, or similar)
+    //   3. Schedules exist AND slots will be shown → teal "has Break Relief"
+    // We compute the slot count AFTER the filters below, but the banner is
+    // rendered here; to handle state 2, we defer banner paint to after the
+    // filtered slot list is known (see end-of-filter block below).
     const banner = document.getElementById('coverageBanner');
     if(banner){
       if(!dayCovering.length && !nocCovering.length){
@@ -4700,18 +4709,9 @@ async function loadOtherSlots(silent=false){
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} Other</strong> has no Break Relief`;
-      } else {
-        setNameCardEnabled(true);
-        banner.style.display = 'block';
-        banner.style.background = 'var(--teal-lt)';
-        banner.style.borderColor = 'var(--teal)';
-        banner.style.color = 'var(--teal-dk)';
-        const parts = [];
-        if(dayCovering.length) parts.push('Day');
-        if(nocCovering.length) parts.push('Noc');
-        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)}</strong> has Break Relief (${parts.join(' & ')})!`;
+        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)}</strong> has no Break Relief`;
       }
+      // state 2 & 3 handled after slot filter runs (so we know if slots remain)
     }
 
     // Build rotation sets per shift — same logic as loadSlots
@@ -4785,6 +4785,31 @@ async function loadOtherSlots(silent=false){
       return !_bnBreak;
     })
     .sort((a,b) => a.sortM - b.sortM);
+
+    // Banner: state 2 vs state 3 based on whether the filter produced slots.
+    // State 2: BN(s) are scheduled but no claimable slots remain (rotation's
+    // slots for this unit already past, or Day coverage doesn't extend into
+    // Other shift window). State 3: slots are available.
+    if(banner && (dayCovering.length || nocCovering.length)){
+      if(allSlots.length === 0){
+        setNameCardEnabled(false);
+        banner.style.display = 'block';
+        banner.style.background = '#fff8dd';
+        banner.style.borderColor = '#e8a020';
+        banner.style.color = '#8a5a00';
+        banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)}</strong> has no available Break Relief`;
+      } else {
+        setNameCardEnabled(true);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--teal-lt)';
+        banner.style.borderColor = 'var(--teal)';
+        banner.style.color = 'var(--teal-dk)';
+        const parts = [];
+        if(allSlots.some(s => s.shift === 'Day')) parts.push('Day');
+        if(allSlots.some(s => s.shift === 'Noc')) parts.push('Noc');
+        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)}</strong> has Break Relief (${parts.join(' & ')})!`;
+      }
+    }
 
     if(!allSlots.length){
       meta.textContent = '';
