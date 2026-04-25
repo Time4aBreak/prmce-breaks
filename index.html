@@ -2121,11 +2121,13 @@ function _close3CModal(){
 
 async function open3CStatusModal(){
   _close3CModal();
-  // Cross-device sync: pull latest schedule from BNState before rendering
-  try {
-    const schedRaw = await getState('unit3CSchedule');
-    if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
-  } catch(e){}
+  // Note: we intentionally do NOT pull `unit3CSchedule` from BNState here.
+  // If a recent commit's BNState write failed (transient backend error),
+  // pulling stale BNState data would clobber the unsaved local commit and
+  // silently flip the displayed status — making the modal show the wrong
+  // direction (e.g. "Opening 3C now" right after the user opened it).
+  // localStorage is authoritative within a single admin session; cross-
+  // device sync happens via `warm3CStatus` on initial page load.
   show3CDefaultToggle();
 
   const currentStatus = effective3CStatusAt(new Date());
@@ -7407,6 +7409,22 @@ async function runImport(){
       return;
     }
 
+    // Drop entries whose `name` matches UKG row-header text. UKG renders the
+    // logged-in user's row as "My Schedule" instead of their actual name, and
+    // the AI sometimes captures that literal header as the BN name. We filter
+    // here rather than in the prompt so the safety net works even if the
+    // upstream prompt drifts.
+    const _UKG_HEADER_NAMES = new Set(['my schedule','my','myschedule','schedule']);
+    const _preFilterCount = entries.length;
+    entries = entries.filter(e => {
+      const n = String(e.name || '').trim().toLowerCase();
+      return !_UKG_HEADER_NAMES.has(n);
+    });
+    const _droppedCount = _preFilterCount - entries.length;
+    if(_droppedCount > 0){
+      toast(`⚠️ Skipped ${_droppedCount} row${_droppedCount!==1?'s':''} labeled "My Schedule" — add yourself manually if needed.`, true);
+    }
+
     if (!Array.isArray(entries) || entries.length === 0) {
       toast('No schedule entries found in that image. Try a less cropped screenshot.', true);
       btn.style.display = 'inline'; spin.style.display = 'none';
@@ -9771,6 +9789,23 @@ async function loadBNConfirm(){
       // Rotation: slotTime -> unit for this BN
       const rotation = loadRotation(BNS.name, dt, shift) || {};
 
+      // Display-only fallback rotation, computed without bnBreakSet
+      // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
+      // their own break mid-shift, the saved rotation still excludes that
+      // slot — so `rotation[slot]` is undefined and the row renders without
+      // a unit chip. The fallback fills in a sensible unit so the row shows
+      // "— Unclaimed · 8N —" instead of "— Unclaimed —".
+      let _fallbackRotation = null;
+      const _rawUnitsForFallback = [];
+      scheds.forEach(s => {
+        try { JSON.parse(s.Units||'[]').forEach(u => { if(!_rawUnitsForFallback.includes(u)) _rawUnitsForFallback.push(u); }); } catch{}
+      });
+      if(_rawUnitsForFallback.length){
+        const _expandedUnits = expandCPair(_rawUnitsForFallback, dt, shift);
+        const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
+        _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
+      }
+
       // Hard-blocked slots for this shift
       const hardBlocked = shift === 'Day' ? getDayHardBlocked() : getNocHardBlocked();
       const hardBlockedSet = new Set(hardBlocked);
@@ -9790,7 +9825,7 @@ async function loadBNConfirm(){
         const b = bookingBySlot[slot];
         const isOwnBreak = ownBreakSlots.has(slot);
         const isHardBlocked = hardBlockedSet.has(slot);
-        const rotationUnit = rotation[slot];  // the unit where this BN was scheduled
+        const rotationUnit = rotation[slot] || (_fallbackRotation ? _fallbackRotation[slot] : undefined);  // the unit where this BN was scheduled (or fallback for freed slots)
         const isPast = sortKey(slot, shift) <= nowSortKey;
         const staged = b ? _prodLogStaged.get(b.Id) : _prodLogStaged.get(`unclaimed:${slot}`);
 
