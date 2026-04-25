@@ -3470,9 +3470,14 @@ async function applyDefaultToAll(){
       const bnBreakSet = new Set(def);
       const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
       const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
+      // Fill rotation includes break slots — used only to attribute a sensible
+      // Unit on BN-break records so they interleave with rotation pattern.
+      // Without this every break slot gets expandedUnits[0] (since `rotation`
+      // excludes break slots), and all breaks cluster on the first unit.
+      const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
 
       for(const slotTime of def){
-        const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+        const unit = fillRotation[slotTime] || expandedUnits[0] || units[0];
         allRows.push({
           Title: `BN-${name}-${unit}-${sched.ShiftDate}-${slotTime}`,
           NurseName: name, Unit: unit, SlotTime: slotTime,
@@ -3559,9 +3564,16 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
     let rotation = {};
     try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
     const expandedUnits = expandCPair(units, date, shift);
+    // Fill rotation: includes break slots so own-break records get an interleaved
+    // unit instead of always falling back to expandedUnits[0]. Display rotation
+    // (above) is left untouched.
+    const _fillDateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
+    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(shift), _fillDateSeed, shift);
     const rows = [];
     for(const slotTime of defaultSlots){
-      const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+      // Prefer saved rotation if it has a value (rare for break slots),
+      // otherwise use fill rotation, then expandedUnits[0] as last resort.
+      const unit = rotation[slotTime] || fillRotation[slotTime] || expandedUnits[0] || units[0];
       rows.push({
         Title: `BN-${name}-${unit}-${date}-${slotTime}`,
         NurseName: name, Unit: unit, SlotTime: slotTime,
@@ -3585,10 +3597,18 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
     const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, allSlots, dateSeed, shift);
     saveRotation(name, date, shift, rotation);
 
-    // Save breaks using the newly calculated rotation unit per slot
+    // Fill rotation = rotation computed WITHOUT excluding break slots. Used
+    // ONLY to pick a sensible Unit value for BN-break records so they
+    // interleave with surrounding rotation pattern. Without this, every break
+    // slot's unit falls back to expandedUnits[0] (since `rotation` has no
+    // entries for break slots), causing all breaks to cluster on the first
+    // unit. Display still uses `rotation` (with exclusion) for unclaimed rows.
+    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), allSlots, dateSeed, shift);
+
+    // Save breaks using fill rotation for own-break unit attribution
     const rows = [];
     for(const slotTime of defaultSlots){
-      const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+      const unit = fillRotation[slotTime] || expandedUnits[0] || units[0];
       rows.push({
         Title: `BN-${name}-${unit}-${date}-${slotTime}`,
         NurseName: name, Unit: unit, SlotTime: slotTime,
@@ -8176,8 +8196,12 @@ const BNS = { shift: null, name: '', date: '', pendingBreaks: new Set() };
 function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
   if (!sel) return;
+  // Preserve current selection across rebuild (e.g. on subtab return). Prefer
+  // the live <select> value; fall back to BNS.name in case the DOM was reset
+  // but a BN is still signed in via in-memory state.
+  const prev = sel.value || (BNS && BNS.name) || '';
   sel.innerHTML = '<option value="">— Select your name —</option>' +
-    importedNames.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
+    importedNames.map(n => `<option value="${n}"${n===prev?' selected':''}>${firstName(n)}</option>`).join('');
 }
 
 async function loadBNView(){
@@ -8988,19 +9012,23 @@ function _prodLogUpdateHeader(){
       bar.style.display = 'flex';
       if(label){
         // Summarize staged actions for the bar label.
-        let taken = 0, notTaken = 0, cancel = 0, claim = 0;
+        let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0;
         _prodLogStaged.forEach(info => {
-          if(info.action === 'confirmed')      taken++;
-          else if(info.action === 'not_taken') notTaken++;
-          else if(info.action === 'cancelled') cancel++;
-          else if(info.action === 'claim')     claim++;
+          if(info.action === 'confirmed')        taken++;
+          else if(info.action === 'not_taken')   notTaken++;
+          else if(info.action === 'cancelled')   cancel++;
+          else if(info.action === 'claim')       claim++;
+          else if(info.action === 'add_break')   addBreak++;
+          else if(info.action === 'remove_break') removeBreak++;
         });
         const parts = [];
-        if(taken)    parts.push(`${taken} taken`);
-        if(notTaken) parts.push(`${notTaken} not taken`);
-        if(cancel)   parts.push(`${cancel} cancel`);
-        if(claim)    parts.push(`${claim} claim${claim!==1?'s':''}`);
-        label.textContent = `${n} break${n!==1?'s':''} queued: ${parts.join(', ')}`;
+        if(taken)       parts.push(`${taken} taken`);
+        if(notTaken)    parts.push(`${notTaken} not taken`);
+        if(cancel)      parts.push(`${cancel} cancel`);
+        if(claim)       parts.push(`${claim} claim${claim!==1?'s':''}`);
+        if(addBreak)    parts.push(`${addBreak} my break${addBreak!==1?'s':''}`);
+        if(removeBreak) parts.push(`${removeBreak} remove`);
+        label.textContent = `${n} item${n!==1?'s':''} queued: ${parts.join(', ')}`;
       }
     }
   }
@@ -9032,6 +9060,35 @@ function stageBreakAction(id, action, nurseName, slotTime, unit){
     _prodLogStaged.delete(key);
   } else {
     _prodLogStaged.set(key, { action, nurseName, slotTime, unit });
+  }
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
+// Stage adding a BN break on an unclaimed Prod Log slot. Keyed by
+// `add_break:${slot}` so it doesn't collide with manual-claim staging
+// (which uses `unclaimed:${slot}`). Tap-to-toggle: a second tap unstages.
+function stageAddBreak(slotTime, unit){
+  const key = `add_break:${slotTime}`;
+  if(_prodLogStaged.has(key)){
+    _prodLogStaged.delete(key);
+  } else {
+    _prodLogStaged.set(key, { action: 'add_break', slotTime, unit: unit || '' });
+  }
+  _prodLogUpdateHeader();
+  loadBNConfirm();
+}
+
+// Stage removing an existing own BN-break from the Prod Log. Keyed by the
+// booking Id so it slots into the same id-keyed bucket as Taken/Not Taken/
+// Cancel. Tap-to-toggle.
+function stageRemoveBreak(bookingId, slotTime){
+  const key = String(bookingId);
+  const existing = _prodLogStaged.get(key);
+  if(existing && existing.action === 'remove_break'){
+    _prodLogStaged.delete(key);
+  } else {
+    _prodLogStaged.set(key, { action: 'remove_break', slotTime, bookingId: key });
   }
   _prodLogUpdateHeader();
   loadBNConfirm();
@@ -9259,6 +9316,30 @@ async function submitStagedActions(){
         // Remember the last successfully submitted claim for "Copy last" on
         // subsequent unclaimed rows this shift.
         _prodLogLastClaim = { name: info.nurseName, ext: info.ext || '' };
+      } else if(info.action === 'add_break'){
+        // Mid-shift BN-break add. Matches applyDefaultToShift's schema:
+        // SlotDate = shift start date (NOT calendar date — Noc post-midnight
+        // breaks store with shift-start). Unit comes from the rotation
+        // captured at stage time, fallback to first BN unit.
+        const dt = BNS.date || today();
+        const shift = BNS.shift;
+        let unit = info.unit;
+        if(!unit){
+          const bnUnits = await getBNUnits(BNS.name, dt, shift);
+          unit = bnUnits[0] || '';
+        }
+        await spPost(LISTS.bookings, {
+          Title: `BN-${BNS.name}-${unit}-${dt}-${info.slotTime}`,
+          NurseName: BNS.name,
+          Unit: unit,
+          SlotDate: dt,
+          SlotTime: info.slotTime,
+          ShiftType: shift,
+          IsBNBreak: 1
+        });
+      } else if(info.action === 'remove_break'){
+        // Mid-shift BN-break removal. Just delete the booking by Id.
+        await spDel(LISTS.bookings, info.bookingId);
       }
       _prodLogStaged.delete(id);
       okCount++;
@@ -9270,18 +9351,22 @@ async function submitStagedActions(){
   _prodLogUpdateHeader();
   if(failCount === 0){
     // Count each action type to build an accurate toast.
-    let taken = 0, notTaken = 0, cancel = 0, claim = 0;
+    let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0;
     entries.forEach(([, info]) => {
-      if(info.action === 'confirmed')      taken++;
-      else if(info.action === 'not_taken') notTaken++;
-      else if(info.action === 'cancelled') cancel++;
-      else if(info.action === 'claim')     claim++;
+      if(info.action === 'confirmed')        taken++;
+      else if(info.action === 'not_taken')   notTaken++;
+      else if(info.action === 'cancelled')   cancel++;
+      else if(info.action === 'claim')       claim++;
+      else if(info.action === 'add_break')   addBreak++;
+      else if(info.action === 'remove_break') removeBreak++;
     });
     const parts = [];
-    if(taken)    parts.push(`${taken} taken`);
-    if(notTaken) parts.push(`${notTaken} not taken`);
-    if(cancel)   parts.push(`${cancel} cancelled`);
-    if(claim)    parts.push(`${claim} manual claim${claim!==1?'s':''}`);
+    if(taken)       parts.push(`${taken} taken`);
+    if(notTaken)    parts.push(`${notTaken} not taken`);
+    if(cancel)      parts.push(`${cancel} cancelled`);
+    if(claim)       parts.push(`${claim} manual claim${claim!==1?'s':''}`);
+    if(addBreak)    parts.push(`${addBreak} break${addBreak!==1?'s':''} added`);
+    if(removeBreak) parts.push(`${removeBreak} break${removeBreak!==1?'s':''} removed`);
     toast(`✓ ${parts.join(', ')}`);
   } else {
     toast(`${okCount} of ${total} saved. ${failCount} failed.`, true);
@@ -9321,50 +9406,74 @@ function handleQueueConflicts(freshBookings){
 
   const toRemove = [];
   _prodLogStaged.forEach((info, key) => {
-    if(key.startsWith('unclaimed:')){
-      const slot = key.slice(10);
+    const action = info.action;
+
+    // Staged manual claim or BN add_break: slot may have been claimed by
+    // staff while in queue. Both look up by slot, both abort if the slot
+    // is now taken.
+    if(action === 'claim' || action === 'add_break'){
+      const slot = action === 'claim' ? key.slice('unclaimed:'.length) : key.slice('add_break:'.length);
       const conflictBooking = staffBySlot.get(normSlot(slot));
       if(conflictBooking){
-        // Case A (manual claim) / Case B (+ My Break on unclaimed slot)
         const claimerFirst = firstName(conflictBooking.NurseName);
         const when = fmt12(slot);
-        if(info.action === 'claim'){
+        if(action === 'claim'){
           toasts.push(`${claimerFirst} claimed ${when} while ${info.nurseName} was in queue`);
         } else {
-          // '+ My Break' staged for BN's own break (future unified flow)
           toasts.push(`${claimerFirst} claimed ${when} while your break was in queue`);
         }
         toRemove.push(key);
+        return;
       }
-    } else {
-      // Queued action on an existing booking (✓ Taken / ✗ Not Taken / ✕ Cancel)
-      const booking = bookingById.get(String(key));
-      if(!booking){
-        // Case C: booking deleted
-        const when = fmt12(info.slotTime);
-        const who  = firstName(info.nurseName);
-        toasts.push(`${who}'s ${when} has been modified while queued`);
-        toRemove.push(key);
-      } else {
-        // Cases D/E/F: booking exists but status may have changed
-        const nowConfirmed = isConfirmed(booking);
-        const nowNotTaken  = isNotTaken(booking);
-        const queuedAction = info.action;
-        let conflict = false;
-        if(queuedAction === 'cancelled' && (nowConfirmed || nowNotTaken)) conflict = true;
-        else if(queuedAction === 'not_taken' && nowConfirmed)              conflict = true;
-        else if(queuedAction === 'confirmed' && (nowConfirmed || nowNotTaken)){
-          // If it's already confirmed, queue is redundant/moot. If now not_taken,
-          // queued ✓ Taken would flip it — still a "modified" state change.
-          conflict = true;
-        }
-        if(conflict){
-          const when = fmt12(info.slotTime);
-          const who  = firstName(info.nurseName);
-          toasts.push(`${who}'s ${when} has been modified while queued`);
+      // For add_break: also drop if the BN-break already exists for this slot
+      // (e.g. another device added it). Avoids creating a duplicate.
+      if(action === 'add_break'){
+        const already = freshBookings.some(b =>
+          isBNBreak(b) && b.NurseName === BNS.name && normSlot(b.SlotTime) === normSlot(slot)
+        );
+        if(already){
+          toasts.push(`Your break at ${fmt12(slot)} was already added`);
           toRemove.push(key);
         }
       }
+      return;
+    }
+
+    // Id-keyed actions: confirmed / not_taken / cancelled / remove_break.
+    const booking = bookingById.get(String(key));
+    if(!booking){
+      // Booking is gone — for remove_break that's already accomplished;
+      // for the others it means it was deleted while queued.
+      if(action === 'remove_break'){
+        toasts.push(`Your break at ${fmt12(info.slotTime)} was already removed`);
+      } else {
+        const when = fmt12(info.slotTime);
+        const who  = firstName(info.nurseName);
+        toasts.push(`${who}'s ${when} has been modified while queued`);
+      }
+      toRemove.push(key);
+      return;
+    }
+    if(action === 'remove_break'){
+      // Booking still exists — no conflict, submission will delete it.
+      return;
+    }
+    // Cases D/E/F: booking exists but status may have changed
+    const nowConfirmed = isConfirmed(booking);
+    const nowNotTaken  = isNotTaken(booking);
+    let conflict = false;
+    if(action === 'cancelled' && (nowConfirmed || nowNotTaken)) conflict = true;
+    else if(action === 'not_taken' && nowConfirmed)             conflict = true;
+    else if(action === 'confirmed' && (nowConfirmed || nowNotTaken)){
+      // If it's already confirmed, queue is redundant/moot. If now not_taken,
+      // queued ✓ Taken would flip it — still a "modified" state change.
+      conflict = true;
+    }
+    if(conflict){
+      const when = fmt12(info.slotTime);
+      const who  = firstName(info.nurseName);
+      toasts.push(`${who}'s ${when} has been modified while queued`);
+      toRemove.push(key);
     }
   });
 
@@ -9625,9 +9734,15 @@ async function loadBNConfirm(){
 
       // BN's own breaks (from allBookings) — use isBNBreak helper since
       // Sheets returns the field as string "0"/"1" not number.
-      const ownBreakSlots = new Set(
-        allBookings.filter(b => isBNBreak(b) && b.NurseName === BNS.name).map(b => normSlot(b.SlotTime))
-      );
+      // Keep both a Set (for fast existence checks) and a slot→record map
+      // (so the render can grab Id for stageRemoveBreak).
+      const ownBreakBySlot = {};
+      allBookings.forEach(b => {
+        if(isBNBreak(b) && b.NurseName === BNS.name){
+          ownBreakBySlot[normSlot(b.SlotTime)] = b;
+        }
+      });
+      const ownBreakSlots = new Set(Object.keys(ownBreakBySlot));
 
       // Rotation: slotTime -> unit for this BN
       const rotation = loadRotation(BNS.name, dt, shift) || {};
@@ -9662,9 +9777,23 @@ async function loadBNConfirm(){
 
         // ── State 1: Own break ─────────────────────────────────────────────
         if(isOwnBreak){
+          const ownBreak = ownBreakBySlot[slot];
+          const ownBreakKey = ownBreak ? String(ownBreak.Id) : '';
+          const stagedOwn = ownBreakKey ? _prodLogStaged.get(ownBreakKey) : null;
+          const isRemoving = stagedOwn && stagedOwn.action === 'remove_break';
           rowClass = '';
-          centerHtml = `<span style="font-weight:600">☕ My break</span>`;
-          actionHtml = ''; // managed via My Normal Break Times card
+          if(isRemoving){
+            stagedLeftBorder = 'border-left:4px solid var(--red)';
+            centerHtml = `<span style="color:var(--red);font-weight:600">queued · break will be removed</span>`;
+            actionHtml = ownBreakKey
+              ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">✕ Deselect</button>`
+              : '';
+          } else {
+            centerHtml = `<span style="font-weight:600">☕ My break</span>`;
+            actionHtml = ownBreakKey
+              ? `<button class="btn btn-danger btn-sm" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">✕ Remove</button>`
+              : '';
+          }
         }
         // ── State 2: Hard-blocked ──────────────────────────────────────────
         else if(isHardBlocked){
@@ -9754,10 +9883,21 @@ async function loadBNConfirm(){
               <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="toggleUnclaimedExpand('${slot}')">✕ Collapse</button>
             </div>`;
           } else {
-            // Collapsed unclaimed row — "+ Claim" button expands the form
-            rowClass = '';
-            centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
-            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>`;
+            // Collapsed unclaimed row — show queued state if staged, else
+            // both "+ Claim" (manual claim form) and "+ My Break" (BN break).
+            const stagedAdd = _prodLogStaged.get(`add_break:${slot}`);
+            if(stagedAdd){
+              stagedLeftBorder = 'border-left:4px solid var(--teal)';
+              rowClass = '';
+              centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ☕ My break</span>
+                <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">✕ Deselect</button>`;
+            } else {
+              rowClass = '';
+              centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>
+                <button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')">+ My Break</button>`;
+            }
           }
         }
 
