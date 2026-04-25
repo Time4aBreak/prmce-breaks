@@ -7409,20 +7409,23 @@ async function runImport(){
       return;
     }
 
-    // Drop entries whose `name` matches UKG row-header text. UKG renders the
-    // logged-in user's row as "My Schedule" instead of their actual name, and
-    // the AI sometimes captures that literal header as the BN name. We filter
-    // here rather than in the prompt so the safety net works even if the
-    // upstream prompt drifts.
+    // Remap entries whose `name` matches UKG row-header text. UKG renders the
+    // logged-in user's row as "My Schedule" instead of their actual name.
+    // For now this assumes Tomas is the uploader — when manager begins
+    // uploading from her UKG view, this remap becomes incorrect (her row
+    // would get assigned to Tomas) and needs to be revisited (see memory).
     const _UKG_HEADER_NAMES = new Set(['my schedule','my','myschedule','schedule']);
-    const _preFilterCount = entries.length;
-    entries = entries.filter(e => {
+    const _UPLOADER_NAME = 'Reyes, Tomas';
+    let _remappedCount = 0;
+    entries.forEach(e => {
       const n = String(e.name || '').trim().toLowerCase();
-      return !_UKG_HEADER_NAMES.has(n);
+      if(_UKG_HEADER_NAMES.has(n)){
+        e.name = _UPLOADER_NAME;
+        _remappedCount++;
+      }
     });
-    const _droppedCount = _preFilterCount - entries.length;
-    if(_droppedCount > 0){
-      toast(`⚠️ Skipped ${_droppedCount} row${_droppedCount!==1?'s':''} labeled "My Schedule" — add yourself manually if needed.`, true);
+    if(_remappedCount > 0){
+      toast(`📝 Mapped ${_remappedCount} "My Schedule" row${_remappedCount!==1?'s':''} → ${_UPLOADER_NAME}.`);
     }
 
     if (!Array.isArray(entries) || entries.length === 0) {
