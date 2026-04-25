@@ -1557,6 +1557,17 @@ function shiftDate(shift){
   return today();
 }
 
+// Earliest date floor that still includes any currently-active shift. Used
+// when querying schedules/bookings with `ShiftDate ge '${floor}'` so that
+// admin views and rotation recompute paths don't lose the still-running Noc
+// shift during the morning overlap (06:30–08:30 AM device-local time), when
+// detectShift() flips to Day and shiftDate('Day') jumps to today.
+function activeShiftFloor(){
+  const dayDt = shiftDate('Day');
+  const nocDt = shiftDate('Noc');
+  return nocDt < dayDt ? nocDt : dayDt;
+}
+
 // Staff-perspective variant of shiftDate. BN/admin code uses the regular
 // shiftDate (08:30 BN boundary) because BNs are still working until then.
 // Staff Sign Up uses this helper so nurses see the UPCOMING shift as soon as
@@ -2065,7 +2076,7 @@ async function _3CTick(){
 
 async function recompute3CAffectedRotations(){
   try {
-    const t = shiftDate(detectShift());
+    const t = activeShiftFloor();
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     const active = scheds.filter(s => {
       if(s.Status === 'inactive') return false;
@@ -2214,8 +2225,12 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
         return slotDt >= effectiveAt;
       });
 
-      // Fetch all active assignments from effectiveAt date forward where units include 3C
-      const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${todayStr}'`);
+      // Fetch all active assignments from effectiveAt date forward where units include 3C.
+      // Pull the floor back to activeShiftFloor() so still-running Noc shifts
+      // (started yesterday-calendar but ending after effectiveAt) aren't missed.
+      const _scheFloor = activeShiftFloor();
+      const _scheFromDate = _scheFloor < todayStr ? _scheFloor : todayStr;
+      const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFromDate}'`);
       const affectedScheds = allScheds.filter(s => {
         if(s.Status === 'inactive') return false;
         let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
@@ -6575,12 +6590,12 @@ async function loadAssignments(){
   if(_viewRange === 'range'){
     const from = document.getElementById('viewDateFrom').value;
     const to   = document.getElementById('viewDateTo').value;
-    if(!from && !to){ filter = `ShiftDate ge '${t}'`; }
+    if(!from && !to){ filter = `ShiftDate ge '${activeShiftFloor()}'`; }
     else if(from && to){ filter = `ShiftDate ge '${from}' and ShiftDate le '${to}'`; }
     else if(from){ filter = `ShiftDate ge '${from}'`; }
     else { filter = `ShiftDate le '${to}'`; }
   } else {
-    filter = `ShiftDate ge '${shiftDate(detectShift())}'`;
+    filter = `ShiftDate ge '${activeShiftFloor()}'`;
   }
 
   try{
@@ -6847,7 +6862,7 @@ async function confirmCloseUnit(schedId, unit, date, shift){
 async function recalculateAllRotations(){
   if(!await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
 
-  const t = shiftDate(detectShift());
+  const t = activeShiftFloor();
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
   const active = scheds.filter(s => s.Status !== 'inactive');
 
