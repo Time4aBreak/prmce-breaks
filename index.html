@@ -5449,6 +5449,20 @@ async function markBNAvailable(schedId, bnName){
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
+
+// Returns true once the BN's shift has actively begun. Used to gate
+// + Claim buttons in Prod Log — staff slot claims should not be open until
+// the BN is on duty. Default starts: 8 AM Day, 8 PM Noc. Overridden by
+// custom start time if BN set one (handles late arrivals).
+function bnShiftStarted(dt, shift, bnName){
+  if(!dt || !shift) return false;
+  const customKey = `bnStart_${bnName}_${dt}_${shift}`;
+  const custom = localStorage.getItem(customKey);
+  const startMin = custom ? toMin(custom) : (shift === 'Day' ? 480 : 1200); // 0800 / 2000
+  const start = new Date(dt + 'T00:00:00');
+  start.setMinutes(start.getMinutes() + startMin);
+  return Date.now() >= start.getTime();
+}
 function populateBNStartTimeSlots(){
   const el = document.getElementById('bnStartTime');
   if(!el) return;
@@ -9333,6 +9347,11 @@ async function loadBNConfirm(){
       // Rotation: slotTime -> unit for this BN
       const rotation = loadRotation(BNS.name, dt, shift) || {};
 
+      // Gate for + Claim button: staff slot claims open only once the BN's
+      // shift has begun (8 AM Day / 8 PM Noc, or custom start). Computed
+      // once and reused across all rows so render is uniform.
+      const _claimOpen = bnShiftStarted(dt, shift, BNS.name);
+
       // Display-only fallback rotation, computed without bnBreakSet
       // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
       // their own break mid-shift, the saved rotation still excludes that
@@ -9498,7 +9517,12 @@ async function loadBNConfirm(){
             } else {
               rowClass = '';
               centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
-              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>
+              // + Claim is gated until BN's shift has started. + My Break stays
+              // open ahead of shift so BN can plan breaks early.
+              const claimBtn = _claimOpen
+                ? `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>`
+                : '';
+              actionHtml = `${claimBtn}
                 <button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')">+ My Break</button>`;
             }
           }
