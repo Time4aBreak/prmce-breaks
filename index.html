@@ -3463,21 +3463,23 @@ async function applyDefaultToAll(){
       try { units = JSON.parse(sched.Units || '[]'); } catch{}
       if(!units.length) continue;
 
-      for(const slotTime of def){
-        for(const unit of units){
-          allRows.push({
-            Title: `BN-${name}-${unit}-${sched.ShiftDate}-${slotTime}`,
-            NurseName: name, Unit: unit, SlotTime: slotTime,
-            SlotDate: sched.ShiftDate, ShiftType: sched.ShiftType, IsBNBreak: 1
-          });
-        }
-      }
-
-      // Pre-compute rotation (client-side, no API needed)
+      // Compute rotation FIRST so each slot row gets its correct rotation unit.
+      // Matches applyDefaultToShift's schema: one BN-break row per slot, with
+      // unit determined by rotation[slotTime] — NOT one row per (slot × unit).
       const expandedUnits = expandCPair(units, sched.ShiftDate, sched.ShiftType);
       const bnBreakSet = new Set(def);
       const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
       const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
+
+      for(const slotTime of def){
+        const unit = rotation[slotTime] || expandedUnits[0] || units[0];
+        allRows.push({
+          Title: `BN-${name}-${unit}-${sched.ShiftDate}-${slotTime}`,
+          NurseName: name, Unit: unit, SlotTime: slotTime,
+          SlotDate: sched.ShiftDate, ShiftType: sched.ShiftType, IsBNBreak: 1
+        });
+      }
+
       const key = `bnRotation_${name}_${sched.ShiftDate}_${sched.ShiftType}`;
       localStorage.setItem(key, JSON.stringify(rotation));
       rotationEntries.push({ key, value: rotation });
