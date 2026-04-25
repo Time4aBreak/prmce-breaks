@@ -410,7 +410,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="prodlog-action-row" style="margin-bottom:10px;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
-            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false;_b.textContent='🏠 Mark unavailable'})">🏠 Mark unavailable</button>
+            <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
           </div>
 
@@ -440,7 +440,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="prodlog-action-row" style="margin-top:12px;display:flex;gap:6px;flex-wrap:wrap">
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
-            <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false;_b.textContent='🏠 Mark unavailable'})">🏠 Mark unavailable</button>
+            <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
           </div>
           <!-- Manual break entry — persistent, not recreated on refresh -->
@@ -5618,17 +5618,20 @@ async function toggleSelfAvailability(){
 }
 
 function updateSelfAvailBtn(isInactive){
-  const btn = document.getElementById('selfUnavailBtn');
-  if(!btn) return;
+  // Prod Log has 2 button rows (top + bottom) — update all instances via class
+  const btns = document.querySelectorAll('.self-avail-btn');
+  if(!btns.length) return;
   const fn = BNS.name ? firstName(BNS.name) : '';
   const label = fn ? ` ${fn}` : '';
-  if(isInactive){
-    btn.textContent = `✅ Mark${label} available`;
-    btn.style.color = 'var(--teal-dk)';
-  } else {
-    btn.textContent = `🏠 Mark${label} unavailable`;
-    btn.style.color = 'var(--red)';
-  }
+  btns.forEach(btn => {
+    if(isInactive){
+      btn.textContent = `✅ Mark${label} available`;
+      btn.style.color = 'var(--teal-dk)';
+    } else {
+      btn.textContent = `🏠 Mark${label} unavailable`;
+      btn.style.color = 'var(--red)';
+    }
+  });
 }
 
 function markCardUnavailableInDOM(bnName){
@@ -9196,6 +9199,12 @@ async function loadBNConfirm(){
     const notifyState = results[2];
 
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
+
+    // Sync Mark unavailable button state with current schedule. If any
+    // schedule entry for this BN/date/shift has Status='inactive' and no
+    // active entries exist, BN is currently marked unavailable.
+    const _hasActive = scheds.some(s => s.Status !== 'inactive');
+    updateSelfAvailBtn(!_hasActive);
 
     // Responsible units: combine main assignment units + supplemental units
     // this BN is currently covering. Supplementals mean the BN owns overlap
