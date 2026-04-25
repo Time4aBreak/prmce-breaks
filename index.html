@@ -6946,8 +6946,9 @@ async function clearSimData(){
   populateBNDropdown();
   renderImportedEntriesSummary();
   renderImportedNamesList();
-  toast('All data cleared.');
-  loadAssignments();
+  toast('All data cleared. Reloading…');
+  // Reload guarantees no stale BN/admin UI state survives the wipe
+  setTimeout(() => location.reload(), 700);
 }
 
 function changePw(){
