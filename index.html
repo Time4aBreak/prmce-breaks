@@ -393,45 +393,6 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
       </div>
 
-      <!-- Custom break schedule for this shift -->
-      <div class="card">
-        <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleBNBreakCard()">
-          <div style="display:flex;align-items:center;gap:8px">
-            <div class="card-label" style="margin:0">🗓 Breaker's Breaks</div>
-            <span id="bnBreakCount" style="font-size:.75rem;color:var(--muted)"></span>
-            <span id="bnLoader" style="display:none"><div class="spinner"></div></span>
-          </div>
-          <span id="bnBreakChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
-        </div>
-        <div id="bnBreakBody" style="display:none;margin-top:12px">
-          <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
-            Select your break slots for this shift. These will be blocked for all units you cover.
-          </p>
-          <div id="bnMeta" style="font-size:.8rem;color:var(--muted);margin-bottom:10px"></div>
-          <div id="bnSlotsList"></div>
-          <!-- BN break submit bar -->
-          <div id="bnSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--day-lt);border-radius:10px;border:1.5px solid var(--day);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
-            <span id="bnSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--day)"></span>
-            <div style="display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" onclick="clearBNPending()">Clear</button>
-              <button class="btn btn-sm" style="background:var(--day);color:white;font-weight:600" id="bnSubmitBtn" onclick="submitBNBreaks()">Submit breaks</button>
-            </div>
-          </div>
-          <div style="margin-top:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-            <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
-            <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
-              <option value="">— full shift —</option>
-            </select>
-            <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
-          </div>
-          <div class="bn-action-btns" style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap">
-            <button class="btn btn-ghost btn-sm" id="clearAllBreaksBtn" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks()">Clear All My Breaks</button>
-            <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Resetting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Reset this shift to default'})">Reset this shift to default</button>
-            <button class="btn btn-ghost btn-sm" style="color:var(--red)" id="selfUnavailBtn" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
-          </div>
-        </div>
-      </div>
-
       <!-- Confirm staff breaks -->
       <div id="bnConfirmWrap" style="display:none">
         <div class="card">
@@ -451,6 +412,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false;_b.textContent='🏠 Mark unavailable'})">🏠 Mark unavailable</button>
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
+          </div>
+
+          <!-- Start-time selector — for late-arrival BNs. Defaults to "full shift".
+               Setting a value gates pre-shift slots from staff sign-up (read in Sign Up
+               grid via bnStart_ key). Migrated from Breaker's Breaks card. -->
+          <div style="margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+            <label style="font-size:.8rem;color:var(--muted);white-space:nowrap">🕐 My start time:</label>
+            <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
+              <option value="">— full shift —</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
           </div>
 
           <div id="bnConfirmList"></div>
@@ -3081,7 +3053,6 @@ function showTab(name, btn){
     // claim-form inputs survive the re-render via _prodLogStaged / _prodLogInputs.
     if(BNS && BNS.name){
       loadBNConfirm();
-      loadBNSlots();
     }
   }
 }
@@ -3433,7 +3404,7 @@ function toggleDefaultSlot(el, slot){
 }
 
 // clearAndResuggest removed — bulk re-suggest flow replaced by applyDefaultToAll
-// cancelSlot, confirmBreak removed — replaced by cancelBNBreak / loadBNConfirm flow
+// cancelSlot, confirmBreak removed — replaced by Productivity Log flow (loadBNConfirm + submitStagedActions)
 async function applyDefaultToAll(){
   const name = BNS.name;
   if(!name){ toast('Select your name first', true); return; }
@@ -3538,7 +3509,7 @@ async function applyDefaultToAll(){
       applyBtn.style.background = 'var(--teal-dk)';
       applyBtn.style.opacity = '1';
     }
-    loadBNSlots();
+    loadBNConfirm();
   } catch(e){
     toast('Error: ' + e.message, true);
     if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply to all shifts'; }
@@ -3660,7 +3631,7 @@ async function resetShiftToDefault(){
   if(!await customConfirm('Reset this shift to your default break schedule?','Reset','Cancel')) return;
   await applyDefaultToShift(name, dt, shift, def, true);
   toast('Shift reset to default');
-  loadBNSlots();
+  loadBNConfirm();
 }
 
 async function resetAllToDefault(){
@@ -3684,7 +3655,7 @@ async function resetAllToDefault(){
     applied++;
   }
   toast(`✓ Reset ${applied} upcoming shift${applied!==1?'s':''} to default`);
-  loadBNSlots();
+  loadBNConfirm();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5499,7 +5470,7 @@ function onBNStartTimeChange(){
   if(val) localStorage.setItem(getBNStartKey(), val);
   else localStorage.removeItem(getBNStartKey());
   const _sy1 = window.scrollY;
-  loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
+  loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
   toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
 }
 function clearBNStartTime(){
@@ -5507,7 +5478,7 @@ function clearBNStartTime(){
   const el = document.getElementById('bnStartTime');
   if(el) el.value = '';
   const _sy2 = window.scrollY;
-  loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
+  loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
   toast('Start time cleared');
 }
 function restoreBNStartTimeUI(){
@@ -5608,7 +5579,7 @@ async function toggleSelfAvailability(){
       }
       hideBusy();
       toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
-      loadBNSlots();
+      loadBNConfirm();
       updateSelfAvailBtn(false);
     } catch(e){ hideBusy(); toast(e.message, true); }
   } else if(active){
@@ -6079,15 +6050,6 @@ function toggleAssignForm(){
 // Card body contains the slot list, submit bar, start time, and action
 // buttons — collapsing gives the BN a shorter-scroll view of My Shift
 // when they don't need to touch their own break plan.
-function toggleBNBreakCard(){
-  const body = document.getElementById('bnBreakBody');
-  const chev = document.getElementById('bnBreakChevron');
-  if(!body) return;
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : 'block';
-  if(chev) chev.textContent = open ? '▼' : '▲';
-}
-
 function toggleExtractedRows(){
   const wrap = document.getElementById('importRowsWrap');
   const chev = document.getElementById('extractedChevron');
@@ -8226,7 +8188,7 @@ async function saveImportRow(i){
     }
     // If BN portal is open for this nurse on same device, reload their slot view
     if(BNS.name === name && BNS.date === date && BNS.shift === shift){
-      loadBNSlots().catch(()=>{});
+      loadBNConfirm().catch(()=>{});
     }
     const svEl = document.getElementById(`saved-${i}`);
     const sbEl = document.getElementById(`savebtn-${i}`);
@@ -8251,7 +8213,7 @@ async function saveImportRow(i){
 // ═══════════════════════════════════════════════════════
 // BREAK NURSE OWN-BREAK TAB
 // ═══════════════════════════════════════════════════════
-const BNS = { shift: null, name: '', date: '', pendingBreaks: new Set() };
+const BNS = { shift: null, name: '', date: '' };
 
 function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
@@ -8273,15 +8235,12 @@ async function loadBNView(){
   if(BNS.name && BNS.name !== name){
     document.getElementById('bnExtInput').value = '';
     document.getElementById('bnExtInput').style.borderColor = '';
-    // Instantly clear slots and show finding indicator
-    const _sl = document.getElementById('bnSlotsList');
-    const _mt = document.getElementById('bnMeta');
-    const _bc = document.getElementById('bnBreakCount');
+    // Instantly clear Prod Log and show finding indicator (fills the same space
+    // BB used to fill — now the only visible BN card is Prod Log).
     const _cw = document.getElementById('bnConfirmWrap');
-    if(_sl) _sl.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
-    if(_mt) _mt.textContent = '';
-    if(_bc) _bc.textContent = '';
-    if(_cw) _cw.style.display = 'none';
+    const _cl = document.getElementById('bnConfirmList');
+    if(_cw) _cw.style.display = 'block';
+    if(_cl) _cl.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
   }
 
   // Resolve the BN's current shift+date. First try schedule-based lookup
@@ -8345,13 +8304,11 @@ async function loadBNView(){
   document.getElementById('bnShiftWrap').style.display = 'block';
   document.getElementById('bnNoSched').style.display   = 'none';
 
-  // Show "Finding shift…" while the pre-scan runs
-  const _bnMeta = document.getElementById('bnMeta');
-  const _bnList = document.getElementById('bnSlotsList');
-  const _bnLoader = document.getElementById('bnLoader');
-  if(_bnMeta) _bnMeta.textContent = '';
-  if(_bnList) _bnList.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
-  if(_bnLoader) _bnLoader.style.display = 'inline-block';
+  // Show "Finding shift…" while the pre-scan runs (in Prod Log space)
+  const _bnCw = document.getElementById('bnConfirmWrap');
+  const _bnCl = document.getElementById('bnConfirmList');
+  if(_bnCw) _bnCw.style.display = 'block';
+  if(_bnCl) _bnCl.innerHTML = '<div class="empty" style="padding:20px 0"><div class="spinner" style="margin:0 auto 8px"></div><div style="color:var(--muted);font-size:.8rem">Finding next scheduled shift…</div></div>';
 
   // Before first render: check if BN is scheduled for this date/shift.
   // If not, scan forward up to 30 days and jump to their next scheduled shift.
@@ -8374,8 +8331,8 @@ async function loadBNView(){
           renderBNShiftPill();
         }
       }
-    } catch(e){ /* fall through — loadBNSlots will handle */ }
-    loadBNSlots();
+    } catch(e){ /* fall through — loadBNConfirm will handle */ }
+    loadBNConfirm();
   })();
 }
 
@@ -8392,25 +8349,23 @@ function onBNDateChange(){
   const dp = document.getElementById('bnDate');
   if (!dp || !dp.value) return;
   BNS.date = dp.value;
-  BNS.pendingBreaks.clear(); updateBNSubmitBar();
   // Auto-detect shift based on imported entries for this date
   const entry = importEntries.find(e => e.name === BNS.name && e.date === BNS.date);
   if (entry) {
     BNS.shift = entry.shift;
     renderBNShiftPill();
   }
-  loadBNSlots();
+  loadBNConfirm();
 }
 
 // renderBNShiftPill defined below
 
 function flipBNShift(){
   BNS.shift = BNS.shift==='Day' ? 'Noc' : 'Day';
-  BNS.pendingBreaks.clear(); updateBNSubmitBar();
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across shifts.
   _prodLogResetShiftState();
   renderBNShiftPill();
-  loadBNSlots();
+  loadBNConfirm();
 }
 
 function renderBNShiftPill(){
@@ -8425,225 +8380,6 @@ function renderBNShiftPill(){
 // updateCoverageBanner removed — banner rendering inlined into loadSlots
 // getSchedules, getAllSchedules removed — replaced by direct spGet calls with batchGet
 // checkRotationConflicts, flipShift removed — rotation conflict handling absorbed into recalculateRotation
-async function loadBNSlots(){
-  const loader = document.getElementById('bnLoader');
-  const list   = document.getElementById('bnSlotsList');
-  const meta   = document.getElementById('bnMeta');
-  const countEl = document.getElementById('bnBreakCount');
-  // Save scroll position so add/remove break doesn't jump the page
-  const _scrollY = window.scrollY;
-  loader.style.display = 'inline-block';
-  list.innerHTML = '';
-  restoreBNStartTimeUI();
-
-  try {
-    const dt = BNS.date || today(), shift = BNS.shift;
-    const isToday = dt === shiftDate(shift);
-    const _months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const _days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    const dtFmt = (()=>{ const d=new Date(dt+'T12:00:00'); return `${_days[d.getDay()]} ${_months[d.getMonth()]} ${d.getDate()}`; })();
-
-    // ── SINGLE ROUND TRIP: batch schedule + breaks ──
-    let batchResults;
-    const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const breaksFilter = `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`;
-    if(SIM_MODE){
-      batchResults = await Promise.all([
-        spGet(LISTS.schedule, schedFilter),
-        spGet(LISTS.bookings, breaksFilter)
-      ]);
-    } else {
-      batchResults = await spBatchGet([
-        {sheet:LISTS.schedule, filter:schedFilter},
-        {sheet:LISTS.bookings, filter:breaksFilter}
-      ]);
-    }
-    const scheds = batchResults[0];
-    const bnBreaksPrefetched = batchResults[1];
-
-    if (!scheds.length){
-      // Auto-find next scheduled assignment for this BN within 14 days
-      try {
-        const upcoming = await spGet(LISTS.schedule,
-          `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${dt}'`);
-        const future = upcoming
-          .filter(s => s.Status !== 'inactive' && (s.ShiftDate.slice(0,10) > dt || (s.ShiftDate.slice(0,10) === dt && s.ShiftType !== shift)))
-          .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
-        if(future.length){
-          // Jump to next scheduled date/shift automatically
-          BNS.date  = future[0].ShiftDate;
-          BNS.shift = future[0].ShiftType;
-          const dp = document.getElementById('bnDate');
-          if(dp) dp.value = BNS.date;
-          renderBNShiftPill();
-          loadBNSlots(); // recurse with correct date/shift
-          return;
-        }
-      } catch(e){ /* fall through to no-sched message */ }
-      document.getElementById('bnNoSched').style.display = 'block';
-      loader.style.display = 'none';
-      list.innerHTML = '';
-      return;
-    }
-    document.getElementById('bnNoSched').style.display = 'none';
-    const isUnavailable = scheds.some(s => s.Status === 'inactive' && !s.IsSupplemental);
-    updateSelfAvailBtn(isUnavailable);
-
-    // Show/hide unavailable banner at top of BN panel
-    let unavailBanner = document.getElementById('bnUnavailBanner');
-    if(!unavailBanner){
-      unavailBanner = document.createElement('div');
-      unavailBanner.id = 'bnUnavailBanner';
-      unavailBanner.style.cssText = 'margin-bottom:12px;padding:10px 14px;border-radius:10px;background:var(--red-lt);border:1.5px solid var(--red);color:var(--red);font-size:.85rem;font-weight:600;display:none';
-      unavailBanner.textContent = '⚠️ You are currently marked unavailable — staff cannot sign up for breaks on your units.';
-      const bnPanel = document.getElementById('bnPanel');
-      if(bnPanel) bnPanel.insertBefore(unavailBanner, bnPanel.firstChild);
-    }
-    unavailBanner.style.display = isUnavailable ? 'block' : 'none';
-    // Warm rotation cache from backend if not already cached
-    await warmRotationCache(BNS.name, dt, shift).catch(()=>{});
-    let bnRotation = loadRotation(BNS.name, dt, shift) || null;
-    if(!bnRotation){
-      // No cached rotation — calculate client-side from schedule units
-      const rawUnits = [];
-      scheds.forEach(s => {
-        try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
-      });
-      if(rawUnits.length){
-        const expandedUnits = expandCPair(rawUnits, dt, shift);
-        const bnBreakSlots = new Set(bnBreaksPrefetched.map(b => String(b.SlotTime).padStart(4,'0')));
-        const dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
-        bnRotation = calculateBlockRotation(expandedUnits, bnBreakSlots, getAvailableSlots(shift), dateSeed, shift);
-        saveRotation(BNS.name, dt, shift, bnRotation);
-      } else {
-        bnRotation = {};
-      }
-    }
-    // Warm default template from backend if not already cached
-    warmDefaultTemplate(BNS.name, shift).catch(()=>{});
-    // Warm 3C status from backend
-    warm3CStatus(dt, shift).catch(()=>{});
-
-    // Get all units this BN covers on this date
-    const units = [];
-    scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
-    const dateLabel = dtFmt;
-    meta.textContent = `${dateLabel}  ·  Covering: ${units.join(', ')}`;
-
-    const slots = generateSlots(shift);
-    const bnBlocked = getBNHardBlocked(shift);
-    // Only filter past slots if the shift is currently active — BNs need to set breaks before shift starts
-    const _shiftActive = staffWindowOpen(shift);
-    const displaySlots = (isToday && _shiftActive ? slots.filter(s => !isPast(s, shift)) : slots)
-      .filter(s => !bnBlocked.includes(s));
-
-    // Use pre-fetched BN breaks from batch query
-    const bnBreaks = bnBreaksPrefetched;
-
-    // Deduplicate by SlotTime — store one representative Id per time
-    const bnBreakTimes = new Set();
-    const bnBreakIds = {};
-    const bnBreakUnits = {}; // slotTime -> unit from the stored break record
-    bnBreaks.forEach(b => {
-      const _bnST = String(b.SlotTime).padStart(4,'0');
-      bnBreakTimes.add(_bnST);
-      if(!bnBreakIds[_bnST]) bnBreakIds[_bnST] = b.Id;
-      if(!bnBreakUnits[_bnST] && b.Unit) bnBreakUnits[_bnST] = b.Unit;
-    });
-
-    const myBreakCount = bnBreakTimes.size;
-    countEl.textContent = `${myBreakCount} slot${myBreakCount!==1?'s':''} selected · ${myBreakCount*15} min`;
-
-    if (!displaySlots.length){
-      list.innerHTML = '<div class="empty">No slots available for this date/shift.</div>';
-      loader.style.display = 'none';
-      return;
-    }
-
-    // Load BN's own start time setting for this shift
-    const _bnStartVal = localStorage.getItem(`bnStart_${BNS.name}_${BNS.date || today()}_${shift}`);
-    const _bnStartMin = _bnStartVal ? toMin(_bnStartVal) : null;
-
-    // Show start time banner once at top if set
-    const _startBanner = _bnStartMin !== null
-      ? `<div style="background:#fff3cd;color:#856404;border:1px solid #ffc107;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:.82rem">
-          🕐 ${firstName(BNS.name)}'s shift starts at ${fmt12(_bnStartVal)} — earlier slots are pre-shift
-         </div>`
-      : '';
-
-    // Display-only fallback rotation for slots missing from the saved one.
-    // The saved rotation excludes slots that were BN-breaks at the time it
-    // was calculated, so if the BN clears a break mid-shift, that slot shows
-    // "—" instead of a unit. We recalculate a rotation with an empty
-    // breaks set — purely for display — to fill in unit labels on those
-    // slots. We DO NOT save this; existing bookings keep their attribution
-    // per the saved rotation.
-    let _fallbackRotation = null;
-    const _rawUnitsForFallback = [];
-    scheds.forEach(s => {
-      try { JSON.parse(s.Units||'[]').forEach(u => { if(!_rawUnitsForFallback.includes(u)) _rawUnitsForFallback.push(u); }); } catch{}
-    });
-    if(_rawUnitsForFallback.length){
-      const _expandedUnits = expandCPair(_rawUnitsForFallback, dt, shift);
-      const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
-      _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
-    }
-
-    // Render a single unified slot list (applies to all covered units)
-    list.innerHTML = _startBanner + displaySlots.map(slot => {
-      const isMyBreak = bnBreakTimes.has(slot);
-      // Prefer the saved rotation; fall back to the display-only rotation for
-      // slots missing from the saved map (e.g., cleared BN-breaks mid-shift).
-      const assignedUnit = bnRotation[slot] || (_fallbackRotation ? _fallbackRotation[slot] : undefined);
-      // For "Your break" slots, show the actual stored unit — not the rotation unit
-      const displayUnit = isMyBreak ? (bnBreakUnits[slot] || assignedUnit) : assignedUnit;
-      const unitDisplay = displayUnit ? (displayUnit === 'C_PAIR' ? '3C/4C' : displayUnit) : null;
-      // Check if this slot is before the BN's set start time
-      // Only flag start time on available slots — not on already-claimed breaks
-      const isBeforeStart = !isMyBreak && _bnStartMin !== null && sortKey(slot, shift) < _bnStartMin;
-      const unitTag = isBeforeStart
-        ? `<span style="background:#fff3cd;color:#856404;padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay || '—'}</span>`
-        : assignedUnit
-          ? `<span style="background:var(--teal-lt);color:var(--teal-dk);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;margin-left:6px">${unitDisplay}</span>`
-          : `<span style="background:var(--bg);color:var(--muted);padding:2px 7px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.72rem;margin-left:6px">—</span>`;
-      const isPendingBreak = BNS.pendingBreaks.has(slot);
-      const rowCls = isMyBreak ? 'bn-break mine' : isPendingBreak ? 'open' : 'open';
-      const rowStyle = isPendingBreak
-        ? 'margin-bottom:6px;min-height:48px;cursor:pointer;border-color:var(--day);box-shadow:0 0 0 2px #f5c060'
-        : 'margin-bottom:6px;min-height:48px;cursor:pointer';
-      return `<div class="slot-row ${rowCls}" style="${rowStyle}">
-        <div class="slot-time" style="display:flex;align-items:center;${isPendingBreak?'color:var(--day);font-weight:700':''}">${fmt12(slot)}${unitTag}</div>
-        <div class="slot-name ${isMyBreak||isPendingBreak?'filled':''}">
-          ${isMyBreak ? `🔒 ${firstName(BNS.name)}'s break` : isPendingBreak ? '⏳ Staged' : isBeforeStart ? '' : assignedUnit ? 'Available' : ''}
-        </div>
-        <div>
-          ${isMyBreak
-            ? `<button class="btn btn-danger btn-sm" onclick="event.stopPropagation();this.disabled=true;this.textContent='Removing…';cancelBNBreak('${slot}')">✕ Remove</button>`
-            : isPendingBreak
-              ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="event.stopPropagation();toggleBNPending('${slot}')">✕ Deselect</button>`
-              : `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600"
-                  onclick="event.stopPropagation();toggleBNPending('${slot}')">+ My Break</button>`
-          }
-        </div>
-      </div>`;
-    }).join('');
-
-  } catch(e) {
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
-  }
-  loader.style.display = 'none';
-  // Restore scroll position — prevents page jumping on break add/remove
-  requestAnimationFrame(() => window.scrollTo({ top: _scrollY, behavior: 'instant' }));
-  loadBNConfirm();
-  // Kick off Productivity Log polling now that a BN is loaded. If user
-  // is on a different subtab, showSubTab's stop-on-exit logic has already
-  // handled polling state — startProdLogPolling only acts if visible.
-  const activeSub = document.querySelector('.subtab.active');
-  if(activeSub && activeSub.id === 'subtab-bn'){
-    _prodLogLastFingerprint = null;
-    startProdLogPolling();
-  }
-}
 
 // Helper: get BN's covered units for a given date/shift
 // testSharePointConnectivity removed — SharePoint hosting abandoned in favour of Google Sheets/Apps Script
@@ -8654,229 +8390,6 @@ async function getBNUnits(bnName, dt, shift){
   const units = [];
   scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
   return units;
-}
-
-function toggleBNPending(slotTime){
-  if(BNS.pendingBreaks.has(slotTime)){
-    BNS.pendingBreaks.delete(slotTime);
-  } else {
-    BNS.pendingBreaks.add(slotTime);
-  }
-  updateBNSubmitBar();
-  updateBNSlotRow(slotTime);
-}
-
-function clearBNPending(){
-  const prev = [...BNS.pendingBreaks];
-  BNS.pendingBreaks.clear();
-  updateBNSubmitBar();
-  prev.forEach(s => updateBNSlotRow(s));
-}
-
-// Update a single BN slot row in-place — no full list rebuild, no jumping
-function updateBNSlotRow(slotTime){
-  const list = document.getElementById('bnSlotsList');
-  if(!list) return;
-  // Find the row by its onclick attribute containing the slotTime
-  const rows = list.querySelectorAll('.slot-row');
-  for(const row of rows){
-    const btn = row.querySelector('button');
-    if(!btn) continue;
-    if(!btn.getAttribute('onclick')?.includes(slotTime)) continue;
-    const isPending = BNS.pendingBreaks.has(slotTime);
-    // Update border and shadow
-    row.style.borderColor = isPending ? 'var(--day)' : '';
-    row.style.boxShadow = isPending ? '0 0 0 2px #f5c060' : '';
-    // Update time cell color
-    const timeCell = row.querySelector('.slot-time');
-    if(timeCell){
-      timeCell.style.color = isPending ? 'var(--day)' : '';
-      timeCell.style.fontWeight = isPending ? '700' : '';
-    }
-    // Update name cell
-    const nameCell = row.querySelector('.slot-name');
-    if(nameCell){
-      nameCell.textContent = isPending ? '⏳ Pending Submit' : 'Available';
-      nameCell.classList.toggle('filled', isPending);
-    }
-    // Swap button
-    const newBtn = document.createElement('button');
-    if(isPending){
-      newBtn.className = 'btn btn-ghost btn-sm';
-      newBtn.style.color = 'var(--muted)';
-      newBtn.setAttribute('onclick', `event.stopPropagation();toggleBNPending('${slotTime}')`);
-      newBtn.textContent = '✕ Deselect';
-    } else {
-      newBtn.className = 'btn btn-sm';
-      newBtn.style.background = 'var(--day-lt)';
-      newBtn.style.color = 'var(--day)';
-      newBtn.style.fontWeight = '600';
-      newBtn.setAttribute('onclick', `event.stopPropagation();toggleBNPending('${slotTime}')`);
-      newBtn.textContent = '+ My Break';
-    }
-    btn.replaceWith(newBtn);
-    break;
-  }
-}
-
-function updateBNSubmitBar(){
-  const bar = document.getElementById('bnSubmitBar');
-  const lbl = document.getElementById('bnSubmitBarLabel');
-  if(!bar) return;
-  const n = BNS.pendingBreaks.size;
-  if(n === 0){
-    bar.style.display = 'none';
-  } else {
-    bar.style.display = 'flex';
-    const times = [...BNS.pendingBreaks]
-      .sort((a,b) => sortKey(a, BNS.shift) - sortKey(b, BNS.shift))
-      .map(fmt12).join(', ');
-    lbl.textContent = `${n} break${n!==1?'s':''} staged: ${times}`;
-  }
-}
-
-async function submitBNBreaks(){
-  const slots = [...BNS.pendingBreaks].sort((a,b) => sortKey(a, BNS.shift) - sortKey(b, BNS.shift));
-  if(!slots.length) return;
-  const btn = document.getElementById('bnSubmitBtn');
-  if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
-  BNS.pendingBreaks.clear();
-  updateBNSubmitBar(); // hides bar — but btn stays visible via submitBtn above...
-  const bar = document.getElementById('bnSubmitBar');
-  const lbl = document.getElementById('bnSubmitBarLabel');
-  if(bar){ bar.style.display = 'flex'; }
-  if(lbl){ lbl.textContent = `Submitting ${slots.length} break${slots.length!==1?'s':''}…`; }
-  // Capture scroll once, before any slot writes begin. Each claimBNBreak
-  // no longer reloads the list — we reload once after the whole batch
-  // completes to avoid repeated layout changes jumping the page.
-  const _sy = window.scrollY;
-  for(const slot of slots){
-    await claimBNBreak(slot);
-  }
-  if(bar) bar.style.display = 'none';
-  // Single refresh at the end, after Sheets has committed all writes.
-  // The setTimeout preserves the original 1.5s buffer that individual
-  // claimBNBreak had, ensuring Sheets has flushed before reading back.
-  setTimeout(() => {
-    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
-  }, 1500);
-}
-
-async function claimBNBreak(slotTime){
-  const dt = BNS.date || today(), shift = BNS.shift;
-  try {
-    const existing = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
-    const uniqueTimes = new Set(existing.map(b => b.SlotTime));
-
-    const units = await getBNUnits(BNS.name, dt, shift);
-
-    // Warn if staff nurses already have this slot on any unit this BN covers
-    const staffAtSlot = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
-    const conflictingStaff = staffAtSlot.filter(b => isStaffBooking(b) && units.includes(b.Unit));
-    if(conflictingStaff.length){
-      const lines = conflictingStaff.map(b => {
-        const match = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-        return match ? `${match[1]} ${match[2]} on ${b.Unit}` : `${b.NurseName} on ${b.Unit}`;
-      }).join(', ');
-      const ok = await customConfirm(
-        `⚠️ ${fmt12(slotTime)} is booked by ${lines}`,
-        'Mark my break & cancel theirs',
-        'Keep their break'
-      );
-      if(!ok) return;
-      // Cancel the conflicting staff bookings and store them for potential restoration
-      for(const b of conflictingStaff){
-        await spDel(LISTS.bookings, b.Id);
-      }
-      const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
-      const cancelData = conflictingStaff.map(b => ({
-        NurseName: b.NurseName, Unit: b.Unit,
-        SlotTime: b.SlotTime, SlotDate: b.SlotDate, ShiftType: b.ShiftType
-      }));
-      setState(cancelKey, cancelData).catch(()=>{}); // cross-device via BNState
-    }
-
-    // Save BN break for the rotation unit — one row per slot, unit from rotation
-    const rotKey = `bnRotation_${BNS.name}_${dt}_${shift}`;
-    let rotation = {};
-    try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
-    const expandedUnits = expandCPair(units, dt, shift);
-    const unit = rotation[String(slotTime).padStart(4,'0')] || expandedUnits[0] || units[0];
-    await spPost(LISTS.bookings, {
-      Title: `BN-${BNS.name}-${unit}-${dt}-${slotTime}`,
-      NurseName: BNS.name, Unit: unit, SlotTime: slotTime,
-      SlotDate: dt, ShiftType: shift, IsBNBreak: 1
-    });
-    toast(`🔒 ${fmt12(slotTime)} blocked`);
-    // NOTE: caller (submitBNBreaks) handles the single loadBNSlots refresh after
-    // all slots commit, preserving scroll position once instead of per-slot.
-  } catch(e) { toast(e.message, true); }
-}
-
-async function cancelBNBreak(slotTime){
-  slotTime = String(slotTime).padStart(4,'0'); // normalize — Sheets may strip leading zero
-  const dt = BNS.date || today(), shift = BNS.shift;
-  try {
-    const breaks = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
-
-    // Warn if any confirmed/not-taken staff bookings exist for this slot
-    const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
-    const actioned = allBookings.filter(b =>
-      isStaffBooking(b) && !isPending(b)
-    );
-    if(actioned.length > 0){
-      const names = actioned.map(b => {
-        const status = isConfirmed(b) ? 'confirmed' : 'marked not taken';
-        return `${formatNurseUnit(b.NurseName, b.Unit)} (${status})`;
-      }).join(', ');
-      if(!await customConfirm(`${names}. Removing will delete this record.`,'Remove anyway','Cancel')) return;
-    }
-
-    // Use batchDelete for speed if multiple rows (same slot, multiple units)
-    if(breaks.length > 1){
-      await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
-        ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
-    } else {
-      for(const b of breaks) await spDel(LISTS.bookings, b.Id);
-    }
-    // Note: no rotation recalc on mid-shift break removal — unit assignments stay fixed
-
-    // Check if any staff nurses had their booking cancelled when this break was marked
-    const cancelKey = `bnBreakCancelled_${dt}_${slotTime}`;
-    let cancelled = [];
-    try { cancelled = (await getState(cancelKey)) || []; } catch{}
-    deleteState(cancelKey).catch(()=>{});
-
-    if(cancelled.length){
-      // Single nurse per slot — fold restore decision into one confirmation
-      const b = cancelled[0];
-      const m = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-      const restore = await customConfirm(
-        `Remove your ${fmt12(slotTime)} break? ${formatNurseUnit(b.NurseName, b.Unit)} was bumped.`,
-        `Remove & restore ${nurseName}'s break`,
-        'Remove & leave open'
-      );
-      if(restore){
-        await spPost(LISTS.bookings, {
-          Title: `${b.Unit}-${b.SlotDate}-${b.SlotTime}`,
-          NurseName: b.NurseName, Unit: b.Unit, SlotTime: b.SlotTime,
-          SlotDate: b.SlotDate, ShiftType: b.ShiftType
-        });
-        toast(`${fmt12(slotTime)} removed — ${nurseName}'s break restored`);
-      } else {
-        toast(`${fmt12(slotTime)} removed — slot is now open`);
-      }
-    } else {
-      toast(`${fmt12(slotTime)} removed`);
-    }
-    // Preserve scroll position so the page doesn't jump to the bottom.
-    const _sy = window.scrollY;
-    loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
-  } catch(e) { toast(e.message, true); }
 }
 
 async function clearBNBreaks(){
@@ -8937,13 +8450,12 @@ async function clearBNBreaks(){
     // Clear in-memory staged state — clearBNBreaks removed backend records,
     // so any staged "+ My Break" selections would now be meaningless and shouldn't
     // persist into the re-render.
-    if(BNS.pendingBreaks) BNS.pendingBreaks.clear();
     const _sy = window.scrollY;
     // Brief delay so Sheets has time to commit the batchDelete before the next
-    // query runs — without it, loadBNSlots / loadBNConfirm can read stale data
+    // query runs — without it, loadBNConfirm can read stale data
     // and render cleared slots as still having breaks.
     setTimeout(() => {
-      loadBNSlots().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
+      loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
     }, 1200);
   } catch(e) {
     toast(e.message, true);
@@ -9628,6 +9140,11 @@ async function loadBNConfirm(){
   const list = document.getElementById('bnConfirmList');
   const loader = document.getElementById('bnConfirmLoader');
   if (!wrap || !BNS.name) return;
+
+  // Populate the start-time dropdown (formerly in Breaker's Breaks card).
+  // Safe to call repeatedly — it early-returns if the element doesn't exist
+  // and re-syncs the saved value if it does.
+  restoreBNStartTimeUI();
 
   // Snapshot any typed inputs before we re-render — they're stored in
   // _prodLogInputs and restored into the new inputs' value attribute.
