@@ -1103,10 +1103,15 @@ function expandCPair(units, date, shift){
 // Check if a unit is covered by a schedule entry (handles C_PAIR expansion)
 function unitCoveredBy(sched, unit, date, shift){
   let units = []; try { units = JSON.parse(sched.Units||'[]'); } catch{}
-  if(units.includes(unit)) return true;
-  if(unit === '3C') return units.includes('C_PAIR') && is3COpen(date, shift);
-  if(unit === '4C') return units.includes('C_PAIR') || units.includes('4C');
-  return false;
+  if(unit === '3C'){
+    // Both explicit '3C' and C_PAIR require global 3C status to be open.
+    // Schedule may list 3C even when closed (e.g. AI extracted it from UKG
+    // verbatim); the closed status is authoritative everywhere downstream.
+    if(!is3COpen(date, shift)) return false;
+    return units.includes('3C') || units.includes('C_PAIR');
+  }
+  if(unit === '4C') return units.includes('4C') || units.includes('C_PAIR');
+  return units.includes(unit);
 }
 
 // Return the full set of units a schedule entry covers, with C_PAIR expanded
@@ -2043,7 +2048,9 @@ async function _3CTick(){
       const dt = staffShiftDate(S.shift);
       const scheds = await spGet(LISTS.schedule,
         `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
-      const newFlag = scheds.some(s => {
+      // Gated by is3COpen — when 3C is closed globally, no schedule listing
+      // counts as "manually assigned" coverage. Closed status wins.
+      const newFlag = is3COpen(dt, S.shift) && scheds.some(s => {
         if(s.Status === 'inactive') return false;
         try { const u = JSON.parse(s.Units||'[]'); return u.includes('3C') || u.includes('C_PAIR'); }
         catch { return false; }
@@ -3858,8 +3865,10 @@ async function loadSlots(silent=false){
     const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`) : [];
     const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     // Update cached flag: any active BN on this shift has 3C in their units?
+    // Gated by is3COpen — when 3C is globally closed, schedule listings of
+    // explicit 3C or C_PAIR don't count as "manually assigned" coverage.
     const prev3CManual = _3CManuallyAssigned;
-    _3CManuallyAssigned = scheds.some(s => {
+    _3CManuallyAssigned = is3COpen(dt, shift) && scheds.some(s => {
       if(s.Status === 'inactive') return false;
       try { const u = JSON.parse(s.Units || '[]'); return u.includes('3C') || u.includes('C_PAIR'); }
       catch { return false; }
