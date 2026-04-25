@@ -7472,6 +7472,20 @@ let importEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]'
 // Key for storing the last processed batch separately from full history
 const LAST_BATCH_KEY = 'bnLastImportBatch';
 
+// Expand 'C_PAIR' slot tokens to explicit ['3C','4C'] units. The suggestion
+// algorithm picks slot tokens (where C_PAIR represents 3C+4C as one paired
+// slot), but the import UI grid renders 3C and 4C as separate buttons keyed
+// off of UNITS which has no 'C_PAIR' member. Without this expansion, a
+// suggestion like ['3A','C_PAIR','7A'] would highlight only 3A and 7A —
+// leaving a count vs highlighted-buttons mismatch ("3 suggested" but 2 lit).
+// Expanding at the boundary makes count, highlights, and toggle behaviour
+// all agree downstream. The save flow (saveImportRow / acceptAllAndSave)
+// already runs its own C_PAIR→[3C,4C] expansion, so this is a no-op there.
+function expandSuggestionUnits(slots){
+  if(!Array.isArray(slots)) return [];
+  return slots.flatMap(s => s === 'C_PAIR' ? ['3C','4C'] : [s]);
+}
+
 function saveLastBatch(entries){
   try { localStorage.setItem(LAST_BATCH_KEY, JSON.stringify(entries)); } catch{}
 }
@@ -7569,10 +7583,10 @@ async function restoreLastImport(){
     }
   }
 
-  // Populate importUnitSel
+  // Populate importUnitSel — expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
   for(let i = 0; i < batch.length; i++){
     const e = batch[i];
-    importUnitSel[i] = allSuggestions[`${e.name}|${e.date}|${e.shift}`] || [];
+    importUnitSel[i] = expandSuggestionUnits(allSuggestions[`${e.name}|${e.date}|${e.shift}`] || []);
   }
 
   // Render rows
@@ -7718,11 +7732,12 @@ async function renderImportRows(entries, forceReplace = false){
   _currentImportEntries = entriesToProcess;
   saveLastBatch(entriesToProcess); // persist for restore after refresh
 
-  // Pre-populate importUnitSel with suggestions for new entries only
+  // Pre-populate importUnitSel with suggestions for new entries only —
+  // expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
   for(let i = 0; i < entriesToProcess.length; i++){
     const e = entriesToProcess[i];
     const key = `${e.name}|${e.date}|${e.shift}`;
-    importUnitSel[i] = allSuggestions[key] || [];
+    importUnitSel[i] = expandSuggestionUnits(allSuggestions[key] || []);
   }
 
   wrap.innerHTML = entriesToProcess.map((e, i) => {
@@ -7918,7 +7933,7 @@ async function resuggestAll(){
 
   for(let i = 0; i < batch.length; i++){
     const e = batch[i];
-    importUnitSel[i] = allSuggestions[`${e.name}|${e.date}|${e.shift}`] || [];
+    importUnitSel[i] = expandSuggestionUnits(allSuggestions[`${e.name}|${e.date}|${e.shift}`] || []);
     // Update DOM
     UNITS.forEach(u => {
       const el = document.getElementById(`iu-${i}-${u}`);
