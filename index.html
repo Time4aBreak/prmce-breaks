@@ -2014,6 +2014,7 @@ async function _3CTick(){
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
     if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
     if(typeof loadAssignments === 'function') loadAssignments();
+    if(typeof notifyProdLogChanged === 'function') notifyProdLogChanged();
     // Recompute rotations for BNs with 3C in their units — so 3C slots appear
     // or disappear from rotation automatically at boundary crossings.
     recompute3CAffectedRotations().catch(()=>{});
@@ -2374,6 +2375,7 @@ async function commit3CChange(){
     setTimeout(show3CDefaultToggle, 500);
     setTimeout(show3CDefaultToggle, 2000);
     loadAssignments();
+    notifyProdLogChanged();
     if(typeof loadSlots === 'function') loadSlots().catch(()=>{});
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
@@ -5731,6 +5733,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       hideBusy();
       toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
       loadAssignments();
+      notifyProdLogChanged(bnName);
       return;
     }
 
@@ -5758,6 +5761,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       }
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
       loadAssignments();
+      notifyProdLogChanged(bnName);
       return;
     }
 
@@ -5770,6 +5774,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       }
       await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
       loadAssignments();
+      notifyProdLogChanged(bnName);
       return;
     }
 
@@ -6022,6 +6027,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     // Update assignment display immediately, background refresh for full state
     loadAssignments();
+    notifyProdLogChanged(bnName);
   } catch(e) { hideBusy(); toast(e.message, true); }
 }
 
@@ -6564,7 +6570,8 @@ async function saveAssign(){
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     loadAssignments();
-  }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); }
+    notifyProdLogChanged(nurse);
+  }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); notifyProdLogChanged(nurse); }
 }
 
 let _viewRange = 'all';
@@ -6766,6 +6773,7 @@ async function delAssign(id){
     toast(e.message, true);
   } finally {
     loadAssignments();
+    notifyProdLogChanged(s && s.BreakNurseName);
   }
 }
 
@@ -6802,6 +6810,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       hideBusy();
       toast(`${unit} removed from ${firstName(bnName)}`);
       loadAssignments();
+      notifyProdLogChanged(bnName);
       return;
     }
 
@@ -6852,6 +6861,8 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       }
       toast(msg);
       loadAssignments();
+      notifyProdLogChanged(bnName);
+      if(result.targetBN) notifyProdLogChanged(result.targetBN);
       return;
     }
 
@@ -6867,6 +6878,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
     hideBusy();
     toast(`${unit} removed · ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} cancelled`);
     loadAssignments();
+    notifyProdLogChanged(bnName);
   } catch(e){ hideBusy(); toast(e.message, true); }
 }
 
@@ -6967,6 +6979,7 @@ async function dedupAssignments(){
     }
     toast(deleted > 0 ? `🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}` : 'No duplicates found');
     loadAssignments();
+    notifyProdLogChanged();
   } catch(e) { toast(e.message, true); }
 }
 
@@ -8124,6 +8137,7 @@ async function acceptAllAndSave(){
   }
   // Reload full assignment list with buttons after save
   loadAssignments();
+  notifyProdLogChanged();
 }
 
 function clearImportSel(i){
@@ -8269,6 +8283,7 @@ async function saveImportRow(i){
     });
     if(allSaved) clearLastBatch();
     loadAssignments();
+    notifyProdLogChanged(name);
   } catch(e) { toast(e.message, true); }
 }
 
