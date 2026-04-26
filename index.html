@@ -5702,6 +5702,19 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
 
+    // Delete BN-A's own BN-break bookings — once they're off the floor, those
+    // slots should reopen for staff to claim. Coverage tab still showing them
+    // as "BN breaks blocked" was confusing and inaccurate.
+    const bnAOwnBreaks = allBookings.filter(b =>
+      isBNBreak(b) &&
+      b.NurseName === bnName &&
+      b.SlotDate >= shiftDate(shift) &&
+      sortKey(b.SlotTime, shift) > nowKey(shift)
+    );
+    for(const b of bnAOwnBreaks){
+      await spDel(LISTS.bookings, b.Id).catch(()=>{});
+    }
+
     // Only future uncovered claimed staff breaks on BN-A's units
     // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
     const uncovered = allBookings.filter(b =>
