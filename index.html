@@ -5387,6 +5387,7 @@ ${nurseLines}`;
     // Ensure "Processing…" button resets on any exit path. processBNUnavailability
     // also calls loadAssignments at its end; calling twice is cheap.
     loadAssignments();
+    notifyProdLogChanged(bnName);
   }
 }
 
@@ -5445,7 +5446,8 @@ async function markBNAvailable(schedId, bnName){
     toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     await new Promise(r => setTimeout(r, 100));
     loadAssignments();
-  } catch(e){ hideBusy(); toast(e.message, true); loadAssignments(); }
+    notifyProdLogChanged(bnName);
+  } catch(e){ hideBusy(); toast(e.message, true); loadAssignments(); notifyProdLogChanged(bnName); }
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
@@ -6579,6 +6581,28 @@ function setViewRange(range, btn){
     if(toEl)   toEl.value   = '';
   }
   loadAssignments();
+}
+
+// Cross-tab Prod Log invalidation after admin schedule changes. Schedule-tab
+// edits (mark BN un/available, change units, etc.) don't go through Prod Log's
+// staging or polling paths, so this helper is the single source for nudging
+// Prod Log to update.
+//
+// Behavior:
+//   1. Reset fingerprint so the NEXT silent poll always re-renders, even if
+//      the booking-side state happens to fingerprint identically.
+//   2. If the affected BN is currently being viewed in My Shift, call
+//      loadBNConfirm() directly so the change is visible instantly instead of
+//      waiting up to 10s for the next poll cycle.
+//
+// Safe to call with no args — fingerprint reset alone covers the case where
+// admin edited some other BN but the viewer is on My Shift looking at their
+// own data (changes don't apply to viewer; reset is a no-op effectively).
+function notifyProdLogChanged(affectedBnName){
+  _prodLogLastFingerprint = null;
+  if(affectedBnName && BNS && BNS.name === affectedBnName){
+    if(typeof loadBNConfirm === 'function') loadBNConfirm();
+  }
 }
 
 async function loadAssignments(){
