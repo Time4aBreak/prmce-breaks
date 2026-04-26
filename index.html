@@ -9431,6 +9431,10 @@ async function loadBNConfirm(){
         let centerHtml = '';
         let actionHtml = '';
         let extraStyle = '';
+        // Per-row unit label, used both in active state branches and pre-shift template.
+        // Declared at row scope so the pre-shift template (which renders after the
+        // state branches) can reference it without scope errors.
+        const unitLabel = rotationUnit ? `· ${rotationUnit}` : '';
 
         // ── State 1: Own break ─────────────────────────────────────────────
         if(isOwnBreak){
@@ -9499,8 +9503,7 @@ async function loadBNConfirm(){
         }
         // ── State 4: Unclaimed ─────────────────────────────────────────────
         else {
-          // Show unit from rotation (if any), otherwise show as generic unclaimed
-          const unitLabel = rotationUnit ? `· ${rotationUnit}` : '';
+          // Use rotation unit (declared at per-row scope above)
           const stagedClaim = staged && staged.action === 'claim' ? staged : null;
 
           if(stagedClaim){
