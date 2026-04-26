@@ -9316,7 +9316,16 @@ async function loadBNConfirm(){
       notifyHtml += `</div>`;
     }
 
-    list.innerHTML = notifyHtml + (() => {
+    // Unavailable banner — single visual indicator that shift is marked off.
+    // [Mark Available] button uses the same toggleSelfAvailability handler.
+    const unavailBanner = _isUnavailable
+      ? `<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;margin-bottom:12px;padding:12px 14px;background:#fff3f3;border:1.5px solid var(--red);border-radius:10px">
+          <span style="font-size:.9rem;font-weight:600;color:var(--red)">🏠 ${firstName(BNS.name)} is unavailable</span>
+          <button class="btn btn-sm self-avail-btn" style="background:var(--teal);color:white;font-weight:600;border:0" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">Mark Available</button>
+        </div>`
+      : '';
+
+    list.innerHTML = unavailBanner + notifyHtml + (() => {
       // ── Per-slot activity log ───────────────────────────────────────────
       // One row per slot-time in the shift. Each row shows what this BN
       // was (or will be) doing at that slot: giving a break, on own break,
@@ -9351,6 +9360,18 @@ async function loadBNConfirm(){
       // shift has begun (8 AM Day / 8 PM Noc, or custom start). Computed
       // once and reused across all rows so render is uniform.
       const _claimOpen = bnShiftStarted(dt, shift, BNS.name);
+
+      // Pre-shift dim threshold: slots before BN's start time render at 50%
+      // opacity. Same start as the claim gate (custom or default 0800/2000)
+      // so visual + functional rules stay consistent.
+      const _customStart = localStorage.getItem(`bnStart_${BNS.name}_${dt}_${shift}`);
+      const _startSortKey = _customStart
+        ? sortKey(_customStart, shift)
+        : (shift === 'Day' ? 480 : 1200);
+
+      // Unavailable state: BN has marked off this shift. Slot list dims, the
+      // top/bottom action rows hide, and a banner appears with Mark Available.
+      const _isUnavailable = !_hasActive;
 
       // Display-only fallback rotation, computed without bnBreakSet
       // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
@@ -9528,13 +9549,37 @@ async function loadBNConfirm(){
           }
         }
 
-        return `<div class="slot-row bn-confirm-row ${rowClass}" style="margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
+        // Pre-shift visual gate: dim slots before BN's start time. Skip
+        // dimming if the whole list is being dimmed for an unavailable
+        // BN — avoids compounding to ~0.275 opacity.
+        const _isPreShift = !_isUnavailable && sortKey(slot, shift) < _startSortKey;
+        const _preShiftStyle = _isPreShift ? 'opacity:0.5;' : '';
+
+        return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
           <div class="slot-time">${fmt12(slot)}</div>
           <div>${centerHtml}</div>
           <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${actionHtml}</div>
         </div>`;
       }).join('');
     })();
+
+    // If BN is marked unavailable: wrap slot list in dimmer + click-blocker.
+    // Otherwise pass-through.
+    if(_isUnavailable){
+      // Surgical replacement: wrap just the slot rows portion (after banner+notify)
+      const idx = list.innerHTML.indexOf('<div class="slot-row');
+      if(idx >= 0){
+        const head = list.innerHTML.slice(0, idx);
+        const tail = list.innerHTML.slice(idx);
+        list.innerHTML = head + '<div style="opacity:.55;pointer-events:none">' + tail + '</div>';
+      }
+    }
+
+    // Toggle action rows visibility based on availability. Hides Clear/Set/Mark/Submit
+    // buttons when BN is off; banner above carries the only meaningful action (Mark Available).
+    document.querySelectorAll('.prodlog-action-row').forEach(r => {
+      r.style.display = _isUnavailable ? 'none' : '';
+    });
 
     wrap.style.display = 'block';
     _prodLogUpdateHeader();
