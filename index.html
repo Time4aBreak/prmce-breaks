@@ -9220,6 +9220,11 @@ async function loadBNConfirm(){
     const _hasActive = scheds.some(s => s.Status !== 'inactive');
     updateSelfAvailBtn(!_hasActive);
 
+    // Unavailable state: BN has marked off this shift. Slot list dims, the
+    // top/bottom action rows hide, and a banner appears with Mark Available.
+    // Declared here (outside IIFE) so banner + post-IIFE wrap can reference it.
+    const _isUnavailable = !_hasActive;
+
     // Responsible units: combine main assignment units + supplemental units
     // this BN is currently covering. Supplementals mean the BN owns overlap
     // attribution on those units too.
@@ -9368,10 +9373,6 @@ async function loadBNConfirm(){
       const _startSortKey = _customStart
         ? sortKey(_customStart, shift)
         : (shift === 'Day' ? 480 : 1200);
-
-      // Unavailable state: BN has marked off this shift. Slot list dims, the
-      // top/bottom action rows hide, and a banner appears with Mark Available.
-      const _isUnavailable = !_hasActive;
 
       // Display-only fallback rotation, computed without bnBreakSet
       // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
