@@ -9417,7 +9417,7 @@ async function loadBNConfirm(){
         let rowClass = 'open';
         let centerHtml = '';
         let actionHtml = '';
-        let stagedLeftBorder = '';
+        let extraStyle = '';
 
         // ── State 1: Own break ─────────────────────────────────────────────
         if(isOwnBreak){
@@ -9427,7 +9427,7 @@ async function loadBNConfirm(){
           const isRemoving = stagedOwn && stagedOwn.action === 'remove_break';
           rowClass = '';
           if(isRemoving){
-            stagedLeftBorder = 'border-left:4px solid var(--red)';
+            extraStyle = 'border-left:4px solid var(--red)';
             centerHtml = `<span style="color:var(--red);font-weight:600">queued · break will be removed</span>`;
             actionHtml = ownBreakKey
               ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">✕ Deselect</button>`
@@ -9450,6 +9450,7 @@ async function loadBNConfirm(){
           rowClass = '';
           centerHtml = `<span style="color:var(--muted)">— ${reasonMap[slot] || 'Blocked'} —</span>`;
           actionHtml = '';
+          extraStyle = 'background:#eef0f2;'; // cool grey tint signals system-blocked
         }
         // ── State 3: Claimed booking exists ────────────────────────────────
         else if(b){
@@ -9473,9 +9474,9 @@ async function loadBNConfirm(){
             const cancelCls  = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
             const notTakenStyle = stagedAction === 'not_taken' ? '' : 'color:var(--muted)';
             const cancelStyle   = stagedAction === 'cancelled' ? '' : 'color:var(--muted)';
-            if(stagedAction === 'confirmed')      stagedLeftBorder = 'border-left:4px solid var(--green)';
-            else if(stagedAction === 'not_taken') stagedLeftBorder = 'border-left:4px solid var(--muted)';
-            else if(stagedAction === 'cancelled') stagedLeftBorder = 'border-left:4px solid var(--red)';
+            if(stagedAction === 'confirmed')      extraStyle = 'border-left:4px solid var(--green)';
+            else if(stagedAction === 'not_taken') extraStyle = 'border-left:4px solid var(--muted)';
+            else if(stagedAction === 'cancelled') extraStyle = 'border-left:4px solid var(--red)';
 
             centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
             actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px">✓ Taken</button>
@@ -9491,7 +9492,7 @@ async function loadBNConfirm(){
 
           if(stagedClaim){
             // Staged walk-up claim — teal border, compact display, Unstage button
-            stagedLeftBorder = 'border-left:4px solid var(--teal)';
+            extraStyle = 'border-left:4px solid var(--teal)';
             centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Deselect</button>`;
@@ -9531,7 +9532,7 @@ async function loadBNConfirm(){
             // both "+ Claim" (manual claim form) and "+ My Break" (BN break).
             const stagedAdd = _prodLogStaged.get(`add_break:${slot}`);
             if(stagedAdd){
-              stagedLeftBorder = 'border-left:4px solid var(--teal)';
+              extraStyle = 'border-left:4px solid var(--teal)';
               rowClass = '';
               centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ☕ My break</span>
                 <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
@@ -9550,15 +9551,18 @@ async function loadBNConfirm(){
           }
         }
 
-        // Pre-shift visual gate: dim slots before BN's start time. Skip
-        // dimming if the whole list is being dimmed for an unavailable
-        // BN — avoids compounding to ~0.275 opacity.
+        // Pre-shift visual gate: slots before BN's start time get a tinted
+        // background and a "🕐 Before start time" label in place of the
+        // unclaimed text. Skipped when whole list is dimmed for unavailable BN.
         const _isPreShift = !_isUnavailable && sortKey(slot, shift) < _startSortKey;
-        const _preShiftStyle = _isPreShift ? 'opacity:0.5;' : '';
+        const _preShiftStyle = _isPreShift ? 'background:#f5f0e8;' : '';
+        const _centerHtmlFinal = _isPreShift
+          ? `<span style="color:var(--muted);font-size:.82rem">🕐 Before start time<span style="margin-left:8px">${unitLabel}</span></span>`
+          : centerHtml;
 
-        return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${stagedLeftBorder}">
+        return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
           <div class="slot-time">${fmt12(slot)}</div>
-          <div>${centerHtml}</div>
+          <div>${_centerHtmlFinal}</div>
           <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${actionHtml}</div>
         </div>`;
       }).join('');
