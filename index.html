@@ -9600,10 +9600,21 @@ async function loadBNConfirm(){
           } else if(_prodLogExpanded.has(slot)){
             // Expanded inline-claim form with Copy last + Apply to more
             const savedInputs = _prodLogInputs.get(slot) || { name: '', ext: '' };
-            // Build chip picker HTML for all other compatible unclaimed slots
-            const chipOptions = compatibleUnclaimed.filter(s => s !== slot);
+            // Build chip picker HTML for compatible unclaimed slots in this BN's
+            // unit. Filtering to a single unit (e.g., expanding 8N shows only
+            // other 8N slots) keeps the picker scannable. Includes past slots
+            // since BNs may record breaks they handled earlier in the shift.
+            // Resolves unit using the same rotation || fallback logic as the
+            // per-row render so past slots with fallback-only rotation match.
+            const _myUnit = rotationUnit || '';
+            const _slotUnit = (s) => rotation[s] || (_fallbackRotation ? _fallbackRotation[s] : '') || '';
+            const chipOptions = compatibleUnclaimed.filter(s => {
+              if(s === slot) return false;
+              if(!_myUnit) return true;
+              return _slotUnit(s) === _myUnit;
+            });
             const chipHtml = chipOptions.map(s => {
-              const u = rotation[s] || '';
+              const u = _slotUnit(s);
               return `<span id="chip_${slot}_${s}" class="chip" data-slot="${s}" data-unit="${esc(u)}" onclick="toggleApplyMoreChip('${slot}','${s}')" style="display:inline-flex;align-items:center;padding:4px 10px;border:1px solid var(--border);border-radius:12px;font-size:.75rem;cursor:pointer;user-select:none;background:var(--bg)">${fmt12(s)}${u ? ` · ${u}` : ''}</span>`;
             }).join(' ');
 
