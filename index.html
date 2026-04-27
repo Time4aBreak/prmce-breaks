@@ -6706,6 +6706,11 @@ async function loadAssignments(){
 }
 
 async function delAssign(id){
+  // Track the BN name for cross-tab refresh in the finally block. Hoisted
+  // to function scope because `s` (the schedule record) is declared inside
+  // try and would not be visible in finally — referencing it there throws
+  // ReferenceError, which silently broke notifyProdLogChanged.
+  let _delBnName = null;
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
     if(!scheds.length){
@@ -6715,6 +6720,7 @@ async function delAssign(id){
       return;
     }
     const s = scheds[0];
+    _delBnName = s.BreakNurseName;
     let units = []; try { units = [...new Set(JSON.parse(s.Units||'[]'))]; } catch{}
 
     // Find future affected staff bookings
@@ -6784,7 +6790,7 @@ async function delAssign(id){
     toast(e.message, true);
   } finally {
     loadAssignments();
-    notifyProdLogChanged(s && s.BreakNurseName);
+    notifyProdLogChanged(_delBnName);
   }
 }
 
