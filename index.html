@@ -9511,8 +9511,23 @@ async function loadBNConfirm(){
       });
       const ownBreakSlots = new Set(Object.keys(ownBreakBySlot));
 
-      // Rotation: slotTime -> unit for this BN
-      const rotation = loadRotation(BNS.name, dt, shift) || {};
+      // Rotation: slotTime -> unit for this BN.
+      // Validate cached rotation against current responsible units. If any
+      // unit in the cache is no longer in the BN's schedule, the cache is
+      // stale (e.g. units changed, BN re-assigned to different units, or a
+      // record was patched). Discard and let _fallbackRotation below
+      // recompute from current scheds. Cache is keyed by (bnName, date,
+      // shift) so it survives across renders, but unit changes don't
+      // invalidate it on their own.
+      let rotation = loadRotation(BNS.name, dt, shift) || {};
+      const _expandedResp = new Set(expandCPair([...responsibleUnits], dt, shift));
+      const _rotUnits = new Set(Object.values(rotation).filter(Boolean));
+      const _hasStaleUnit = [..._rotUnits].some(u => !_expandedResp.has(u));
+      if(_hasStaleUnit){
+        rotation = {};
+        // Trigger async recalc so future renders use the correct cache
+        recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+      }
 
       // Gate for + Claim button: staff slot claims open only once the BN's
       // shift has begun (8 AM Day / 8 PM Noc, or custom start). Computed
