@@ -1799,17 +1799,28 @@ function getBNHardBlocked(shift){
   return (shift === 'Noc' && isWeekday) ? ['0755'] : [];
 }
 
-function getDayHardBlocked(){
-  const dow = new Date().getDay();
+// Returns the weekday (0–6) for the slot at a given shift+date. Noc post-midnight
+// slots (0000–0759) belong to the NEXT calendar day after the shift's start date.
+function _slotWeekday(shift, dateStr){
+  const dt = dateStr || today();
+  const base = new Date(dt + 'T12:00:00');
+  // For Noc, 0755 (and other early-AM slots) actually fall on the day AFTER
+  // the shift's start date. That's the day the Monday-morning huddle exists.
+  if(shift === 'Noc') base.setDate(base.getDate() + 1);
+  return base.getDay();
+}
+
+function getDayHardBlocked(dateStr){
+  const dow = _slotWeekday('Day', dateStr);
   const isWeekday = dow >= 1 && dow <= 5;
   // 0755 blocked weekdays — break ends 0810, BN late for 0800 huddle
   return isWeekday ? [...HARD_BLOCKED_SLOTS.Day, '0755'] : [...HARD_BLOCKED_SLOTS.Day];
 }
 
-function getNocHardBlocked(){
-  const dow = new Date().getDay(); // 0=Sun, 6=Sat
+function getNocHardBlocked(dateStr){
+  const dow = _slotWeekday('Noc', dateStr);
   const isWeekday = dow >= 1 && dow <= 5;
-  // 0755 weekday only — Noc BN at huddle, can't run a break then.
+  // 0755 weekday only — Noc BN at huddle next morning, can't run a break then.
   // 0815 is in base HARD_BLOCKED_SLOTS.Noc (clock-out buffer, all days).
   return isWeekday ? [...HARD_BLOCKED_SLOTS.Noc, '0755'] : [...HARD_BLOCKED_SLOTS.Noc];
 }
@@ -9460,8 +9471,10 @@ async function loadBNConfirm(){
         _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
       }
 
-      // Hard-blocked slots for this shift
-      const hardBlocked = shift === 'Day' ? getDayHardBlocked() : getNocHardBlocked();
+      // Hard-blocked slots for this shift on this specific date.
+      // For Noc, the 0755 slot is the NEXT morning after dt — that's why
+      // the helpers need the shift's start date, not "today".
+      const hardBlocked = shift === 'Day' ? getDayHardBlocked(dt) : getNocHardBlocked(dt);
       const hardBlockedSet = new Set(hardBlocked);
 
       const esc = (s) => String(s).replace(/'/g, "\\'");
