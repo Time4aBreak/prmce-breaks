@@ -8944,15 +8944,13 @@ async function submitStagedActions(){
         // Walk-up claim: create a new booking record, already confirmed.
         const dt = BNS.date || today();
         const shift = BNS.shift;
-        // Compute SlotDate — Noc slots past midnight belong to next calendar day
-        const slotMin = toMin(info.slotTime);
-        let slotDate = dt;
-        if(shift === 'Noc' && slotMin < 12*60){
-          // After midnight — next day
-          const nxt = new Date(dt + 'T12:00:00');
-          nxt.setDate(nxt.getDate() + 1);
-          slotDate = nxt.toISOString().slice(0,10);
-        }
+        // SlotDate = shift-start date, NOT calendar date. Even for Noc
+        // post-midnight slots (e.g. 12:15 AM), the booking belongs to the
+        // shift that started yesterday evening. This matches BN-break and
+        // Sign Up schema, and is what bnCovers expects when matching bookings
+        // to the viewing BN. Storing post-midnight claims with next-day SlotDate
+        // made them invisible to the render predicate.
+        const slotDate = dt;
         // Ensure a unit is set — rotation might not have one for every slot.
         // Fall back to any of the BN's responsible units so the booking
         // re-surfaces on query in loadBNConfirm/Sign Up.
