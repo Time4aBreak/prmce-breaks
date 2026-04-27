@@ -9594,7 +9594,7 @@ async function loadBNConfirm(){
           if(stagedClaim){
             // Staged walk-up claim — teal border, compact display, Unstage button
             extraStyle = 'border-left:4px solid var(--teal)';
-            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
+            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">↺ Undo</button>`;
           } else if(_prodLogExpanded.has(slot)){
