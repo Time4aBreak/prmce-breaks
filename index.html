@@ -845,10 +845,16 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="bnListBody" style="display:none;margin-top:10px">
         <div id="importedNamesList"><div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div></div>
         <div id="manualNameRow" style="display:none;margin-top:10px">
-          <div class="row">
-            <input type="text" id="manualNurseInput" placeholder="Full name (e.g. Smith, Jane)" style="flex:1"/>
-            <button class="btn btn-success btn-sm" onclick="addManualName()">Add</button>
-            <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">✕</button>
+          <div style="display:flex;flex-direction:column;gap:6px">
+            <div class="row" style="gap:6px">
+              <input type="text" id="manualLastName" placeholder="Last name" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
+              <input type="text" id="manualFirstName" placeholder="First name" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
+            </div>
+            <div style="font-size:.72rem;color:var(--muted);line-height:1.3">Both fields required. Saved as <em>Lastname, Firstname</em>.</div>
+            <div class="row" style="gap:6px;justify-content:flex-end">
+              <button id="manualAddBtn" class="btn btn-success btn-sm" onclick="addManualName()" disabled>Add</button>
+              <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">✕</button>
+            </div>
           </div>
         </div>
       </div>
@@ -6409,8 +6415,33 @@ function setAShift(sh){
 }
 
 async function saveAssign(){
-  const nurse=(document.getElementById('aNurseText').value.trim()) ||
-             document.getElementById('aNurse').value;
+  const typedRaw = document.getElementById('aNurseText').value.trim();
+  const dropdownVal = document.getElementById('aNurse').value;
+  // Resolve the typed/selected name to the canonical "Last, First" format.
+  // Dropdown values are already canonical (sourced from importedNames). Typed
+  // values may be a first name or have casing differences — canonicalize via
+  // importedNames lookup. This prevents saving partial-name records that
+  // downstream queries can't match (e.g. typed "Ashley" saved as "Ashley"
+  // doesn't match queries for "Muhammad, Ashley").
+  let nurse;
+  if(typedRaw){
+    const resolved = canonicalizeBNName(typedRaw);
+    if(!resolved){
+      // Detect ambiguity vs no-match for a clearer message
+      const lower = typedRaw.toLowerCase();
+      const firstMatches = importedNames.filter(n => n && firstName(n).toLowerCase() === lower);
+      if(firstMatches.length > 1){
+        toast(`"${typedRaw}" matches ${firstMatches.length} nurses (${firstMatches.map(firstName).join(', ')}). Be more specific or use the dropdown.`, true);
+      } else {
+        toast(`"${typedRaw}" doesn't match any known nurse. Add to roster first or check spelling.`, true);
+      }
+      loadAssignments();
+      return;
+    }
+    nurse = resolved;
+  } else {
+    nurse = dropdownVal;
+  }
   const dt=document.getElementById('aDate').value;
   const shift=S.aShift;
   const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
@@ -7151,6 +7182,43 @@ function firstName(fullName){
   const parts = fullName.split(',');
   if(parts.length > 1) return parts[1].trim().split(' ')[0];
   return fullName.split(' ')[0];
+}
+
+// Resolve a free-text BN name to the canonical full name from importedNames.
+// Handles case-insensitive matching, firstName-only typing ("ashley" →
+// "Muhammad, Ashley"), and small typos via the existing namesSimilar fuzzy
+// matcher. Returns the canonical name on success, or null if no unique match.
+//
+// Used to prevent saveAssign from creating records with partial/wrong-case
+// BreakNurseName values that don't match downstream queries (e.g. typing
+// "Ashley" saved a record that loadBNConfirm couldn't find when querying for
+// "Muhammad, Ashley").
+function canonicalizeBNName(input){
+  if(!input || typeof input !== 'string') return null;
+  const typed = input.trim();
+  if(!typed) return null;
+  const list = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames : [];
+  if(!list.length) return null;
+  const lower = typed.toLowerCase();
+
+  // 1. Exact match (case-insensitive) on full name
+  const exact = list.find(n => n && n.toLowerCase() === lower);
+  if(exact) return exact;
+
+  // 2. Exact firstName match (case-insensitive). If exactly one BN has this
+  //    first name, use it. Multiple matches → ambiguous, return null.
+  const firstMatches = list.filter(n => n && firstName(n).toLowerCase() === lower);
+  if(firstMatches.length === 1) return firstMatches[0];
+  if(firstMatches.length > 1) return null; // ambiguous — caller should prompt
+
+  // 3. Fuzzy match — try against full name and firstName separately
+  const fuzzyFull = list.filter(n => n && namesSimilar(typed, n));
+  if(fuzzyFull.length === 1) return fuzzyFull[0];
+  const fuzzyFirst = list.filter(n => n && namesSimilar(typed, firstName(n)));
+  if(fuzzyFirst.length === 1) return fuzzyFirst[0];
+
+  // No unique match
+  return null;
 }
 
 function toTitleCase(str){
@@ -10857,16 +10925,35 @@ async function populateNurseDropdown(){
 
   const combined = [...new Set([...fromImport, ...fromScheds])].sort();
 
-  if (combined.length) {
-    sel.innerHTML = '<option value="">— Select break nurse —</option>' +
-      combined.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
+  // Other BNs from the master roster who AREN'T already in combined. Adding
+  // these as a second group lets admin assign a BN to a date they weren't
+  // originally scheduled for (the most common reason to use the manual text
+  // input). Manual typing led to data-format bugs where typed first names
+  // saved as-is and broke downstream queries.
+  const others = (typeof importedNames !== 'undefined' && Array.isArray(importedNames))
+    ? importedNames.filter(n => n && !combined.includes(n)).sort()
+    : [];
+
+  if (combined.length || others.length) {
+    let html = '<option value="">— Select break nurse —</option>';
+    if(combined.length){
+      html += combined.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
+    }
+    if(others.length){
+      // Optgroup separates the two lists visually
+      const groupLabel = combined.length ? '— Other Break Nurses —' : '— All Break Nurses —';
+      html += `<optgroup label="${groupLabel}">` +
+              others.map(n => `<option value="${n}">${firstName(n)}</option>`).join('') +
+              `</optgroup>`;
+    }
+    sel.innerHTML = html;
   } else if (date) {
-    sel.innerHTML = '<option value="">No break nurses on this date/shift — type a name below</option>';
+    sel.innerHTML = '<option value="">No break nurses on roster — import schedule first</option>';
   } else {
     sel.innerHTML = '<option value="">— Select a date first —</option>';
   }
 
-  if (prev && combined.includes(prev)) sel.value = prev;
+  if (prev && (combined.includes(prev) || others.includes(prev))) sel.value = prev;
 }
 
 function renderImportedNamesList(){
@@ -11042,16 +11129,35 @@ function toggleImportedEntries(){
 function toggleManualName(){
   const row = document.getElementById('manualNameRow');
   row.style.display = row.style.display === 'none' ? 'block' : 'none';
-  if (row.style.display === 'block') document.getElementById('manualNurseInput').focus();
+  if (row.style.display === 'block'){
+    document.getElementById('manualLastName').value = '';
+    document.getElementById('manualFirstName').value = '';
+    updateManualAddState();
+    document.getElementById('manualLastName').focus();
+  }
+}
+
+// Enable Add button only when both Last and First name fields have content.
+// Inline validation prevents saving partial names that would break the
+// canonical "Lastname, Firstname" format other code relies on.
+function updateManualAddState(){
+  const last = (document.getElementById('manualLastName')||{}).value || '';
+  const first = (document.getElementById('manualFirstName')||{}).value || '';
+  const btn = document.getElementById('manualAddBtn');
+  if(btn) btn.disabled = !(last.trim() && first.trim());
 }
 
 function addManualName(){
-  const val = document.getElementById('manualNurseInput').value.trim();
-  if (!val) return;
-  addNamesToRoster([val]);
-  document.getElementById('manualNurseInput').value = '';
+  const last = document.getElementById('manualLastName').value.trim();
+  const first = document.getElementById('manualFirstName').value.trim();
+  if (!last || !first) return;
+  // Title-case each part, then assemble canonical "Lastname, Firstname"
+  const lastTC = last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
+  const firstTC = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
+  const canonical = `${lastTC}, ${firstTC}`;
+  addNamesToRoster([canonical]);
   toggleManualName();
-  toast(`${val} added.`);
+  toast(`${canonical} added.`);
 }
 
 
