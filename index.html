@@ -274,7 +274,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <span id="submitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="clearPending()">Clear</button>
-          <button class="btn btn-primary" onclick="submitClaims()" id="submitBtn">Submit breaks</button>
+          <button class="btn btn-primary" onclick="submitClaims()" id="submitBtn">Submit</button>
         </div>
       </div>
     </div>
@@ -432,7 +432,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <span id="prodLogSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
             <div style="display:flex;gap:8px">
               <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()">Clear</button>
-              <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="submitStagedActions()">Submit breaks</button>
+              <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="submitStagedActions()">Submit</button>
             </div>
           </div>
 
@@ -4416,7 +4416,7 @@ async function loadSlots(silent=false){
         }</div>
         <div>
           ${isMine && !isPastSlot  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
-          ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
+          ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
           ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
         </div>
       </div>`;
@@ -4580,7 +4580,7 @@ function renderSlotsFromCache(){
       }</div>
       <div>
         ${isMine && !isPast(slot, shift)  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
-        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">✕ Deselect</button>` : ''}
+        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
         ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
       </div>
     </div>`;
@@ -4722,7 +4722,7 @@ async function submitClaims(){
   }
   S.pendingClaims.clear();
   updateSubmitBar();
-  if(btn){ btn.disabled = false; btn.textContent = 'Submit breaks'; }
+  if(btn){ btn.disabled = false; btn.textContent = 'Submit'; }
   if(results.failed.length === 0){
     toast(`✓ ${results.claimed.length} break${results.claimed.length!==1?'s':''} confirmed!`);
   } else {
@@ -4985,7 +4985,7 @@ function renderOtherSlotsFromCache(){
     return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
       <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
       <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
-      <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'✕ Deselect':'+  Select'}</button>
+      <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'↺ Undo':'+  Select'}</button>
     </div>`;
   }).join('');
 }
@@ -8657,8 +8657,8 @@ function _prodLogUpdateHeader(){
   const submitBtn = _prodLogSubmitBtn();
   if(submitBtn){
     submitBtn.disabled = n === 0;
-    if(n > 0 && submitBtn.textContent !== 'Submit breaks' && submitBtn.textContent !== 'Submitting…'){
-      submitBtn.textContent = 'Submit breaks';
+    if(n > 0 && submitBtn.textContent !== 'Submit' && submitBtn.textContent !== 'Submitting…'){
+      submitBtn.textContent = 'Submit';
     }
   }
   // Sticky submit bar at bottom of slot list (matches Breaker's Breaks pattern).
@@ -9033,7 +9033,7 @@ async function submitStagedActions(){
     console.warn('Staged action failures:', errors);
   }
   if(submit){
-    submit.textContent = 'Submit breaks';
+    submit.textContent = 'Submit';
     submit.disabled = false;
   }
   // Short delay so Sheets has time to commit walk-up claim writes before we
@@ -9516,7 +9516,7 @@ async function loadBNConfirm(){
             extraStyle = 'border-left:4px solid var(--red)';
             centerHtml = `<span style="color:var(--red);font-weight:600">queued · break will be removed</span>`;
             actionHtml = ownBreakKey
-              ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">✕ Deselect</button>`
+              ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">↺ Undo</button>`
               : '';
           } else {
             centerHtml = `<span style="font-weight:600">☕ My break</span>`;
@@ -9543,7 +9543,7 @@ async function loadBNConfirm(){
           if(_allowMyBreakOnBlocked){
             const stagedAdd = _prodLogStaged.get(`add_break:${slot}`);
             if(stagedAdd){
-              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">✕ Deselect</button>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">↺ Undo</button>`;
               extraStyle = 'background:#eef0f2;border-left:4px solid var(--teal);';
             } else {
               actionHtml = `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')">+ My Break</button>`;
@@ -9596,7 +9596,7 @@ async function loadBNConfirm(){
             extraStyle = 'border-left:4px solid var(--teal)';
             centerHtml = `<span style="color:var(--teal-dk);font-weight:600">✓ Pending: ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
-            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">✕ Deselect</button>`;
+            actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">↺ Undo</button>`;
           } else if(_prodLogExpanded.has(slot)){
             // Expanded inline-claim form with Copy last + Apply to more
             const savedInputs = _prodLogInputs.get(slot) || { name: '', ext: '' };
@@ -9637,7 +9637,7 @@ async function loadBNConfirm(){
               rowClass = '';
               centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ☕ My break</span>
                 <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
-              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">✕ Deselect</button>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">↺ Undo</button>`;
             } else {
               rowClass = '';
               centerHtml = `<span style="color:var(--muted);font-size:.82rem">— Unclaimed ${unitLabel} —</span>`;
