@@ -8415,6 +8415,7 @@ async function loadBNView(){
           `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}'`);
         const future = upcoming
           .filter(s => s.Status !== 'inactive' &&
+            !shiftIsOver(s.ShiftDate, s.ShiftType) &&
             (s.ShiftDate.slice(0,10) > BNS.date || (s.ShiftDate.slice(0,10) === BNS.date && s.ShiftType !== BNS.shift)))
           .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
         if(future.length){
