@@ -1549,6 +1549,35 @@ const syncedLS = {
     await Promise.all(missing.map(k => syncedLS.warm(k)));
   },
 
+  // Force-refresh a single key from BNState, ignoring local cache. Returns
+  // true if the cached value actually changed. Use this when you need
+  // up-to-date cross-device truth — e.g. polling or just-before-action.
+  async refresh(key){
+    try {
+      const remote = await getState(key);
+      const before = localStorage.getItem(key);
+      if(remote == null){
+        // Missing in BNState (deleted on another device). Clear local too.
+        if(before != null){ localStorage.removeItem(key); return true; }
+        return false;
+      }
+      const next = JSON.stringify(remote);
+      if(before === next) return false;
+      localStorage.setItem(key, next);
+      return true;
+    } catch { return false; }
+  },
+
+  // Batch-refresh many keys in parallel. Returns the array of keys that
+  // changed. Used by polling to detect cross-device updates without spamming
+  // round trips when nothing's changed.
+  async refreshMany(keys){
+    const valid = keys.filter(Boolean);
+    if(!valid.length) return [];
+    const results = await Promise.all(valid.map(k => syncedLS.refresh(k).then(ch => [k, ch])));
+    return results.filter(([, ch]) => ch).map(([k]) => k);
+  },
+
   async set(key, value){
     localStorage.setItem(key, JSON.stringify(value));
     // Mirror to BNState. setState handles its own write lock + localStorage
@@ -4582,6 +4611,11 @@ async function silentRefreshSlots(){
 
     const allBNNames = [...new Set(covering.map(c => c.BreakNurseName))];
 
+    // Watched: bnStart for every covering BN. Their cross-device updates
+    // affect which slots are claimable for staff.
+    const watchedKeys = allBNNames.map(n => `bnStart_${n}_${dt}_${shift}`);
+    await syncedLS.refreshMany(watchedKeys);
+
     // Build a lightweight state fingerprint from current bookings
     const bMap = {};
     bookings.forEach(b => { if(isStaffBooking(b)) bMap[b.SlotTime] = b.NurseName; });
@@ -4616,7 +4650,9 @@ async function silentRefreshSlots(){
       if(myTimes.includes(s)) return `${s}:mine`;
       if(bMap[s]) return `${s}:taken`;
       return `${s}:open`;
-    }).join('|');
+    }).join('|') +
+    // Append watched bnStart values so cross-device updates wake the renderer.
+    '||' + watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|');
 
     // Only trigger full re-render if state changed
     if(list.dataset.fingerprint !== fingerprint){
@@ -9505,9 +9541,21 @@ async function silentRefreshProdLog(){
     // any booking field, so fingerprint stays the same and Prod Log doesn't
     // refresh until something else triggers it — caused multi-minute lag.
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const [bookingsRaw, scheds] = await Promise.all([
-      spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`),
-      spGet(LISTS.schedule, schedFilter)
+    // Watched cross-device keys: BN's normal-break templates (both shifts —
+    // grid is toggleable) and current shift's start time. Other devices may
+    // have updated these; fold them into the fingerprint so changes trigger
+    // a re-render and the relevant UI auto-refreshes.
+    const watchedKeys = [
+      `bnDefault_${BNS.name}_Day`,
+      `bnDefault_${BNS.name}_Noc`,
+      `bnStart_${BNS.name}_${dt}_${shift}`
+    ];
+    const [[bookingsRaw, scheds], stateChanged] = await Promise.all([
+      Promise.all([
+        spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`),
+        spGet(LISTS.schedule, schedFilter)
+      ]),
+      syncedLS.refreshMany(watchedKeys)
     ]);
     // Reconcile against any in-flight mutations so the fingerprint we
     // compute matches what loadBNConfirm will actually render. Without this,
@@ -9518,11 +9566,13 @@ async function silentRefreshProdLog(){
     const bookings = reconcileBookings(bookingsRaw);
 
     // Build fingerprint from booking fields + this BN's schedule status/units
+    // + watched BNState values (so cross-device changes wake the renderer).
     const bookFp = bookings.map(b =>
       `${b.Id}:${normSlot(b.SlotTime)}:${b.Unit}:${b.BreakStatus||''}:${b.IsCompleted||''}:${b.IsBNBreak||''}`
     ).sort().join('|');
     const schedFp = scheds.map(s => `${s.Id}:${s.Status||''}:${s.Units||''}`).sort().join('|');
-    const fp = bookFp + '||' + schedFp;
+    const stateFp = watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|');
+    const fp = bookFp + '||' + schedFp + '||' + stateFp;
 
     // Handle conflicts first — this may remove queue entries and show toasts,
     // which should happen regardless of whether the fingerprint changed.
@@ -9533,6 +9583,16 @@ async function silentRefreshProdLog(){
     if(fp !== _prodLogLastFingerprint || conflictsResolved > 0){
       _prodLogLastFingerprint = fp;
       loadBNConfirm();
+      // If a watched bnDefault_* changed, repaint the normal-breaks grid too
+      // — it lives outside the Prod Log proper and isn't refreshed by loadBNConfirm.
+      if(stateChanged.some(k => k.startsWith('bnDefault_'))){
+        loadDefaultGrid(BNS.defaultShift || BNS.shift);
+        updateApplyAllBtn();
+      }
+      // If bnStart changed, the dropdown selection should re-sync.
+      if(stateChanged.some(k => k.startsWith('bnStart_')) && typeof restoreBNStartTimeUI === 'function'){
+        restoreBNStartTimeUI();
+      }
     }
   } catch(e){
     // Silent failure — next poll will retry
@@ -9556,9 +9616,16 @@ async function silentRefreshCoverage(){
       `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const scheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    // Watched: every covering BN's bnStart for this shift. Cross-device
+    // changes here affect which slots staff see as claimable.
+    const watchedKeys = scheds
+      .filter(s => s.Status !== 'inactive')
+      .map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`);
+    await syncedLS.refreshMany(watchedKeys);
     const fp = [
       ...bookings.map(b => `${b.Id}:${b.Unit}:${normSlot(b.SlotTime)}:${b.BreakStatus||''}:${b.IsCompleted||''}`),
-      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}`)
+      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}`),
+      ...watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`)
     ].sort().join('|');
     if(fp !== _coverageLastFingerprint){
       _coverageLastFingerprint = fp;
