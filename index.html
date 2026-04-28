@@ -1473,20 +1473,22 @@ async function setState(key, value){
   let _resolve;
   _stateWriteLock[key] = new Promise(r => _resolve = r);
   try {
-    const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
     const val = JSON.stringify(value);
-    if(items.length){
-      await spPatch(LISTS.state, items[0].Id, { Value: val, UpdatedAt: new Date().toISOString() });
-      // Delete any extra rows (can accumulate from concurrent writes)
-      for(let i = 1; i < items.length; i++) spDel(LISTS.state, items[i].Id).catch(()=>{});
-    } else {
-      await spPost(LISTS.state, { Title: key, Key: key, Value: val, UpdatedAt: new Date().toISOString() });
-    }
-    // Keep localStorage in sync as cache
+    let remoteErr = null;
+    try {
+      const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+      if(items.length){
+        await spPatch(LISTS.state, items[0].Id, { Value: val, UpdatedAt: new Date().toISOString() });
+        // Delete any extra rows (can accumulate from concurrent writes)
+        for(let i = 1; i < items.length; i++) spDel(LISTS.state, items[i].Id).catch(()=>{});
+      } else {
+        await spPost(LISTS.state, { Title: key, Key: key, Value: val, UpdatedAt: new Date().toISOString() });
+      }
+    } catch(e){ remoteErr = e; }
+    // Always update LS — covers offline use and read-back consistency on
+    // this device. Throw if remote failed so the caller can surface it.
     localStorage.setItem(key, val);
-  } catch(e){
-    // Fall back to localStorage only
-    localStorage.setItem(key, JSON.stringify(value));
+    if(remoteErr) throw remoteErr;
   } finally {
     _resolve();
     delete _stateWriteLock[key];
@@ -1494,10 +1496,21 @@ async function setState(key, value){
 }
 
 async function deleteState(key){
-  try {
-    const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
-    for(const item of items) await spDel(LISTS.state, item.Id);
-  } catch(e){ /* non-critical */ }
+  // Delete BNState row first; LS is only cleared on success so a failed
+  // network call doesn't desync this device from the server (which would
+  // cause the value to look "deleted" locally but still be present on
+  // BNState — invisible to other devices' polls). Throws on failure so the
+  // caller can decide whether to retry or surface to the user.
+  const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+  if(items.length){
+    // Parallel delete — one failure doesn't block the rest. If any fail,
+    // throw so the caller sees the partial state.
+    const results = await Promise.allSettled(items.map(it => spDel(LISTS.state, it.Id)));
+    const failed = results.filter(r => r.status === 'rejected');
+    if(failed.length){
+      throw new Error(`deleteState(${key}): ${failed.length}/${items.length} row deletes failed: ${failed[0].reason?.message || failed[0].reason}`);
+    }
+  }
   localStorage.removeItem(key);
 }
 
@@ -1588,12 +1601,31 @@ const syncedLS = {
     // Mirror to BNState. setState handles its own write lock + localStorage
     // sync, but we wrote localStorage above so the local cache is correct
     // even before the network call completes.
-    try { await setState(key, value); } catch{}
+    try {
+      await setState(key, value);
+      return true;
+    } catch(e){
+      console.warn(`[syncedLS.set] ${key}: ${e.message}`);
+      try { toast('Network error — change not saved to server. Other devices may not see this update.', true); } catch{}
+      throw e;
+    }
   },
 
   async delete(key){
-    localStorage.removeItem(key);
-    try { await deleteState(key); } catch{}
+    // Try BNState first; only clear LS on success so a network failure
+    // doesn't make this device falsely think the value is gone (which
+    // would also block any retry from working — the next call would think
+    // there's nothing to delete locally and exit clean).
+    try {
+      await deleteState(key);
+      return true;
+    } catch(e){
+      console.warn(`[syncedLS.delete] ${key}: ${e.message}`);
+      // Surface to user — silent failures here cause the cross-device drift
+      // bug we just hit (phone "cleared" locally but BNState still had the row).
+      try { toast('Network error — change not saved. Please try again.', true); } catch{}
+      throw e;
+    }
   },
 };
 
@@ -3489,14 +3521,21 @@ async function saveAndApplyDefault(btn){
   await applyDefaultToAll();
 }
 
-function clearDefaultTemplate(){
+async function clearDefaultTemplate(){
   const name = BNS.name;
   const shift = BNS.defaultShift || 'Day';
   if(!name) return;
-  syncedLS.delete(`bnDefault_${name}_${shift}`).catch(()=>{});
-  loadDefaultGrid(shift);
-  updateApplyAllBtn();
-  toast('Default break schedule cleared');
+  try {
+    // Block on confirmed BNState delete — if this fails, syncedLS.delete
+    // shows its own error toast and the visual state stays unchanged
+    // (avoids the user thinking they cleared when the change wasn't saved).
+    await syncedLS.delete(`bnDefault_${name}_${shift}`);
+    loadDefaultGrid(shift);
+    updateApplyAllBtn();
+    toast('Default break schedule cleared');
+  } catch(e){
+    // syncedLS.delete already surfaced the error to the user
+  }
 }
 
 function updateApplyAllBtn(){
@@ -5324,8 +5363,11 @@ async function manageSlotAction(action){
         ts: Date.now()
       });
       localStorage.setItem(key, JSON.stringify(notifications));
-      // Also persist to BNState for cross-device
-      setState(key, notifications);
+      // Also persist to BNState for cross-device. Fire-and-forget — failure
+      // here means the notification won't propagate to other devices, but
+      // the local action already succeeded. setState now surfaces its own
+      // toast on failure, which is enough user feedback.
+      setState(key, notifications).catch(()=>{});
       closeManageModal();
       toast(`✓ ${fmt12(slotTime)} transferred to ${toTitleCase(newName)}`);
       loadSlots();
@@ -5352,7 +5394,7 @@ async function manageSlotAction(action){
         ts: Date.now()
       });
       localStorage.setItem(key, JSON.stringify(notifications));
-      setState(key, notifications);
+      setState(key, notifications).catch(()=>{});
       await spDel(LISTS.bookings, bookingId);
       closeManageModal();
       toast(`✓ ${fmt12(slotTime)} break given up — now open for others.`);
@@ -7254,7 +7296,7 @@ function changePw(){
   if(!p1||p1!==p2){
     msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
   }
-  setState('portalPw_admin', p1);
+  setState('portalPw_admin', p1).catch(()=>{});
   document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
   msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Password updated ✓';
   setTimeout(()=>msg.style.display='none',3000);
@@ -7276,7 +7318,7 @@ function changeBNPw(){
   if(!p1||p1!==p2){
     msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
   }
-  setState('portalPw_bn', p1);
+  setState('portalPw_bn', p1).catch(()=>{});
   document.getElementById('bnpw1').value=''; document.getElementById('bnpw2').value='';
   msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Break nurse password updated ✓';
   setTimeout(()=>msg.style.display='none',3000);
