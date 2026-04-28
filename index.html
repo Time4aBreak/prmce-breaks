@@ -2353,13 +2353,15 @@ async function commit3CChange(){
             if(!migrated.includes('4C')) migrated.push('4C');
             await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(migrated) });
           }
-          // Recompute rotation — 3C will be excluded naturally because is3COpen
-          // returns false for this shift after the schedule entry is saved.
+          // Recompute rotation in background — 3C will be excluded naturally
+          // because is3COpen returns false after the schedule entry is saved.
+          // Non-awaited: the render path's fallback rotation already reflects
+          // the new state from current scheds, so cache update is best-effort.
           const bnDef = getDefaultTemplate(i.bn, i.shift);
           if(bnDef && bnDef.length > 0){
-            await applyDefaultToShift(i.bn, i.date, i.shift, bnDef).catch(()=>{});
+            applyDefaultToShift(i.bn, i.date, i.shift, bnDef).catch(()=>{});
           } else {
-            await recalculateRotation(i.bn, i.date, i.shift).catch(()=>{});
+            recalculateRotation(i.bn, i.date, i.shift).catch(()=>{});
           }
         }));
       }
@@ -2375,11 +2377,13 @@ async function commit3CChange(){
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
       toast(`3C closing ${when} · ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''} cancelled · please notify nurses`);
     } else {
-      // Opening — recompute rotations for any active assignment with 3C in units
-      // so 3C slots appear in their rotation immediately.
-      showBusy('Updating rotations…');
-      await recompute3CAffectedRotations();
-      hideBusy();
+      // Opening — recompute rotations in background so 3C slots appear in
+      // affected BNs' rotation. Don't await: the current viewer's Prod Log
+      // render computes a fallback rotation inline from current scheds (line
+      // ~9572), so the new 3C slot appears immediately on next render. The
+      // background recompute updates localStorage + BNState so cached
+      // rotations stay correct for subsequent renders and other devices.
+      recompute3CAffectedRotations().catch(()=>{});
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
       toast(`3C opening ${when}`);
     }
@@ -6661,23 +6665,14 @@ function notifyProdLogChanged(affectedBnName){
 
 // Fire when 3C global status flips. Different from notifyProdLogChanged
 // because the affected BN set is "everyone covering 3C or C_PAIR", not a
-// single named BN. We resolve which (if any) of those is the current viewer
-// and re-render immediately so the unit appears/disappears from their
-// rotation without waiting for the 10s polling cycle.
-async function notifyProdLog3CFlipped(){
+// single named BN. We always re-render the current viewer's Prod Log if
+// they're signed in — loadBNConfirm fetches fresh scheds, and the inline
+// fallback rotation reflects the new 3C state immediately. One round trip
+// instead of two; viewers without 3C in their units see a no-op render.
+function notifyProdLog3CFlipped(){
   _prodLogLastFingerprint = null;
-  if(!BNS || !BNS.name || !BNS.date || !BNS.shift) return;
-  if(typeof loadBNConfirm !== 'function') return;
-  try {
-    const scheds = await spGet(LISTS.schedule,
-      `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}'`);
-    const has3C = scheds.some(s => {
-      if(s.Status === 'inactive') return false;
-      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-      return units.includes('3C') || units.includes('C_PAIR');
-    });
-    if(has3C) loadBNConfirm();
-  } catch(e){ /* fall back to polling — silent */ }
+  if(!BNS || !BNS.name) return;
+  if(typeof loadBNConfirm === 'function') loadBNConfirm();
 }
 
 async function loadAssignments(){
