@@ -9625,6 +9625,19 @@ async function silentRefreshProdLog(){
     // which should happen regardless of whether the fingerprint changed.
     const conflictsResolved = handleQueueConflicts(bookings);
 
+    // [DIAG] Always log poll outcome so we can trace why phone doesn't see
+    // delete from laptop. Remove after issue is confirmed resolved.
+    const fpChanged = fp !== _prodLogLastFingerprint;
+    if(fpChanged || stateChanged.length > 0 || conflictsResolved > 0){
+      try {
+        const parts = [];
+        if(stateChanged.length) parts.push(`state:${stateChanged.map(k=>k.split('_').slice(0,2).join('_')).join(',')}`);
+        if(fpChanged) parts.push('fp');
+        if(conflictsResolved) parts.push(`conflicts:${conflictsResolved}`);
+        toast(`🔄 ${parts.join(' ')}`);
+      } catch{}
+    }
+
     // Re-render only if fingerprint changed OR conflicts were resolved (which
     // modified the queue and needs a fresh render to reflect removed states).
     if(fp !== _prodLogLastFingerprint || conflictsResolved > 0){
