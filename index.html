@@ -3340,6 +3340,32 @@ async function warmDefaultTemplate(name, shift){
   } catch(e){}
 }
 
+// Warm a BN's custom shift-start time from BNState if not cached.
+// bnStart_${name}_${date}_${shift} controls when staff slots become claimable
+// for a given BN's shift (e.g. Tinsley arriving at 9 AM hides 0815/0835 from
+// staff). Critical to keep cross-device-consistent — a stale start time on
+// Device B could let a staff slot be claimed that Tinsley can't actually cover.
+async function warmBNStartTime(name, date, shift){
+  if(!name || !date || !shift) return;
+  const key = `bnStart_${name}_${date}_${shift}`;
+  if(localStorage.getItem(key)) return;
+  try {
+    const remote = await getState(key);
+    if(remote) localStorage.setItem(key, typeof remote === 'string' ? remote : JSON.stringify(remote));
+  } catch(e){}
+}
+
+// Batch-warm bnStart for many BN/date/shift combos in parallel. Used by
+// loadSlots so each unit's covering BNs all hydrate at once instead of
+// serializing N getState calls.
+async function warmBNStartTimes(triples){
+  const missing = triples.filter(({name, date, shift}) => {
+    return name && date && shift && !localStorage.getItem(`bnStart_${name}_${date}_${shift}`);
+  });
+  if(!missing.length) return;
+  await Promise.all(missing.map(({name, date, shift}) => warmBNStartTime(name, date, shift)));
+}
+
 // Warm all BN defaults from BNState for a list of {name, shift} pairs
 // Used by coordinator bulk operations to ensure BN defaults are available
 async function warmAllBNDefaults(pairs){
@@ -3652,6 +3678,9 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
 
 async function resetShiftToDefault(){
   const name = BNS.name, dt = BNS.date || today(), shift = BNS.shift;
+  // Warm from BNState in case the template was set on another device and
+  // hasn't propagated to this device's localStorage yet. No-op if already cached.
+  await warmDefaultTemplate(name, shift);
   const def = getDefaultTemplate(name, shift);
   if(!def || !def.length){
     toast('No default schedule set for ' + shift + ' shift', true); return;
@@ -3665,6 +3694,11 @@ async function resetShiftToDefault(){
 async function resetAllToDefault(){
   const name = BNS.name;
   if(!name) return;
+  // Warm both shifts from BNState in case templates were set on another device.
+  await Promise.all([
+    warmDefaultTemplate(name, 'Day'),
+    warmDefaultTemplate(name, 'Noc')
+  ]);
   const dayDef = getDefaultTemplate(name, 'Day') || [];
   const nocDef = getDefaultTemplate(name, 'Noc') || [];
   if(!dayDef.length && !nocDef.length){
@@ -4253,6 +4287,16 @@ async function loadSlots(silent=false){
 
     // Filter slots: must be future, not hard-blocked, and if rotation exists, must be this unit's turn
     // Also respect each covering BN's start time — hide slots before they arrive
+    // Warm bnStart from BNState first so other-device-set start times aren't
+    // missed. Critical for patient safety: a stale start time could let staff
+    // claim a slot before the BN arrives.
+    await warmBNStartTimes(
+      [...covering, ...oppCovering].map(c => ({
+        name: c.BreakNurseName,
+        date: c.ShiftDate.slice(0, 10),
+        shift: c.ShiftType
+      }))
+    );
     const bnStartMins = {};
     [...covering, ...oppCovering].forEach(c => {
       const key = `bnStart_${c.BreakNurseName}_${c.ShiftDate || dt}_${c.ShiftType}`;
@@ -5511,14 +5555,26 @@ function populateBNStartTimeSlots(){
 
 function onBNStartTimeChange(){
   const val = document.getElementById('bnStartTime').value;
-  if(val) localStorage.setItem(getBNStartKey(), val);
-  else localStorage.removeItem(getBNStartKey());
+  const key = getBNStartKey();
+  if(val){
+    localStorage.setItem(key, val);
+    // Mirror to BNState so other devices see the same start time. Critical
+    // for staff Sign Up: an out-of-sync start time could let staff claim
+    // slots before this BN arrives. Fire-and-forget — local cache is the
+    // immediate source of truth for this device.
+    setState(key, val).catch(()=>{});
+  } else {
+    localStorage.removeItem(key);
+    deleteState(key).catch(()=>{});
+  }
   const _sy1 = window.scrollY;
   loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
   toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
 }
 function clearBNStartTime(){
-  localStorage.removeItem(getBNStartKey());
+  const key = getBNStartKey();
+  localStorage.removeItem(key);
+  deleteState(key).catch(()=>{});
   const el = document.getElementById('bnStartTime');
   if(el) el.value = '';
   const _sy2 = window.scrollY;
@@ -8483,6 +8539,24 @@ async function loadBNView(){
   // Show default schedule section
   const defWrap = document.getElementById('bnDefaultWrap');
   if(defWrap) defWrap.style.display = 'block';
+  // Warm template cache from BNState in case Tinsley set her normals on
+  // another device. Without this, getDefaultTemplate returns null on a
+  // fresh device until something else populates localStorage. Both shifts
+  // warm in parallel since the grid can be toggled between them.
+  // Also warm bnStart for the current shift so the shift-start dropdown
+  // and staff Sign Up reflect what's actually configured cross-device.
+  Promise.all([
+    warmDefaultTemplate(BNS.name, 'Day'),
+    warmDefaultTemplate(BNS.name, 'Noc'),
+    warmBNStartTime(BNS.name, BNS.date, BNS.shift)
+  ]).finally(() => {
+    // Re-paint the grid with whatever we now have. If localStorage was
+    // already populated, this is a harmless re-render with the same data.
+    loadDefaultGrid(BNS.defaultShift || BNS.shift);
+    updateApplyAllBtn();
+    // Also re-sync the start-time dropdown in case bnStart warmed in.
+    if(typeof restoreBNStartTimeUI === 'function') restoreBNStartTimeUI();
+  });
   loadDefaultGrid(BNS.shift);
   updateApplyAllBtn();
 
@@ -9614,6 +9688,9 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         const val = JSON.parse(notifyState[0].Value || '[]');
         notifications = Array.isArray(val) ? val : [];
       } else {
+        // notifyState empty (no BNState row yet) — try localStorage as a
+        // fallback in case the user dismissed locally before BNState propagated.
+        const notifyKey = `slotNotify_${dt}_${shift}`;
         const lsVal = localStorage.getItem(notifyKey);
         if(lsVal) notifications = JSON.parse(lsVal);
       }
