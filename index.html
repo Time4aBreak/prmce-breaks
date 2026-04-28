@@ -9181,9 +9181,12 @@ function handleQueueConflicts(freshBookings){
       }
       // For add_break: also drop if the BN-break already exists for this slot
       // (e.g. another device added it). Avoids creating a duplicate.
+      // Filter to current shift's SlotDate — freshBookings is widened by 1
+      // day for Noc, so without the SlotDate check, a next-shift BN-break
+      // at the same SlotTime would falsely flag the staged action as a duplicate.
       if(action === 'add_break'){
         const already = freshBookings.some(b =>
-          isBNBreak(b) && b.NurseName === BNS.name && normSlot(b.SlotTime) === normSlot(slot)
+          isBNBreak(b) && b.NurseName === BNS.name && (b.SlotDate || '').slice(0,10) === BNS.date && normSlot(b.SlotTime) === normSlot(slot)
         );
         if(already){
           toasts.push(`Your break at ${fmt12(slot)} was already added`);
@@ -9522,11 +9525,17 @@ async function loadBNConfirm(){
 
       // BN's own breaks (from allBookings) — use isBNBreak helper since
       // Sheets returns the field as string "0"/"1" not number.
+      // Filter to current shift's SlotDate: allBookings is widened by 1 day
+      // for Noc to catch overlap-window staff bookings on D+1 morning, but
+      // BN-break records belong to a specific shift's start date. Without
+      // the SlotDate check, the next Noc shift's pre-midnight breaks
+      // (SlotDate=D+1) would ghost onto the current shift's slot grid
+      // because SlotTime collides (e.g. 2235 exists on both nights).
       // Keep both a Set (for fast existence checks) and a slot→record map
       // (so the render can grab Id for stageRemoveBreak).
       const ownBreakBySlot = {};
       allBookings.forEach(b => {
-        if(isBNBreak(b) && b.NurseName === BNS.name){
+        if(isBNBreak(b) && b.NurseName === BNS.name && (b.SlotDate || '').slice(0,10) === dt){
           ownBreakBySlot[normSlot(b.SlotTime)] = b;
         }
       });
