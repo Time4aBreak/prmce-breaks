@@ -8582,12 +8582,15 @@ async function clearBNBreaks(){
   if(!await customConfirm('Remove all your break slots for this shift?','Remove All','Cancel')) return;
   const dt = BNS.date || today(), shift = BNS.shift;
   try {
-    const breaks = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(BNS.name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+    // Single query for all shift bookings — split client-side into BN breaks
+    // (this BN's IsBNBreak rows) and the rest (used for the warning check).
+    // Saves one round trip vs. fetching breaks and allB separately.
+    const allB = await spGet(LISTS.bookings,
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const breaks = allB.filter(b => isBNBreak(b) && b.NurseName === BNS.name);
 
-    // Warn if any confirmed/not-taken staff bookings exist
+    // Warn if any confirmed/not-taken staff bookings exist on those slots
     const slotTimes = [...new Set(breaks.map(b => b.SlotTime))];
-    const allB = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const actioned = allB.filter(b =>
       isStaffBooking(b) && slotTimes.includes(b.SlotTime) && !isPending(b)
     );
@@ -8610,13 +8613,37 @@ async function clearBNBreaks(){
     // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
     // so existing staff bookings keep their BN attribution.
 
-    // Collect all stored cancelled bookings across all cleared slots
+    // Collect all stored cancelled bookings across all cleared slots.
+    // Batch the BNState lookup into a single OR-query to avoid N round trips
+    // on shifts with many cleared slots — and batch the cleanup deletes too.
     const slotTimes2 = [...new Set(breaks.map(b => b.SlotTime))];
     let allCancelled = [];
-    for(const st of slotTimes2){
-      const key = `bnBreakCancelled_${dt}_${st}`;
-      try { const d = await getState(key); if(d) allCancelled = allCancelled.concat(d); } catch{}
-      deleteState(key).catch(()=>{});
+    if(slotTimes2.length){
+      const keys = slotTimes2.map(st => `bnBreakCancelled_${dt}_${st}`);
+      const orFilter = '(' + keys.map(k => `Key eq '${esc(k)}'`).join(' or ') + ')';
+      try {
+        const items = await spGet(LISTS.state, orFilter);
+        for(const it of items){
+          try {
+            const v = JSON.parse(it.Value || 'null');
+            if(v) allCancelled = allCancelled.concat(v);
+          } catch{}
+        }
+        // Best-effort cleanup. Single batchDelete instead of N sequential
+        // deleteState calls (each of which would itself be spGet + spDel).
+        if(items.length){
+          gasCallPost({ action:'batchDelete', sheet:LISTS.state,
+            ids: encodeURIComponent(JSON.stringify(items.map(i => i.Id))) }).catch(()=>{});
+        }
+        // Sync localStorage
+        keys.forEach(k => localStorage.removeItem(k));
+      } catch{
+        // Fallback to localStorage if backend lookup failed
+        for(const k of keys){
+          try { const v = JSON.parse(localStorage.getItem(k) || 'null'); if(v) allCancelled = allCancelled.concat(v); } catch{}
+          localStorage.removeItem(k);
+        }
+      }
     }
 
     if(allCancelled.length){
