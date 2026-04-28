@@ -1501,6 +1501,68 @@ async function deleteState(key){
   localStorage.removeItem(key);
 }
 
+// ═══════════════════════════════════════════════════════
+// SYNCED LOCAL STORAGE — cross-device key/value abstraction
+// ═══════════════════════════════════════════════════════
+// Single pattern for any value that should be consistent across devices:
+// localStorage as fast cache, BNState as backing store.
+//
+// Contract:
+//   syncedLS.get(key)           → cached value, or null
+//   syncedLS.warm(key)          → ensures local cache populated from BNState
+//   syncedLS.set(key, value)    → updates cache + mirrors to BNState
+//   syncedLS.delete(key)        → clears cache + BNState
+//   syncedLS.warmMany([keys])   → parallel warm of N keys (one round trip each)
+//
+// Values are JSON-encoded internally. Strings, arrays, objects, numbers all
+// round-trip cleanly. Legacy raw-string entries (pre-syncedLS writes that
+// stored "0900" or "closed" as plain strings rather than JSON-encoded) are
+// tolerated by the get path — JSON.parse fallback returns the raw string.
+// All NEW writes go through syncedLS.set so they're uniformly JSON.
+//
+// Use this for any cross-device key. Direct localStorage access is reserved
+// for: per-device preferences, transient UI state, sim-mode test data, and
+// caches whose source-of-truth lives in another sheet (e.g. BNSchedule.Ext).
+
+const syncedLS = {
+  get(key){
+    const raw = localStorage.getItem(key);
+    if(raw == null) return null;
+    try { return JSON.parse(raw); }
+    catch { return raw; } // legacy raw-string entry — return as-is
+  },
+
+  async warm(key){
+    if(localStorage.getItem(key) != null) return;
+    try {
+      const remote = await getState(key);
+      if(remote != null){
+        // getState already JSON.parses, so re-stringify before storing.
+        localStorage.setItem(key, JSON.stringify(remote));
+      }
+    } catch{}
+  },
+
+  async warmMany(keys){
+    const missing = keys.filter(k => k && localStorage.getItem(k) == null);
+    if(!missing.length) return;
+    await Promise.all(missing.map(k => syncedLS.warm(k)));
+  },
+
+  async set(key, value){
+    localStorage.setItem(key, JSON.stringify(value));
+    // Mirror to BNState. setState handles its own write lock + localStorage
+    // sync, but we wrote localStorage above so the local cache is correct
+    // even before the network call completes.
+    try { await setState(key, value); } catch{}
+  },
+
+  async delete(key){
+    localStorage.removeItem(key);
+    try { await deleteState(key); } catch{}
+  },
+};
+
 // ── Sim mode indicator ────────────────────────────────
 function showSimBanner(){
   if (!SIM_MODE) return;
@@ -3326,18 +3388,14 @@ function setNameCardEnabled(enabled){
 // ═══════════════════════════════════════════════════════
 
 function getDefaultTemplate(name, shift){
-  const key = `bnDefault_${name}_${shift}`;
-  try { return JSON.parse(localStorage.getItem(key) || 'null'); } catch { return null; }
+  return syncedLS.get(`bnDefault_${name}_${shift}`);
 }
 
-// Warm default template from backend if not cached
+// Warm default template from backend if not cached.
+// Thin wrapper over syncedLS.warm — kept as a named function so call sites
+// stay readable and the key derivation lives in one place.
 async function warmDefaultTemplate(name, shift){
-  const key = `bnDefault_${name}_${shift}`;
-  if(localStorage.getItem(key)) return;
-  try {
-    const remote = await getState(key);
-    if(remote) localStorage.setItem(key, JSON.stringify(remote));
-  } catch(e){}
+  return syncedLS.warm(`bnDefault_${name}_${shift}`);
 }
 
 // Warm a BN's custom shift-start time from BNState if not cached.
@@ -3369,18 +3427,7 @@ async function warmBNStartTimes(triples){
 // Warm all BN defaults from BNState for a list of {name, shift} pairs
 // Used by coordinator bulk operations to ensure BN defaults are available
 async function warmAllBNDefaults(pairs){
-  const missing = pairs.filter(({name, shift}) => {
-    const key = `bnDefault_${name}_${shift}`;
-    return !localStorage.getItem(key);
-  });
-  if(!missing.length) return;
-  await Promise.all(missing.map(async ({name, shift}) => {
-    try {
-      const key = `bnDefault_${name}_${shift}`;
-      const remote = await getState(key);
-      if(remote) localStorage.setItem(key, JSON.stringify(remote));
-    } catch(e){}
-  }));
+  return syncedLS.warmMany(pairs.map(({name, shift}) => `bnDefault_${name}_${shift}`));
 }
 
 function saveDefaultTemplate(){
@@ -3389,9 +3436,7 @@ function saveDefaultTemplate(){
   if(!name){ toast('Select your name first', true); return; }
   const selected = [...document.querySelectorAll('.bn-default-slot.on')]
     .map(el => el.dataset.slot);
-  const key = `bnDefault_${name}_${shift}`;
-  localStorage.setItem(key, JSON.stringify(selected));
-  setState(key, selected).catch(()=>{});
+  syncedLS.set(`bnDefault_${name}_${shift}`, selected).catch(()=>{});
   updateApplyAllBtn();
 }
 
@@ -3414,9 +3459,7 @@ function clearDefaultTemplate(){
   const name = BNS.name;
   const shift = BNS.defaultShift || 'Day';
   if(!name) return;
-  const key = `bnDefault_${name}_${shift}`;
-  localStorage.removeItem(key);
-  deleteState(key).catch(()=>{});
+  syncedLS.delete(`bnDefault_${name}_${shift}`).catch(()=>{});
   loadDefaultGrid(shift);
   updateApplyAllBtn();
   toast('Default break schedule cleared');
