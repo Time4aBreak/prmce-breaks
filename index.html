@@ -2031,7 +2031,7 @@ async function _3CTick(){
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
     if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
     if(typeof loadAssignments === 'function') loadAssignments();
-    if(typeof notifyProdLogChanged === 'function') notifyProdLogChanged();
+    if(typeof notifyProdLog3CFlipped === 'function') notifyProdLog3CFlipped();
     // Recompute rotations for BNs with 3C in their units — so 3C slots appear
     // or disappear from rotation automatically at boundary crossings.
     recompute3CAffectedRotations().catch(()=>{});
@@ -2392,7 +2392,7 @@ async function commit3CChange(){
     setTimeout(show3CDefaultToggle, 500);
     setTimeout(show3CDefaultToggle, 2000);
     loadAssignments();
-    notifyProdLogChanged();
+    notifyProdLog3CFlipped();
     if(typeof loadSlots === 'function') loadSlots().catch(()=>{});
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
@@ -2954,6 +2954,11 @@ function showSubTab(name, btn){
     // sign in (loadBNView also calls startProdLogPolling after successful load).
     if(BNS && BNS.name){
       _prodLogLastFingerprint = null;
+      // Immediate refresh on tab activation — covers the case where state
+      // changed on another sub-tab (e.g. 3C status flipped, schedule edited)
+      // and the user switches to My Shift expecting current data. Without
+      // this, they wait up to POLL_INTERVAL_MS for the next poll cycle.
+      silentRefreshProdLog();
       startProdLogPolling();
     }
   }
@@ -6652,6 +6657,27 @@ function notifyProdLogChanged(affectedBnName){
   if(affectedBnName && BNS && BNS.name === affectedBnName){
     if(typeof loadBNConfirm === 'function') loadBNConfirm();
   }
+}
+
+// Fire when 3C global status flips. Different from notifyProdLogChanged
+// because the affected BN set is "everyone covering 3C or C_PAIR", not a
+// single named BN. We resolve which (if any) of those is the current viewer
+// and re-render immediately so the unit appears/disappears from their
+// rotation without waiting for the 10s polling cycle.
+async function notifyProdLog3CFlipped(){
+  _prodLogLastFingerprint = null;
+  if(!BNS || !BNS.name || !BNS.date || !BNS.shift) return;
+  if(typeof loadBNConfirm !== 'function') return;
+  try {
+    const scheds = await spGet(LISTS.schedule,
+      `BreakNurseName eq '${esc(BNS.name)}' and ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}'`);
+    const has3C = scheds.some(s => {
+      if(s.Status === 'inactive') return false;
+      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+      return units.includes('3C') || units.includes('C_PAIR');
+    });
+    if(has3C) loadBNConfirm();
+  } catch(e){ /* fall back to polling — silent */ }
 }
 
 async function loadAssignments(){
