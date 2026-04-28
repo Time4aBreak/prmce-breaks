@@ -1552,9 +1552,14 @@ const syncedLS = {
   // Force-refresh a single key from BNState, ignoring local cache. Returns
   // true if the cached value actually changed. Use this when you need
   // up-to-date cross-device truth — e.g. polling or just-before-action.
+  // IMPORTANT: queries BNState directly rather than via getState, because
+  // getState falls back to localStorage on miss — which would mask a remote
+  // delete (BNState empty + LS stale → getState returns stale value → refresh
+  // thinks "no change"). Querying spGet directly: empty result === remote miss.
   async refresh(key){
     try {
-      const remote = await getState(key);
+      const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+      const remote = items.length ? JSON.parse(items[0].Value || 'null') : null;
       const before = localStorage.getItem(key);
       if(remote == null){
         // Missing in BNState (deleted on another device). Clear local too.
