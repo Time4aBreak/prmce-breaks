@@ -8908,7 +8908,9 @@ function stageBreakAction(id, action, nurseName, slotTime, unit){
     _prodLogStaged.set(key, { action, nurseName, slotTime, unit });
   }
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  // Render from cache — no network round trip. Falls back to full reload
+  // if cache is empty (e.g. first call after page load).
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 // Stage adding a BN break on an unclaimed Prod Log slot. Keyed by
@@ -8922,7 +8924,7 @@ function stageAddBreak(slotTime, unit){
     _prodLogStaged.set(key, { action: 'add_break', slotTime, unit: unit || '' });
   }
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 // Stage removing an existing own BN-break from the Prod Log. Keyed by the
@@ -8937,7 +8939,7 @@ function stageRemoveBreak(bookingId, slotTime){
     _prodLogStaged.set(key, { action: 'remove_break', slotTime, bookingId: key });
   }
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 // ── Unclaimed row expand/collapse ─────────────────────────
@@ -8956,13 +8958,21 @@ function toggleUnclaimedExpand(slotTime){
   } else {
     _prodLogExpanded.add(slotTime);
   }
-  loadBNConfirm().then(() => {
+  // Re-render from cache for instant response. Focus the name input
+  // after the row expands. Falls back to full reload if cache is empty.
+  if(_renderBNConfirm()){
     if(_prodLogExpanded.has(slotTime)){
-      // Focus the name input after expand
       const nameInput = document.getElementById(`claimName_${slotTime}`);
       nameInput?.focus();
     }
-  });
+  } else {
+    loadBNConfirm().then(() => {
+      if(_prodLogExpanded.has(slotTime)){
+        const nameInput = document.getElementById(`claimName_${slotTime}`);
+        nameInput?.focus();
+      }
+    });
+  }
 }
 
 // Snapshot current input values from DOM into _prodLogInputs so they survive
@@ -9091,7 +9101,7 @@ function stageClaimFromInputs(slotTime, unit){
   });
 
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 // Unstage a walk-up claim (restore the collapsed unclaimed state).
@@ -9099,14 +9109,14 @@ function unstageClaim(slotTime){
   const key = `unclaimed:${slotTime}`;
   _prodLogStaged.delete(key);
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 function clearStagedActions(){
   if(_prodLogStaged.size === 0) return;
   _prodLogStaged.clear();
   _prodLogUpdateHeader();
-  loadBNConfirm();
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 async function submitStagedActions(){
@@ -9125,7 +9135,12 @@ async function submitStagedActions(){
       } else if(info.action === 'not_taken'){
         await spPatch(LISTS.bookings, id, { BreakStatus: 'not_taken', IsCompleted: 0 });
       } else if(info.action === 'cancelled'){
-        await spDel(LISTS.bookings, id);
+        try {
+          await spDel(LISTS.bookings, id);
+        } catch(e){
+          // Already gone is the desired end state — don't surface as failure
+          if(!/not found|404/i.test(e.message || '')) throw e;
+        }
         trackDelete(id);
       } else if(info.action === 'claim'){
         // Walk-up claim: create a new booking record, already confirmed.
@@ -9186,7 +9201,12 @@ async function submitStagedActions(){
         trackCreate(created);
       } else if(info.action === 'remove_break'){
         // Mid-shift BN-break removal. Just delete the booking by Id.
-        await spDel(LISTS.bookings, info.bookingId);
+        try {
+          await spDel(LISTS.bookings, info.bookingId);
+        } catch(e){
+          // Already gone is the desired end state — don't surface as failure
+          if(!/not found|404/i.test(e.message || '')) throw e;
+        }
         trackDelete(info.bookingId);
       }
       _prodLogStaged.delete(id);
@@ -9327,6 +9347,10 @@ function handleQueueConflicts(freshBookings){
   });
 
   toRemove.forEach(k => _prodLogStaged.delete(k));
+  // Refresh the submit bar / queued count — without this, pruned entries
+  // (e.g. a remove_break whose booking was already deleted elsewhere)
+  // leave a stale "1 remove" label even though the Map no longer contains them.
+  if(toRemove.length) _prodLogUpdateHeader();
   // Fire each toast sequentially. Toast component replaces the previous one,
   // so show at most one composite toast if multiple conflicts occurred.
   if(toasts.length === 1){
@@ -9428,6 +9452,35 @@ async function silentRefreshCoverage(){
   }
 }
 
+// Cached payload from the most recent loadBNConfirm fetch. _renderBNConfirm
+// reads from this so stage handlers (Undo/Taken/Cancel/+ My Break/etc.) can
+// re-render instantly without an awaited round trip — fixing the race where
+// rapid taps could land on a button being innerHTML-replaced mid-tap.
+let _bnConfirmCache = null;
+
+// Render-only path. Reads _bnConfirmCache + current _prodLogStaged.
+// Returns true if a render happened, false if cache empty/stale or wrap missing.
+function _renderBNConfirm(){
+  if(!_bnConfirmCache) return false;
+  const wrap = document.getElementById('bnConfirmWrap');
+  const list = document.getElementById('bnConfirmList');
+  if(!wrap || !list || !BNS.name) return false;
+  const { scheds, allBookings, notifyState, dt, shift, nextDt } = _bnConfirmCache;
+  // Invalidate if BN changed date/shift since the cache was populated.
+  // Forces caller to fall back to a full loadBNConfirm.
+  if(dt !== (BNS.date || today()) || shift !== BNS.shift){
+    _bnConfirmCache = null;
+    return false;
+  }
+  try {
+    _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt);
+    return true;
+  } catch(e){
+    console.warn('[renderBNConfirm] failed:', e);
+    return false;
+  }
+}
+
 async function loadBNConfirm(){
   const wrap = document.getElementById('bnConfirmWrap');
   const list = document.getElementById('bnConfirmList');
@@ -9488,9 +9541,25 @@ async function loadBNConfirm(){
     const allBookings = reconcileBookings(results[1]);
     const notifyState = results[2];
 
-    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
+    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; return; }
 
-    // Sync Mark unavailable button state with current schedule. If any
+    // Cache the fetched data so stage handlers can re-render instantly
+    // without waiting for another network round trip. Cache is invalidated
+    // when shift/date changes (caller already calls loadBNConfirm in that case).
+    _bnConfirmCache = { scheds, allBookings, notifyState, dt, shift, nextDt };
+
+    _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt);
+  } catch(e) {
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    wrap.style.display = 'block';
+  }
+  loader.style.display = 'none';
+}
+
+// Synchronous render body — assumes data is already fetched. Called from
+// loadBNConfirm (after fetch) and _renderBNConfirm (from cache, on stage taps).
+function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt){
+  try {    // Sync Mark unavailable button state with current schedule. If any
     // schedule entry for this BN/date/shift has Status='inactive' and no
     // active entries exist, BN is currently marked unavailable.
     const _hasActive = scheds.some(s => s.Status !== 'inactive');
@@ -9922,7 +9991,6 @@ async function loadBNConfirm(){
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     wrap.style.display = 'block';
   }
-  loader.style.display = 'none';
 }
 
 async function cancelStaffBooking(id, nurseName, slotTime){
