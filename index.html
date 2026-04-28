@@ -3875,10 +3875,10 @@ async function loadSlots(silent=false){
     // ── Sequential spGet: schedule first, then bookings (both dates for overlap BN breaks) ──
     const schedFloor = oppDt < dt ? oppDt : dt;
     const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`);
-    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
+    const allBookingsRaw = reconcileBookings(await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`));
     // Also fetch opposite date bookings — needed for overlap BN breaks (e.g. Noc BN break at 7:55 AM
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
-    const oppBookingsRaw = (oppDt !== dt) ? await spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`) : [];
+    const oppBookingsRaw = (oppDt !== dt) ? reconcileBookings(await spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`)) : [];
     const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     // Update cached flag: any active BN on this shift has 3C in their units?
     // Gated by is3COpen — when 3C is globally closed, schedule listings of
@@ -6219,7 +6219,9 @@ async function loadSummary(){
       results = [];
       for(const q of queries) results.push(await spGet(q.sheet, q.filter));
     }
-    const [bookings, oppBookings, scheds, oppScheds] = results;
+    const [bookingsRaw, oppBookingsRaw, scheds, oppScheds] = results;
+    const bookings = reconcileBookings(bookingsRaw);
+    const oppBookings = reconcileBookings(oppBookingsRaw);
 
     // Warm rotation cache for all active BNs so slot-level attribution works
     await Promise.all([
@@ -8601,6 +8603,9 @@ async function clearBNBreaks(){
     if(breaks.length){
       await gasCallPost({ action:'batchDelete', sheet:LISTS.bookings,
         ids: encodeURIComponent(JSON.stringify(breaks.map(b=>b.Id))) });
+      // Track deletes so the immediate re-render filters them out even if
+      // Sheets returns stale pre-delete state for a brief window.
+      breaks.forEach(b => trackDelete(b.Id));
     }
     // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
     // so existing staff bookings keep their BN attribution.
@@ -8635,12 +8640,10 @@ async function clearBNBreaks(){
     // so any staged "+ My Break" selections would now be meaningless and shouldn't
     // persist into the re-render.
     const _sy = window.scrollY;
-    // Brief delay so Sheets has time to commit the batchDelete before the next
-    // query runs — without it, loadBNConfirm can read stale data
-    // and render cleared slots as still having breaks.
-    setTimeout(() => {
-      loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
-    }, 1200);
+    // Render immediately. trackDelete entries above ensure that even if the
+    // next fetch returns stale pre-delete state, reconcileBookings will hide
+    // the rows we just removed.
+    loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' })));
   } catch(e) {
     toast(e.message, true);
     const clearBtn = document.getElementById('clearAllBreaksBtn');
@@ -8657,6 +8660,66 @@ async function clearBNBreaks(){
 // action is one of 'confirmed' | 'not_taken' | 'cancelled'.
 // Staged changes don't hit the backend until the BN taps Submit.
 const _prodLogStaged = new Map();
+
+// ── Recent-mutation reconciliation ───────────────────────────────────
+// Google Sheets (via Apps Script) is eventually consistent on writes:
+// a fetch fired immediately after a successful write may return the
+// pre-write state for ~1s. Without compensation, the user sees the
+// just-deleted row reappear briefly, or a just-created booking missing
+// from the render. Previously we papered over this with 1200ms setTimeouts
+// before re-rendering — slow and visible to the BN.
+//
+// Instead we track recently-mutated bookings client-side and reconcile
+// fetched results against them. After the TTL expires the entries
+// auto-purge (Sheets has surely caught up by then).
+//
+//   _recentMutations: Map<bookingId, {op:'delete'|'create', record?, ts}>
+//
+//   - 'delete': filter the ID out of any subsequent fetch results
+//   - 'create': inject the record snapshot if it isn't already present
+//
+// Use trackDelete / trackCreate / reconcileBookings around any write→read
+// flow on the BNBookings sheet that powers loadBNConfirm or loadSlots.
+const _recentMutations = new Map();
+const MUTATION_TTL_MS = 10000;
+
+function trackDelete(id){
+  if(id == null) return;
+  const key = String(id);
+  _recentMutations.set(key, { op:'delete', ts:Date.now() });
+  setTimeout(() => {
+    const m = _recentMutations.get(key);
+    if(m && m.op === 'delete' && Date.now() - m.ts >= MUTATION_TTL_MS) _recentMutations.delete(key);
+  }, MUTATION_TTL_MS + 100);
+}
+
+function trackCreate(record){
+  if(!record || record.Id == null) return;
+  const key = String(record.Id);
+  _recentMutations.set(key, { op:'create', record, ts:Date.now() });
+  setTimeout(() => {
+    const m = _recentMutations.get(key);
+    if(m && m.op === 'create' && Date.now() - m.ts >= MUTATION_TTL_MS) _recentMutations.delete(key);
+  }, MUTATION_TTL_MS + 100);
+}
+
+// Apply pending mutations to a freshly fetched bookings array. Filters
+// out client-side deletes and injects client-side creates that the server
+// may not yet be returning. Idempotent — safe to call multiple times.
+function reconcileBookings(bookings){
+  if(!_recentMutations.size) return bookings;
+  // 1. Drop deletes
+  const filtered = bookings.filter(b => {
+    const m = _recentMutations.get(String(b.Id));
+    return !(m && m.op === 'delete');
+  });
+  // 2. Inject missing creates
+  const present = new Set(filtered.map(b => String(b.Id)));
+  _recentMutations.forEach((m, id) => {
+    if(m.op === 'create' && !present.has(id)) filtered.push(m.record);
+  });
+  return filtered;
+}
 
 // Which unclaimed slots currently have their inline claim form expanded.
 // Set<slotTime>. Cleared when shift changes.
@@ -9036,6 +9099,7 @@ async function submitStagedActions(){
         await spPatch(LISTS.bookings, id, { BreakStatus: 'not_taken', IsCompleted: 0 });
       } else if(info.action === 'cancelled'){
         await spDel(LISTS.bookings, id);
+        trackDelete(id);
       } else if(info.action === 'claim'){
         // Walk-up claim: create a new booking record, already confirmed.
         const dt = BNS.date || today();
@@ -9056,7 +9120,7 @@ async function submitStagedActions(){
           unit = bnUnits[0] || '';
         }
         const nurseDisplay = info.ext ? `${info.nurseName} (${info.ext})` : info.nurseName;
-        await spPost(LISTS.bookings, {
+        const created = await spPost(LISTS.bookings, {
           Title: `${info.nurseName}-${slotDate}-${info.slotTime}-${unit}`,
           NurseName: nurseDisplay,
           Unit: unit,
@@ -9067,6 +9131,7 @@ async function submitStagedActions(){
           BreakStatus: 'confirmed',
           IsBNBreak: 0
         });
+        trackCreate(created);
         // Remember the last successfully submitted claim for "Copy last" on
         // subsequent unclaimed rows this shift.
         _prodLogLastClaim = { name: info.nurseName, ext: info.ext || '' };
@@ -9082,7 +9147,7 @@ async function submitStagedActions(){
           const bnUnits = await getBNUnits(BNS.name, dt, shift);
           unit = bnUnits[0] || '';
         }
-        await spPost(LISTS.bookings, {
+        const created = await spPost(LISTS.bookings, {
           Title: `BN-${BNS.name}-${unit}-${dt}-${info.slotTime}`,
           NurseName: BNS.name,
           Unit: unit,
@@ -9091,9 +9156,11 @@ async function submitStagedActions(){
           ShiftType: shift,
           IsBNBreak: 1
         });
+        trackCreate(created);
       } else if(info.action === 'remove_break'){
         // Mid-shift BN-break removal. Just delete the booking by Id.
         await spDel(LISTS.bookings, info.bookingId);
+        trackDelete(info.bookingId);
       }
       _prodLogStaged.delete(id);
       okCount++;
@@ -9130,14 +9197,12 @@ async function submitStagedActions(){
     submit.textContent = 'Submit';
     submit.disabled = false;
   }
-  // Short delay so Sheets has time to commit walk-up claim writes before we
-  // re-query — otherwise the re-render may show stale state with slots
-  // still appearing unclaimed.
-  setTimeout(() => {
-    loadBNConfirm();
-    loadSummary();
-    if(S.unit) loadSlots(true);
-  }, 1200);
+  // Render immediately. trackDelete/trackCreate calls above ensure that even
+  // if the next fetch returns stale state, reconcileBookings hides cancelled
+  // rows and surfaces newly created claims/breaks.
+  loadBNConfirm();
+  loadSummary();
+  if(S.unit) loadSlots(true);
 }
 
 // Check queued actions against current backend state. For any queue entry
@@ -9272,10 +9337,17 @@ async function silentRefreshProdLog(){
     // any booking field, so fingerprint stays the same and Prod Log doesn't
     // refresh until something else triggers it — caused multi-minute lag.
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
-    const [bookings, scheds] = await Promise.all([
+    const [bookingsRaw, scheds] = await Promise.all([
       spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`),
       spGet(LISTS.schedule, schedFilter)
     ]);
+    // Reconcile against any in-flight mutations so the fingerprint we
+    // compute matches what loadBNConfirm will actually render. Without this,
+    // a stale-read poll right after a local delete would compute fp from
+    // pre-delete data while the render shows post-delete state — first
+    // mismatch wastes a render, but more importantly handleQueueConflicts
+    // would compare queued actions against pre-delete state.
+    const bookings = reconcileBookings(bookingsRaw);
 
     // Build fingerprint from booking fields + this BN's schedule status/units
     const bookFp = bookings.map(b =>
@@ -9386,7 +9458,7 @@ async function loadBNConfirm(){
       ]);
     }
     const scheds = results[0];
-    const allBookings = results[1];
+    const allBookings = reconcileBookings(results[1]);
     const notifyState = results[2];
 
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; return; }
