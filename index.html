@@ -1281,7 +1281,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-04-29-06';
+const APP_VERSION = '2026-04-29-07';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -4597,7 +4597,13 @@ async function loadSlots(silent=false){
     // For overlap slots (stored as opposite ShiftType), count against that shift's quota
     // For same-shift slots, count against current shift quota
     const mySameShift = myBookings.filter(b => b.ShiftType === shift);
-    const canClaimMore = mySameShift.length < MAX_SLOTS;
+    // Staged cancels reduce the user's effective slot count — if they own 3 and
+    // stage a cancel on one, they should be able to stage a 3rd new claim. The
+    // cancel will execute on Submit before the new claim, freeing the slot.
+    const myStagedCancelCount = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
+    const effectiveOwnedCount = mySameShift.length - myStagedCancelCount;
+    const pendingClaimSameShift = [...S.pendingClaims].filter(c => !c.includes('|') || c.split('|')[1] === shift).length;
+    const canClaimMore = (effectiveOwnedCount + pendingClaimSameShift) < MAX_SLOTS;
 
     // Build BN name label — include both main and overlap BNs
     // Look up BN extensions — from schedule record first, fall back to localStorage
@@ -5287,14 +5293,22 @@ function unstageOwnedAndRender(bookingId, slot){
   _updateOwnedSlotRow(slot);
 }
 
-// Surgical re-render for an owned-slot row. Day/Noc go through
-// _updateSlotRow (existing helper); Other goes through full re-render
-// for now (Other still uses its own render path for the row body).
+// Surgical re-render for an owned-slot row + the rest of the list.
+//
+// We can't do a single-row update for owned-slot staging the way we do for
+// claim-staging, because staging a cancel (or undoing one) changes the
+// effective slot count, which flips the "Max 3 slots reached" lock state on
+// every other available row in the list. Without re-rendering those, the
+// nurse sees a row that says "Max 3 reached" even after they stage a cancel.
+//
+// This is a full DOM rebuild, but it's a local render with no network calls,
+// and owned-slot management is much less rapid-tap-prone than claim-selection
+// (the Flavor 1 race was about rapid + Select taps; not stage-then-tap-other).
 function _updateOwnedSlotRow(slot){
   if(S.shift === 'Other'){
     renderOtherSlotsFromCache();
   } else {
-    _updateSlotRow(slot);
+    renderSlotsFromCache();
   }
 }
 
@@ -5809,9 +5823,14 @@ function renderOtherSlotsFromCache(){
   const curName = _rFirstName && /^[0-9]{5}$/.test(_rExt) ? `${toTitleCase(_rFirstName)} (${_rExt})` : nurseName;
   const myBookings = curName ? allBookings.filter(b => b.NurseName === curName && isStaffBooking(b)) : [];
   const myTimes    = new Set(myBookings.map(b => b.SlotTime));
-  // canClaimMore factors in both existing bookings AND pending selections so
-  // locking kicks in the moment the user picks their 3rd slot in the UI.
-  const canClaimMore = (myBookings.length + S.pendingClaims.size) < MAX_SLOTS;
+  // canClaimMore factors in: existing bookings, pending claims, and pending
+  // cancels (which reduce effective ownership). Without subtracting cancels,
+  // a nurse who owns 3 slots and stages a cancel on one will still see "Max
+  // reached" on remaining open slots, blocking the natural cancel-and-replace
+  // flow.
+  const myStagedCancelsOther = myBookings.filter(b => S.pendingCancels.has(b.Id)).length;
+  const effectiveOwnedOther = myBookings.length - myStagedCancelsOther;
+  const canClaimMore = (effectiveOwnedOther + S.pendingClaims.size) < MAX_SLOTS;
 
   const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
   if(meta) meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
