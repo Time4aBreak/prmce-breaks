@@ -8742,6 +8742,12 @@ function onBNDateChange(){
     renderBNShiftPill();
   }
   loadBNConfirm();
+  // Start background polling so cross-device updates (other devices changing
+  // bnDefault, bnStart, bookings, schedule) propagate within ~10s while
+  // this BN is signed in. Without this call here, polling would only start
+  // when the user *switches to* the bn subtab — meaning a sign-in performed
+  // while already on the subtab leaves polling dormant until the next switch.
+  startProdLogPolling();
 }
 
 // renderBNShiftPill defined below
