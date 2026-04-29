@@ -9578,15 +9578,14 @@ function handleQueueConflicts(freshBookings){
 // fingerprint-based skip (re-render only if data changed), conflict handling
 // for queued items, and no loader/spinner visibility to keep UX quiet.
 async function silentRefreshProdLog(){
-  // [DIAG] Trace why polling skips — remove after sync issue resolved.
-  if(document.hidden){ try { toast('⏸ poll skip: hidden'); } catch{}; return; }
+  if(document.hidden) return;
   const wrap = document.getElementById('bnConfirmWrap');
-  if(!wrap || !BNS.name){ try { toast('⏸ poll skip: no BN'); } catch{}; return; }
+  if(!wrap || !BNS.name) return;
   // Don't refresh if the subtab isn't actually visible — a race on timer start/stop
   const activeSub = document.querySelector('.subtab.active');
-  if(!activeSub || activeSub.id !== 'subtab-bn'){ try { toast(`⏸ poll skip: subtab=${activeSub?.id||'none'}`); } catch{}; return; }
+  if(!activeSub || activeSub.id !== 'subtab-bn') return;
   // Skip if shift is over — no more changes to track
-  try { if(typeof shiftIsOver === 'function' && shiftIsOver(BNS.date, BNS.shift)) { try { toast('⏸ poll skip: shift over'); } catch{}; stopProdLogPolling(); return; } } catch{}
+  try { if(typeof shiftIsOver === 'function' && shiftIsOver(BNS.date, BNS.shift)) { stopProdLogPolling(); return; } } catch{}
 
   try {
     const dt = BNS.date || today(), shift = BNS.shift;
@@ -9637,28 +9636,6 @@ async function silentRefreshProdLog(){
     // Handle conflicts first — this may remove queue entries and show toasts,
     // which should happen regardless of whether the fingerprint changed.
     const conflictsResolved = handleQueueConflicts(bookings);
-
-    // [DIAG] Always log poll outcome so we can trace why phone doesn't see
-    // delete from laptop. Remove after issue is confirmed resolved.
-    const fpChanged = fp !== _prodLogLastFingerprint;
-    const lsValStr = (k) => (localStorage.getItem(k) || 'null').slice(0, 20);
-    if(fpChanged || stateChanged.length > 0 || conflictsResolved > 0){
-      try {
-        const parts = [];
-        if(stateChanged.length) parts.push(`state:${stateChanged.map(k=>k.split('_').slice(0,2).join('_')).join(',')}`);
-        if(fpChanged) parts.push('fp');
-        if(conflictsResolved) parts.push(`conflicts:${conflictsResolved}`);
-        toast(`🔄 ${parts.join(' ')}`);
-      } catch{}
-    } else {
-      // Heartbeat: poll fired, refreshMany ran, nothing changed.
-      // Include the LS values of watched keys so we can see what the phone
-      // currently thinks the truth is.
-      try {
-        const samples = watchedKeys.map(k => `${k.split('_').slice(0,2).join('_')}=${lsValStr(k)}`).join(' ');
-        toast(`💓 ${samples}`);
-      } catch{}
-    }
 
     // Re-render only if fingerprint changed OR conflicts were resolved (which
     // modified the queue and needs a fresh render to reflect removed states).
