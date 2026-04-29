@@ -2148,6 +2148,12 @@ async function cancelScheduled3CChange(effectiveAt){
 // the flip.
 let _3CTickLastStatus = null;
 async function _3CTick(){
+  // Pull latest 3C state from BNState before reading. Without this, the tick
+  // paints whatever localStorage already has — meaning a schedule change made
+  // on another device never surfaces here unless the user opens the admin
+  // panel (which has its own refresh). The 3C status line lives in admin and
+  // the effective-status flip detection below both depend on this being fresh.
+  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule']); } catch{}
   const nowStatus = effective3CStatusAt(new Date());
   const statusFlipped = _3CTickLastStatus !== null && nowStatus !== _3CTickLastStatus;
   if(_3CTickLastStatus === null){
