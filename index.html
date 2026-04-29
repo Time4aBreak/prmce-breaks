@@ -1610,6 +1610,28 @@ const syncedLS = {
     }
   },
 
+  // Batch write many key/value pairs in a single round trip via spBatchSetState.
+  // Use this for write storms (e.g. recomputing N rotations at once) instead
+  // of awaiting N individual syncedLS.set calls. Updates LS for every entry
+  // synchronously so reads see fresh data even if the network call lags.
+  // Throws if the batch fails — caller decides whether to retry or surface.
+  // entries: Array<{key, value}>
+  async setMany(entries){
+    if(!entries?.length) return;
+    // Update LS first so reads on this device are immediately consistent.
+    for(const {key, value} of entries){
+      localStorage.setItem(key, JSON.stringify(value));
+    }
+    try {
+      await spBatchSetState(entries);
+      return true;
+    } catch(e){
+      console.warn(`[syncedLS.setMany] ${entries.length} entries failed: ${e.message}`);
+      try { toast('Network error — some changes not saved to server. Other devices may not see all updates.', true); } catch{}
+      throw e;
+    }
+  },
+
   async delete(key){
     // Try BNState first; only clear LS on success so a network failure
     // doesn't make this device falsely think the value is gone (which
@@ -3656,7 +3678,8 @@ async function applyDefaultToAll(){
       }
 
       const key = `bnRotation_${name}_${sched.ShiftDate}_${sched.ShiftType}`;
-      localStorage.setItem(key, JSON.stringify(rotation));
+      // LS is written below by syncedLS.setMany. We keep this push so the
+      // batch flushes in one round trip (vs N parallel set calls).
       rotationEntries.push({ key, value: rotation });
     }
 
@@ -3673,8 +3696,10 @@ async function applyDefaultToAll(){
       }
     }
 
-    // ── batchSetState for rotations — fire-and-forget, localStorage already updated ──
-    if(rotationEntries.length) spBatchSetState(rotationEntries).catch(()=>{});
+    // ── Mirror rotations to BNState in one round trip — LS already updated
+    // synchronously inside syncedLS.setMany. Fire-and-forget: if it fails,
+    // the toast inside syncedLS.setMany surfaces it; local data still works.
+    if(rotationEntries.length) syncedLS.setMany(rotationEntries).catch(()=>{});
 
     const applied = upcoming.filter(s => (s.ShiftType==='Day'?dayDef:nocDef).length > 0).length;
     toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
@@ -3730,9 +3755,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
   }
   if(shiftAlreadyStarted){
     // Shift already started — save breaks using existing rotation, no recalc
-    const rotKey = `bnRotation_${name}_${date}_${shift}`;
-    let rotation = {};
-    try { rotation = JSON.parse(localStorage.getItem(rotKey) || '{}'); } catch{}
+    const rotation = loadRotation(name, date, shift) || {};
     const expandedUnits = expandCPair(units, date, shift);
     // Fill rotation: includes break slots so own-break records get an interleaved
     // unit instead of always falling back to expandedUnits[0]. Display rotation
@@ -3792,8 +3815,8 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
         rows: encodeURIComponent(JSON.stringify(rows))
       });
     }
-    // Persist updated rotation to BNState
-    spBatchSetState([{ key: `bnRotation_${name}_${date}_${shift}`, value: rotation }]).catch(()=>{});
+    // Rotation was already persisted to BNState by saveRotation (above).
+    // No additional write needed — previous redundant spBatchSetState removed.
   }
 }
 
@@ -3950,25 +3973,25 @@ function saveRotation(bnName, date, shift, rotation){
   Object.entries(rotation).forEach(([slot, unit]) => {
     normalized[String(slot).padStart(4,'0')] = unit;
   });
-  localStorage.setItem(key, JSON.stringify(normalized));
-  setState(key, normalized).catch(()=>{});
+  // Fire-and-forget: most callers don't await rotation writes (they happen
+  // alongside booking inserts that take precedence). syncedLS.set updates
+  // LS synchronously so reads see fresh data immediately; the BNState mirror
+  // happens async and surfaces its own toast on failure.
+  syncedLS.set(key, normalized).catch(()=>{});
 }
 
 // Load rotation — reads from localStorage cache (populated by warmRotationCache)
 function loadRotation(bnName, date, shift){
-  const key = `bnRotation_${bnName}_${date}_${shift}`;
-  try { return JSON.parse(localStorage.getItem(key) || 'null'); }
-  catch { return null; }
+  // syncedLS.get parses JSON automatically and tolerates legacy raw entries.
+  // Returns null on miss/parse failure — same contract as before.
+  return syncedLS.get(`bnRotation_${bnName}_${date}_${shift}`);
 }
 
-// Warm rotation cache from backend for a BN — call once at shift start
+// Warm rotation cache from backend for a BN — call once at shift start.
+// Thin wrapper over syncedLS.warm so the key derivation lives in one place.
 async function warmRotationCache(bnName, date, shift){
-  const key = `bnRotation_${bnName}_${date}_${shift}`;
-  if(localStorage.getItem(key)) return; // already cached
-  try {
-    const remote = await getState(key);
-    if(remote) localStorage.setItem(key, JSON.stringify(remote));
-  } catch(e){ /* use empty cache, rotation will be recalculated */ }
+  if(!bnName || !date || !shift) return;
+  return syncedLS.warm(`bnRotation_${bnName}_${date}_${shift}`);
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
@@ -4661,11 +4684,13 @@ async function silentRefreshSlots(){
 
     const allBNNames = [...new Set(covering.map(c => c.BreakNurseName))];
 
-    // Watched: bnStart for every covering BN, plus 3C state. Their
-    // cross-device updates affect which slots are claimable for staff
-    // (start time gates) and whether 3C slots are exposed at all.
+    // Watched: bnStart and rotation for every covering BN, plus 3C state.
+    // Cross-device updates affect which slots are claimable for staff (start
+    // time gates), how slots map to units (rotation chips), and whether 3C
+    // slots are exposed at all.
     const watchedKeys = [
       ...allBNNames.map(n => `bnStart_${n}_${dt}_${shift}`),
+      ...allBNNames.map(n => `bnRotation_${n}_${dt}_${shift}`),
       'unit3CDefault',
       'unit3CSchedule'
     ];
@@ -7202,10 +7227,17 @@ async function recalculateAllRotations(){
       const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
       const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
       const rotation = calculateBlockRotation(units, bnBreakSet, getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
-      // saveRotation normalizes keys to 4 digits
-      saveRotation(s.BreakNurseName, s.ShiftDate, s.ShiftType, rotation);
+      // Normalize slot keys to 4 digits — matches saveRotation's contract.
+      const normalized = {};
+      Object.entries(rotation).forEach(([slot, unit]) => {
+        normalized[String(slot).padStart(4,'0')] = unit;
+      });
       const key = `bnRotation_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`;
-      const normalized = JSON.parse(localStorage.getItem(key));
+      // Bypass saveRotation — it would fire its own per-key BNState write.
+      // We're collecting entries for a single batch flush below to avoid N
+      // round trips. Local cache is updated synchronously here; BNState is
+      // mirrored by the batch.
+      localStorage.setItem(key, JSON.stringify(normalized));
       rotationEntries.push({ key, value: normalized });
     } catch(e) {
       console.warn(`Rotation failed for ${s.BreakNurseName} ${s.ShiftDate}:`, e.message);
@@ -7213,12 +7245,15 @@ async function recalculateAllRotations(){
     }
   }
 
-  // Single batch call to save all rotations
+  // Single batch call to save all rotations to BNState in one round trip.
+  // syncedLS.setMany surfaces its own error toast on failure.
   if(rotationEntries.length){
     try {
-      await spBatchSetState(rotationEntries);
+      await syncedLS.setMany(rotationEntries);
     } catch(e) {
-      toast(`Rotations computed locally but remote save failed: ${e.message}`, true);
+      // Error already toasted by syncedLS.setMany. Local cache is consistent
+      // (we wrote LS in the loop above), so the device will function — but
+      // other devices may not see the update until the next batch retry.
       return;
     }
   }
@@ -7365,22 +7400,22 @@ const PREFERRED_NAMES_DEFAULTS = {
 };
 let PREFERRED_NAMES = {...PREFERRED_NAMES_DEFAULTS};
 try {
-  const saved = JSON.parse(localStorage.getItem('bnPreferredNames') || '{}');
-  Object.assign(PREFERRED_NAMES, saved);
+  const saved = syncedLS.get('bnPreferredNames');
+  if(saved && typeof saved === 'object') Object.assign(PREFERRED_NAMES, saved);
 } catch {}
 
 async function warmPreferredNames(){
   try {
-    const remote = await getState('bnPreferredNames');
-    if(remote && typeof remote === 'object'){
-      localStorage.setItem('bnPreferredNames', JSON.stringify(remote));
-      Object.assign(PREFERRED_NAMES, PREFERRED_NAMES_DEFAULTS, remote);
+    await syncedLS.warm('bnPreferredNames');
+    const saved = syncedLS.get('bnPreferredNames');
+    if(saved && typeof saved === 'object'){
+      Object.assign(PREFERRED_NAMES, PREFERRED_NAMES_DEFAULTS, saved);
     }
   } catch {}
 }
 
 function setPreferredName(fullName, preferred){
-  const saved = JSON.parse(localStorage.getItem('bnPreferredNames') || '{}');
+  const saved = syncedLS.get('bnPreferredNames') || {};
   const trimmed = (preferred || '').trim();
   if(trimmed){
     saved[fullName] = trimmed;
@@ -7394,8 +7429,8 @@ function setPreferredName(fullName, preferred){
       delete PREFERRED_NAMES[fullName];
     }
   }
-  localStorage.setItem('bnPreferredNames', JSON.stringify(saved));
-  setState('bnPreferredNames', saved).catch(()=>{});
+  // Fire-and-forget — syncedLS.set surfaces its own toast on failure.
+  syncedLS.set('bnPreferredNames', saved).catch(()=>{});
 }
 
 // fmt24 removed — time formatting replaced by fmt12 throughout
@@ -8383,13 +8418,14 @@ async function acceptAllAndSave(){
         const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
         const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
         const key = `bnRotation_${name}_${date}_${shift}`;
-        localStorage.setItem(key, JSON.stringify(rotation));
+        // LS write is below in syncedLS.setMany. Just collect entries here so
+        // the batch flushes in one round trip (vs N parallel set calls).
         rotationEntries.push({ key, value: rotation });
       }
     }
     // Fire default applies concurrently, then batch-save plain rotations
     await Promise.all(defaultApplyPromises);
-    if(rotationEntries.length) await spBatchSetState(rotationEntries);
+    if(rotationEntries.length) await syncedLS.setMany(rotationEntries);
 
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
@@ -9622,14 +9658,16 @@ async function silentRefreshProdLog(){
     // refresh until something else triggers it — caused multi-minute lag.
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
     // Watched cross-device keys: BN's normal-break templates (both shifts —
-    // grid is toggleable), current shift's start time, and 3C status keys
-    // (default + scheduled timeline). Other devices may have updated these;
-    // fold them into the fingerprint so changes trigger a re-render and the
-    // relevant UI auto-refreshes.
+    // grid is toggleable), current shift's start time, this shift's rotation
+    // assignments (so unit chips re-paint when admin recomputes elsewhere),
+    // and 3C status keys (default + scheduled timeline). Other devices may
+    // have updated these; fold them into the fingerprint so changes trigger
+    // a re-render and the relevant UI auto-refreshes.
     const watchedKeys = [
       `bnDefault_${BNS.name}_Day`,
       `bnDefault_${BNS.name}_Noc`,
       `bnStart_${BNS.name}_${dt}_${shift}`,
+      `bnRotation_${BNS.name}_${dt}_${shift}`,
       'unit3CDefault',
       'unit3CSchedule'
     ];
@@ -9706,13 +9744,13 @@ async function silentRefreshCoverage(){
       `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const scheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    // Watched: every covering BN's bnStart for this shift, plus 3C state.
-    // Cross-device changes here affect which slots staff see as claimable
-    // and whether 3C is included in coverage at all.
+    // Watched: every covering BN's bnStart and rotation for this shift, plus
+    // 3C state. Cross-device changes here affect slot visibility, claimability,
+    // unit chip display, and whether 3C is included in coverage at all.
+    const activeScheds = scheds.filter(s => s.Status !== 'inactive');
     const watchedKeys = [
-      ...scheds
-        .filter(s => s.Status !== 'inactive')
-        .map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`),
+      ...activeScheds.map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`),
+      ...activeScheds.map(s => `bnRotation_${s.BreakNurseName}_${dt}_${shift}`),
       'unit3CDefault',
       'unit3CSchedule'
     ];
