@@ -1249,7 +1249,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-04-29-02';
+const APP_VERSION = '2026-04-29-03';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2255,11 +2255,19 @@ function showAppVersionLine(){
   if(!line) return;
   const remoteVer = syncedLS.get('appVersion');
   if(!remoteVer){
-    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <em>not yet set</em></span>`;
+    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <em>not yet set</em> — tap Push update to initialize.</span>`;
     return;
   }
-  const matches = remoteVer === APP_VERSION;
-  line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <strong style="color:${matches?'var(--green)':'var(--red)'}">${remoteVer}</strong>${matches ? ' ✓' : ' (mismatch — devices on older versions will see banner)'}</span>`;
+  if(APP_VERSION === remoteVer){
+    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <strong style="color:var(--green)">${remoteVer}</strong> ✓</span>`;
+  } else if(APP_VERSION > remoteVer){
+    // This device is newer than server — admin deployed but hasn't pushed yet.
+    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <strong style="color:var(--orange,#e8a020)">${remoteVer}</strong> — tap Push update to notify other devices.</span>`;
+  } else {
+    // This device is older than server — admin pushed without this device updating.
+    // Banner is showing on this device. (Should not normally happen for the admin.)
+    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <strong style="color:var(--red)">${remoteVer}</strong> — this device is out of date. Refresh.</span>`;
+  }
 }
 
 // Cancel a future-scheduled 3C change (remove its entry from the schedule)
@@ -2291,8 +2299,13 @@ async function _3CTick(){
     const remoteVer = syncedLS.get('appVersion');
     const banner = document.getElementById('appUpdateBanner');
     if(banner){
-      const mismatch = remoteVer && typeof remoteVer === 'string' && remoteVer !== APP_VERSION;
-      banner.style.display = mismatch ? 'flex' : 'none';
+      // Only show banner when device is OLDER than server. A device that's
+      // newer than server (admin who deployed but hasn't pushed yet) doesn't
+      // need to refresh — they're already on the latest. Lexicographic
+      // comparison works because version strings use YYYY-MM-DD-NN format
+      // which sorts chronologically.
+      const isOlder = remoteVer && typeof remoteVer === 'string' && APP_VERSION < remoteVer;
+      banner.style.display = isOlder ? 'flex' : 'none';
     }
     // Keep the admin's "App Version" status line current so they can see
     // mismatches resolve as devices update. Cheap DOM update — no-op if
