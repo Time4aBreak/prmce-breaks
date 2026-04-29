@@ -2210,6 +2210,22 @@ async function _3CTick(){
   // panel (which has its own refresh). The 3C status line lives in admin and
   // the effective-status flip detection below both depend on this being fresh.
   try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule']); } catch{}
+  // Self-heal: drop redundant consecutive same-status entries from schedule.
+  // Cheap no-op when the list is already clean. Without this, a stale entry
+  // pre-dating the compaction logic would persist forever — only new writes
+  // trigger compaction inside set3CSchedule.
+  try {
+    const current = get3CSchedule();
+    if(current.length){
+      let lastStatus = get3CDefault();
+      let needsCompaction = false;
+      for(const e of current){
+        if(e.status === lastStatus){ needsCompaction = true; break; }
+        lastStatus = e.status;
+      }
+      if(needsCompaction) await set3CSchedule(current);
+    }
+  } catch{}
   const nowStatus = effective3CStatusAt(new Date());
   const statusFlipped = _3CTickLastStatus !== null && nowStatus !== _3CTickLastStatus;
   if(_3CTickLastStatus === null){
