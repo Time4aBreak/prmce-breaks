@@ -971,12 +971,28 @@ function get3CSchedule(){
 }
 function set3CSchedule(entries){
   // Entries: array of {effectiveAt: ISO string, status: 'open'|'closed'}
+  // Sort and compact: drop consecutive same-status entries. Any entry whose
+  // status equals the most-recent-effective status as of its time is
+  // redundant — the status is already in force. Initialize "previous" to
+  // the global default so a first scheduled entry matching default is also
+  // pruned. This is what fixes scheduled changes lingering as redundant
+  // after an Apply Now to the same status.
   const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
+  const compacted = [];
+  let lastStatus = get3CDefault();
+  for(const e of sorted){
+    if(e.status !== lastStatus){
+      compacted.push(e);
+      lastStatus = e.status;
+    }
+  }
   // syncedLS.set updates LS immediately, mirrors to BNState, throws on
   // network failure with its own user-visible toast.
-  return syncedLS.set('unit3CSchedule', sorted);
+  return syncedLS.set('unit3CSchedule', compacted);
 }
 async function add3CScheduleEntry(effectiveAt, status){
+  // Compaction (drop consecutive same-status entries) happens inside
+  // set3CSchedule, so callers don't need to deduplicate.
   const list = get3CSchedule();
   list.push({ effectiveAt, status });
   await set3CSchedule(list);
@@ -1053,6 +1069,24 @@ async function warm3CStatus(date, shift){
       syncedLS.warm('unit3CDefault'),
       syncedLS.warm('unit3CSchedule')
     ]);
+    // One-shot self-heal: if the warmed schedule has redundant consecutive
+    // same-status entries (legacy bug), rewrite it through set3CSchedule
+    // which compacts. Cheap no-op if already clean.
+    try {
+      const current = get3CSchedule();
+      if(current.length){
+        const def = get3CDefault();
+        let lastStatus = def;
+        let needsCompaction = false;
+        for(const e of current){
+          if(e.status === lastStatus){ needsCompaction = true; break; }
+          lastStatus = e.status;
+        }
+        if(needsCompaction){
+          set3CSchedule(current).catch(()=>{});
+        }
+      }
+    } catch{}
     // Refresh toggle if admin panel is visible
     show3CDefaultToggle();
   } catch(e){}
