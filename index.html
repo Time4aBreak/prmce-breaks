@@ -4841,7 +4841,7 @@ function renderSlotsFromCache(){
     const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
     const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
     const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
-    html += `<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
+    html += `<div class="slot-row ${cls}" data-slot="${slot}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
       <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
       <div class="slot-name ${booking||isPending?'filled':''}">${
         isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
@@ -4878,14 +4878,95 @@ function togglePending(slotTime, slotShift){
     S.pendingClaims.add(key);
   }
   updateSubmitBar();
-  // Re-render via the correct path for the current shift mode.
-  // Both paths are now network-free local renders using their respective
-  // caches — Day/Noc via _slotRenderCache, Other via _otherSlotRenderCache.
+  // Surgical re-render: replace only the affected row's outerHTML instead of
+  // rebuilding the entire list. Without this, rapid taps land on rebuilt DOM
+  // nodes and the click hits the wrong button (e.g. an Undo button replaced
+  // a +Select at the same screen position), causing the second tap to undo
+  // the first selection. By only replacing one row, all other buttons remain
+  // the same DOM nodes and clicks land on what the user actually pressed.
   if(S.shift === 'Other'){
-    renderOtherSlotsFromCache();
+    _updateOtherSlotRow(slotTime, slotShift);
   } else {
-    renderSlotsFromCache();
+    _updateSlotRow(slotTime);
   }
+}
+
+// Replace one slot row in-place without rebuilding the rest of the list.
+// Reads from _slotRenderCache for everything the row needs to draw.
+function _updateSlotRow(slot){
+  if(!_slotRenderCache){ renderSlotsFromCache(); return; }
+  const list = document.getElementById('slotsList');
+  if(!list) return;
+  const oldRow = list.querySelector(`[data-slot="${slot}"]`);
+  if(!oldRow){ renderSlotsFromCache(); return; }
+  const html = _renderSingleSlotRow(slot);
+  if(!html){ renderSlotsFromCache(); return; }
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+  const newRow = tmp.firstElementChild;
+  if(newRow) oldRow.replaceWith(newRow);
+}
+
+function _updateOtherSlotRow(slot, slotShift){
+  const list = document.getElementById('slotsList');
+  if(!list) return;
+  const keyAttr = `${slot}|${slotShift}`;
+  const oldRow = list.querySelector(`[data-slot-key="${keyAttr}"]`);
+  // Other-shift list is a single innerHTML build; replacing one row is harder
+  // because its render is inline. For now, fall back to full re-render only
+  // for Other tab — taps on Other are rarer and the bug is most pronounced
+  // when rapid-tapping multiple Day/Noc slots in sequence.
+  // TODO: factor out per-row builder for Other shift, mirror _renderSingleSlotRow.
+  if(!oldRow){ renderOtherSlotsFromCache(); return; }
+  renderOtherSlotsFromCache();
+}
+
+// Build a single row's HTML from the cache. Mirrors the row template inside
+// renderSlotsFromCache exactly — keep these in sync if the row markup changes.
+function _renderSingleSlotRow(slot){
+  if(!_slotRenderCache) return '';
+  const { future, bMap, bnBreaks, shift } = _slotRenderCache;
+  if(bnBreaks.has(slot)) return ''; // BN-break slots don't render
+  if(!future.includes(slot)) return ''; // not in the visible window
+  const _rsFirstName = document.getElementById('nurseName').value.trim();
+  const _rsExt       = document.getElementById('nurseExt').value.trim();
+  const nurseExt  = _rsExt;
+  const nurseName = _rsFirstName && /^[0-9]{5}$/.test(_rsExt) ? `${toTitleCase(_rsFirstName)} (${_rsExt})` : '';
+  const myBookings = nurseName
+    ? Object.values(bMap).filter(b => b.NurseName === nurseName && isStaffBooking(b))
+    : [];
+  const mySameShift = myBookings.filter(b => b.ShiftType === shift);
+  const canClaimMore = mySameShift.length < MAX_SLOTS;
+  const shiftWindowOpen = staffWindowOpen(shift);
+  const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
+  const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
+  const booking = bMap[slot];
+  const isMine  = booking && booking.NurseName === nurseName && nurseName;
+  const isTaken = booking && !isMine;
+  const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
+  const isPending = S.pendingClaims.has(slot);
+  let canClaim = false, lockReason = '';
+  if(!isTaken && !isMine){
+    if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
+    else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
+    else if(!canClaimMore)             { canClaim=false; lockReason='Max 3 slots reached'; }
+    else                               { canClaim=true; }
+  }
+  const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
+  const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
+  const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
+  const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
+  return `<div class="slot-row ${cls}" data-slot="${slot}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
+      <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
+      <div class="slot-name ${booking||isPending?'filled':''}">${
+        isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
+      }</div>
+      <div>
+        ${isMine && !isPast(slot, shift)  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
+        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
+        ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
+      </div>
+    </div>`;
 }
 
 function clearPending(){
@@ -5250,7 +5331,7 @@ function renderOtherSlotsFromCache(){
       </div>`;
     }
 
-    return `<div class="slot-row${isPending?' selected':''}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
+    return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${time}|${slotShift}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
       <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
       <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
       <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'↺ Undo':'+  Select'}</button>
