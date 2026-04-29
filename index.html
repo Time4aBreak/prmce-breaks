@@ -939,38 +939,42 @@ const UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S',
 const STAFF_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
 
 // ── 3C open/closed status ─────────────────────────────
-function get3CDefault(){ return localStorage.getItem('unit3CDefault') || 'closed'; }
+function get3CDefault(){
+  // syncedLS.get returns the parsed value (string), or null if unset.
+  // Default to 'closed' if the key has never been written.
+  return syncedLS.get('unit3CDefault') || 'closed';
+}
 function set3CDefault(val){
-  localStorage.setItem('unit3CDefault', val);
-  setState('unit3CDefault', val).catch(()=>{});
+  // Throws and toasts on remote failure — caller should catch if it cares.
+  return syncedLS.set('unit3CDefault', val);
 }
 
 // ── 3C schedule (list of {effectiveAt, status}) ─────────
 // Sorted ascending by effectiveAt. `effective3CStatusAt(datetime)` walks
 // the list and returns the most recent entry's status at or before datetime.
 function get3CSchedule(){
-  try {
-    let raw = localStorage.getItem('unit3CSchedule');
-    if(!raw) return [];
-    let parsed = JSON.parse(raw);
-    // Self-heal: if parsed is a string, it was double-stringified — unwrap once more
-    if(typeof parsed === 'string'){
-      try { parsed = JSON.parse(parsed); } catch { parsed = []; }
-      // Write back the cleaned version
-      localStorage.setItem('unit3CSchedule', JSON.stringify(parsed));
-      setState('unit3CSchedule', parsed).catch(()=>{});
-    }
-    return Array.isArray(parsed) ? parsed : [];
-  } catch { return []; }
+  // syncedLS.get parses JSON automatically and tolerates legacy raw-string
+  // entries. Return [] for missing or non-array values.
+  const parsed = syncedLS.get('unit3CSchedule');
+  if(!parsed) return [];
+  // Self-heal: if a previous version double-stringified the value,
+  // syncedLS.get returns a string. Try parsing it once more and write back.
+  if(typeof parsed === 'string'){
+    try {
+      const reparsed = JSON.parse(parsed);
+      // Persist the cleaned form so future reads don't have to re-parse.
+      syncedLS.set('unit3CSchedule', reparsed).catch(()=>{});
+      return Array.isArray(reparsed) ? reparsed : [];
+    } catch { return []; }
+  }
+  return Array.isArray(parsed) ? parsed : [];
 }
 function set3CSchedule(entries){
   // Entries: array of {effectiveAt: ISO string, status: 'open'|'closed'}
   const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
-  // setState stringifies internally and keeps localStorage in sync as cache.
-  // Also pre-populate localStorage synchronously so subsequent reads see the new value
-  // before the BNState round-trip completes.
-  localStorage.setItem('unit3CSchedule', JSON.stringify(sorted));
-  return setState('unit3CSchedule', sorted); // pass the array, NOT a stringified array
+  // syncedLS.set updates LS immediately, mirrors to BNState, throws on
+  // network failure with its own user-visible toast.
+  return syncedLS.set('unit3CSchedule', sorted);
 }
 async function add3CScheduleEntry(effectiveAt, status){
   const list = get3CSchedule();
@@ -1037,23 +1041,18 @@ function is3COpen(date, shift){ return get3CStatus(date, shift) === 'open'; }
 
 // Warm 3C state from backend
 async function warm3CStatus(date, shift){
-  const key = `unit3C_${date}_${shift}`;
   try {
-    // Per-shift override (only if local doesn't have one)
-    if(!localStorage.getItem(key)){
-      const remote = await getState(key);
-      if(remote !== null) localStorage.setItem(key, remote);
-    }
-    // Global default — BNState is source of truth
-    const def = await getState('unit3CDefault');
-    if(def !== null) localStorage.setItem('unit3CDefault', def);
-    // Schedule list — only warm from BNState if local doesn't have a valid list.
-    // After the first set3CSchedule write, local is kept in sync with every edit,
+    // Per-shift override (rare/legacy — read-only support)
+    const overrideKey = `unit3C_${date}_${shift}`;
+    // Global default — BNState is source of truth on app load
+    // Schedule list — only warm if local doesn't have a valid list. After
+    // the first set3CSchedule write, local is kept in sync with every edit,
     // so pulling from BNState could overwrite an in-flight write-not-yet-confirmed.
-    if(!localStorage.getItem('unit3CSchedule')){
-      const schedRaw = await getState('unit3CSchedule');
-      if(schedRaw !== null) localStorage.setItem('unit3CSchedule', schedRaw);
-    }
+    await Promise.all([
+      syncedLS.warm(overrideKey),
+      syncedLS.warm('unit3CDefault'),
+      syncedLS.warm('unit3CSchedule')
+    ]);
     // Refresh toggle if admin panel is visible
     show3CDefaultToggle();
   } catch(e){}
@@ -3117,12 +3116,14 @@ function showSubTab(name, btn){
       const panel2 = document.getElementById('adminPanel');
       if(gate) gate.style.display = 'none';
       if(panel2) panel2.style.display = 'block';
-      // Sync 3C default from BNState whenever admin panel opens
-      getState('unit3CDefault').then(def => {
-        const resolved = (def !== null) ? def : 'closed';
-        localStorage.setItem('unit3CDefault', resolved);
-        show3CDefaultToggle();
-      }).catch(() => { show3CDefaultToggle(); });
+      // Sync 3C default + schedule from BNState whenever admin panel opens.
+      // Uses syncedLS.refresh which queries BNState directly (bypassing the
+      // LS-fallback in getState) so a remote delete is detected even if local
+      // has stale data. show3CDefaultToggle re-reads via syncedLS.get afterward.
+      Promise.all([
+        syncedLS.refresh('unit3CDefault'),
+        syncedLS.refresh('unit3CSchedule')
+      ]).finally(() => show3CDefaultToggle());
     }
     // Only load admin data if gate has been passed — otherwise the BN-level
     // visitor stays on the gate and data isn't populated behind it.
@@ -3196,12 +3197,12 @@ function showTab(name, btn){
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
-    // Always sync 3C default from BNState on portal open — source of truth is Sheets
-    getState('unit3CDefault').then(def => {
-      const resolved = (def !== null) ? def : 'closed';
-      localStorage.setItem('unit3CDefault', resolved);
-      show3CDefaultToggle();
-    }).catch(() => { show3CDefaultToggle(); });
+    // Always sync 3C default + schedule from BNState on portal open — source
+    // of truth is Sheets. syncedLS.refresh detects cross-device deletes too.
+    Promise.all([
+      syncedLS.refresh('unit3CDefault'),
+      syncedLS.refresh('unit3CSchedule')
+    ]).finally(() => show3CDefaultToggle());
 
     // If a BN is already signed in to My Shift, refresh their view so any
     // changes made on the Sign Up tab (or by other users) while they were
@@ -4654,9 +4655,14 @@ async function silentRefreshSlots(){
 
     const allBNNames = [...new Set(covering.map(c => c.BreakNurseName))];
 
-    // Watched: bnStart for every covering BN. Their cross-device updates
-    // affect which slots are claimable for staff.
-    const watchedKeys = allBNNames.map(n => `bnStart_${n}_${dt}_${shift}`);
+    // Watched: bnStart for every covering BN, plus 3C state. Their
+    // cross-device updates affect which slots are claimable for staff
+    // (start time gates) and whether 3C slots are exposed at all.
+    const watchedKeys = [
+      ...allBNNames.map(n => `bnStart_${n}_${dt}_${shift}`),
+      'unit3CDefault',
+      'unit3CSchedule'
+    ];
     await syncedLS.refreshMany(watchedKeys);
 
     // Build a lightweight state fingerprint from current bookings
@@ -6594,11 +6600,10 @@ function unlock(){
       renderImportedNamesList();
       populateNurseDropdown();
       renderImportedEntriesSummary();
-      getState('unit3CDefault').then(def => {
-        const resolved = (def !== null) ? def : 'closed';
-        localStorage.setItem('unit3CDefault', resolved);
-        show3CDefaultToggle();
-      }).catch(() => { show3CDefaultToggle(); });
+      Promise.all([
+        syncedLS.refresh('unit3CDefault'),
+        syncedLS.refresh('unit3CSchedule')
+      ]).finally(() => show3CDefaultToggle());
     } else {
       document.getElementById('pwErr').style.display='block';
       document.getElementById('pwInput').value='';
@@ -7273,8 +7278,7 @@ async function clearSimData(){
       await gasCall({action:'clearSheet', sheet:LISTS.bookings});
       await gasCall({action:'clearSheet', sheet:LISTS.state});
       // Re-write defaults after clearing state sheet
-      await setState('unit3CDefault', 'closed');
-      localStorage.setItem('unit3CDefault', 'closed');
+      await syncedLS.set('unit3CDefault', 'closed');
       show3CDefaultToggle();
     } catch(e){ toast('Some sheets could not be cleared: ' + e.message, true); }
   }
@@ -9612,13 +9616,16 @@ async function silentRefreshProdLog(){
     // refresh until something else triggers it — caused multi-minute lag.
     const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
     // Watched cross-device keys: BN's normal-break templates (both shifts —
-    // grid is toggleable) and current shift's start time. Other devices may
-    // have updated these; fold them into the fingerprint so changes trigger
-    // a re-render and the relevant UI auto-refreshes.
+    // grid is toggleable), current shift's start time, and 3C status keys
+    // (default + scheduled timeline). Other devices may have updated these;
+    // fold them into the fingerprint so changes trigger a re-render and the
+    // relevant UI auto-refreshes.
     const watchedKeys = [
       `bnDefault_${BNS.name}_Day`,
       `bnDefault_${BNS.name}_Noc`,
-      `bnStart_${BNS.name}_${dt}_${shift}`
+      `bnStart_${BNS.name}_${dt}_${shift}`,
+      'unit3CDefault',
+      'unit3CSchedule'
     ];
     const [[bookingsRaw, scheds], stateChanged] = await Promise.all([
       Promise.all([
@@ -9663,6 +9670,13 @@ async function silentRefreshProdLog(){
       if(stateChanged.some(k => k.startsWith('bnStart_')) && typeof restoreBNStartTimeUI === 'function'){
         restoreBNStartTimeUI();
       }
+      // If 3C state changed (default or schedule), the visible status line
+      // and any 3C-affected rotations need to update. _3CTick handles the
+      // detection of effective-status flips (status as of NOW), so just
+      // refresh the toggle UI here — the next _3CTick will catch flips.
+      if(stateChanged.some(k => k === 'unit3CDefault' || k === 'unit3CSchedule')){
+        if(typeof show3CDefaultToggle === 'function') show3CDefaultToggle();
+      }
     }
   } catch(e){
     // Silent failure — next poll will retry
@@ -9686,11 +9700,16 @@ async function silentRefreshCoverage(){
       `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
     const scheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    // Watched: every covering BN's bnStart for this shift. Cross-device
-    // changes here affect which slots staff see as claimable.
-    const watchedKeys = scheds
-      .filter(s => s.Status !== 'inactive')
-      .map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`);
+    // Watched: every covering BN's bnStart for this shift, plus 3C state.
+    // Cross-device changes here affect which slots staff see as claimable
+    // and whether 3C is included in coverage at all.
+    const watchedKeys = [
+      ...scheds
+        .filter(s => s.Status !== 'inactive')
+        .map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`),
+      'unit3CDefault',
+      'unit3CSchedule'
+    ];
     await syncedLS.refreshMany(watchedKeys);
     const fp = [
       ...bookings.map(b => `${b.Id}:${b.Unit}:${normSlot(b.SlotTime)}:${b.BreakStatus||''}:${b.IsCompleted||''}`),
