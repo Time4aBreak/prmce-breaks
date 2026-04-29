@@ -3469,25 +3469,23 @@ async function warmDefaultTemplate(name, shift){
 // for a given BN's shift (e.g. Tinsley arriving at 9 AM hides 0815/0835 from
 // staff). Critical to keep cross-device-consistent — a stale start time on
 // Device B could let a staff slot be claimed that Tinsley can't actually cover.
+// Thin wrapper over syncedLS.warm — kept as a named function so call sites
+// stay readable and the key derivation lives in one place.
 async function warmBNStartTime(name, date, shift){
   if(!name || !date || !shift) return;
-  const key = `bnStart_${name}_${date}_${shift}`;
-  if(localStorage.getItem(key)) return;
-  try {
-    const remote = await getState(key);
-    if(remote) localStorage.setItem(key, typeof remote === 'string' ? remote : JSON.stringify(remote));
-  } catch(e){}
+  return syncedLS.warm(`bnStart_${name}_${date}_${shift}`);
 }
 
 // Batch-warm bnStart for many BN/date/shift combos in parallel. Used by
 // loadSlots so each unit's covering BNs all hydrate at once instead of
 // serializing N getState calls.
 async function warmBNStartTimes(triples){
-  const missing = triples.filter(({name, date, shift}) => {
-    return name && date && shift && !localStorage.getItem(`bnStart_${name}_${date}_${shift}`);
-  });
-  if(!missing.length) return;
-  await Promise.all(missing.map(({name, date, shift}) => warmBNStartTime(name, date, shift)));
+  if(!triples?.length) return;
+  return syncedLS.warmMany(
+    triples
+      .filter(({name, date, shift}) => name && date && shift)
+      .map(({name, date, shift}) => `bnStart_${name}_${date}_${shift}`)
+  );
 }
 
 // Warm all BN defaults from BNState for a list of {name, shift} pairs
@@ -4415,8 +4413,9 @@ async function loadSlots(silent=false){
     );
     const bnStartMins = {};
     [...covering, ...oppCovering].forEach(c => {
-      const key = `bnStart_${c.BreakNurseName}_${c.ShiftDate || dt}_${c.ShiftType}`;
-      const val = localStorage.getItem(key);
+      // syncedLS.get handles both new JSON-encoded and legacy raw-string
+      // values written before the migration.
+      const val = syncedLS.get(`bnStart_${c.BreakNurseName}_${c.ShiftDate || dt}_${c.ShiftType}`);
       if(val){ bnStartMins[c.BreakNurseName] = toMin(val); }
     });
     const earliestBNStart = Object.values(bnStartMins).length
@@ -5656,8 +5655,9 @@ function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS
 // custom start time if BN set one (handles late arrivals).
 function bnShiftStarted(dt, shift, bnName){
   if(!dt || !shift) return false;
-  const customKey = `bnStart_${bnName}_${dt}_${shift}`;
-  const custom = localStorage.getItem(customKey);
+  // syncedLS.get handles both new-style (JSON-encoded) and legacy raw-string
+  // values — direct localStorage.getItem would mishandle the JSON case.
+  const custom = syncedLS.get(`bnStart_${bnName}_${dt}_${shift}`);
   const startMin = custom ? toMin(custom) : (shift === 'Day' ? 480 : 1200); // 0800 / 2000
   const start = new Date(dt + 'T00:00:00');
   start.setMinutes(start.getMinutes() + startMin);
@@ -5667,7 +5667,7 @@ function populateBNStartTimeSlots(){
   const el = document.getElementById('bnStartTime');
   if(!el) return;
   const shift = BNS.shift || detectShift();
-  const saved = localStorage.getItem(getBNStartKey()) || '';
+  const saved = syncedLS.get(getBNStartKey()) || '';
   // Only filter past slots if viewing today's shift — future dates show all slots
   const isToday = (BNS.date || today()) === shiftDate(shift);
   // Only filter past slots if the shift is currently active
@@ -5679,37 +5679,48 @@ function populateBNStartTimeSlots(){
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
 
-function onBNStartTimeChange(){
+async function onBNStartTimeChange(){
   const val = document.getElementById('bnStartTime').value;
   const key = getBNStartKey();
-  if(val){
-    localStorage.setItem(key, val);
-    // Mirror to BNState so other devices see the same start time. Critical
-    // for staff Sign Up: an out-of-sync start time could let staff claim
-    // slots before this BN arrives. Fire-and-forget — local cache is the
-    // immediate source of truth for this device.
-    setState(key, val).catch(()=>{});
-  } else {
-    localStorage.removeItem(key);
-    deleteState(key).catch(()=>{});
-  }
   const _sy1 = window.scrollY;
-  loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
-  toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
+  try {
+    if(val){
+      // syncedLS.set updates LS immediately and mirrors to BNState; throws on
+      // remote failure with its own error toast so the user knows to retry.
+      await syncedLS.set(key, val);
+    } else {
+      await syncedLS.delete(key);
+    }
+    loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
+    toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
+  } catch(e){
+    // syncedLS already surfaced the network-error toast. Don't paint over it.
+    // Re-render so the dropdown reflects current (rolled-back) LS state.
+    loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
+  }
 }
-function clearBNStartTime(){
+async function clearBNStartTime(){
   const key = getBNStartKey();
-  localStorage.removeItem(key);
-  deleteState(key).catch(()=>{});
-  const el = document.getElementById('bnStartTime');
-  if(el) el.value = '';
   const _sy2 = window.scrollY;
-  loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
-  toast('Start time cleared');
+  try {
+    await syncedLS.delete(key);
+    const el = document.getElementById('bnStartTime');
+    if(el) el.value = '';
+    loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
+    toast('Start time cleared');
+  } catch(e){
+    // syncedLS already surfaced the error toast. Skip the success toast and
+    // skip clearing the UI — local state stays in sync with BNState.
+    loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
+  }
 }
 function restoreBNStartTimeUI(){
   // Auto-clear start time keys after the BN's shift has ended
   // Day BN clocks out at 2030, Noc BN clocks out at 0830 (next day)
+  // Note: this only evicts LS — the BNState row stays. Old rows accumulate
+  // but don't interfere because they're keyed by date (a fresh shift uses
+  // a different key). Avoiding round trips on every page load is the
+  // tradeoff. Admin cleanup can sweep stale rows later if needed.
   const shiftEndMin = { Day: BN_CLOCKOUT_DAY, Noc: BN_CLOCKOUT_NOC };
   Object.keys(localStorage).filter(k => k.startsWith('bnStart_')).forEach(k => {
     const parts = k.split('_');
@@ -9981,7 +9992,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // Pre-shift dim threshold: slots before BN's start time render at 50%
       // opacity. Same start as the claim gate (custom or default 0800/2000)
       // so visual + functional rules stay consistent.
-      const _customStart = localStorage.getItem(`bnStart_${BNS.name}_${dt}_${shift}`);
+      const _customStart = syncedLS.get(`bnStart_${BNS.name}_${dt}_${shift}`);
       const _startSortKey = _customStart
         ? sortKey(_customStart, shift)
         : (shift === 'Day' ? 480 : 1200);
