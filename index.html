@@ -188,6 +188,16 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 </head>
 <body>
 
+<!-- ═══════════ UPDATE BANNER ═══════════ -->
+<!-- Hidden until version mismatch detected by _3CTick. Non-dismissable —
+     intentionally — so nurses don't snooze it indefinitely on a critical
+     update. Tapping the button reloads the page, fetching the latest HTML
+     from GitHub Pages and clearing the banner automatically. -->
+<div id="appUpdateBanner" style="display:none;position:fixed;top:0;left:0;right:0;background:var(--red);color:white;padding:12px 16px;z-index:99999;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;box-shadow:0 2px 12px rgba(0,0,0,0.2);font-size:.9rem">
+  <span style="font-weight:600">⚠ Update required, please tap here.</span>
+  <button onclick="location.reload()" style="background:white;color:var(--red);border:none;padding:8px 16px;border-radius:6px;font-weight:700;font-size:.85rem;cursor:pointer">Refresh now</button>
+</div>
+
 <!-- ═══════════ NAV ═══════════ -->
 <nav class="nav">
   <div class="nav-brand">
@@ -807,6 +817,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+    <!-- App version / push update -->
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
+        <div style="flex:1;min-width:200px">
+          <div class="card-label" style="margin:0">📢 App Version</div>
+          <div id="appVersionLine" style="font-size:.85rem;color:var(--muted);margin-top:6px">Loading…</div>
+        </div>
+        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()">Push update</button>
+      </div>
+    </div>
+
     <!-- Change passwords — collapsible -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePwCard()">
@@ -1220,6 +1241,15 @@ const S = {
 // ── Set to true to use local simulation instead ────────
 const SIM_MODE = false;
 const DEV_MODE = true; // Auto-unlock portal as admin — set false for production
+// ─────────────────────────────────────────────────────
+
+// ── App version ───────────────────────────────────────
+// Bump this string before every deploy. When admin taps "📢 Push update"
+// in the admin panel, this value is written to BNState. Other devices'
+// _3CTick compares their loaded APP_VERSION to BNState; if different, a
+// non-dismissable banner appears prompting refresh. Tapping refresh
+// reloads, fetches the new HTML from GitHub Pages, and the banner clears.
+const APP_VERSION = '2026-04-29-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2189,6 +2219,49 @@ function show3CDefaultToggle(){
   line.innerHTML = html;
 }
 
+// ── App version push (admin) ───────────────────────────
+// pushAppUpdate writes this device's APP_VERSION to BNState. Other devices
+// poll BNState in _3CTick and show the update banner if their loaded
+// APP_VERSION differs. Admin uses this AFTER deploying a new build to
+// nudge nurses on stale tabs to refresh.
+async function pushAppUpdate(){
+  const remoteVer = syncedLS.get('appVersion');
+  if(remoteVer === APP_VERSION){
+    if(!await customConfirm(
+      `All devices already on ${APP_VERSION}. Push anyway?\n\n(Useful if some devices haven't checked in recently.)`,
+      'Push again', 'Go back'
+    )) return;
+  } else {
+    if(!await customConfirm(
+      `Push ${APP_VERSION} to all devices?\n\nDevices on older versions will see an "Update required" banner within ~15 seconds.`,
+      `Push ${APP_VERSION}`, 'Go back'
+    )) return;
+  }
+  const btn = document.getElementById('pushUpdateBtn');
+  if(btn){ btn.disabled = true; btn.textContent = 'Pushing…'; }
+  try {
+    await syncedLS.set('appVersion', APP_VERSION);
+    toast(`📢 ${APP_VERSION} pushed. Other devices will prompt to refresh shortly.`);
+    showAppVersionLine();
+  } catch(e){
+    // syncedLS already toasted the error.
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = 'Push update'; }
+  }
+}
+
+function showAppVersionLine(){
+  const line = document.getElementById('appVersionLine');
+  if(!line) return;
+  const remoteVer = syncedLS.get('appVersion');
+  if(!remoteVer){
+    line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <em>not yet set</em></span>`;
+    return;
+  }
+  const matches = remoteVer === APP_VERSION;
+  line.innerHTML = `This device: <strong>${APP_VERSION}</strong><br><span style="font-size:.78rem">Server: <strong style="color:${matches?'var(--green)':'var(--red)'}">${remoteVer}</strong>${matches ? ' ✓' : ' (mismatch — devices on older versions will see banner)'}</span>`;
+}
+
 // Cancel a future-scheduled 3C change (remove its entry from the schedule)
 async function cancelScheduled3CChange(effectiveAt){
   if(!await customConfirm('Cancel this scheduled 3C change?', 'Yes, cancel it', 'Go back')) return;
@@ -2204,12 +2277,28 @@ async function cancelScheduled3CChange(effectiveAt){
 // the flip.
 let _3CTickLastStatus = null;
 async function _3CTick(){
-  // Pull latest 3C state from BNState before reading. Without this, the tick
-  // paints whatever localStorage already has — meaning a schedule change made
-  // on another device never surfaces here unless the user opens the admin
-  // panel (which has its own refresh). The 3C status line lives in admin and
-  // the effective-status flip detection below both depend on this being fresh.
-  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule']); } catch{}
+  // Pull latest 3C state + app version from BNState before reading. Without
+  // this, the tick paints whatever localStorage already has — meaning a
+  // schedule change or app-update push made on another device never surfaces
+  // here unless the user opens the admin panel.
+  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule', 'appVersion']); } catch{}
+  // Show update banner if BNState appVersion differs from this device's
+  // loaded APP_VERSION. Server's value is empty until admin first pushes —
+  // missing/empty values match anything, so banner only appears after admin
+  // explicitly bumps it. Banner stays visible until the user taps Refresh
+  // (which reloads, fetches fresh HTML, and the comparison passes again).
+  try {
+    const remoteVer = syncedLS.get('appVersion');
+    const banner = document.getElementById('appUpdateBanner');
+    if(banner){
+      const mismatch = remoteVer && typeof remoteVer === 'string' && remoteVer !== APP_VERSION;
+      banner.style.display = mismatch ? 'flex' : 'none';
+    }
+    // Keep the admin's "App Version" status line current so they can see
+    // mismatches resolve as devices update. Cheap DOM update — no-op if
+    // the admin card isn't on screen.
+    if(typeof showAppVersionLine === 'function') showAppVersionLine();
+  } catch{}
   // Self-heal: drop redundant consecutive same-status entries from schedule.
   // Cheap no-op when the list is already clean. Without this, a stale entry
   // pre-dating the compaction logic would persist forever — only new writes
@@ -3083,6 +3172,7 @@ function unlockPortal(){
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
       show3CDefaultToggle();
+      showAppVersionLine();
       update3CToggle();
     }
   }).catch(e => {
@@ -3194,14 +3284,16 @@ function showSubTab(name, btn){
       const panel2 = document.getElementById('adminPanel');
       if(gate) gate.style.display = 'none';
       if(panel2) panel2.style.display = 'block';
-      // Sync 3C default + schedule from BNState whenever admin panel opens.
-      // Uses syncedLS.refresh which queries BNState directly (bypassing the
-      // LS-fallback in getState) so a remote delete is detected even if local
-      // has stale data. show3CDefaultToggle re-reads via syncedLS.get afterward.
+      // Sync 3C default + schedule + app version from BNState whenever admin
+      // panel opens. Uses syncedLS.refresh which queries BNState directly
+      // (bypassing the LS-fallback in getState) so a remote delete is detected
+      // even if local has stale data. show*Line re-reads via syncedLS.get
+      // afterward.
       Promise.all([
         syncedLS.refresh('unit3CDefault'),
-        syncedLS.refresh('unit3CSchedule')
-      ]).finally(() => show3CDefaultToggle());
+        syncedLS.refresh('unit3CSchedule'),
+        syncedLS.refresh('appVersion')
+      ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
     }
     // Only load admin data if gate has been passed — otherwise the BN-level
     // visitor stays on the gate and data isn't populated behind it.
@@ -3271,16 +3363,18 @@ function showTab(name, btn){
       renderImportedNamesList();
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
-      show3CDefaultToggle(); update3CToggle();
+      show3CDefaultToggle(); showAppVersionLine(); update3CToggle();
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
-    // Always sync 3C default + schedule from BNState on portal open — source
-    // of truth is Sheets. syncedLS.refresh detects cross-device deletes too.
+    // Always sync 3C default + schedule + app version from BNState on portal
+    // open — source of truth is Sheets. syncedLS.refresh detects cross-device
+    // deletes too.
     Promise.all([
       syncedLS.refresh('unit3CDefault'),
-      syncedLS.refresh('unit3CSchedule')
-    ]).finally(() => show3CDefaultToggle());
+      syncedLS.refresh('unit3CSchedule'),
+      syncedLS.refresh('appVersion')
+    ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
 
     // If a BN is already signed in to My Shift, refresh their view so any
     // changes made on the Sign Up tab (or by other users) while they were
@@ -6783,8 +6877,9 @@ function unlock(){
       renderImportedEntriesSummary();
       Promise.all([
         syncedLS.refresh('unit3CDefault'),
-        syncedLS.refresh('unit3CSchedule')
-      ]).finally(() => show3CDefaultToggle());
+        syncedLS.refresh('unit3CSchedule'),
+        syncedLS.refresh('appVersion')
+      ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
     } else {
       document.getElementById('pwErr').style.display='block';
       document.getElementById('pwInput').value='';
