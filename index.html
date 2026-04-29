@@ -818,13 +818,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     </div>
 
     <!-- App version / push update -->
+    <!-- Push button is hidden during pre-launch testing to prevent accidental
+         version mismatches on the fleet. Status line stays visible so admin
+         can verify cross-device version state. To re-enable for go-live,
+         remove the inline display:none on pushUpdateBtn. -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div style="flex:1;min-width:200px">
           <div class="card-label" style="margin:0">📢 App Version</div>
           <div id="appVersionLine" style="font-size:.85rem;color:var(--muted);margin-top:6px">Loading…</div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()">Push update</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()" style="display:none">Push update</button>
       </div>
     </div>
 
@@ -947,6 +951,28 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <button class="btn btn-primary" id="manageTransferBtn" onclick="manageSlotAction('transfer')">Transfer to another nurse</button>
       <button class="btn btn-danger" id="manageCancelBtn" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Give up this break time</button>
       <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
+    </div>
+  </div>
+</div>
+
+<!-- Transfer staging modal — used by the Day/Noc inline picker. Stages a
+     transfer (no immediate network call); the actual transfer happens on
+     Submit alongside any other staged actions. -->
+<div id="transferStagingModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
+  <div style="background:var(--card);border-radius:16px;padding:22px;max-width:460px;width:94%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+    <div style="font-weight:700;font-size:1rem;margin-bottom:4px" id="transferStagingTitle">Transfer your break</div>
+    <div style="font-size:.85rem;color:var(--muted);margin-bottom:16px" id="transferStagingInfo"></div>
+    <div style="margin-bottom:16px;padding:14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg)">
+      <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
+      <div style="display:flex;gap:8px">
+        <input type="text" id="transferStagingName" placeholder="First name" style="flex:1;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferStagingExt" placeholder="Ext" maxlength="5" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+      </div>
+      <div id="transferStagingErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
+    </div>
+    <div style="display:flex;flex-direction:column;gap:8px">
+      <button class="btn btn-primary" id="transferStagingSaveBtn" onclick="confirmTransferStaging()">Save transfer</button>
+      <button class="btn btn-ghost" onclick="closeTransferStagingModal()">Go back</button>
     </div>
   </div>
 </div>
@@ -1230,6 +1256,12 @@ const S = {
   editingAssignId: null,
   refreshTmr:      null,
   pendingClaims:   new Set(),  // slot times staged for submission
+  // Staging for actions on slots already owned by the nurse. Both keyed by
+  // booking Id so a slot can have at most one staged action. Submit runs all
+  // three buckets (claims, cancels, transfers) as a single batch.
+  pendingCancels:  new Set(),  // booking Ids staged for deletion
+  pendingTransfers: new Map(), // bookingId -> { newFirst, newExt, slotTime, slotShift }
+  pickerOpenFor:   null,       // bookingId of the row currently showing the [Cancel][Transfer][Keep] picker
   otherEndTime:    null,
   submitting:      false       // guard against double-tap during submission
 };
@@ -1249,7 +1281,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-04-29-04';
+const APP_VERSION = '2026-04-29-06';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3405,6 +3437,9 @@ function showTab(name, btn){
 function pickUnit(u){
   S.unit=u;
   S.pendingClaims.clear();
+  S.pendingCancels.clear();
+  S.pendingTransfers.clear();
+  S.pickerOpenFor = null;
   updateSubmitBar();
   document.querySelectorAll('.unit-btn').forEach(b=>b.classList.remove('active'));
   const _ubtn = document.getElementById(`ub-${u}`);
@@ -3553,6 +3588,9 @@ function selectStaffShift(sh){
   if(ow) ow.style.display = sh === 'Other' ? 'block' : 'none';
   if(sh === 'Other') populateOtherEndTimes();
   S.pendingClaims.clear();
+  S.pendingCancels.clear();
+  S.pendingTransfers.clear();
+  S.pickerOpenFor = null;
   updateSubmitBar();
   renderShiftPill();
   updateNameCardState();
@@ -3593,6 +3631,9 @@ function onOtherEndTimeChange(){
   S.otherEndTime = val;
   renderShiftPill();
   S.pendingClaims.clear();
+  S.pendingCancels.clear();
+  S.pendingTransfers.clear();
+  S.pickerOpenFor = null;
   updateSubmitBar();
   // Clear caches and stop timer so stale data doesn't overwrite fresh load
   _slotRenderCache = null;
@@ -4765,21 +4806,72 @@ async function loadSlots(silent=false){
 
       const isPending = S.pendingClaims.has(slot);
       const isPastSlot = shiftIsActive && isPast(slot, shift);
+      // Owned-slot staging state (only meaningful when isMine)
+      const myBookingId      = isMine ? booking.Id : null;
+      const isCancelStaged   = isMine && S.pendingCancels.has(myBookingId);
+      const isTransferStaged = isMine && S.pendingTransfers.has(myBookingId);
+      const isPickerOpen     = isMine && S.pickerOpenFor === myBookingId;
+      const transferData     = isTransferStaged ? S.pendingTransfers.get(myBookingId) : null;
       const cls = isMine?'mine':isTaken?(isPastSlot?'taken past':'taken'):isPending?'mine':canClaim?'open':'locked';
-      const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
-      const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
-      const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
-
-      html+=`<div class="slot-row ${cls}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
-        <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
-        <div class="slot-name ${booking||isPending?'filled':''}">${
-          isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason === openLabel ? (_slotBNMap[slot] || lockReason) : `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}`))
-        }</div>
-        <div>
-          ${isMine && !isPastSlot  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
-          ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
-          ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
-        </div>
+      // Row visual treatment — staging states override the default
+      let rowStyle, timeStyle;
+      if(isCancelStaged){
+        rowStyle  = 'background:#fff5f5;border-color:#f5c0c0;opacity:0.7';
+        timeStyle = 'color:var(--muted);text-decoration:line-through';
+      } else if(isTransferStaged){
+        rowStyle  = 'background:#fff8eb;border-color:#f3d68a';
+        timeStyle = 'color:#a06a00;font-weight:700';
+      } else if(isPending){
+        rowStyle  = 'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)';
+        timeStyle = 'color:var(--teal-dk);font-weight:700';
+      } else if(isOtherShiftClaim){
+        rowStyle  = 'background:#fff5f5;border-color:#f5c0c0';
+        timeStyle = 'color:var(--red)';
+      } else {
+        rowStyle = '';
+        timeStyle = '';
+      }
+      // Slot-name middle column content
+      let nameCellHtml;
+      if(isCancelStaged){
+        nameCellHtml = `<span style="color:var(--muted)">Will cancel · ${booking.NurseName}</span>`;
+      } else if(isTransferStaged){
+        const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+        nameCellHtml = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
+      } else if(isMine){
+        nameCellHtml = booking.NurseName;
+      } else if(isPending){
+        nameCellHtml = '\u2713 Selected';
+      } else if(isOtherShiftClaim){
+        nameCellHtml = `${booking.NurseName} ⚠`;
+      } else if(booking){
+        nameCellHtml = booking.NurseName;
+      } else {
+        nameCellHtml = canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason === openLabel ? (_slotBNMap[slot] || lockReason) : `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}`);
+      }
+      // Action cell — owned slots route through the new picker; others unchanged
+      let actionHtml = '';
+      if(isMine && !isPastSlot){
+        if(isCancelStaged || isTransferStaged){
+          actionHtml = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${booking.Id}','${slot}')">↺ Undo</button>`;
+        } else if(isPickerOpen){
+          actionHtml = `<div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-danger btn-sm" onclick="pickCancel('${booking.Id}','${slot}')">Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${booking.NurseName}')">Transfer</button>
+            <button class="btn btn-ghost btn-sm" onclick="pickKeep('${slot}')">Keep</button>
+          </div>`;
+        } else {
+          actionHtml = `<button class="btn btn-danger btn-sm" onclick="openPicker('${booking.Id}','${slot}')">✕ Manage</button>`;
+        }
+      } else if(isPending){
+        actionHtml = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>`;
+      } else if(canClaim){
+        actionHtml = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>`;
+      }
+      html+=`<div class="slot-row ${cls}" data-slot="${slot}" style="${rowStyle}">
+        <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
+        <div class="slot-name ${booking||isPending?'filled':''}">${nameCellHtml}</div>
+        <div>${actionHtml}</div>
       </div>`;
     });
     // Silent DOM update — only re-render if content changed
@@ -4913,52 +5005,16 @@ let _otherSlotRenderCache = null; // { allSlots, allBookings, nurseName, activeD
 
 function renderSlotsFromCache(){
   if(!_slotRenderCache){ loadSlots(true); return; } // fallback if no cache yet
-  const { future, bMap, bnBreaks, covering, oppCovering, shift, overlapRange } = _slotRenderCache;
-  // Always read name/ext live from DOM — cache may be stale for overlap-only coverage
-  const _rsFirstName = document.getElementById('nurseName').value.trim();
-  const _rsExt       = document.getElementById('nurseExt').value.trim();
-  const nurseExt  = _rsExt;
-  const nurseName = _rsFirstName && /^[0-9]{5}$/.test(_rsExt) ? `${toTitleCase(_rsFirstName)} (${_rsExt})` : '';
+  const { future, bnBreaks } = _slotRenderCache;
   const list = document.getElementById('slotsList');
   if(!list) return;
-  const myBookings = nurseName
-    ? Object.values(bMap).filter(b => b.NurseName === nurseName && isStaffBooking(b))
-    : [];
-  const mySameShift = myBookings.filter(b => b.ShiftType === shift);
-  const canClaimMore = mySameShift.length < MAX_SLOTS;
-  const shiftWindowOpen = staffWindowOpen(shift);
-  const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
-  const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
+  // Delegate per-row rendering to _renderSingleSlotRow so the full-render and
+  // surgical-update paths produce identical markup. Without this, drift between
+  // the two functions reintroduces the rapid-tap race.
   let html = '';
   future.forEach(slot => {
     if(bnBreaks.has(slot)) return;
-    const booking = bMap[slot];
-    const isMine  = booking && booking.NurseName === nurseName && nurseName;
-    const isTaken = booking && !isMine;
-    const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
-    const isPending = S.pendingClaims.has(slot);
-    let canClaim = false, lockReason = '';
-    if(!isTaken && !isMine){
-      if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
-      else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
-      else if(!canClaimMore)             { canClaim=false; lockReason='Max 3 slots reached'; }
-      else                               { canClaim=true; }
-    }
-    const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
-    const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
-    const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
-    const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
-    html += `<div class="slot-row ${cls}" data-slot="${slot}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
-      <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
-      <div class="slot-name ${booking||isPending?'filled':''}">${
-        isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
-      }</div>
-      <div>
-        ${isMine && !isPast(slot, shift)  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
-        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
-        ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
-      </div>
-    </div>`;
+    html += _renderSingleSlotRow(slot);
   });
   list.innerHTML = html;
   list.dataset.lastHtml = html;
@@ -5030,6 +5086,8 @@ function _updateOtherSlotRow(slot, slotShift){
 
 // Build a single row's HTML from the cache. Mirrors the row template inside
 // renderSlotsFromCache exactly — keep these in sync if the row markup changes.
+// Surgical-update contract (Flavor 1 fix): row is uniquely keyed by data-slot
+// so _updateSlotRow can replace just this node without rebuilding others.
 function _renderSingleSlotRow(slot){
   if(!_slotRenderCache) return '';
   const { future, bMap, bnBreaks, shift } = _slotRenderCache;
@@ -5043,7 +5101,14 @@ function _renderSingleSlotRow(slot){
     ? Object.values(bMap).filter(b => b.NurseName === nurseName && isStaffBooking(b))
     : [];
   const mySameShift = myBookings.filter(b => b.ShiftType === shift);
-  const canClaimMore = mySameShift.length < MAX_SLOTS;
+  // Pending cancels reduce the user's effective slot count for the canClaimMore
+  // check — i.e. if they own 3 and stage a cancel on one, they should be able
+  // to stage a 3rd new claim. Pending transfers do NOT reduce the count
+  // (transfer keeps the slot in the system, just changes the owner).
+  const myStagedCancels = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
+  const effectiveOwned = mySameShift.length - myStagedCancels;
+  const pendingClaimCount = [...S.pendingClaims].filter(c => !c.includes('|') || c.split('|')[1] === shift).length;
+  const canClaimMore = (effectiveOwned + pendingClaimCount) < MAX_SLOTS;
   const shiftWindowOpen = staffWindowOpen(shift);
   const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
   const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
@@ -5052,6 +5117,12 @@ function _renderSingleSlotRow(slot){
   const isTaken = booking && !isMine;
   const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
   const isPending = S.pendingClaims.has(slot);
+  // Owned-slot staging state lookups (only meaningful when isMine)
+  const myBookingId   = isMine ? booking.Id : null;
+  const isCancelStaged   = isMine && S.pendingCancels.has(myBookingId);
+  const isTransferStaged = isMine && S.pendingTransfers.has(myBookingId);
+  const isPickerOpen     = isMine && S.pickerOpenFor === myBookingId;
+  const transferData     = isTransferStaged ? S.pendingTransfers.get(myBookingId) : null;
   let canClaim = false, lockReason = '';
   if(!isTaken && !isMine){
     if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
@@ -5059,25 +5130,72 @@ function _renderSingleSlotRow(slot){
     else if(!canClaimMore)             { canClaim=false; lockReason='Max 3 slots reached'; }
     else                               { canClaim=true; }
   }
+  // Row class & visual treatment.
+  // Cancel-staged owned slots get a muted/strike treatment; transfer-staged
+  // get an amber accent; picker-open keeps the normal mine background.
   const cls = isMine?'mine':isTaken?'taken':isPending?'mine':canClaim?'open':'locked';
-  const otherStyle = isOtherShiftClaim ? 'background:#fff5f5;border-color:#f5c0c0' : '';
-  const otherTimeStyle = isOtherShiftClaim ? 'color:var(--red)' : '';
-  const otherLabel = isOtherShiftClaim ? `${booking.NurseName} ⚠` : '';
-  return `<div class="slot-row ${cls}" data-slot="${slot}" style="${isPending?'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)':otherStyle}">
-      <div class="slot-time" style="${isPending?'color:var(--teal-dk);font-weight:700':otherTimeStyle}">${fmt12(slot)}</div>
-      <div class="slot-name ${booking||isPending?'filled':''}">${
-        isMine ? booking.NurseName : isPending ? '\u2713 Selected' : isOtherShiftClaim ? otherLabel : booking ? booking.NurseName : (canClaim?'Available':(lockReason||'Available'))
-      }</div>
-      <div>
-        ${isMine && !isPast(slot, shift)  ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${booking.Id}','${slot}','${booking.NurseName}')">✕ Manage</button>` : ''}
-        ${isPending ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>` : ''}
-        ${canClaim && !isPending ? `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>` : ''}
-      </div>
+  let rowStyle = '';
+  if(isCancelStaged)        rowStyle = 'background:#fff5f5;border-color:#f5c0c0;opacity:0.7';
+  else if(isTransferStaged) rowStyle = 'background:#fff8eb;border-color:#f3d68a';
+  else if(isPending)        rowStyle = 'border-color:var(--teal);box-shadow:0 0 0 2px var(--teal-mid)';
+  else if(isOtherShiftClaim) rowStyle = 'background:#fff5f5;border-color:#f5c0c0';
+  const timeStyle = isCancelStaged ? 'color:var(--muted);text-decoration:line-through'
+                  : isTransferStaged ? 'color:#a06a00;font-weight:700'
+                  : isPending ? 'color:var(--teal-dk);font-weight:700'
+                  : isOtherShiftClaim ? 'color:var(--red)' : '';
+  // Slot-name middle column content
+  let nameCell;
+  if(isCancelStaged){
+    nameCell = `<span style="color:var(--muted)">Will cancel · ${booking.NurseName}</span>`;
+  } else if(isTransferStaged){
+    const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+    nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
+  } else if(isMine){
+    nameCell = booking.NurseName;
+  } else if(isPending){
+    nameCell = '\u2713 Selected';
+  } else if(isOtherShiftClaim){
+    nameCell = `${booking.NurseName} ⚠`;
+  } else if(booking){
+    nameCell = booking.NurseName;
+  } else {
+    nameCell = canClaim ? 'Available' : (lockReason || 'Available');
+  }
+  // Action cell — depends on staging state
+  const slotIsPast = isPast(slot, shift);
+  let actionCell = '';
+  if(isMine && !slotIsPast){
+    if(isCancelStaged || isTransferStaged){
+      // Staged action — show Undo button
+      actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${booking.Id}','${slot}')">↺ Undo</button>`;
+    } else if(isPickerOpen){
+      // Picker open — show three inline buttons
+      actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
+        <button class="btn btn-danger btn-sm" onclick="pickCancel('${booking.Id}','${slot}')">Cancel</button>
+        <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${booking.NurseName}')">Transfer</button>
+        <button class="btn btn-ghost btn-sm" onclick="pickKeep('${slot}')">Keep</button>
+      </div>`;
+    } else {
+      // Default — show Manage button to open the picker
+      actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${booking.Id}','${slot}')">✕ Manage</button>`;
+    }
+  } else if(isPending){
+    actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>`;
+  } else if(canClaim){
+    actionCell = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>`;
+  }
+  return `<div class="slot-row ${cls}" data-slot="${slot}" style="${rowStyle}">
+      <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
+      <div class="slot-name ${booking||isPending?'filled':''}">${nameCell}</div>
+      <div>${actionCell}</div>
     </div>`;
 }
 
 function clearPending(){
   S.pendingClaims.clear();
+  S.pendingCancels.clear();
+  S.pendingTransfers.clear();
+  S.pickerOpenFor = null;
   updateSubmitBar();
   if(S.shift === 'Other'){
     renderOtherSlotsFromCache();
@@ -5086,17 +5204,197 @@ function clearPending(){
   }
 }
 
+// ── Staging helpers for owned-slot actions ─────────────
+// Each owned booking can have at most one staged action: cancel OR transfer
+// OR neither. The picker (Cancel / Transfer / Keep) cycles between these.
+// All three pending buckets (claims, cancels, transfers) submit together as
+// one batch via submitClaims.
+
+// Stage a cancel for an owned booking. Removes any in-progress transfer
+// staging on the same booking so there's only ever one staged action per row.
+function stageCancel(bookingId){
+  S.pendingTransfers.delete(bookingId);
+  S.pendingCancels.add(bookingId);
+  S.pickerOpenFor = null;
+  updateSubmitBar();
+}
+
+// Stage a transfer with the recipient details. Called after the user submits
+// the transfer modal. slotTime/slotShift are stored so the renderer can find
+// the row to update without doing a lookup against bookings cache.
+function stageTransfer(bookingId, newFirst, newExt, slotTime, slotShift){
+  S.pendingCancels.delete(bookingId);
+  S.pendingTransfers.set(bookingId, { newFirst, newExt, slotTime, slotShift });
+  S.pickerOpenFor = null;
+  updateSubmitBar();
+}
+
+// Remove any staged action on this booking — both buckets, just in case.
+function unstageOwned(bookingId){
+  S.pendingCancels.delete(bookingId);
+  S.pendingTransfers.delete(bookingId);
+  S.pickerOpenFor = null;
+  updateSubmitBar();
+}
+
+// Open the action picker on a row. Closes any previously-open picker first
+// so only one is visible at a time.
+function openSlotPicker(bookingId){
+  S.pickerOpenFor = bookingId;
+}
+
+// Close the picker without staging anything (the "Keep" button).
+function closeSlotPicker(){
+  S.pickerOpenFor = null;
+}
+
+// ── Picker action handlers (wired to inline buttons in row template) ──
+// Each opens the picker on a row, stages an action, or undoes a staged action.
+// All call _updateOwnedSlotRow afterwards to surgically re-render just the
+// affected row — preserving the Flavor 1 surgical-update contract.
+
+function openPicker(bookingId, slot){
+  // Close any other open picker on a different row first
+  const previouslyOpen = S.pickerOpenFor;
+  S.pickerOpenFor = bookingId;
+  if(previouslyOpen && previouslyOpen !== bookingId){
+    // Find and re-render the previously-open row to collapse its picker
+    _updateOwnedSlotRowByBookingId(previouslyOpen);
+  }
+  _updateOwnedSlotRow(slot);
+}
+
+function pickCancel(bookingId, slot){
+  stageCancel(bookingId);
+  _updateOwnedSlotRow(slot);
+}
+
+function pickKeep(slot){
+  closeSlotPicker();
+  _updateOwnedSlotRow(slot);
+}
+
+function pickTransfer(bookingId, slot, currentNurseName){
+  // Open the transfer modal in staging mode. On confirm, the modal stages
+  // the transfer; on cancel, the picker stays open so the user can pick
+  // something else.
+  openTransferStagingModal(bookingId, slot, currentNurseName);
+}
+
+// Called from the row's Undo button when an action is already staged
+function unstageOwnedAndRender(bookingId, slot){
+  unstageOwned(bookingId);
+  _updateOwnedSlotRow(slot);
+}
+
+// Surgical re-render for an owned-slot row. Day/Noc go through
+// _updateSlotRow (existing helper); Other goes through full re-render
+// for now (Other still uses its own render path for the row body).
+function _updateOwnedSlotRow(slot){
+  if(S.shift === 'Other'){
+    renderOtherSlotsFromCache();
+  } else {
+    _updateSlotRow(slot);
+  }
+}
+
+// When closing one row's picker, we don't always have the slot time on hand.
+// Find the row by booking Id via the current bMap and re-render it.
+function _updateOwnedSlotRowByBookingId(bookingId){
+  if(!_slotRenderCache) return;
+  const { bMap } = _slotRenderCache;
+  const found = Object.entries(bMap).find(([slot, b]) => b.Id === bookingId);
+  if(found){
+    _updateOwnedSlotRow(found[0]);
+  }
+}
+
+// ── Transfer staging modal ─────────────────────────────
+// Used by the Day/Noc inline picker's Transfer button. Stages the transfer
+// (does NOT dispatch immediately) — the actual spPatch happens on Submit.
+let _transferStagingContext = null; // { bookingId, slot, slotShift, currentNurseName }
+
+function openTransferStagingModal(bookingId, slot, currentNurseName){
+  // Determine the slot's shift from the cache
+  let slotShift = S.shift;
+  if(_slotRenderCache && _slotRenderCache.bMap[slot]){
+    slotShift = _slotRenderCache.bMap[slot].ShiftType || S.shift;
+  }
+  _transferStagingContext = { bookingId, slot, slotShift, currentNurseName };
+  document.getElementById('transferStagingTitle').textContent = `Transfer your ${fmt12(slot)} break`;
+  document.getElementById('transferStagingInfo').textContent = `${S.unit} · ${currentNurseName}`;
+  // Pre-fill if already staged for this booking
+  const existing = S.pendingTransfers.get(bookingId);
+  document.getElementById('transferStagingName').value = existing ? existing.newFirst : '';
+  document.getElementById('transferStagingExt').value  = existing ? existing.newExt : '';
+  document.getElementById('transferStagingErr').style.display = 'none';
+  const saveBtn = document.getElementById('transferStagingSaveBtn');
+  if(saveBtn){ saveBtn.disabled = false; saveBtn.textContent = existing ? 'Update transfer' : 'Save transfer'; }
+  document.getElementById('transferStagingModal').style.display = 'flex';
+  setTimeout(() => document.getElementById('transferStagingName').focus(), 50);
+}
+
+function closeTransferStagingModal(){
+  document.getElementById('transferStagingModal').style.display = 'none';
+  // Re-render the row that was about to be transferred so its picker collapses
+  // back to the Manage button (the user backed out without staging anything).
+  if(_transferStagingContext){
+    const { slot } = _transferStagingContext;
+    closeSlotPicker();
+    _updateOwnedSlotRow(slot);
+  }
+  _transferStagingContext = null;
+}
+
+function confirmTransferStaging(){
+  if(!_transferStagingContext) return;
+  const { bookingId, slot, slotShift, currentNurseName } = _transferStagingContext;
+  const newFirst = document.getElementById('transferStagingName').value.trim();
+  const newExt   = document.getElementById('transferStagingExt').value.trim();
+  const errEl    = document.getElementById('transferStagingErr');
+  if(!newFirst || !/^\d{5}$/.test(newExt)){
+    errEl.textContent = 'Enter a first name and 5-digit extension.';
+    errEl.style.display = 'block';
+    return;
+  }
+  // Don't allow transferring to yourself (same name + ext)
+  const myFirst = document.getElementById('nurseName').value.trim().toLowerCase();
+  const myExt   = document.getElementById('nurseExt').value.trim();
+  if(newFirst.toLowerCase() === myFirst && newExt === myExt){
+    errEl.textContent = "That's your own name and ext.";
+    errEl.style.display = 'block';
+    return;
+  }
+  stageTransfer(bookingId, newFirst, newExt, slot, slotShift);
+  document.getElementById('transferStagingModal').style.display = 'none';
+  _transferStagingContext = null;
+  _updateOwnedSlotRow(slot);
+}
+
 function updateSubmitBar(){
   const bar = document.getElementById('submitBar');
   const lbl = document.getElementById('submitBarLabel');
   if(!bar) return;
-  const n = S.pendingClaims.size;
-  if(n === 0){
+  const nClaim    = S.pendingClaims.size;
+  const nCancel   = S.pendingCancels.size;
+  const nTransfer = S.pendingTransfers.size;
+  const total = nClaim + nCancel + nTransfer;
+  if(total === 0){
     bar.style.display = 'none';
-  } else {
-    bar.style.display = 'flex';
+    return;
+  }
+  bar.style.display = 'flex';
+  // Build a human-readable summary. For pure-claim case (most common) preserve
+  // the original detailed format with slot times. Mixed actions show counts.
+  if(nCancel === 0 && nTransfer === 0){
     const times = [...S.pendingClaims].sort((a,b) => sortKey(a,S.shift)-sortKey(b,S.shift)).map(fmt12).join(', ');
-    lbl.textContent = `${n} break${n!==1?'s':''} selected: ${times}`;
+    lbl.textContent = `${nClaim} break${nClaim!==1?'s':''} selected: ${times}`;
+  } else {
+    const parts = [];
+    if(nClaim)    parts.push(`${nClaim} claim${nClaim!==1?'s':''}`);
+    if(nCancel)   parts.push(`${nCancel} cancel${nCancel!==1?'s':''}`);
+    if(nTransfer) parts.push(`${nTransfer} transfer${nTransfer!==1?'s':''}`);
+    lbl.textContent = `${total} change${total!==1?'s':''}: ${parts.join(' · ')}`;
   }
 }
 
@@ -5106,6 +5404,11 @@ async function submitClaims(){
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
     toast('Please enter your first name and a 5-digit Spectra extension.', true);
+    return;
+  }
+
+  // Need at least one staged action to submit
+  if(S.pendingClaims.size === 0 && S.pendingCancels.size === 0 && S.pendingTransfers.size === 0){
     return;
   }
 
@@ -5152,32 +5455,106 @@ async function submitClaims(){
     return;
   }
 
-  // Float check — once before the batch
-  const otherUnitBookings = allBookingsToday.filter(b => {
-    if(isBNBreak(b)) return false;
-    if(b.Unit === S.unit) return false;
-    const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
-    return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
-  });
-  if(otherUnitBookings.length){
-    // Modal opens — release submitting state so user can interact normally.
-    _resetSubmitState();
-    const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
-    const floated = await customConfirm(
-      `${toTitleCase(_nurseFirst)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
-      `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
-      `Go back to ${myOtherUnits.join(', ')}`
-    );
-    if(!floated){ pickUnit(myOtherUnits[0]); return; }
-    for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
-    S.pendingClaims.clear(); updateSubmitBar();
-    const extEl = document.getElementById('nurseExt');
-    if(extEl) extEl.value = '';
-    loadSlots(true);
-    toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}.`);
-    return;
+  // Float check — only relevant for new claims, skip if we're only managing existing slots
+  if(S.pendingClaims.size > 0){
+    const otherUnitBookings = allBookingsToday.filter(b => {
+      if(isBNBreak(b)) return false;
+      if(b.Unit === S.unit) return false;
+      const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
+      return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
+    });
+    // Don't trigger float modal for the user's own owned slots that are staged
+    // for cancel/transfer — those are intentional management actions.
+    const stagedBookingIds = new Set([...S.pendingCancels, ...S.pendingTransfers.keys()]);
+    const otherUnitNotStaged = otherUnitBookings.filter(b => !stagedBookingIds.has(b.Id));
+    if(otherUnitNotStaged.length){
+      // Modal opens — release submitting state so user can interact normally.
+      _resetSubmitState();
+      const myOtherUnits = [...new Set(otherUnitNotStaged.map(b => b.Unit))];
+      const floated = await customConfirm(
+        `${toTitleCase(_nurseFirst)}, you have breaks booked on ${myOtherUnits.join(', ')}. Did you float to a new unit?`,
+        `Cancel ${myOtherUnits.join(', ')} breaks & claim here`,
+        `Go back to ${myOtherUnits.join(', ')}`
+      );
+      if(!floated){ pickUnit(myOtherUnits[0]); return; }
+      for(const b of otherUnitNotStaged) await spDel(LISTS.bookings, b.Id);
+      S.pendingClaims.clear(); S.pendingCancels.clear(); S.pendingTransfers.clear();
+      updateSubmitBar();
+      const extEl = document.getElementById('nurseExt');
+      if(extEl) extEl.value = '';
+      loadSlots(true);
+      toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}.`);
+      return;
+    }
   }
 
+  const results = { claimed: [], cancelled: [], transferred: [], failed: [] };
+
+  // ── Process cancels first (frees slots for any claims that need them) ──
+  // Build a quick lookup of bookings by Id from fresh data for race-validation
+  const bookingsById = {};
+  allBookingsToday.forEach(b => { bookingsById[b.Id] = b; });
+
+  for(const bookingId of S.pendingCancels){
+    const fresh = bookingsById[bookingId];
+    if(!fresh){
+      results.failed.push({ label: 'cancel', reason: 'Slot was already changed by someone else' });
+      continue;
+    }
+    try {
+      // Notification first (for BN view), then delete
+      const slotShift = fresh.ShiftType || S.shift;
+      const slotDate  = fresh.SlotDate || dt;
+      const key = `slotNotify_${slotDate}_${slotShift}`;
+      let notifications = [];
+      try { notifications = JSON.parse(localStorage.getItem(key) || '[]'); } catch{}
+      notifications.push({
+        type: 'cancel', unit: fresh.Unit, slotTime: fresh.SlotTime,
+        fromNurse: fresh.NurseName, ts: Date.now()
+      });
+      localStorage.setItem(key, JSON.stringify(notifications));
+      setState(key, notifications).catch(()=>{});
+      await spDel(LISTS.bookings, bookingId);
+      results.cancelled.push(fresh.SlotTime);
+      // Remove from cached data so any pending claim on the same slot can succeed
+      delete bookingsById[bookingId];
+      const idx = allBookingsToday.findIndex(b => b.Id === bookingId);
+      if(idx >= 0) allBookingsToday.splice(idx, 1);
+    } catch(e){
+      results.failed.push({ label: `cancel ${fmt12(fresh.SlotTime)}`, reason: e.message || 'Network error' });
+    }
+  }
+
+  // ── Process transfers ──
+  for(const [bookingId, transferInfo] of S.pendingTransfers){
+    const fresh = bookingsById[bookingId];
+    if(!fresh){
+      results.failed.push({ label: 'transfer', reason: 'Slot was already changed by someone else' });
+      continue;
+    }
+    try {
+      const newNurseName = `${toTitleCase(transferInfo.newFirst)} (${transferInfo.newExt})`;
+      const slotShift = fresh.ShiftType || S.shift;
+      const slotDate  = fresh.SlotDate || dt;
+      const key = `slotNotify_${slotDate}_${slotShift}`;
+      let notifications = [];
+      try { notifications = JSON.parse(localStorage.getItem(key) || '[]'); } catch{}
+      notifications.push({
+        type: 'transfer', unit: fresh.Unit, slotTime: fresh.SlotTime,
+        fromNurse: fresh.NurseName, toNurse: newNurseName, ts: Date.now()
+      });
+      localStorage.setItem(key, JSON.stringify(notifications));
+      setState(key, notifications).catch(()=>{});
+      await spPatch(LISTS.bookings, bookingId, { NurseName: newNurseName });
+      results.transferred.push({ slot: fresh.SlotTime, to: newNurseName });
+      // Update cached data so subsequent checks see the new owner
+      fresh.NurseName = newNurseName;
+    } catch(e){
+      results.failed.push({ label: `transfer ${fmt12(fresh.SlotTime)}`, reason: e.message || 'Network error' });
+    }
+  }
+
+  // ── Process new claims ──
   const slots = [...S.pendingClaims].sort((a,b) => {
     const aTime = a.includes('|') ? a.split('|')[0] : a;
     const bTime = b.includes('|') ? b.split('|')[0] : b;
@@ -5185,7 +5562,6 @@ async function submitClaims(){
     const bSh   = b.includes('|') ? b.split('|')[1] : S.shift;
     return sortKey(aTime, aSh) - sortKey(bTime, bSh);
   });
-  const results = { claimed: [], failed: [] };
   for(const slot of slots){
     const slotTime  = slot.includes('|') ? slot.split('|')[0] : slot;
     const slotShift = slot.includes('|') ? slot.split('|')[1] : S.shift;
@@ -5195,15 +5571,26 @@ async function submitClaims(){
       // Add to cached data so next iteration's max/race checks see it
       allBookingsToday.push({NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false});
     }
-    else results.failed.push({ slot: slotTime, reason: result });
+    else results.failed.push({ label: fmt12(slotTime), reason: result });
   }
+
+  // ── Clear staging state ──
   S.pendingClaims.clear();
+  S.pendingCancels.clear();
+  S.pendingTransfers.clear();
+  S.pickerOpenFor = null;
   updateSubmitBar();
+
+  // ── Summary toast ──
+  const successParts = [];
+  if(results.claimed.length)     successParts.push(`${results.claimed.length} claimed`);
+  if(results.cancelled.length)   successParts.push(`${results.cancelled.length} cancelled`);
+  if(results.transferred.length) successParts.push(`${results.transferred.length} transferred`);
   if(results.failed.length === 0){
-    toast(`✓ ${results.claimed.length} break${results.claimed.length!==1?'s':''} confirmed!`);
+    toast(`✓ ${successParts.join(', ')}!`);
   } else {
-    const ok = results.claimed.length ? `${results.claimed.length} confirmed. ` : '';
-    const fail = results.failed.map(f => `${fmt12(f.slot)}: ${f.reason}`).join(' | ');
+    const ok = successParts.length ? `${successParts.join(', ')}. ` : '';
+    const fail = results.failed.map(f => `${f.label}: ${f.reason}`).join(' | ');
     toast(`${ok}${results.failed.length} couldn't be saved: ${fail}`, true);
   }
   _resetSubmitState();
@@ -5438,10 +5825,48 @@ function renderOtherSlotsFromCache(){
 
     if(isMine){
       const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===curName && isStaffBooking(b));
-      return `<div class="slot-row mine" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:2px solid var(--teal);margin-bottom:6px;background:var(--teal-lt)">
-        <div class="slot-time" style="font-weight:700;color:var(--teal-dk)">${fmt12(time)}</div>
-        <div class="slot-name filled">${curName}</div>
-        ${myBooking ? `<button class="btn btn-danger btn-sm" onclick="manageMySlot('${myBooking.Id}','${time}','${escHTML(curName)}')">✕ Manage</button>` : ''}
+      const myBookingId = myBooking ? myBooking.Id : null;
+      const isCancelStaged   = myBookingId && S.pendingCancels.has(myBookingId);
+      const isTransferStaged = myBookingId && S.pendingTransfers.has(myBookingId);
+      const isPickerOpen     = myBookingId && S.pickerOpenFor === myBookingId;
+      const transferData     = isTransferStaged ? S.pendingTransfers.get(myBookingId) : null;
+      // Row visual treatment based on staging state
+      let rowStyle = 'display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;margin-bottom:6px;';
+      let timeStyle = '';
+      let nameCell;
+      if(isCancelStaged){
+        rowStyle += 'background:#fff5f5;border:1.5px solid #f5c0c0;opacity:0.7';
+        timeStyle = 'color:var(--muted);text-decoration:line-through';
+        nameCell = `<span style="color:var(--muted)">Will cancel · ${escHTML(curName)}</span>`;
+      } else if(isTransferStaged){
+        rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
+        timeStyle = 'color:#a06a00;font-weight:700';
+        const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+        nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
+      } else {
+        rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
+        timeStyle = 'font-weight:700;color:var(--teal-dk)';
+        nameCell = escHTML(curName);
+      }
+      // Action cell
+      let actionCell = '';
+      if(myBooking && !isPast(time, slotShift)){
+        if(isCancelStaged || isTransferStaged){
+          actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${myBookingId}','${time}')">↺ Undo</button>`;
+        } else if(isPickerOpen){
+          actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
+            <button class="btn btn-danger btn-sm" onclick="pickCancel('${myBookingId}','${time}')">Cancel</button>
+            <button class="btn btn-primary btn-sm" onclick="pickTransfer('${myBookingId}','${time}','${escHTML(curName)}')">Transfer</button>
+            <button class="btn btn-ghost btn-sm" onclick="pickKeep('${time}')">Keep</button>
+          </div>`;
+        } else {
+          actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${myBookingId}','${time}')">✕ Manage</button>`;
+        }
+      }
+      return `<div class="slot-row mine" data-slot-key="${time}|${slotShift}" style="${rowStyle}">
+        <div class="slot-time" style="${timeStyle}">${fmt12(time)}</div>
+        <div class="slot-name filled">${nameCell}</div>
+        <div>${actionCell}</div>
       </div>`;
     }
     if(booking){
