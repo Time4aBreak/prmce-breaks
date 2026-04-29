@@ -8719,6 +8719,12 @@ async function loadBNView(){
       }
     } catch(e){ /* fall through — loadBNConfirm will handle */ }
     loadBNConfirm();
+    // Start background polling so cross-device updates (other devices changing
+    // bnDefault, bnStart, bookings, schedule) propagate within ~10s while
+    // this BN is signed in. Inside the IIFE so we start AFTER any forward-scan
+    // jump has resolved BNS.date/shift — otherwise the first poll's fingerprint
+    // would be computed against the wrong shift, then immediately invalidated.
+    startProdLogPolling();
   })();
 }
 
