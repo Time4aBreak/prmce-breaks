@@ -5889,7 +5889,7 @@ function markCardUnavailableInDOM(bnName){
 // showReassignModal + handleReassignConfirm removed — modal-based reassign flow
 // replaced by processBNUnavailability + customConfirm (inline redistribution algorithm)
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
-  showBusy(redistribute ? `Redistributing ${firstName(bnName)}'s breaks…` : `Cancelling ${firstName(bnName)}'s breaks…`);
+  showBusy('Updating coverage…');
   try {
     // Get BN-A's units and mark record inactive
     // Fetch main record + all supplementals for this BN on this shift
