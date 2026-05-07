@@ -1281,7 +1281,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-07-02';
+const APP_VERSION = '2026-05-07-03';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1506,7 +1506,16 @@ async function spBatchUpsert(list, records){
   }
 }
 
-// Batch set state: write multiple BNState entries in one round trip
+// Batch set state: write multiple BNState entries in one round trip.
+//
+// Uses POST (gasCallPost) instead of GET because rotation payloads are
+// large — each entry contains a full slot-to-unit map JSON-stringified
+// and URL-encoded. With CHUNK_SIZE=5 the URL was exceeding browser/proxy
+// length limits (~2-8KB) and browsers refused to send the request,
+// returning "Failed to fetch" before Apps Script ever saw it. POST body
+// has no comparable limit — same payload, same chunk size, just safer
+// transport. Apps Script's doPost already routes action-tagged requests
+// (used elsewhere for batchInsert/batchDelete).
 async function spBatchSetState(entries){
   if(!entries.length) return;
   entries.forEach(({key, value}) => localStorage.setItem(key, JSON.stringify(value)));
@@ -1519,7 +1528,7 @@ async function spBatchSetState(entries){
   const CHUNK_SIZE = 5;
   for(let i = 0; i < entries.length; i += CHUNK_SIZE){
     const chunk = entries.slice(i, i + CHUNK_SIZE);
-    await gasCall({
+    await gasCallPost({
       action: 'batchSetState',
       entries: encodeURIComponent(JSON.stringify(chunk))
     });
