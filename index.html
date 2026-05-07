@@ -1139,6 +1139,198 @@ async function warm3CStatus(date, shift){
   } catch(e){}
 }
 
+// ═══════════════════════════════════════════════════════
+// PER-UNIT OPEN/CLOSED STATUS (generalized 3C pattern)
+// ═══════════════════════════════════════════════════════
+// Each of the 15 units in STAFF_UNITS has an open/closed status that
+// behaves like 3C's: a current default + a schedule of upcoming changes.
+//
+// Storage is two combined BNState rows so polling cost stays at 2 keys
+// instead of 30 (15 defaults + 15 schedules):
+//   `unitStatuses`   = { '3A': 'open', '4A': 'closed', ... }
+//   `unitSchedules`  = { '3A': [{effectiveAt, status}, ...], ... }
+// Units not present in the object default to 'open'.
+//
+// 3C remains structurally unique because of its C_PAIR rotation-sharing
+// with 4C — that mechanism lives in expandCPair (untouched). The 3C
+// system's existing keys (`unit3CDefault`, `unit3CSchedule`) are mirrored
+// into the new combined keys via one-time migration so 3C continues to
+// work through both pathways during transition. Cleanup chunk removes
+// the old keys after a stability period.
+//
+// Behavior parity with 3C:
+//  - Default status persists until a scheduled change takes effect
+//  - Scheduled changes fire at their effectiveAt datetime
+//  - Compaction drops consecutive same-status entries
+//  - Local time (PST/PDT) used consistently for comparisons
+
+// ── Read helpers ──────────────────────────────────────
+function getUnitStatuses(){
+  // Returns an object keyed by unit. Self-heals double-stringified values
+  // and bad shapes. Empty object on miss.
+  const parsed = syncedLS.get('unitStatuses');
+  if(!parsed) return {};
+  if(typeof parsed === 'string'){
+    try {
+      const reparsed = JSON.parse(parsed);
+      syncedLS.set('unitStatuses', reparsed).catch(()=>{});
+      return (reparsed && typeof reparsed === 'object' && !Array.isArray(reparsed)) ? reparsed : {};
+    } catch { return {}; }
+  }
+  return (typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+}
+
+function getUnitSchedules(){
+  const parsed = syncedLS.get('unitSchedules');
+  if(!parsed) return {};
+  if(typeof parsed === 'string'){
+    try {
+      const reparsed = JSON.parse(parsed);
+      syncedLS.set('unitSchedules', reparsed).catch(()=>{});
+      return (reparsed && typeof reparsed === 'object' && !Array.isArray(reparsed)) ? reparsed : {};
+    } catch { return {}; }
+  }
+  return (typeof parsed === 'object' && !Array.isArray(parsed)) ? parsed : {};
+}
+
+function getUnitStatus(unit){
+  // Default to 'open' for any unit not explicitly tracked. New units come
+  // online open until admin says otherwise.
+  return getUnitStatuses()[unit] || 'open';
+}
+
+function getUnitSchedule(unit){
+  const all = getUnitSchedules();
+  const list = all[unit];
+  return Array.isArray(list) ? list : [];
+}
+
+// ── Write helpers ─────────────────────────────────────
+function setUnitStatus(unit, val){
+  // Throws and toasts on remote failure — caller should catch if it cares.
+  // Mirrors 3C convention: setting to default ('open') still writes to keep
+  // the explicit record. Migration drift (unit was open by default, then
+  // explicitly set to open) doesn't matter because both paths produce 'open'
+  // when read.
+  const all = getUnitStatuses();
+  all[unit] = val;
+  return syncedLS.set('unitStatuses', all);
+}
+
+function setUnitSchedule(unit, entries){
+  // Sort and compact: drop consecutive same-status entries. Initialize
+  // "previous" to that unit's current default — first scheduled entry
+  // matching default is redundant and gets pruned. Mirrors set3CSchedule.
+  const sorted = [...entries].sort((a,b) => a.effectiveAt.localeCompare(b.effectiveAt));
+  const compacted = [];
+  let lastStatus = getUnitStatus(unit);
+  for(const e of sorted){
+    if(e.status !== lastStatus){
+      compacted.push(e);
+      lastStatus = e.status;
+    }
+  }
+  const all = getUnitSchedules();
+  all[unit] = compacted;
+  return syncedLS.set('unitSchedules', all);
+}
+
+async function addUnitScheduleEntry(unit, effectiveAt, status){
+  const list = getUnitSchedule(unit);
+  list.push({ effectiveAt, status });
+  await setUnitSchedule(unit, list);
+}
+
+async function cancelScheduledUnitChange(unit, effectiveAt){
+  const list = getUnitSchedule(unit).filter(e => e.effectiveAt !== effectiveAt);
+  await setUnitSchedule(unit, list);
+}
+
+// ── Core resolver: unit status at a specific moment ───
+// Walk the unit's schedule timeline, find most recent entry ≤ datetime.
+// Fallback to that unit's default. Mirrors effective3CStatusAt exactly.
+function effectiveUnitStatusAt(unit, datetime){
+  // 3C delegates to its existing path so closures via the legacy admin UI
+  // continue working until cleanup. Other units use the new generic path.
+  if(unit === '3C') return effective3CStatusAt(datetime);
+  const dt = datetime instanceof Date ? datetime : parseLocalIso(datetime);
+  const dtIso = toLocalIso(dt);
+  const schedule = getUnitSchedule(unit);
+  let scheduled = null;
+  for(const e of schedule){
+    if(e.effectiveAt <= dtIso) scheduled = e;
+    else break;
+  }
+  if(scheduled) return scheduled.status;
+  return getUnitStatus(unit);
+}
+
+function isUnitOpenAt(unit, datetime){
+  return effectiveUnitStatusAt(unit, datetime) === 'open';
+}
+
+function isUnitOpenForShift(unit, date, shift){
+  return isUnitOpenAt(unit, shiftStartDateTime(date, shift));
+}
+
+// ── Generic filter — drop closed units from a list ────
+// Used after expandCPair in rotation pipeline (chunk 2). expandCPair
+// already handles 3C-specific closure via its existing branch; this
+// filter handles every other unit. Calling both is safe — 3C closed
+// will be absent from the input here because expandCPair already
+// dropped it, and re-checking is a cheap no-op.
+function filterClosedUnits(units, date, shift){
+  return units.filter(u => isUnitOpenForShift(u, date, shift));
+}
+
+// ── Migration from old 3C-only keys ───────────────────
+// Idempotent: runs every load but only writes when needed.
+// Reads existing `unit3CDefault` / `unit3CSchedule` and copies them into
+// the new combined `unitStatuses` / `unitSchedules` keys under the '3C'
+// entry. Old keys remain in place so the existing 3C admin UI keeps
+// working — cleanup chunk 7 removes them after stability is confirmed.
+function migrate3CIntoUnitStatuses(){
+  try {
+    const statuses = getUnitStatuses();
+    const schedules = getUnitSchedules();
+    const old3CDefault = syncedLS.get('unit3CDefault');
+    const old3CSchedule = syncedLS.get('unit3CSchedule');
+
+    let needsStatusWrite = false;
+    let needsScheduleWrite = false;
+
+    // Copy 3C default into combined statuses if old key exists and combined
+    // doesn't already have a 3C entry (don't clobber a newer combined value).
+    if(old3CDefault && !statuses['3C']){
+      statuses['3C'] = old3CDefault;
+      needsStatusWrite = true;
+    }
+
+    // Same for schedule. Old key may be a string (legacy double-stringify);
+    // get3CSchedule already handles that and returns a clean array.
+    const oldSched = get3CSchedule();
+    if(oldSched.length && !schedules['3C']){
+      schedules['3C'] = oldSched;
+      needsScheduleWrite = true;
+    }
+
+    if(needsStatusWrite) syncedLS.set('unitStatuses', statuses).catch(()=>{});
+    if(needsScheduleWrite) syncedLS.set('unitSchedules', schedules).catch(()=>{});
+  } catch{}
+}
+
+// ── Warm from BNState ─────────────────────────────────
+async function warmUnitStatuses(){
+  try {
+    await Promise.all([
+      syncedLS.warm('unitStatuses'),
+      syncedLS.warm('unitSchedules')
+    ]);
+    migrate3CIntoUnitStatuses();
+  } catch{}
+}
+
+
 // Expand C_PAIR to actual units based on 3C status for a given date/shift
 function expandCPair(units, date, shift){
   const expanded = [];
@@ -1281,7 +1473,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-07-03';
+const APP_VERSION = '2026-05-07-04';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3132,6 +3324,12 @@ function init(){
   // Warm user-saved preferred names
   warmPreferredNames().catch(()=>{});
 
+  // Warm per-unit open/closed status (chunk 1: data layer only — no
+  // render or rotation wiring yet, so this is a no-op visually).
+  // Includes one-time migration of legacy 3C-only keys into the new
+  // combined unitStatuses/unitSchedules format.
+  warmUnitStatuses().catch(()=>{});
+
   // Set today's date on all pickers
   // Covering tab uses shiftDate so Noc after midnight shows the correct shift date
   const t=today();
@@ -4080,6 +4278,24 @@ async function resetAllToDefault(){
 // Rotates in blocks of up to 4. BN break slots = gaps (no unit covered).
 // Round 1: each unit gets exactly 4 slots before rotation advances.
 // Round 2+: continue same rotation in blocks up to 4.
+//
+// TODO (revisit BEFORE rolling-shift view ships):
+//   Per-unit slot count can be significantly uneven across a 3-unit
+//   BN coverage. Example observed 2026-05-07: Tinsley covering [7N,8N,8S]
+//   produced 7N=15 / 8N=8 / 8S=~8. Cause is two-fold:
+//     1. Low-desirability tiers (earlyLow, thirdLow) with ≤3 slots
+//        always go to first unit in rotation. First unit accrues all
+//        the leftovers from short tier windows.
+//     2. Prime-tier round 2+ doesn't rotate which unit starts the round,
+//        so the first unit also gets the extra block when total slots
+//        aren't divisible by units × block_size.
+//   Staff at the disadvantaged unit see fewer claimable slots in their
+//   13-hour rolling-shift window — same problem in either rendering model.
+//   Possible fixes: (a) rotate the "first unit" position each round so
+//   leftovers redistribute, (b) weight low-tier blocks toward different
+//   units across the day, (c) make block_size adaptive to slot count.
+//   Algorithm change must be verified across 1-unit, 2-unit, and 3-unit
+//   BN coverage scenarios for both Day and Noc shifts.
 
 function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='Day'){
   if(!units || !units.length) return {};
