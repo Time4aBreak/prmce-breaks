@@ -1281,7 +1281,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-04-29-07';
+const APP_VERSION = '2026-05-07-02';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1510,17 +1510,19 @@ async function spBatchUpsert(list, records){
 async function spBatchSetState(entries){
   if(!entries.length) return;
   entries.forEach(({key, value}) => localStorage.setItem(key, JSON.stringify(value)));
-  try {
-    const CHUNK_SIZE = 5;
-    for(let i = 0; i < entries.length; i += CHUNK_SIZE){
-      const chunk = entries.slice(i, i + CHUNK_SIZE);
-      await gasCall({
-        action: 'batchSetState',
-        entries: encodeURIComponent(JSON.stringify(chunk))
-      });
-    }
-  } catch(e){
-    console.warn('batchSetState failed, localStorage cache used:', e.message);
+  // Re-throw on failure so callers (syncedLS.setMany) can surface the error
+  // via toast. Earlier this catch swallowed errors silently, which masked
+  // the import-time rotation save failures: the local LS was updated but
+  // BNState writes were lost, and the user saw no indication. setMany has
+  // its own try/catch that toasts and re-throws — that path was unreachable
+  // because of this swallow.
+  const CHUNK_SIZE = 5;
+  for(let i = 0; i < entries.length; i += CHUNK_SIZE){
+    const chunk = entries.slice(i, i + CHUNK_SIZE);
+    await gasCall({
+      action: 'batchSetState',
+      entries: encodeURIComponent(JSON.stringify(chunk))
+    });
   }
 }
 
@@ -4185,6 +4187,39 @@ function loadRotation(bnName, date, shift){
   return syncedLS.get(`bnRotation_${bnName}_${date}_${shift}`);
 }
 
+// Load rotation with on-the-fly fallback when nothing is saved.
+//
+// Why this exists: the schedule import → rotation save pipeline drops most
+// rotations for reasons we haven't fully root-caused yet. When that happens,
+// staff Sign Up's rotation filter sees `loadRotation === null` for every
+// covering BN, falls open, and shows every slot as claimable on every unit.
+// That's a workforce/patient-safety hole — staff could claim slots the BN
+// isn't scheduled to cover, and breaks would be missed.
+//
+// This helper attempts the saved rotation first; if missing, it computes
+// the same rotation the BN portal computes for its My Shift display
+// (`_fallbackRotation` around line 10779). Same algorithm, same inputs,
+// same output — fairness preserved. The schedule row's `Units` field is
+// authoritative.
+//
+// `schedRow` is the BNSchedule row for this BN/date/shift (already in hand
+// at every call site). `bnBreakSet` defaults to empty Set since the staff
+// Sign Up filter use case doesn't care about BN-break slot exclusion (it's
+// asking "which slots is this unit in rotation for", not "which slots is
+// the BN free at").
+function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
+  const saved = loadRotation(bnName, date, shift);
+  if(saved) return saved;
+  if(!schedRow) return null;
+  let rawUnits = [];
+  try { rawUnits = JSON.parse(schedRow.Units || '[]'); } catch{}
+  if(!rawUnits.length) return null;
+  const expandedUnits = expandCPair(rawUnits, date, shift);
+  if(!expandedUnits.length) return null;
+  const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + (bnName||'').charCodeAt(0);
+  return calculateBlockRotation(expandedUnits, bnBreakSet || new Set(), getAvailableSlots(shift), dateSeed, shift);
+}
+
 // Warm rotation cache from backend for a BN — call once at shift start.
 // Thin wrapper over syncedLS.warm so the key derivation lives in one place.
 async function warmRotationCache(bnName, date, shift){
@@ -4520,11 +4555,13 @@ async function loadSlots(silent=false){
     ]);
     warm3CStatus(dt, shift).catch(()=>{});
 
-    // Load block rotation for each BN covering this unit
+    // Load block rotation for each BN covering this unit. Uses
+    // loadRotationWithFallback so staff Sign Up filtering still works when
+    // the import pipeline failed to persist a rotation for this BN.
     const unitRotationSlots = new Set();
     let hasAnyRotation = false;
     for(const sched of covering){
-      const bnRot = loadRotation(sched.BreakNurseName, dt, shift);
+      const bnRot = loadRotationWithFallback(sched.BreakNurseName, dt, shift, sched);
       if(bnRot){
         hasAnyRotation = true;
         Object.entries(bnRot).forEach(([slot, unit]) => {
@@ -4538,7 +4575,7 @@ async function loadSlots(silent=false){
     const oppRotationSlots = new Set();
     let hasOppRotation = false;
     for(const sched of oppCovering){
-      const oppRot = loadRotation(sched.BreakNurseName, oppSchedDt, oppShift);
+      const oppRot = loadRotationWithFallback(sched.BreakNurseName, oppSchedDt, oppShift, sched);
       if(oppRot){
         hasOppRotation = true;
         Object.entries(oppRot).forEach(([slot, unit]) => {
@@ -4747,7 +4784,7 @@ async function loadSlots(silent=false){
     const _getBNFirst = n => { if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n]; const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
     const _slotBNMap = {};
     for(const sched of covering){
-      const rot = loadRotation(sched.BreakNurseName, dt, shift);
+      const rot = loadRotationWithFallback(sched.BreakNurseName, dt, shift, sched);
       if(rot) Object.entries(rot).forEach(([s,u]) => {
         if(u !== S.unit) return;
         // Skip slots in the overlap window — those display the opp BN, not the main BN
@@ -4756,7 +4793,7 @@ async function loadSlots(silent=false){
       });
     }
     for(const sched of oppCovering){
-      const rot = loadRotation(sched.BreakNurseName, oppSchedDt, oppShift);
+      const rot = loadRotationWithFallback(sched.BreakNurseName, oppSchedDt, oppShift, sched);
       if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
     }
     // Fallback: overlap slots not assigned to this unit in the rotation still get the opp BN's name.
