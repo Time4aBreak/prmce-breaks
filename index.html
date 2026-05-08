@@ -1478,7 +1478,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-08-01';
+const APP_VERSION = '2026-05-08-03';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3395,13 +3395,49 @@ function init(){
   UNITS.forEach(u=>{
     const d=document.createElement('div');
     d.className='uc'; d.textContent=u; d.id=`au-${u}`;
-    d.onclick=()=>{
-      // Defensive: if a closed unit is somehow tappable (race / stale state),
-      // do nothing. Visibility is controlled by updateAdminUnitGrid.
-      if(d.style.display === 'none') return;
-      d.classList.toggle('on');
+    d.onclick=async ()=>{
       const i = S.aUnits.indexOf(u);
-      i < 0 ? S.aUnits.push(u) : S.aUnits.splice(i, 1);
+      // Removing (already in array): just toggle off, no modal needed.
+      if(i >= 0){
+        S.aUnits.splice(i, 1);
+        d.classList.remove('on');
+        return;
+      }
+      // Adding: if unit is closed at the currently-selected aDate+aShift,
+      // fire the same prompt the import grid uses. Single decision point.
+      const date = (document.getElementById('aDate') || {}).value || '';
+      const shift = S.aShift;
+      if(date && shift && u !== 'C_PAIR'){
+        const open = (u === '3C')
+          ? is3COpen(date, shift)
+          : isUnitOpenForShift(u, date, shift);
+        if(!open){
+          // Resolve BN name for the modal — prefer dropdown, fall back to typed
+          const sel = document.getElementById('aNurse');
+          const typed = (document.getElementById('aNurseText')||{}).value || '';
+          const bnName = (sel && sel.value) || typed || '';
+          const choice = await _promptClosedUnitAssignment(u, date, shift, bnName);
+          if(choice === 'cancel') return;
+          if(choice === 'now'){
+            try {
+              if(u === '3C'){
+                await set3CDefault('open');
+                recompute3CAffectedRotations().catch(()=>{});
+              } else {
+                await setUnitStatus(u, 'open');
+                recomputeUnitAffectedRotations(u).catch(()=>{});
+              }
+              toast(`${u} opened`);
+              // Refresh grid styling — the unit is now open
+              updateAdminUnitGrid();
+            } catch(e){ toast(`Could not open ${u}: ${e.message}`, true); return; }
+          } else if(choice === 'later'){
+            await _scheduleUnitOpen(u);
+          }
+        }
+      }
+      S.aUnits.push(u);
+      d.classList.add('on');
     };
     ag.appendChild(d);
   });
@@ -7724,10 +7760,10 @@ function setAShift(sh){
   updateAdminUnitGrid();
 }
 
-// Hide unit buttons in the admin manual-assign grid when the unit is closed
-// for the currently-selected aDate+aShift. Closed units stay in the DOM
-// (they may already be in S.aUnits from an edit-mode load) but are not
-// tappable. Called whenever aDate or aShift changes, and on initial render.
+// Style closed units in the admin manual-assign grid as grayed (visible
+// but muted) for the currently-selected aDate+aShift. Tapping a closed
+// unit fires _promptClosedUnitAssignment via the click handler — the
+// decision point. Mirrors the import grid treatment for consistency.
 function updateAdminUnitGrid(){
   const date  = (document.getElementById('aDate') || {}).value || '';
   const shift = S.aShift;
@@ -7736,7 +7772,8 @@ function updateAdminUnitGrid(){
     const el = document.getElementById(`au-${u}`);
     if(!el) return;
     const open = isUnitOpenForShift(u, date, shift);
-    el.style.display = open ? '' : 'none';
+    el.style.display = '';
+    el.style.opacity = open ? '' : '0.45';
   });
 }
 
@@ -7774,23 +7811,11 @@ async function saveAssign(){
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
-  // Closed-unit guard: if any selected units are closed for this date+shift,
-  // surface the situation before saving. Catches edit-mode loads where the
-  // assignment was saved before the unit was closed, plus stale state where
-  // status changed while the admin had the panel open. Closed units in the
-  // saved Units array are intentionally preserved (rotation excludes them
-  // until they reopen) — this is just to confirm intent.
-  const closedSelected = units.filter(u => !isUnitOpenForShift(u, dt, shift));
-  if(closedSelected.length){
-    const list = closedSelected.join(', ');
-    const noun = closedSelected.length === 1 ? 'is closed' : 'are closed';
-    const proceed = await customConfirm(
-      `${list} ${noun} for this shift.\n\nAssignment will be saved but rotation will exclude ${closedSelected.length === 1 ? 'this unit' : 'these units'} until reopened.`,
-      'Save anyway',
-      'Cancel'
-    );
-    if(!proceed){ loadAssignments(); return; }
-  }
+  // No save-time closed-unit guard. The decision point is at TAP time
+  // (toggleU / toggleIU fire _promptClosedUnitAssignment when a closed
+  // unit is selected). Save just persists the array — closed units that
+  // remain are intentional. Rotation excludes them via filterClosedUnits
+  // until the unit reopens.
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
     const allScheds = await spGet(LISTS.schedule,
@@ -9096,17 +9121,17 @@ async function restoreLastImport(){
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
         <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
-          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested)} suggested · target ${uPerN}</span>
+          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" onclick="clearImportSel(${i})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px" onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
         </div>
       </div>
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
         ${UNITS.map(u => {
-          // Gray out closed units so admin sees operational status at a glance.
-          // Closed-but-suggested (e.g. 3C as part of C_PAIR) still gets 'on'
-          // — intent preserved — but muted style shows rotation will exclude
-          // it until reopened. Mirrors loadAssignments treatment.
+          // Gray closed units so admin sees they're closed but can still tap
+          // them — the toggleIU handler fires _promptClosedUnitAssignment, the
+          // single decision point. No save-time modal; the choice made at tap
+          // time is what gets persisted.
           const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
@@ -9258,7 +9283,7 @@ async function renderImportRows(entries, forceReplace = false){
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
         <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
-          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested)} suggested · target ${uPerN}</span>
+          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
             onclick="clearImportSel(${i})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
@@ -9267,10 +9292,10 @@ async function renderImportRows(entries, forceReplace = false){
       </div>
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
         ${UNITS.map(u => {
-          // Gray out closed units so admin sees operational status at a glance.
-          // Closed-but-suggested (e.g. 3C as part of C_PAIR) still gets 'on'
-          // — intent preserved — but muted style shows rotation will exclude
-          // it until reopened. Mirrors loadAssignments treatment.
+          // Gray closed units so admin sees they're closed but can still tap
+          // them — the toggleIU handler fires _promptClosedUnitAssignment, the
+          // single decision point. No save-time modal; the choice made at tap
+          // time is what gets persisted.
           const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
@@ -9341,7 +9366,7 @@ async function toggleIU(i, u, el){
         ? is3COpen(entry.date, entry.shift)
         : isUnitOpenForShift(u, entry.date, entry.shift);
       if(!open){
-        const choice = await _promptClosedUnitAssignment(u, entry.date, entry.shift);
+        const choice = await _promptClosedUnitAssignment(u, entry.date, entry.shift, entry.name);
         if(choice === 'cancel') return; // admin backed out, don't toggle
         if(choice === 'now'){
           // Apply Now: open the unit immediately, then continue with the toggle
@@ -9362,8 +9387,6 @@ async function toggleIU(i, u, el){
           // until the scheduled open takes effect.
           await _scheduleUnitOpen(u);
         }
-        // 'leave' falls through — toggle proceeds, unit stays closed,
-        // rotation excludes it for now.
       }
     }
     arr.push(u); el.classList.add('on');
@@ -9374,24 +9397,31 @@ async function toggleIU(i, u, el){
 
 // Prompt admin when assigning a closed unit. Returns one of:
 //   'now'    — Open Now
-//   'later'  — Schedule open for later
-//   'leave'  — Assign anyway (unit stays closed)
-//   'cancel' — Don't toggle the unit
-async function _promptClosedUnitAssignment(unit, date, shift){
+//   'later'  — Schedule open time
+//   'cancel' — Don't toggle/save
+async function _promptClosedUnitAssignment(unit, date, shift, bnName){
+  // Format date as "Friday 05/15" — full day name + MM/DD, no year
+  let dateStr = date;
+  try {
+    const d = new Date(date + 'T12:00:00');
+    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    dateStr = `${dayName} ${mm}/${dd}`;
+  } catch{}
+  const bnDisplay = bnName ? firstName(bnName) : 'this BN';
   return new Promise(resolve => {
     const m = document.createElement('div');
     m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     m.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1.05rem;margin-bottom:10px">${unit} is currently closed</div>
+        <div style="font-weight:700;font-size:1.05rem;margin-bottom:10px">${unit} is closed</div>
         <div style="font-size:.88rem;color:var(--muted);margin-bottom:16px">
-          Assigning ${unit} to ${date} ${shift} won't put it back into rotation
-          until the unit reopens. Open it now, schedule a reopen, or assign anyway?
+          To assign ${unit} to ${bnDisplay} on ${dateStr} please select
         </div>
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" data-act="now">Open ${unit} Now</button>
-          <button type="button" class="btn btn-ghost"   data-act="later">Schedule open for later</button>
-          <button type="button" class="btn btn-ghost"   data-act="leave">Assign anyway (leave closed)</button>
+          <button type="button" class="btn btn-primary" data-act="now">Open Now</button>
+          <button type="button" class="btn btn-ghost"   data-act="later">Schedule open time</button>
           <button type="button" class="btn btn-ghost"   data-act="cancel">Cancel</button>
         </div>
       </div>`;
@@ -9474,21 +9504,29 @@ function _scheduleUnitOpen(unit){
 }
 
 // Count suggested units as slots (3C+4C = 1 slot)
-function suggestedSlotCount(units){
-  // Counts SLOTS, not expanded units. C_PAIR (the 3C/4C pair) collapses to
-  // 1 slot regardless of 3C's open/closed status. Reasoning: 3C and 4C each
-  // have lighter staffing than typical units; combined, their staff load
-  // approximates a single normal unit (like 5A or 3A). One BN covering the
-  // pair is therefore ~1 normal unit of workload — the BN alternates between
-  // 3C and 4C in their rotation when 3C is open, but the total work is the
-  // equivalent of covering one regular unit. This matches `unitsPerNurse`
-  // which targets WORKLOAD per BN, not literal location count.
-  //
-  // Without this collapse, an assignment that includes the C section reads
-  // as "X suggested · target X-1", which looks like the algorithm
-  // over-suggested when it actually picked the right workload count.
+function suggestedSlotCount(units, date, shift){
+  // Counts SLOTS the BN is OPERATIONALLY covering, not raw array size.
+  // Two reductions:
+  //   1. C_PAIR (3C/4C pair) collapses to 1 slot — combined low staffing
+  //      approximates one normal unit of workload (matches unitsPerNurse,
+  //      which targets WORKLOAD per BN, not literal location count).
+  //   2. Closed units are excluded — they're in the array as intent
+  //      (will activate when reopened) but produce no current coverage.
+  //      Without this, "X suggested · target Y" reports overstated
+  //      coverage and admin can't see the operational gap.
   if(!units || !units.length) return 0;
-  const set = new Set(units);
+  // Filter closed units when date+shift available. Callers without context
+  // get the legacy intent-based count (degenerate but safe — closed units
+  // are rare and the count is just a UI hint).
+  let arr = units;
+  if(date && shift){
+    arr = units.filter(u => {
+      if(u === 'C_PAIR') return is3COpen(date, shift) || isUnitOpenForShift('4C', date, shift);
+      if(u === '3C') return is3COpen(date, shift);
+      return isUnitOpenForShift(u, date, shift);
+    });
+  }
+  const set = new Set(arr);
   let count = 0;
   if(set.has('3C') || set.has('4C')) count++;
   set.delete('3C'); set.delete('4C');
@@ -9605,7 +9643,7 @@ async function resuggestAll(){
     const countEl = document.getElementById(`suggest-count-${i}`);
     if(countEl){
       const uPerN = unitsPerNurse(e.shift, batch.filter(x => x.date===e.date && x.shift===e.shift).length);
-      countEl.textContent = `✨ ${suggestedSlotCount(importUnitSel[i])} suggested · target ${uPerN}`;
+      countEl.textContent = `✨ ${suggestedSlotCount(importUnitSel[i], e.date, e.shift)} suggested · target ${uPerN}`;
     }
     // Re-enable save button if it was disabled
     const savedEl = document.getElementById(`saved-${i}`);
@@ -9822,7 +9860,7 @@ async function rerunSuggest(i, name, date, shift){
       if(countEl){
         const uPerN = unitsPerNurse(shift,
           entriesToProcess.filter(x => x.date===date && x.shift===shift).length);
-        countEl.innerHTML = `✨ ${suggestedSlotCount(newUnits)} suggested · target ${uPerN}
+        countEl.innerHTML = `✨ ${suggestedSlotCount(newUnits, date, shift)} suggested · target ${uPerN}
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
             onclick="clearImportSel(${idx})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
@@ -9842,8 +9880,18 @@ async function saveImportRow(i){
   // Expand C_PAIR to ['3C','4C']
   const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
   try {
-    // Cross-wing check — warn if BN will be split across A Wing and D Wing
-    const wings = [...new Set(rawUnits.map(u => getWing(u === 'C_PAIR' ? '3C' : u)).filter(w => w !== '?'))];
+    // Cross-wing check — warn if BN will be split across A Wing and D Wing.
+    // Operational only: closed units don't trigger fake "split" warnings,
+    // since they produce no actual coverage. (Example: 5A closed + 8S open
+    // is not a real split — BN only covers 8S.)
+    const wings = [...new Set(rawUnits
+      .filter(u => {
+        if(u === 'C_PAIR') return is3COpen(date, shift) || isUnitOpenForShift('4C', date, shift);
+        if(u === '3C') return is3COpen(date, shift);
+        return isUnitOpenForShift(u, date, shift);
+      })
+      .map(u => getWing(u === 'C_PAIR' ? '3C' : u))
+      .filter(w => w !== '?'))];
     if(wings.length > 1){
       const shortName = firstName(name);
       const wingList = wings.join(' and ') + ' Wing';
