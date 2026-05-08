@@ -9102,7 +9102,15 @@ async function restoreLastImport(){
         </div>
       </div>
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
-        ${UNITS.map(u => `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`).join('')}
+        ${UNITS.map(u => {
+          // Gray out closed units so admin sees operational status at a glance.
+          // Closed-but-suggested (e.g. 3C as part of C_PAIR) still gets 'on'
+          // — intent preserved — but muted style shows rotation will exclude
+          // it until reopened. Mirrors loadAssignments treatment.
+          const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
+          const dimStyle = isClosed ? 'opacity:.45' : '';
+          return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
+        }).join('')}
       </div>
       <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="saveImportRow(${i})">✓ Save</button>
       <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
@@ -9258,7 +9266,15 @@ async function renderImportRows(entries, forceReplace = false){
         </div>
       </div>
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
-        ${UNITS.map(u => `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`).join('')}
+        ${UNITS.map(u => {
+          // Gray out closed units so admin sees operational status at a glance.
+          // Closed-but-suggested (e.g. 3C as part of C_PAIR) still gets 'on'
+          // — intent preserved — but muted style shows rotation will exclude
+          // it until reopened. Mirrors loadAssignments treatment.
+          const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
+          const dimStyle = isClosed ? 'opacity:.45' : '';
+          return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
+        }).join('')}
       </div>
       <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="saveImportRow(${i})">✓ Save</button>
       <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
@@ -9459,9 +9475,24 @@ function _scheduleUnitOpen(unit){
 
 // Count suggested units as slots (3C+4C = 1 slot)
 function suggestedSlotCount(units){
-  // units now stores slot names ('C_PAIR', '3A', etc.) not expanded units
+  // Counts SLOTS, not expanded units. C_PAIR (the 3C/4C pair) collapses to
+  // 1 slot regardless of 3C's open/closed status. Reasoning: 3C and 4C each
+  // have lighter staffing than typical units; combined, their staff load
+  // approximates a single normal unit (like 5A or 3A). One BN covering the
+  // pair is therefore ~1 normal unit of workload — the BN alternates between
+  // 3C and 4C in their rotation when 3C is open, but the total work is the
+  // equivalent of covering one regular unit. This matches `unitsPerNurse`
+  // which targets WORKLOAD per BN, not literal location count.
+  //
+  // Without this collapse, an assignment that includes the C section reads
+  // as "X suggested · target X-1", which looks like the algorithm
+  // over-suggested when it actually picked the right workload count.
   if(!units || !units.length) return 0;
-  return units.length;
+  const set = new Set(units);
+  let count = 0;
+  if(set.has('3C') || set.has('4C')) count++;
+  set.delete('3C'); set.delete('4C');
+  return count + set.size;
 }
 
 // Imported entries management
