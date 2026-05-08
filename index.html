@@ -9774,7 +9774,12 @@ async function rerunSuggest(i, name, date, shift){
   // Apply suggestions to correct DOM rows
   entriesToProcess.forEach((e, idx) => {
     if(e.date===date && e.shift===shift){
-      const newUnits = suggestions[e.name] || [];
+      // suggestAssignments returns slot names ('C_PAIR' is a slot, not a unit).
+      // Expand to actual unit names before storing/highlighting — mirrors the
+      // pattern used in renderImportRows and resuggestAll. Without expansion,
+      // 'C_PAIR' lands in importUnitSel and forEach looks up an 'iu-{idx}-C_PAIR'
+      // button that doesn't exist (UNITS list has 3C and 4C separately).
+      const newUnits = expandSuggestionUnits(suggestions[e.name] || []);
       importUnitSel[idx] = newUnits;
       newUnits.forEach(u => {
         const el = document.getElementById(`iu-${idx}-${u}`);
