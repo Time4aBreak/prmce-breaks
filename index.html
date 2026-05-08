@@ -754,7 +754,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div class="row" style="margin-bottom:12px">
           <div class="field">
             <label>Date</label>
-            <input type="date" id="aDate" onchange="populateNurseDropdown();update3CToggle()"/>
+            <input type="date" id="aDate" onchange="populateNurseDropdown();update3CToggle();updateAdminUnitGrid()"/>
           </div>
           <div class="field">
             <label>Shift</label>
@@ -1478,7 +1478,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-07-07';
+const APP_VERSION = '2026-05-08-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3036,7 +3036,12 @@ async function promptReassignBN(impact){
     const modal = document.createElement('div');
     modal.id = 'reassignBNModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-    const ALL_UNITS = ['3A','4A','5A','6A','7A','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
+    // Filter to only units open at this BN's date+shift. Reassigning to a
+    // closed unit defeats the purpose — the BN would still have nothing to
+    // cover. 3C is excluded by default since this modal only fires when 3C
+    // is being closed (impact.bn currently covers only 3C).
+    const ALL_UNITS = ['3A','4A','5A','6A','7A','4C','6N','7N','8N','8S','9N','9S','10N','10S']
+      .filter(u => isUnitOpenForShift(u, impact.date, impact.shift));
     const unitCheckboxes = ALL_UNITS.map(u =>
       `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}"> ${u}</label>`
     ).join('');
@@ -3391,6 +3396,9 @@ function init(){
     const d=document.createElement('div');
     d.className='uc'; d.textContent=u; d.id=`au-${u}`;
     d.onclick=()=>{
+      // Defensive: if a closed unit is somehow tappable (race / stale state),
+      // do nothing. Visibility is controlled by updateAdminUnitGrid.
+      if(d.style.display === 'none') return;
       d.classList.toggle('on');
       const i = S.aUnits.indexOf(u);
       i < 0 ? S.aUnits.push(u) : S.aUnits.splice(i, 1);
@@ -7521,26 +7529,37 @@ async function loadSummary(){
     const allBookings = [...bookings, ...overlapBookings];
 
     // Build separate BN maps — main shift and opp shift (for overlap attribution)
-    // Active records take priority over inactive
+    // Active records take priority over inactive.
+    // Closed units are skipped entirely — Coverage tab shouldn't claim a unit
+    // is covered by a BN when the unit itself isn't operational. The schedule
+    // record can list a closed unit (intent preserved) but the runtime view
+    // reflects operational reality via filterClosedUnits, mirroring the
+    // rotation pipeline.
     const unitBN={}, unitBNExt={}, oppUnitBN={}, oppUnitBNExt={};
     scheds.forEach(s=>{
-      try{ JSON.parse(s.Units||'[]').forEach(u=>{
-        // Only overwrite if no active BN assigned yet, or this record is active
-        if(!unitBN[u] || s.Status !== 'inactive'){
-          unitBN[u] = s.BreakNurseName;
-          const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-          if(ext) unitBNExt[u] = ext;
-        }
-      }); }catch{}
+      try{
+        const sDate = s.ShiftDate.slice(0,10);
+        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
+          // Only overwrite if no active BN assigned yet, or this record is active
+          if(!unitBN[u] || s.Status !== 'inactive'){
+            unitBN[u] = s.BreakNurseName;
+            const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+            if(ext) unitBNExt[u] = ext;
+          }
+        });
+      }catch{}
     });
     oppScheds.forEach(s=>{
-      try{ JSON.parse(s.Units||'[]').forEach(u=>{
-        if(!oppUnitBN[u] || s.Status !== 'inactive'){
-          oppUnitBN[u] = s.BreakNurseName;
-          const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-          if(ext) oppUnitBNExt[u] = ext;
-        }
-      }); }catch{}
+      try{
+        const sDate = s.ShiftDate.slice(0,10);
+        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
+          if(!oppUnitBN[u] || s.Status !== 'inactive'){
+            oppUnitBN[u] = s.BreakNurseName;
+            const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+            if(ext) oppUnitBNExt[u] = ext;
+          }
+        });
+      }catch{}
     });
 
     // Build rotation-based slot→BN lookup for units covered by multiple BNs.
@@ -7702,6 +7721,23 @@ function setAShift(sh){
   document.getElementById('aDay').classList.toggle('active',sh==='Day');
   document.getElementById('aNoc').classList.toggle('active',sh==='Noc');
   populateNurseDropdown();
+  updateAdminUnitGrid();
+}
+
+// Hide unit buttons in the admin manual-assign grid when the unit is closed
+// for the currently-selected aDate+aShift. Closed units stay in the DOM
+// (they may already be in S.aUnits from an edit-mode load) but are not
+// tappable. Called whenever aDate or aShift changes, and on initial render.
+function updateAdminUnitGrid(){
+  const date  = (document.getElementById('aDate') || {}).value || '';
+  const shift = S.aShift;
+  if(!date || !shift) return;
+  UNITS.forEach(u => {
+    const el = document.getElementById(`au-${u}`);
+    if(!el) return;
+    const open = isUnitOpenForShift(u, date, shift);
+    el.style.display = open ? '' : 'none';
+  });
 }
 
 async function saveAssign(){
@@ -7738,6 +7774,23 @@ async function saveAssign(){
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
+  // Closed-unit guard: if any selected units are closed for this date+shift,
+  // surface the situation before saving. Catches edit-mode loads where the
+  // assignment was saved before the unit was closed, plus stale state where
+  // status changed while the admin had the panel open. Closed units in the
+  // saved Units array are intentionally preserved (rotation excludes them
+  // until they reopen) — this is just to confirm intent.
+  const closedSelected = units.filter(u => !isUnitOpenForShift(u, dt, shift));
+  if(closedSelected.length){
+    const list = closedSelected.join(', ');
+    const noun = closedSelected.length === 1 ? 'is closed' : 'are closed';
+    const proceed = await customConfirm(
+      `${list} ${noun} for this shift.\n\nAssignment will be saved but rotation will exclude ${closedSelected.length === 1 ? 'this unit' : 'these units'} until reopened.`,
+      'Save anyway',
+      'Cancel'
+    );
+    if(!proceed){ loadAssignments(); return; }
+  }
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
     const allScheds = await spGet(LISTS.schedule,
@@ -8020,9 +8073,12 @@ async function loadAssignments(){
               </div>
             </div>
             <div class="unit-tags">${units.map(u => {
-              // Grey out 3C when it's closed for this shift — assignment exists but unit inactive
-              const is3CInactive = u === '3C' && !is3COpen(s.ShiftDate.slice(0,10), s.ShiftType);
-              const tagStyle = is3CInactive ? 'opacity:.45' : '';
+              // Grey out any unit closed for this shift — assignment exists but unit inactive.
+              // 3C goes through is3COpen (legacy path); other units use isUnitOpenForShift.
+              const isUnitInactive = (u === '3C')
+                ? !is3COpen(s.ShiftDate.slice(0,10), s.ShiftType)
+                : !isUnitOpenForShift(u, s.ShiftDate.slice(0,10), s.ShiftType);
+              const tagStyle = isUnitInactive ? 'opacity:.45' : '';
               const canClose = !isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType);
               return canClose
                 ? `<span class="tag" style="display:inline-flex;align-items:center;gap:4px;${tagStyle}">${u}<button onclick="closeUnit(${s.Id},'${u}','${s.BreakNurseName}','${s.ShiftDate}','${s.ShiftType}')" style="background:none;border:none;cursor:pointer;font-size:.65rem;color:var(--muted);padding:0;line-height:1" title="Close unit">✕</button></span>`
@@ -12383,15 +12439,23 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0);
   const isNewNurse = (name) => getNurseWingHistory(name, shift).length === 0;
 
-  // Build slot pool with tier and global count (including batch overlay)
-  const pool = ALL_COVERAGE_SLOTS.map(s => ({
-    slot: s,
-    units: s === 'C_PAIR' ? ['3C','4C'] : [s],
-    globalCount: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0),
-    wing: getWing(s),
-    tier: UNIT_TIER[s] || 'Standard',
-    floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
-  }));
+  // Build slot pool with tier and global count (including batch overlay).
+  // Drop slots whose unit(s) are closed at this date/shift — closed units
+  // shouldn't be suggested for assignment. C_PAIR survives if at least one
+  // of {3C, 4C} is open; expandCPair will drop the closed half at runtime.
+  const pool = ALL_COVERAGE_SLOTS
+    .filter(s => {
+      const components = s === 'C_PAIR' ? ['3C', '4C'] : [s];
+      return components.some(u => isUnitOpenForShift(u, date, shift));
+    })
+    .map(s => ({
+      slot: s,
+      units: s === 'C_PAIR' ? ['3C','4C'] : [s],
+      globalCount: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0),
+      wing: getWing(s),
+      tier: UNIT_TIER[s] || 'Standard',
+      floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
+    }));
 
   const aPool = pool.filter(s => s.wing === 'A');
   const dPool = pool.filter(s => s.wing === 'D');
