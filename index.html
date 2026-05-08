@@ -1353,6 +1353,11 @@ function expandCPair(units, date, shift){
 // Check if a unit is covered by a schedule entry (handles C_PAIR expansion)
 function unitCoveredBy(sched, unit, date, shift){
   let units = []; try { units = JSON.parse(sched.Units||'[]'); } catch{}
+  // Generic closed-unit gate (chunk 2). 3C is delegated to the existing
+  // branch below since its closure is interleaved with C_PAIR semantics.
+  // For every other unit: if closed at this date/shift, no schedule covers
+  // it — even if the schedule entry literally lists the unit.
+  if(unit !== '3C' && !isUnitOpenForShift(unit, date, shift)) return false;
   if(unit === '3C'){
     // Both explicit '3C' and C_PAIR require global 3C status to be open.
     // Schedule may list 3C even when closed (e.g. AI extracted it from UKG
@@ -1473,7 +1478,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-07-04';
+const APP_VERSION = '2026-05-07-05';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -4065,7 +4070,7 @@ async function applyDefaultToAll(){
       // Compute rotation FIRST so each slot row gets its correct rotation unit.
       // Matches applyDefaultToShift's schema: one BN-break row per slot, with
       // unit determined by rotation[slotTime] — NOT one row per (slot × unit).
-      const expandedUnits = expandCPair(units, sched.ShiftDate, sched.ShiftType);
+      const expandedUnits = filterClosedUnits(expandCPair(units, sched.ShiftDate, sched.ShiftType), sched.ShiftDate, sched.ShiftType);
       const bnBreakSet = new Set(def);
       const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
       const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
@@ -4163,7 +4168,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
   if(shiftAlreadyStarted){
     // Shift already started — save breaks using existing rotation, no recalc
     const rotation = loadRotation(name, date, shift) || {};
-    const expandedUnits = expandCPair(units, date, shift);
+    const expandedUnits = filterClosedUnits(expandCPair(units, date, shift), date, shift);
     // Fill rotation: includes break slots so own-break records get an interleaved
     // unit instead of always falling back to expandedUnits[0]. Display rotation
     // (above) is left untouched.
@@ -4190,7 +4195,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
     // No rotation recalc — shift has started, unit assignments are locked
   } else {
     // Future shift — recalculate rotation incorporating the new breaks
-    const expandedUnits = expandCPair(units, date, shift);
+    const expandedUnits = filterClosedUnits(expandCPair(units, date, shift), date, shift);
     const bnBreakSet = new Set(defaultSlots);
     const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
     const allSlots = getAvailableSlots(shift);
@@ -4439,7 +4444,7 @@ function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
   let rawUnits = [];
   try { rawUnits = JSON.parse(schedRow.Units || '[]'); } catch{}
   if(!rawUnits.length) return null;
-  const expandedUnits = expandCPair(rawUnits, date, shift);
+  const expandedUnits = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
   if(!expandedUnits.length) return null;
   const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + (bnName||'').charCodeAt(0);
   return calculateBlockRotation(expandedUnits, bnBreakSet || new Set(), getAvailableSlots(shift), dateSeed, shift);
@@ -4462,8 +4467,8 @@ async function recalculateRotation(bnName, date, shift){
     try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
   });
   if(!rawUnits.length) return null;
-  // Expand C_PAIR based on 3C status for this date
-  const units = expandCPair(rawUnits, date, shift);
+  // Expand C_PAIR based on 3C status for this date, then drop any closed units
+  const units = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
 
   // Get BN's own break slots
   const breaks = await spGet(LISTS.bookings,
@@ -8185,7 +8190,7 @@ async function recalculateAllRotations(){
       const rawUnits = [];
       try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
       if(!rawUnits.length) continue;
-      const units = expandCPair(rawUnits, s.ShiftDate, s.ShiftType);
+      const units = filterClosedUnits(expandCPair(rawUnits, s.ShiftDate, s.ShiftType), s.ShiftDate, s.ShiftType);
       const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
       // Use existing BN default breaks if available
       const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
@@ -9371,7 +9376,7 @@ async function acceptAllAndSave(){
     for(const i of indices){
       const { name, date, shift } = entriesToProcess[i];
       const rawUnits = importUnitSel[i] || [];
-      const units = expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift);
+      const units = filterClosedUnits(expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift), date, shift);
       if(!units.length) continue;
       const bnDef = getDefaultTemplate(name, shift);
       if(bnDef && bnDef.length > 0){
@@ -11002,7 +11007,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // shift) so it survives across renders, but unit changes don't
       // invalidate it on their own.
       let rotation = loadRotation(BNS.name, dt, shift) || {};
-      const _expandedResp = new Set(expandCPair([...responsibleUnits], dt, shift));
+      const _expandedResp = new Set(filterClosedUnits(expandCPair([...responsibleUnits], dt, shift), dt, shift));
       const _rotUnits = new Set(Object.values(rotation).filter(Boolean));
       const _hasStaleUnit = [..._rotUnits].some(u => !_expandedResp.has(u));
       if(_hasStaleUnit){
@@ -11036,7 +11041,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         try { JSON.parse(s.Units||'[]').forEach(u => { if(!_rawUnitsForFallback.includes(u)) _rawUnitsForFallback.push(u); }); } catch{}
       });
       if(_rawUnitsForFallback.length){
-        const _expandedUnits = expandCPair(_rawUnitsForFallback, dt, shift);
+        const _expandedUnits = filterClosedUnits(expandCPair(_rawUnitsForFallback, dt, shift), dt, shift);
         const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
         _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
       }
