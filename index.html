@@ -1273,6 +1273,24 @@ function isUnitOpenForShift(unit, date, shift){
   return isUnitOpenAt(unit, shiftStartDateTime(date, shift));
 }
 
+// ── UI / admin variant: status at the moment the user is deciding ─────
+// Use this anywhere a UI decision (gray a button, fire a "unit closed" modal,
+// exclude from Coverage map) is being made for a specific date+shift.
+//   • Shift in progress  → status NOW (mid-shift closure surfaces immediately,
+//                          mid-shift reopen unblocks immediately)
+//   • Future shift       → status at shift-start (incorporates scheduled changes)
+//   • Past shift         → status at shift-start (historical accuracy)
+// Rotation logic (suggestAssignments, filterClosedUnits, unit covered-by
+// computation in the rotation pipeline) must KEEP using isUnitOpenForShift
+// so an in-progress rotation isn't reshuffled when a unit closes mid-shift.
+function isUnitOpenForShiftEffective(unit, date, shift){
+  const start = shiftStartDateTime(date, shift);
+  const now = new Date();
+  if(now < start) return isUnitOpenAt(unit, start);          // future
+  if(shiftIsOver(date, shift)) return isUnitOpenAt(unit, start); // past
+  return isUnitOpenAt(unit, now);                            // in progress
+}
+
 // ── Generic filter — drop closed units from a list ────
 // Used after expandCPair in rotation pipeline (chunk 2). expandCPair
 // already handles 3C-specific closure via its existing branch; this
@@ -1357,12 +1375,14 @@ function unitCoveredBy(sched, unit, date, shift){
   // branch below since its closure is interleaved with C_PAIR semantics.
   // For every other unit: if closed at this date/shift, no schedule covers
   // it — even if the schedule entry literally lists the unit.
-  if(unit !== '3C' && !isUnitOpenForShift(unit, date, shift)) return false;
+  // UI semantic: mid-shift closure surfaces immediately (uses NOW for
+  // in-progress shifts; shift-start for past/future).
+  if(unit !== '3C' && !isUnitOpenForShiftEffective(unit, date, shift)) return false;
   if(unit === '3C'){
     // Both explicit '3C' and C_PAIR require global 3C status to be open.
     // Schedule may list 3C even when closed (e.g. AI extracted it from UKG
     // verbatim); the closed status is authoritative everywhere downstream.
-    if(!is3COpen(date, shift)) return false;
+    if(!isUnitOpenForShiftEffective('3C', date, shift)) return false;
     return units.includes('3C') || units.includes('C_PAIR');
   }
   if(unit === '4C') return units.includes('4C') || units.includes('C_PAIR');
@@ -1478,7 +1498,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-08-03';
+const APP_VERSION = '2026-05-08-04';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3041,7 +3061,7 @@ async function promptReassignBN(impact){
     // cover. 3C is excluded by default since this modal only fires when 3C
     // is being closed (impact.bn currently covers only 3C).
     const ALL_UNITS = ['3A','4A','5A','6A','7A','4C','6N','7N','8N','8S','9N','9S','10N','10S']
-      .filter(u => isUnitOpenForShift(u, impact.date, impact.shift));
+      .filter(u => isUnitOpenForShiftEffective(u, impact.date, impact.shift));
     const unitCheckboxes = ALL_UNITS.map(u =>
       `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}"> ${u}</label>`
     ).join('');
@@ -3405,12 +3425,11 @@ function init(){
       }
       // Adding: if unit is closed at the currently-selected aDate+aShift,
       // fire the same prompt the import grid uses. Single decision point.
+      // Effective check: NOW for in-progress shifts, shift-start otherwise.
       const date = (document.getElementById('aDate') || {}).value || '';
       const shift = S.aShift;
       if(date && shift && u !== 'C_PAIR'){
-        const open = (u === '3C')
-          ? is3COpen(date, shift)
-          : isUnitOpenForShift(u, date, shift);
+        const open = isUnitOpenForShiftEffective(u, date, shift);
         if(!open){
           // Resolve BN name for the modal — prefer dropdown, fall back to typed
           const sel = document.getElementById('aNurse');
@@ -7569,13 +7588,13 @@ async function loadSummary(){
     // Closed units are skipped entirely — Coverage tab shouldn't claim a unit
     // is covered by a BN when the unit itself isn't operational. The schedule
     // record can list a closed unit (intent preserved) but the runtime view
-    // reflects operational reality via filterClosedUnits, mirroring the
-    // rotation pipeline.
+    // reflects operational reality via NOW-effective status (so a mid-shift
+    // closure removes the unit from the BN map immediately).
     const unitBN={}, unitBNExt={}, oppUnitBN={}, oppUnitBNExt={};
     scheds.forEach(s=>{
       try{
         const sDate = s.ShiftDate.slice(0,10);
-        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
+        JSON.parse(s.Units||'[]').filter(u => isUnitOpenForShiftEffective(u, sDate, s.ShiftType)).forEach(u=>{
           // Only overwrite if no active BN assigned yet, or this record is active
           if(!unitBN[u] || s.Status !== 'inactive'){
             unitBN[u] = s.BreakNurseName;
@@ -7588,7 +7607,7 @@ async function loadSummary(){
     oppScheds.forEach(s=>{
       try{
         const sDate = s.ShiftDate.slice(0,10);
-        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
+        JSON.parse(s.Units||'[]').filter(u => isUnitOpenForShiftEffective(u, sDate, s.ShiftType)).forEach(u=>{
           if(!oppUnitBN[u] || s.Status !== 'inactive'){
             oppUnitBN[u] = s.BreakNurseName;
             const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
@@ -7771,7 +7790,7 @@ function updateAdminUnitGrid(){
   UNITS.forEach(u => {
     const el = document.getElementById(`au-${u}`);
     if(!el) return;
-    const open = isUnitOpenForShift(u, date, shift);
+    const open = isUnitOpenForShiftEffective(u, date, shift);
     el.style.display = '';
     el.style.opacity = open ? '' : '0.45';
   });
@@ -8099,10 +8118,10 @@ async function loadAssignments(){
             </div>
             <div class="unit-tags">${units.map(u => {
               // Grey out any unit closed for this shift — assignment exists but unit inactive.
-              // 3C goes through is3COpen (legacy path); other units use isUnitOpenForShift.
-              const isUnitInactive = (u === '3C')
-                ? !is3COpen(s.ShiftDate.slice(0,10), s.ShiftType)
-                : !isUnitOpenForShift(u, s.ShiftDate.slice(0,10), s.ShiftType);
+              // Effective check: NOW for in-progress shifts so a mid-shift
+              // closure dims the tag immediately. (3C handled via the same
+              // path through effectiveUnitStatusAt → effective3CStatusAt.)
+              const isUnitInactive = !isUnitOpenForShiftEffective(u, s.ShiftDate.slice(0,10), s.ShiftType);
               const tagStyle = isUnitInactive ? 'opacity:.45' : '';
               const canClose = !isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType);
               return canClose
@@ -9132,7 +9151,7 @@ async function restoreLastImport(){
           // them — the toggleIU handler fires _promptClosedUnitAssignment, the
           // single decision point. No save-time modal; the choice made at tap
           // time is what gets persisted.
-          const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
+          const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
         }).join('')}
@@ -9296,7 +9315,7 @@ async function renderImportRows(entries, forceReplace = false){
           // them — the toggleIU handler fires _promptClosedUnitAssignment, the
           // single decision point. No save-time modal; the choice made at tap
           // time is what gets persisted.
-          const isClosed = !isUnitOpenForShift(u, e.date, e.shift);
+          const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
         }).join('')}
@@ -9358,13 +9377,12 @@ async function toggleIU(i, u, el){
   if (idx < 0) {
     // Adding this unit. If it's currently closed at this BN's date+shift,
     // prompt the admin so they don't silently assign work to a closed unit.
-    // 'C_PAIR' inherits 3C status; '3C' uses legacy 3C resolver; everything
-    // else uses chunk 1's generic isUnitOpenForShift.
+    // Effective check: NOW for in-progress shifts (mid-shift closures fire
+    // the modal immediately), shift-start for past/future. The helper handles
+    // 3C internally via effectiveUnitStatusAt → effective3CStatusAt.
     const entry = _currentImportEntries[i];
     if(entry && u !== 'C_PAIR'){
-      const open = (u === '3C')
-        ? is3COpen(entry.date, entry.shift)
-        : isUnitOpenForShift(u, entry.date, entry.shift);
+      const open = isUnitOpenForShiftEffective(u, entry.date, entry.shift);
       if(!open){
         const choice = await _promptClosedUnitAssignment(u, entry.date, entry.shift, entry.name);
         if(choice === 'cancel') return; // admin backed out, don't toggle
@@ -9521,9 +9539,8 @@ function suggestedSlotCount(units, date, shift){
   let arr = units;
   if(date && shift){
     arr = units.filter(u => {
-      if(u === 'C_PAIR') return is3COpen(date, shift) || isUnitOpenForShift('4C', date, shift);
-      if(u === '3C') return is3COpen(date, shift);
-      return isUnitOpenForShift(u, date, shift);
+      if(u === 'C_PAIR') return isUnitOpenForShiftEffective('3C', date, shift) || isUnitOpenForShiftEffective('4C', date, shift);
+      return isUnitOpenForShiftEffective(u, date, shift);
     });
   }
   const set = new Set(arr);
@@ -9886,9 +9903,8 @@ async function saveImportRow(i){
     // is not a real split — BN only covers 8S.)
     const wings = [...new Set(rawUnits
       .filter(u => {
-        if(u === 'C_PAIR') return is3COpen(date, shift) || isUnitOpenForShift('4C', date, shift);
-        if(u === '3C') return is3COpen(date, shift);
-        return isUnitOpenForShift(u, date, shift);
+        if(u === 'C_PAIR') return isUnitOpenForShiftEffective('3C', date, shift) || isUnitOpenForShiftEffective('4C', date, shift);
+        return isUnitOpenForShiftEffective(u, date, shift);
       })
       .map(u => getWing(u === 'C_PAIR' ? '3C' : u))
       .filter(w => w !== '?'))];
