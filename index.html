@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-11-03';
+const APP_VERSION = '2026-05-11-05';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5220,15 +5220,34 @@ async function loadSlots(silent=false){
     const earliestBNStart = Object.values(bnStartMins).length
       ? Math.min(...Object.values(bnStartMins)) : null;
 
-    // Shift is "active" once its sign-up window opens.
-    // For the next (upcoming) shift, skip isPast — all slots are future,
-    // and shiftWindowOpen already locks them until sign-up opens.
-    const shiftIsActive = staffWindowOpen(shift);
+    // shiftIsActive: viewed dt+shift is currently in progress (slot
+    // time-of-day comparisons via isPast are meaningful).
+    //
+    // Three exclusions, all of which guarantee every slot is in the future:
+    //   1. dt > today  — viewing a future date (e.g. Day after 18:30 →
+    //      staffShiftDate returns tomorrow).
+    //   2. Noc + dt = today + m < 20:00 — staffShiftDate('Noc') flips to
+    //      today at 06:30 AM (meaning tonight's upcoming Noc), but
+    //      tonight's Noc doesn't actually start until 20:00. In that
+    //      window the morning-overlap clause in staffWindowOpen falsely
+    //      makes the signup window appear open; isPast would misclassify
+    //      tonight's evening slots as past due to nowKey/sortKey wrap.
+    //   3. signup window closed (e.g. 5 AM viewing Day before 06:30).
+    //
+    // Otherwise: viewed shift is in progress (Day mid-shift, Noc evening/
+    // night, Noc yesterday-rollover with dt = yesterday).
+    const shiftIsActive = (() => {
+      if(dt > today()) return false;
+      if(shift === 'Noc' && dt === today() && nowMin() < 20*60) return false;
+      return staffWindowOpen(shift);
+    })();
 
     // Only apply rotation filter if there are future rotation slots for this unit.
     // If all rotation slots are already past, this unit is done for the shift — show nothing.
+    // Gated by shiftIsActive: when viewing a future-dated shift, all rotation
+    // slots are future, so isPast must not exclude any.
     const futureRotSlots = [...unitRotationSlots].filter(s => {
-      if(isPast(s, shift)) return false;
+      if(shiftIsActive && isPast(s, shift)) return false;
       if(shift === 'Day' && toMin(s) >= SLOT_CUTOFF_DAY) return false; // past Day staff window
       return true;
     });
