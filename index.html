@@ -1510,7 +1510,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-11-01';
+const APP_VERSION = '2026-05-11-02';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2652,15 +2652,57 @@ async function recompute3CAffectedRotations(){
       let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
       return units.includes('3C') || units.includes('C_PAIR');
     });
-    await Promise.all(active.map(async (s) => {
-      const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType, bnDef).catch(()=>{});
-      } else {
-        await recalculateRotation(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType).catch(()=>{});
-      }
-    }));
+    await Promise.all(active.map(s =>
+      recomputeBNWithPastPreserved(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType)
+    ));
   } catch(e){ /* silent */ }
+}
+
+// ── Mid-shift-safe recompute wrapper ──────────────────────
+// Runs the standard rotation recompute (default template or fresh calc)
+// then, if the target shift is currently in progress, overlays each past
+// slot's unit from the pre-recompute cached rotation. Result:
+//   • Past slots — preserve historical unit (no retroactive rewrite)
+//   • Future slots — fresh distribution including newly-open units
+// For non-active shifts (future or past), runs the standard recompute
+// unchanged. Used by both 3C and generic-unit status-change paths so
+// mid-shift opens/closes don't rewrite BN portal history.
+async function recomputeBNWithPastPreserved(bnName, date, shift){
+  // Active = this BN/date/shift is the currently-running shift on this device.
+  // shiftDate(shift) handles the Noc-after-midnight case (returns yesterday).
+  const isActive = (typeof shiftDate === 'function')
+    && shiftDate(shift) === date
+    && (typeof staffWindowOpen === 'function')
+    && staffWindowOpen(shift);
+
+  // Snapshot BEFORE recompute overwrites the cache
+  const oldRotation = isActive ? (loadRotation(bnName, date, shift) || {}) : null;
+
+  // Standard recompute (writes new rotation to cache + backend)
+  const bnDef = getDefaultTemplate(bnName, shift);
+  if(bnDef && bnDef.length > 0){
+    await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
+  } else {
+    await recalculateRotation(bnName, date, shift).catch(()=>{});
+  }
+
+  if(!isActive || !oldRotation) return;
+
+  // Overlay past slots from the snapshot. slotDateTime handles Noc
+  // wrap-past-midnight so the past/future cut works for both shifts.
+  const newRot = loadRotation(bnName, date, shift) || {};
+  const now = new Date();
+  let changed = false;
+  const merged = { ...newRot };
+  Object.entries(oldRotation).forEach(([slot, unit]) => {
+    try {
+      if(slotDateTime(date, slot, shift) < now && merged[slot] !== unit){
+        merged[slot] = unit;
+        changed = true;
+      }
+    } catch{ /* skip malformed slot */ }
+  });
+  if(changed) saveRotation(bnName, date, shift, merged);
 }
 
 // ═══════════════════════════════════════════════════════
@@ -2728,15 +2770,12 @@ async function recomputeUnitsAffectedRotations(units){
       }
     }
 
-    // Recompute each affected BN/date/shift exactly once
-    await Promise.all([...affected.values()].map(async ({ name, date, shift }) => {
-      const bnDef = getDefaultTemplate(name, shift);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(name, date, shift, bnDef).catch(()=>{});
-      } else {
-        await recalculateRotation(name, date, shift).catch(()=>{});
-      }
-    }));
+    // Recompute each affected BN/date/shift exactly once. Wrapper preserves
+    // past slots when the shift is currently in progress so mid-shift unit
+    // status changes don't rewrite the BN's morning rotation history.
+    await Promise.all([...affected.values()].map(({ name, date, shift }) =>
+      recomputeBNWithPastPreserved(name, date, shift)
+    ));
   } catch(e){ /* silent */ }
 }
 // Start ticking every 15 seconds so status transitions feel responsive
@@ -2945,7 +2984,7 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:140px;overflow-y:auto;font-size:.82rem">${bnLines}</div>`;
       }
     } else {
-      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">3C will open ${effectiveLabel}. No automatic reassignments — admin will need to assign a BN to cover 3C.</div>`;
+      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">3C will open ${effectiveLabel}. 3C slots will be added to the remaining rotation for affected break nurses — already-claimed bookings stay where they are.</div>`;
     }
 
     const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? 'Confirm & Notify Nurses' : 'Confirm';
@@ -3059,6 +3098,12 @@ async function commit3CChange(){
     hideBusy();
     toast(`Error: ${e.message}`, true);
   } finally {
+    // Safety net: guarantee the busy overlay dismisses even if the success
+    // path never explicitly called hideBusy() (the open branch didn't).
+    // Calling hideBusy a second time after the inline close-branch call is
+    // a no-op. Without this finally hideBusy, the open-success path leaves
+    // the spinner up indefinitely — the symptom you hit twice today.
+    hideBusy();
     window._pending3CChange = null;
   }
 }
