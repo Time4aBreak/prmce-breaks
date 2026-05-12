@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-11-05';
+const APP_VERSION = '2026-05-12-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10731,11 +10731,13 @@ function stageRemoveBreak(bookingId, slotTime){
 }
 
 // ── Unclaimed row expand/collapse ─────────────────────────
-// An unclaimed row starts collapsed, showing a "+ Claim" button. Tapping it
+// An unclaimed row starts collapsed, showing a "+ Log" button. Tapping it
 // expands the row to reveal name + ext inputs (plus an "Apply to more"
 // checkbox and a "Copy last" hint if a prior claim was submitted this shift).
-// Any number of rows can be expanded; tapping "+ Claim" again collapses
+// Any number of rows can be expanded; tapping "+ Log" again collapses
 // that row. Inputs persist across re-renders via _prodLogInputs.
+// The expanded row also exposes "✕ Clear" — see clearUnclaimedExpand below
+// for the wipe-and-collapse variant.
 
 function toggleUnclaimedExpand(slotTime){
   if(_prodLogExpanded.has(slotTime)){
@@ -10761,6 +10763,24 @@ function toggleUnclaimedExpand(slotTime){
       }
     });
   }
+}
+
+// Clear typed Name/Ext inputs for an expanded unclaimed row, then collapse it.
+// Used by the "✕ Clear" button in the expanded prod-log claim form. Distinct
+// from toggleUnclaimedExpand (which preserves typed inputs across collapse/
+// re-expand cycles). The DOM clear wipes any visible value; the map delete
+// removes the cached value so a later re-expand starts from blank.
+function clearUnclaimedExpand(slotTime){
+  const nameInput = document.getElementById(`claimName_${slotTime}`);
+  const extInput  = document.getElementById(`claimExt_${slotTime}`);
+  if(nameInput) nameInput.value = '';
+  if(extInput)  extInput.value  = '';
+  _prodLogInputs.delete(slotTime);
+  // Collapse without re-capturing (inputs are now empty anyway, but skip
+  // the capture-then-delete dance for clarity and to short-circuit any
+  // future capture-side effects).
+  _prodLogExpanded.delete(slotTime);
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 // Snapshot current input values from DOM into _prodLogInputs so they survive
@@ -11762,7 +11782,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
 
             actionHtml = `<div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end">
               <button class="btn btn-primary btn-sm" id="logBreakBtn_${slot}" onclick="stageClaimFromInputs('${slot}','${esc(rotationUnit || '')}')">✓ Log break</button>
-              <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="toggleUnclaimedExpand('${slot}')">✕ Collapse</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.72rem;padding:3px 8px" onclick="clearUnclaimedExpand('${slot}')">✕ Clear</button>
             </div>`;
           } else {
             // Collapsed unclaimed row — show queued state if staged, else
@@ -11780,7 +11800,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
               // + Claim is gated until BN's shift has started. + My Break stays
               // open ahead of shift so BN can plan breaks early.
               const claimBtn = _claimOpen
-                ? `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Claim</button>`
+                ? `<button class="btn btn-ghost btn-sm" onclick="toggleUnclaimedExpand('${slot}')">+ Log</button>`
                 : '';
               actionHtml = `${claimBtn}
                 <button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')">+ My Break</button>`;
