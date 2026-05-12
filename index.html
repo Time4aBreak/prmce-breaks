@@ -806,15 +806,12 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
-    <!-- 3C Global Status -->
+    <!-- Unit Status -->
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
-        <div style="flex:1;min-width:200px">
-          <div class="card-label" style="margin:0">3C Global Status</div>
-          <div id="threeCStatusLine" style="font-size:.85rem;color:var(--muted);margin-top:6px">Loading…</div>
-        </div>
-        <button type="button" class="btn btn-ghost btn-sm" onclick="open3CStatusModal()">Change Status</button>
-      </div>
+      <div class="card-label" style="margin:0 0 4px">Unit Status</div>
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Tap a unit to open or close it. Closed units appear dimmed.</div>
+      <div class="unit-grid" id="unitStatusGrid"></div>
+      <div id="unitStatusScheduled" style="margin-top:12px;font-size:.82rem"></div>
     </div>
 
     <!-- App version / push update -->
@@ -1510,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-11-02';
+const APP_VERSION = '2026-05-11-03';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2470,26 +2467,50 @@ function isPast(hhmm, shift){
 // stray HTML onclick handlers that slipped through don't throw.
 // ──────────────────────────────
 
-function show3CDefaultToggle(){
-  const line = document.getElementById('threeCStatusLine');
-  if(!line) return;
-  const currentStatus = effective3CStatusAt(new Date());
-  const next = nextScheduled3CChange();
-  const fmt = (iso) => {
-    const d = parseLocalIso(iso);
-    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-    const hh = d.getHours();
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    const h12 = ((hh + 11) % 12) + 1;
-    const ampm = hh < 12 ? 'AM' : 'PM';
-    return `${months[d.getMonth()]} ${d.getDate()}, ${h12}:${mm} ${ampm}`;
-  };
-  let html = `Currently <strong>${currentStatus === 'open' ? 'Open' : 'Closed'}</strong>`;
-  if(next){
-    html += `<br><span style="font-size:.82rem">Scheduled: <strong>${next.status === 'open' ? 'Open' : 'Closed'}</strong> at ${fmt(next.effectiveAt)} · <a href="#" onclick="event.preventDefault();cancelScheduled3CChange('${next.effectiveAt}')" style="color:var(--red);text-decoration:underline">Cancel</a></span>`;
+// ── Render the Unit Status grid in the Schedule tab ──────
+// Mirrors the manual-assign grid visually (.uc buttons in .unit-grid).
+// Open units render normally; closed units at 0.45 opacity (matches the
+// chunk 4.5 closed-unit visual everywhere else). Tap any unit → opens
+// the unit status modal. Also renders any scheduled future changes
+// below the grid with a cancel link.
+function refreshUnitStatusGrid(){
+  const grid = document.getElementById('unitStatusGrid');
+  if(grid){
+    const now = new Date();
+    grid.innerHTML = '';
+    UNITS.forEach(u => {
+      const d = document.createElement('div');
+      d.className = 'uc';
+      d.textContent = u;
+      d.id = `usg-${u}`;
+      const isOpen = isUnitOpenAt(u, now);
+      if(!isOpen) d.style.opacity = '0.45';
+      d.onclick = () => openUnitStatusModal(u);
+      grid.appendChild(d);
+    });
   }
-  line.innerHTML = html;
+  // Render any scheduled future status changes
+  const sched = document.getElementById('unitStatusScheduled');
+  if(sched){
+    const lines = [];
+    UNITS.forEach(u => {
+      const next = _peekNextScheduledForUnit(u);
+      if(next){
+        const fmt = _fmtUnitDateTime(parseLocalIso(next.effectiveAt));
+        const verb = next.status === 'open' ? 'Open' : 'Close';
+        lines.push(`<div style="margin-top:4px"><strong>${u}</strong>: ${verb} at ${fmt} · <a href="#" onclick="event.preventDefault();cancelScheduledUnitChangeUI('${u}','${next.effectiveAt}')" style="color:var(--red);text-decoration:underline">Cancel</a></div>`);
+      }
+    });
+    sched.innerHTML = lines.length
+      ? `<div style="font-size:.78rem;color:var(--muted);font-weight:600;letter-spacing:.06em;text-transform:uppercase;margin-bottom:4px">Scheduled changes</div>${lines.join('')}`
+      : '';
+  }
 }
+
+// Legacy alias — many call sites still invoke show3CDefaultToggle to
+// refresh after a 3C status change. Points to the new grid renderer
+// which covers 3C plus all other units.
+function show3CDefaultToggle(){ refreshUnitStatusGrid(); }
 
 // ── App version push (admin) ───────────────────────────
 // pushAppUpdate writes this device's APP_VERSION to BNState. Other devices
@@ -2542,13 +2563,24 @@ function showAppVersionLine(){
   }
 }
 
-// Cancel a future-scheduled 3C change (remove its entry from the schedule)
-async function cancelScheduled3CChange(effectiveAt){
-  if(!await customConfirm('Cancel this scheduled 3C change?', 'Yes, cancel it', 'Go back')) return;
-  const list = get3CSchedule().filter(e => e.effectiveAt !== effectiveAt);
-  await set3CSchedule(list);
-  show3CDefaultToggle();
+// Cancel a future-scheduled unit status change. 3C uses legacy storage;
+// other units use the unified path.
+async function cancelScheduledUnitChangeUI(unit, effectiveAt){
+  if(!await customConfirm(`Cancel this scheduled ${unit} change?`, 'Yes, cancel it', 'Go back')) return;
+  if(unit === '3C'){
+    const list = get3CSchedule().filter(e => e.effectiveAt !== effectiveAt);
+    await set3CSchedule(list);
+  } else {
+    await cancelScheduledUnitChange(unit, effectiveAt);
+  }
+  refreshUnitStatusGrid();
   toast('Scheduled change cancelled');
+}
+
+// Legacy alias — kept so older code paths still resolve. Calls the
+// generic UI handler with unit fixed to 3C.
+async function cancelScheduled3CChange(effectiveAt){
+  return cancelScheduledUnitChangeUI('3C', effectiveAt);
 }
 
 // Fast UI tick — runs every 15 seconds. If status has flipped since last check,
@@ -2757,9 +2789,10 @@ async function recomputeUnitsAffectedRotations(units){
       if(s.Status === 'inactive') continue;
       let schedUnits = []; try { schedUnits = JSON.parse(s.Units||'[]'); } catch{}
       // A schedule covers a changed unit if it lists that unit directly,
-      // OR if the changed unit is 3C and the schedule lists C_PAIR.
+      // OR if the changed unit is 3C/4C and the schedule lists C_PAIR
+      // (the legacy paired-unit token that maps to both 3C and 4C).
       const coversAny = units.some(u => {
-        if(u === '3C') return schedUnits.includes('3C') || schedUnits.includes('C_PAIR');
+        if(u === '3C' || u === '4C') return schedUnits.includes(u) || schedUnits.includes('C_PAIR');
         return schedUnits.includes(u);
       });
       if(!coversAny) continue;
@@ -2784,13 +2817,44 @@ if(typeof window !== 'undefined' && !window._3CTickStarted){
   setInterval(_3CTick, 15 * 1000);
 }
 
-// ── 3C Status Change Modal chain ────────────────────────
-// Flow: open3CStatusModal → [Apply Now / Schedule for later / Go back]
-//   Apply Now → previewAndApply3CChange(now)
-//   Schedule for later → show datetime picker → previewAndApply3CChange(picked)
-//   Confirm preview → commit3CChange
+// ── Unit Status Change Modal chain ──────────────────────
+// Flow: openUnitStatusModal(unit) → [Apply Now / Schedule for later / Go back]
+//   Apply Now → previewAndApplyUnitChange(unit, now, target)
+//   Schedule for later → datetime picker → previewAndApplyUnitChange(unit, picked, target)
+//   Confirm preview → commitUnitChange
+//
+// 3C uses its legacy storage backend (unit3CSchedule / unit3CDefault) for
+// backward compatibility with the rotation pipeline; all other units use the
+// generic unitSchedules / unitStatuses path. Dispatch helpers route reads
+// and writes correctly. Reads can mostly use the unified effectiveUnitStatusAt
+// (which delegates to effective3CStatusAt for 3C).
+//
+// Legacy aliases at the bottom (open3CStatusModal, cancelScheduled3CChange,
+// show3CDefaultToggle) point old callers at the new functions. Other 3C-
+// specific helpers (set3CDefault, add3CScheduleEntry, effective3CStatusAt,
+// is3COpen, etc.) remain — they're still used by the rotation pipeline and
+// by the legacy storage path inside the dispatch.
 
-function _fmt3CDateTime(d){
+// Storage dispatch — 3C → legacy backend; all others → unified backend
+async function _writeUnitScheduleEntry(unit, effectiveAt, status){
+  if(unit === '3C') return add3CScheduleEntry(effectiveAt, status);
+  return addUnitScheduleEntry(unit, effectiveAt, status);
+}
+async function _writeUnitDefault(unit, status){
+  if(unit === '3C') return set3CDefault(status);
+  return setUnitStatus(unit, status);
+}
+async function _recomputeAffectedFor(unit){
+  if(unit === '3C') return recompute3CAffectedRotations();
+  return recomputeUnitAffectedRotations(unit);
+}
+function _peekNextScheduledForUnit(unit, fromDate){
+  if(unit === '3C') return nextScheduled3CChange(fromDate);
+  const nowIso = toLocalIso(fromDate || new Date());
+  return getUnitSchedule(unit).find(e => e.effectiveAt > nowIso) || null;
+}
+
+function _fmtUnitDateTime(d){
   const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const hh = d.getHours();
   const mm = String(d.getMinutes()).padStart(2,'0');
@@ -2799,51 +2863,46 @@ function _fmt3CDateTime(d){
   return `${months[d.getMonth()]} ${d.getDate()}, ${h12}:${mm} ${ampm}`;
 }
 
-function _close3CModal(){
-  const m = document.getElementById('threeCStatusModal');
+function _closeUnitStatusModal(){
+  const m = document.getElementById('unitStatusModal');
   if(m) m.remove();
 }
 
-async function open3CStatusModal(){
-  _close3CModal();
-  // Note: we intentionally do NOT pull `unit3CSchedule` from BNState here.
-  // If a recent commit's BNState write failed (transient backend error),
-  // pulling stale BNState data would clobber the unsaved local commit and
-  // silently flip the displayed status — making the modal show the wrong
-  // direction (e.g. "Opening 3C now" right after the user opened it).
-  // localStorage is authoritative within a single admin session; cross-
-  // device sync happens via `warm3CStatus` on initial page load.
-  show3CDefaultToggle();
+async function openUnitStatusModal(unit){
+  _closeUnitStatusModal();
+  // Refresh the status grid first so the modal opens against a current view —
+  // protects against stale data masking a status that just changed.
+  refreshUnitStatusGrid();
 
-  const currentStatus = effective3CStatusAt(new Date());
+  const currentStatus = effectiveUnitStatusAt(unit, new Date());
   const targetStatus = currentStatus === 'open' ? 'closed' : 'open';
   const verb = targetStatus === 'open' ? 'Open' : 'Close';
 
   const modal = document.createElement('div');
-  modal.id = 'threeCStatusModal';
+  modal.id = 'unitStatusModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML = `
     <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-      <div style="font-weight:700;font-size:1.05rem;margin-bottom:16px">${verb} 3C?</div>
+      <div style="font-weight:700;font-size:1.05rem;margin-bottom:16px">${verb} ${unit}?</div>
       <div style="font-size:.88rem;color:var(--muted);margin-bottom:16px">
         Current status: <strong style="color:var(--text)">${currentStatus === 'open' ? 'Open' : 'Closed'}</strong>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_3CApplyNow('${targetStatus}')">Apply Now</button>
-        <button type="button" class="btn btn-ghost" onclick="_3CScheduleLater('${targetStatus}')">Schedule for later</button>
-        <button type="button" class="btn btn-ghost" onclick="_close3CModal()">Go back</button>
+        <button type="button" class="btn btn-primary" onclick="_unitApplyNow('${unit}','${targetStatus}')">Apply Now</button>
+        <button type="button" class="btn btn-ghost" onclick="_unitScheduleLater('${unit}','${targetStatus}')">Schedule for later</button>
+        <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 }
 
-function _3CApplyNow(targetStatus){
-  _close3CModal();
-  previewAndApply3CChange(new Date(), targetStatus);
+function _unitApplyNow(unit, targetStatus){
+  _closeUnitStatusModal();
+  previewAndApplyUnitChange(unit, new Date(), targetStatus);
 }
 
-function _3CScheduleLater(targetStatus){
-  _close3CModal();
+function _unitScheduleLater(unit, targetStatus){
+  _closeUnitStatusModal();
   const verb = targetStatus === 'open' ? 'Open' : 'Close';
   // Default date = today, default time = 08:00 for open, 20:00 for close
   const today = new Date();
@@ -2851,33 +2910,33 @@ function _3CScheduleLater(targetStatus){
   const defTime = targetStatus === 'open' ? '08:00' : '20:00';
 
   const modal = document.createElement('div');
-  modal.id = 'threeCStatusModal';
+  modal.id = 'unitStatusModal';
   modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   modal.innerHTML = `
     <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-      <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Schedule 3C to ${verb}</div>
+      <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Schedule ${unit} to ${verb}</div>
       <div style="font-size:.85rem;color:var(--muted);margin-bottom:14px">When should this take effect?</div>
       <div style="display:flex;gap:8px;margin-bottom:18px">
         <div style="flex:1">
           <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Date</label>
-          <input type="date" id="_3cSchedDate" value="${defDate}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
+          <input type="date" id="_unitSchedDate" value="${defDate}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
         </div>
         <div style="flex:1">
           <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Time</label>
-          <input type="time" id="_3cSchedTime" value="${defTime}" step="900" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
+          <input type="time" id="_unitSchedTime" value="${defTime}" step="900" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_3CScheduleSave('${targetStatus}')">Save</button>
-        <button type="button" class="btn btn-ghost" onclick="_close3CModal()">Go back</button>
+        <button type="button" class="btn btn-primary" onclick="_unitScheduleSave('${unit}','${targetStatus}')">Save</button>
+        <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
     </div>`;
   document.body.appendChild(modal);
 }
 
-function _3CScheduleSave(targetStatus){
-  const dateVal = document.getElementById('_3cSchedDate').value;
-  const timeVal = document.getElementById('_3cSchedTime').value;
+function _unitScheduleSave(unit, targetStatus){
+  const dateVal = document.getElementById('_unitSchedDate').value;
+  const timeVal = document.getElementById('_unitSchedTime').value;
   if(!dateVal || !timeVal){ toast('Date and time required', true); return; }
   const [y,m,d] = dateVal.split('-').map(Number);
   const [hh,mm] = timeVal.split(':').map(Number);
@@ -2886,12 +2945,12 @@ function _3CScheduleSave(targetStatus){
     toast('Scheduled time must be in the future. Use Apply Now for immediate changes.', true);
     return;
   }
-  _close3CModal();
-  previewAndApply3CChange(effectiveAt, targetStatus);
+  _closeUnitStatusModal();
+  previewAndApplyUnitChange(unit, effectiveAt, targetStatus);
 }
 
 // Build preview of affected bookings + BN assignments, then confirm
-async function previewAndApply3CChange(effectiveAt, targetStatus){
+async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
   const verb = targetStatus === 'open' ? 'Open' : 'Close';
   const effectiveIso = toLocalIso(effectiveAt);
   const isNow = (effectiveAt.getTime() - Date.now()) < 60*1000; // within 60s = "now"
@@ -2899,29 +2958,39 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
   showBusy(`Checking affected bookings…`);
   try {
     let affectedBookings = [];
-    let bnImpacts = []; // {bn, date, shift, hasOtherUnits, otherUnits}
+    let bnImpacts = []; // {schedId, bn, date, shift, unit, hasOtherUnits, otherUnits}
 
     if(targetStatus === 'closed'){
-      // Fetch all future 3C bookings at or after effectiveAt
+      // Fetch future bookings on this unit at or after effectiveAt.
+      // For 3C/4C: also catch legacy C_PAIR bookings (current writes canonicalize
+      // to '3C' or '4C', but old rows may still carry 'C_PAIR').
       const todayStr = `${effectiveAt.getFullYear()}-${String(effectiveAt.getMonth()+1).padStart(2,'0')}-${String(effectiveAt.getDate()).padStart(2,'0')}`;
-      const allBookings = await spGet(LISTS.bookings,
-        `Unit eq '3C' and SlotDate ge '${todayStr}'`);
+      const bookingFilter = (unit === '3C' || unit === '4C')
+        ? `(Unit eq '${unit}' or Unit eq 'C_PAIR') and SlotDate ge '${todayStr}'`
+        : `Unit eq '${unit}' and SlotDate ge '${todayStr}'`;
+      const allBookings = await spGet(LISTS.bookings, bookingFilter);
       affectedBookings = allBookings.filter(b => {
         if(isBNBreak(b)) return false;
         const slotDt = slotDateTime(b.SlotDate.slice(0,10), b.SlotTime, b.ShiftType);
         return slotDt >= effectiveAt;
       });
 
-      // Fetch all active assignments from effectiveAt date forward where units include 3C.
-      // Pull the floor back to activeShiftFloor() so still-running Noc shifts
-      // (started yesterday-calendar but ending after effectiveAt) aren't missed.
+      // Fetch all active assignments from effectiveAt date forward whose Units
+      // include this unit (or C_PAIR for 3C/4C). Pull the floor back to
+      // activeShiftFloor() so still-running Noc shifts (started yesterday-
+      // calendar but ending after effectiveAt) aren't missed.
       const _scheFloor = activeShiftFloor();
       const _scheFromDate = _scheFloor < todayStr ? _scheFloor : todayStr;
       const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFromDate}'`);
       const affectedScheds = allScheds.filter(s => {
         if(s.Status === 'inactive') return false;
         let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-        if(!(units.includes('3C') || units.includes('C_PAIR'))) return false;
+        // A schedule covers the changing unit if it lists that unit directly,
+        // OR (for 3C/4C only) if it lists C_PAIR.
+        const coversChangingUnit = (unit === '3C' || unit === '4C')
+          ? (units.includes(unit) || units.includes('C_PAIR'))
+          : units.includes(unit);
+        if(!coversChangingUnit) return false;
         // Only include if shift hasn't ended yet at effectiveAt
         const shiftEnd = slotDateTime(s.ShiftDate.slice(0,10), s.ShiftType === 'Noc' ? '0830' : '1830', s.ShiftType);
         return shiftEnd >= effectiveAt;
@@ -2929,15 +2998,35 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
       bnImpacts = affectedScheds.map(s => {
         let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
         const hasC_PAIR = units.includes('C_PAIR');
-        const otherUnits = units.filter(u => u !== '3C' && u !== 'C_PAIR');
-        if(hasC_PAIR) otherUnits.push('4C'); // C_PAIR contributes 4C
+        // Other units = everything except the changing unit and C_PAIR placeholder.
+        // Then for C_PAIR-carrying schedules, contribute the OTHER half:
+        //   • Closing 3C → C_PAIR contributes 4C
+        //   • Closing 4C → C_PAIR contributes 3C
+        //   • Closing any other unit → C_PAIR contributes both 3C and 4C
+        let otherUnits = units.filter(u => u !== unit && u !== 'C_PAIR');
+        if(hasC_PAIR){
+          if(unit === '3C'){ if(!otherUnits.includes('4C')) otherUnits.push('4C'); }
+          else if(unit === '4C'){ if(!otherUnits.includes('3C')) otherUnits.push('3C'); }
+          else {
+            if(!otherUnits.includes('3C')) otherUnits.push('3C');
+            if(!otherUnits.includes('4C')) otherUnits.push('4C');
+          }
+        }
+        // Critical fix for chunk 5: filter to only CURRENTLY-OPEN other units.
+        // The pre-chunk-5 code assumed 4C was always open; with 4C closeable,
+        // a BN whose "other units" are all also closed effectively has no
+        // coverage and needs reassignment. Without this filter the prompt
+        // would be skipped when it shouldn't.
+        const schedDate = s.ShiftDate.slice(0,10);
+        const openOtherUnits = otherUnits.filter(u => isUnitOpenForShift(u, schedDate, s.ShiftType));
         return {
           schedId: s.Id,
           bn: s.BreakNurseName,
-          date: s.ShiftDate.slice(0,10),
+          date: schedDate,
           shift: s.ShiftType,
-          hasOtherUnits: otherUnits.length > 0,
-          otherUnits
+          unit, // pass through so promptReassignBN can show the right name
+          hasOtherUnits: openOtherUnits.length > 0,
+          otherUnits: openOtherUnits
         };
       });
     }
@@ -2951,25 +3040,25 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
     const bnLines = bnImpacts.length
       ? bnImpacts.map(i => {
           if(i.hasOtherUnits){
-            return `• ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): 3C removed, still covers ${i.otherUnits.join(', ')}`;
+            return `• ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): ${unit} removed, still covers ${i.otherUnits.join(', ')}`;
           } else {
-            return `⚠️ ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): <strong>only covers 3C — needs reassignment</strong>`;
+            return `⚠️ ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): <strong>only covers ${unit} — needs reassignment</strong>`;
           }
         }).join('<br>')
       : '<span style="color:var(--muted)">None</span>';
 
-    const effectiveLabel = isNow ? 'now' : _fmt3CDateTime(effectiveAt);
+    const effectiveLabel = isNow ? 'now' : _fmtUnitDateTime(effectiveAt);
     const headerText = targetStatus === 'closed'
-      ? `Closing 3C ${isNow ? 'now' : `at ${_fmt3CDateTime(effectiveAt)}`} will:`
-      : `Opening 3C ${isNow ? 'now' : `at ${_fmt3CDateTime(effectiveAt)}`}`;
+      ? `Closing ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`} will:`
+      : `Opening ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`}`;
     const nothingAffected = targetStatus === 'closed' && !affectedBookings.length && !bnImpacts.length;
 
     // Store for confirm handler
-    window._pending3CChange = { effectiveAt, effectiveIso, targetStatus, affectedBookings, bnImpacts };
+    window._pendingUnitChange = { unit, effectiveAt, effectiveIso, targetStatus, affectedBookings, bnImpacts };
 
-    _close3CModal();
+    _closeUnitStatusModal();
     const modal = document.createElement('div');
-    modal.id = 'threeCStatusModal';
+    modal.id = 'unitStatusModal';
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     let body = `<div style="font-weight:700;font-size:1rem;margin-bottom:14px">${headerText}</div>`;
     if(targetStatus === 'closed'){
@@ -2984,7 +3073,7 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:140px;overflow-y:auto;font-size:.82rem">${bnLines}</div>`;
       }
     } else {
-      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">3C will open ${effectiveLabel}. 3C slots will be added to the remaining rotation for affected break nurses — already-claimed bookings stay where they are.</div>`;
+      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} will open ${effectiveLabel}. ${unit} slots will be added to the remaining rotation for affected break nurses — already-claimed bookings stay where they are.</div>`;
     }
 
     const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? 'Confirm & Notify Nurses' : 'Confirm';
@@ -2992,8 +3081,8 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" onclick="commit3CChange()">${confirmLabel}</button>
-          <button type="button" class="btn btn-ghost" onclick="_close3CModal()">Go back</button>
+          <button type="button" class="btn btn-primary" onclick="commitUnitChange()">${confirmLabel}</button>
+          <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -3003,25 +3092,28 @@ async function previewAndApply3CChange(effectiveAt, targetStatus){
   }
 }
 
-async function commit3CChange(){
-  const pending = window._pending3CChange;
+async function commitUnitChange(){
+  const pending = window._pendingUnitChange;
   if(!pending) return;
-  _close3CModal();
-  showBusy('Applying 3C change…');
+  const { unit } = pending;
+  _closeUnitStatusModal();
+  showBusy(`Applying ${unit} change…`);
   try {
-    // 1. Add schedule entry (await so BNState write completes before any
-    //    warm3CStatus call can pull back a stale value)
-    await add3CScheduleEntry(pending.effectiveIso, pending.targetStatus);
+    // 1. Write schedule entry. Dispatch routes 3C → legacy backend,
+    //    other units → unified backend. Await so the write completes
+    //    before any subsequent reads or BNState warm-pulls.
+    await _writeUnitScheduleEntry(unit, pending.effectiveIso, pending.targetStatus);
 
-    // 2. For closures, cancel affected bookings (parallel) + update each BN's assignment
     if(pending.targetStatus === 'closed'){
       if(pending.affectedBookings.length){
         showBusy(`Cancelling ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''}…`);
         await Promise.all(pending.affectedBookings.map(b => spDel(LISTS.bookings, b.Id)));
       }
 
-      // 3. For each BN with other units, remove 3C + redistribute rotation.
-      // Do these in parallel per-BN since they affect different records.
+      // For each BN with other open units: keep them assigned, recompute
+      // their rotation (which excludes the now-closed unit naturally via
+      // filterClosedUnits / expandCPair). For each BN whose only coverage
+      // was this unit: prompt for reassignment.
       const reassignNeeded = [];
       const bnUpdates = [];
       for(const i of pending.bnImpacts){
@@ -3038,60 +3130,57 @@ async function commit3CChange(){
           const sched = await spGet(LISTS.schedule, `Id eq ${i.schedId}`);
           if(!sched.length) return;
           let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
-          // Normalize legacy C_PAIR → ['3C','4C'] (so 3C stays visible as greyed-out tag
-          // when closed). We keep 3C in the Units array intentionally — closure is
-          // reflected by is3COpen() / rotation exclusion, not by stripping units.
-          const hasC_PAIR = units.includes('C_PAIR');
-          if(hasC_PAIR){
+          // Legacy C_PAIR migration — only applies when closing 3C or 4C.
+          // Splits 'C_PAIR' into ['3C','4C'] in the saved Units so both halves
+          // remain visible as tags. Closure is reflected via runtime
+          // is3COpen / filterClosedUnits, not by stripping units. Preserves
+          // intent so reopening restores coverage automatically.
+          if((unit === '3C' || unit === '4C') && units.includes('C_PAIR')){
             const migrated = units.filter(u => u !== 'C_PAIR');
             if(!migrated.includes('3C')) migrated.push('3C');
             if(!migrated.includes('4C')) migrated.push('4C');
             await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(migrated) });
           }
-          // Recompute rotation in background — 3C will be excluded naturally
-          // because is3COpen returns false after the schedule entry is saved.
-          // Non-awaited: the render path's fallback rotation already reflects
-          // the new state from current scheds, so cache update is best-effort.
-          const bnDef = getDefaultTemplate(i.bn, i.shift);
-          if(bnDef && bnDef.length > 0){
-            applyDefaultToShift(i.bn, i.date, i.shift, bnDef).catch(()=>{});
-          } else {
-            recalculateRotation(i.bn, i.date, i.shift).catch(()=>{});
-          }
+          // Mid-shift-safe recompute: preserves past slots, redistributes
+          // future slots without the closed unit. Fire-and-forget — render
+          // path's fallback rotation reflects new state immediately.
+          recomputeBNWithPastPreserved(i.bn, i.date, i.shift).catch(()=>{});
         }));
       }
 
       hideBusy();
 
-      // 4. Prompt for each BN that only covers 3C
+      // Prompt for each BN whose only open coverage was the closed unit
       for(const i of reassignNeeded){
         await promptReassignBN(i);
       }
 
-      // 5. Summary toast
-      const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
-      toast(`3C closing ${when} · ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''} cancelled · please notify nurses`);
+      const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
+      const cancelTail = pending.affectedBookings.length
+        ? ` · ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''} cancelled · please notify nurses`
+        : '';
+      toast(`${unit} closing ${when}${cancelTail}`);
     } else {
-      // Opening — recompute rotations in background so 3C slots appear in
-      // affected BNs' rotation. Don't await: the current viewer's Prod Log
-      // render computes a fallback rotation inline from current scheds (line
-      // ~9572), so the new 3C slot appears immediately on next render. The
-      // background recompute updates localStorage + BNState so cached
-      // rotations stay correct for subsequent renders and other devices.
-      recompute3CAffectedRotations().catch(()=>{});
-      const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmt3CDateTime(pending.effectiveAt);
-      toast(`3C opening ${when}`);
+      // Opening — recompute affected rotations in background. Dispatch:
+      // 3C uses recompute3CAffectedRotations (covers 3C and C_PAIR BNs);
+      // other units use recomputeUnitAffectedRotations(unit) (which the
+      // chunk-5 bug fix now correctly catches C_PAIR for 4C as well).
+      // Both internally use recomputeBNWithPastPreserved so mid-shift
+      // opens add slots to future rotation only, preserving past history.
+      _recomputeAffectedFor(unit).catch(()=>{});
+      const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
+      toast(`${unit} opening ${when}`);
     }
 
-    show3CDefaultToggle();
-    // Sync the ticker's tracked status so the next tick doesn't re-trigger
-    // recomputation based on a status change commit just handled.
-    _3CTickLastStatus = effective3CStatusAt(new Date());
-    // Re-render shortly after in case an in-flight warm overwrote the display
-    setTimeout(show3CDefaultToggle, 500);
-    setTimeout(show3CDefaultToggle, 2000);
+    refreshUnitStatusGrid();
+    // For 3C only: sync the legacy ticker's last-status so it doesn't
+    // re-trigger recomputation based on a commit we just handled. Other
+    // units don't have a ticker yet (chunk 6 territory).
+    if(unit === '3C') _3CTickLastStatus = effective3CStatusAt(new Date());
+    setTimeout(refreshUnitStatusGrid, 500);
+    setTimeout(refreshUnitStatusGrid, 2000);
     loadAssignments();
-    notifyProdLog3CFlipped();
+    if(unit === '3C' && typeof notifyProdLog3CFlipped === 'function') notifyProdLog3CFlipped();
     if(typeof loadSlots === 'function') loadSlots().catch(()=>{});
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
@@ -3099,14 +3188,19 @@ async function commit3CChange(){
     toast(`Error: ${e.message}`, true);
   } finally {
     // Safety net: guarantee the busy overlay dismisses even if the success
-    // path never explicitly called hideBusy() (the open branch didn't).
-    // Calling hideBusy a second time after the inline close-branch call is
-    // a no-op. Without this finally hideBusy, the open-success path leaves
-    // the spinner up indefinitely — the symptom you hit twice today.
+    // path didn't reach an inline hideBusy. Calling hideBusy a second time
+    // after the inline close-branch call is a no-op. Without this finally
+    // hideBusy, an open-path success left the spinner up indefinitely.
     hideBusy();
-    window._pending3CChange = null;
+    window._pendingUnitChange = null;
   }
 }
+
+// ── Legacy aliases for the 3C-specific entry points ─────
+// Old call sites continue to work during transition. New code should call
+// openUnitStatusModal(unit) directly. These aliases will be removed in
+// chunk 7 cleanup once nothing depends on them.
+async function open3CStatusModal(){ return openUnitStatusModal('3C'); }
 
 async function promptReassignBN(impact){
   return new Promise(resolve => {
@@ -3115,17 +3209,20 @@ async function promptReassignBN(impact){
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     // Filter to only units open at this BN's date+shift. Reassigning to a
     // closed unit defeats the purpose — the BN would still have nothing to
-    // cover. 3C is excluded by default since this modal only fires when 3C
-    // is being closed (impact.bn currently covers only 3C).
-    const ALL_UNITS = ['3A','4A','5A','6A','7A','4C','6N','7N','8N','8S','9N','9S','10N','10S']
-      .filter(u => isUnitOpenForShiftEffective(u, impact.date, impact.shift));
+    // cover. Also exclude the unit currently being closed (impact.unit) so
+    // it doesn't show up as a reassignment target. impact.unit is set by
+    // previewAndApplyUnitChange; defaults to '3C' for any legacy callers
+    // that don't pass it.
+    const closingUnit = impact.unit || '3C';
+    const ALL_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S']
+      .filter(u => u !== closingUnit && isUnitOpenForShiftEffective(u, impact.date, impact.shift));
     const unitCheckboxes = ALL_UNITS.map(u =>
       `<label style="display:flex;align-items:center;gap:6px;font-size:.85rem;margin-bottom:4px"><input type="checkbox" value="${u}"> ${u}</label>`
     ).join('');
 
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${firstName(impact.bn)} only covers 3C</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${firstName(impact.bn)} only covers ${closingUnit}</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${impact.shift} · ${impact.date}</div>
         <div style="font-size:.85rem;margin-bottom:10px">Assign other units to ${firstName(impact.bn)}, or mark unavailable.</div>
         <div id="reassignUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px">${unitCheckboxes}</div>
@@ -9517,9 +9614,10 @@ async function _promptClosedUnitAssignment(unit, date, shift, bnName){
 function _scheduleUnitOpen(unit){
   return new Promise(resolve => {
     if(unit === '3C'){
-      // Reuse the existing 3C scheduling chain for full feature parity.
-      if(typeof _3CScheduleLater === 'function'){
-        _3CScheduleLater('open');
+      // Reuse the parameterized scheduling chain for 3C — full preview/
+      // confirm flow including booking/BN impact analysis.
+      if(typeof _unitScheduleLater === 'function'){
+        _unitScheduleLater('3C', 'open');
         resolve();
         return;
       }
