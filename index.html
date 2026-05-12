@@ -1273,16 +1273,26 @@ function isUnitOpenForShift(unit, date, shift){
   return isUnitOpenAt(unit, shiftStartDateTime(date, shift));
 }
 
-// ── UI / admin variant: status at the moment the user is deciding ─────
-// Use this anywhere a UI decision (gray a button, fire a "unit closed" modal,
-// exclude from Coverage map) is being made for a specific date+shift.
-//   • Shift in progress  → status NOW (mid-shift closure surfaces immediately,
-//                          mid-shift reopen unblocks immediately)
+// ── UI display variant: status at the moment the user is viewing ─────
+// Use ONLY for display-only surfaces — gray a button, dim a tag, exclude
+// from a UI count, fire a "unit closed" modal. NOT for any function that
+// feeds rotation, slot rendering, or booking attribution (those must align
+// with the rotation, which is built at shift-start; use isUnitOpenForShift).
+//
+//   • Shift in progress  → status NOW (mid-shift closure dims/grays
+//                          immediately; mid-shift reopen ungrays immediately)
 //   • Future shift       → status at shift-start (incorporates scheduled changes)
 //   • Past shift         → status at shift-start (historical accuracy)
-// Rotation logic (suggestAssignments, filterClosedUnits, unit covered-by
-// computation in the rotation pipeline) must KEEP using isUnitOpenForShift
-// so an in-progress rotation isn't reshuffled when a unit closes mid-shift.
+//
+// Display-only callers (NOW semantic):
+//   updateAdminUnitGrid, loadAssignments tag dim, restoreLastImport,
+//   renderImportRows, toggleIU modal, suggestedSlotCount, saveImportRow
+//   wing-split warning, promptReassignBN, manual grid tap handler.
+//
+// Rotation-adjacent callers (shift-start, use isUnitOpenForShift instead):
+//   unitCoveredBy, filterClosedUnits, suggestAssignments, expandCPair via
+//   is3COpen, recalculateRotation, applyDefaultToShift, loadSummary's
+//   unitBN map (feeds booking attribution).
 function isUnitOpenForShiftEffective(unit, date, shift){
   const start = shiftStartDateTime(date, shift);
   const now = new Date();
@@ -1371,18 +1381,20 @@ function expandCPair(units, date, shift){
 // Check if a unit is covered by a schedule entry (handles C_PAIR expansion)
 function unitCoveredBy(sched, unit, date, shift){
   let units = []; try { units = JSON.parse(sched.Units||'[]'); } catch{}
-  // Generic closed-unit gate (chunk 2). 3C is delegated to the existing
-  // branch below since its closure is interleaved with C_PAIR semantics.
+  // Generic closed-unit gate. 3C is delegated to the existing branch below
+  // since its closure is interleaved with C_PAIR semantics.
   // For every other unit: if closed at this date/shift, no schedule covers
   // it — even if the schedule entry literally lists the unit.
-  // UI semantic: mid-shift closure surfaces immediately (uses NOW for
-  // in-progress shifts; shift-start for past/future).
-  if(unit !== '3C' && !isUnitOpenForShiftEffective(unit, date, shift)) return false;
+  // Rotation-adjacent semantic: uses shift-start (NOT NOW). This function
+  // feeds slot rendering, slot ownership, and booking attribution — all of
+  // which align with the rotation, which is built at shift-start.
+  // Mid-shift status changes don't reshuffle these surfaces.
+  if(unit !== '3C' && !isUnitOpenForShift(unit, date, shift)) return false;
   if(unit === '3C'){
     // Both explicit '3C' and C_PAIR require global 3C status to be open.
     // Schedule may list 3C even when closed (e.g. AI extracted it from UKG
     // verbatim); the closed status is authoritative everywhere downstream.
-    if(!isUnitOpenForShiftEffective('3C', date, shift)) return false;
+    if(!is3COpen(date, shift)) return false;
     return units.includes('3C') || units.includes('C_PAIR');
   }
   if(unit === '4C') return units.includes('4C') || units.includes('C_PAIR');
@@ -1498,7 +1510,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-08-04';
+const APP_VERSION = '2026-05-11-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -7585,16 +7597,16 @@ async function loadSummary(){
 
     // Build separate BN maps — main shift and opp shift (for overlap attribution)
     // Active records take priority over inactive.
-    // Closed units are skipped entirely — Coverage tab shouldn't claim a unit
-    // is covered by a BN when the unit itself isn't operational. The schedule
-    // record can list a closed unit (intent preserved) but the runtime view
-    // reflects operational reality via NOW-effective status (so a mid-shift
-    // closure removes the unit from the BN map immediately).
+    // Closed units are skipped entirely — but using shift-start semantics
+    // (filterClosedUnits) because unitBN feeds booking attribution via
+    // getBNForBooking. Attribution must align with the rotation, which is
+    // built at shift-start. A mid-shift closure must not orphan bookings
+    // that were validly claimed before closure.
     const unitBN={}, unitBNExt={}, oppUnitBN={}, oppUnitBNExt={};
     scheds.forEach(s=>{
       try{
         const sDate = s.ShiftDate.slice(0,10);
-        JSON.parse(s.Units||'[]').filter(u => isUnitOpenForShiftEffective(u, sDate, s.ShiftType)).forEach(u=>{
+        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
           // Only overwrite if no active BN assigned yet, or this record is active
           if(!unitBN[u] || s.Status !== 'inactive'){
             unitBN[u] = s.BreakNurseName;
@@ -7607,7 +7619,7 @@ async function loadSummary(){
     oppScheds.forEach(s=>{
       try{
         const sDate = s.ShiftDate.slice(0,10);
-        JSON.parse(s.Units||'[]').filter(u => isUnitOpenForShiftEffective(u, sDate, s.ShiftType)).forEach(u=>{
+        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
           if(!oppUnitBN[u] || s.Status !== 'inactive'){
             oppUnitBN[u] = s.BreakNurseName;
             const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
