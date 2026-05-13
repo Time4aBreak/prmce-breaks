@@ -475,11 +475,11 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               </div>
               <div style="margin-bottom:8px">
                 <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Nurse First Name</label>
-                <input type="text" id="manualNurseName" placeholder="First name" maxlength="30" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                <input type="text" id="manualNurseName" placeholder="First name" maxlength="30" autocomplete="off" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
               </div>
               <div style="margin-bottom:10px">
                 <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Spectra Ext</label>
-                <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" autocomplete="off" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
               </div>
               <div style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
@@ -939,8 +939,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div id="manageTransferSection" style="display:none;margin-bottom:16px;padding:14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg)">
       <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
       <div style="display:flex;gap:8px">
-        <input type="text" id="transferName" placeholder="First name" style="flex:1;padding:8px 10px;font-size:.9rem"/>
-        <input type="text" id="transferExt" placeholder="Ext" maxlength="5" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferName" placeholder="First name" autocomplete="off" style="flex:1;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferExt" placeholder="Ext" maxlength="5" autocomplete="off" style="width:80px;padding:8px 10px;font-size:.9rem"/>
       </div>
       <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
@@ -962,8 +962,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div style="margin-bottom:16px;padding:14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg)">
       <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
       <div style="display:flex;gap:8px">
-        <input type="text" id="transferStagingName" placeholder="First name" style="flex:1;padding:8px 10px;font-size:.9rem"/>
-        <input type="text" id="transferStagingExt" placeholder="Ext" maxlength="5" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferStagingName" placeholder="First name" autocomplete="off" style="flex:1;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferStagingExt" placeholder="Ext" maxlength="5" autocomplete="off" style="width:80px;padding:8px 10px;font-size:.9rem"/>
       </div>
       <div id="transferStagingErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-12-01';
+const APP_VERSION = '2026-05-12-02';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11770,8 +11770,8 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             centerHtml = `<span style="color:var(--muted);font-size:.82rem">Unclaimed ${unitLabel}</span>
               ${copyLastBtn ? `<div style="margin-top:4px">${copyLastBtn}</div>` : ''}
               <div style="display:flex;gap:4px;margin-top:6px">
-                <input type="text" id="claimName_${slot}" placeholder="Nurse name" value="${escHTML(savedInputs.name)}" oninput="_prodLogCaptureInputs('${slot}')" style="flex:1;min-width:80px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
-                <input type="text" id="claimExt_${slot}" placeholder="Ext" maxlength="5" value="${escHTML(savedInputs.ext)}" oninput="_prodLogCaptureInputs('${slot}')" style="width:72px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+                <input type="text" id="claimName_${slot}" placeholder="Nurse name" autocomplete="off" value="${escHTML(savedInputs.name)}" oninput="_prodLogCaptureInputs('${slot}')" style="flex:1;min-width:80px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
+                <input type="text" id="claimExt_${slot}" placeholder="Ext" maxlength="5" autocomplete="off" value="${escHTML(savedInputs.ext)}" oninput="_prodLogCaptureInputs('${slot}')" style="width:72px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
               </div>
               <div style="font-size:.7rem;color:var(--muted);margin-top:4px">Ext enables the staff nurse to manage their break from the Sign Up tab.</div>
               ${chipOptions.length ? `<label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.78rem;color:var(--muted);cursor:pointer">
@@ -13047,7 +13047,7 @@ function renderImportedNamesList(){
     const esc = n.replace(/'/g,"\\'");
     return `<div class="roster-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       <span style="font-weight:500;flex:1;min-width:140px">${n}</span>
-      <input type="text" value="${pref}" placeholder="Preferred name"
+      <input type="text" value="${pref}" placeholder="Preferred name" autocomplete="off"
         onblur="setPreferredName('${esc}', this.value); renderImportedNamesList();"
         style="padding:6px 8px;font-size:.85rem;width:130px"/>
       <button class="btn btn-danger btn-sm" onclick="removeImportedName('${esc}')">Remove</button>
