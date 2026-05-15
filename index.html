@@ -316,8 +316,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
       <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
       <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
-      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)" id="st-reports-btn">📊 Reports</button>
       <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">⚙️ Schedule</button>
+      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
     </div>
 
     <!-- Sub-tab content -->
@@ -469,7 +469,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
               </div>
               <div style="margin-bottom:8px">
                   <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Time</label>
-                  <select id="manualSlotTime" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
+                  <select id="manualSlotTime" onchange="refreshManualApplyMoreChips()" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
                     <option value="">— select unit first —</option>
                   </select>
               </div>
@@ -481,9 +481,19 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
                 <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:3px">Spectra Ext</label>
                 <input type="text" id="manualNurseExt" placeholder="5-digit ext" maxlength="5" inputmode="numeric" autocomplete="off" style="width:100%;padding:6px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.85rem">
               </div>
+              <!-- Apply-to-more — log same nurse + ext on additional times for the
+                   same selected unit. Chips populated by populateManualSlots from
+                   available (unclaimed) times on the unit. -->
+              <div id="manualApplyMoreSection" style="margin-bottom:10px;display:none">
+                <label style="display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted);cursor:pointer">
+                  <input type="checkbox" id="manualApplyMoreCheck" onchange="toggleManualApplyMore()" style="cursor:pointer">
+                  Apply to more times on this unit
+                </label>
+                <div id="manualApplyMoreWrap" style="display:none;flex-wrap:wrap;gap:4px;margin-top:6px;max-height:140px;overflow-y:auto"></div>
+              </div>
               <div style="display:flex;gap:8px;justify-content:flex-end">
                 <button class="btn btn-ghost btn-sm" onclick="toggleManualBreakForm()">Cancel</button>
-                <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';saveManualBreak().finally(()=>{this.disabled=false;this.textContent='Save Break'})">Save Break</button>
+                <button class="btn btn-success btn-sm" id="manualSaveBtn" onclick="const _b=this;_b.disabled=true;const _orig=_b.textContent;_b.textContent='Saving…';saveManualBreak().finally(()=>{_b.disabled=false;_b.textContent=_orig})">Save Break</button>
               </div>
             </div>
           </div>
@@ -815,17 +825,16 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     </div>
 
     <!-- App version / push update -->
-    <!-- Push button is hidden during pre-launch testing to prevent accidental
-         version mismatches on the fleet. Status line stays visible so admin
-         can verify cross-device version state. To re-enable for go-live,
-         remove the inline display:none on pushUpdateBtn. -->
+    <!-- Push button visible to admin so they can deploy version updates to
+         the fleet after every release. The status line above tells admin
+         when this is meaningful (server out of date / not yet set). -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px">
         <div style="flex:1;min-width:200px">
           <div class="card-label" style="margin:0">📢 App Version</div>
           <div id="appVersionLine" style="font-size:.85rem;color:var(--muted);margin-top:6px">Loading…</div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()" style="display:none">Push update</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()">Push update</button>
       </div>
     </div>
 
@@ -1432,6 +1441,12 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 // also the blank-cell case (old staff bookings have no IsBNBreak value).
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
+// Manual breaks are staff bookings logged by the BN via the "+ Add Manual
+// Break" form. They bypass the BN's responsibleUnits filter because the BN
+// may legitimately give a break to a nurse from a different unit (favor,
+// cross-coverage, etc.) and that booking must still appear on their Prod
+// Log. Detected via the MANUAL-* Title prefix set by saveManualBreak.
+function isManualBreak(b){ return b && String(b.Title || '').startsWith('MANUAL-'); }
 
 // Normalize a SlotTime into the 4-digit string form used as keys throughout
 // the app. Sheets strips leading zeros on numeric cells, so a 00:15 slot
@@ -1507,7 +1522,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-04';
+const APP_VERSION = '2026-05-15-08';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11352,7 +11367,10 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
     // Overlap-aware coverage predicate: does THIS BN actually cover this booking?
     const bnCovers = (b) => {
       if(isBNBreak(b)) return false;
-      if(!responsibleUnits.has(b.Unit)) return false;
+      // Manual breaks bypass the unit filter — BN may log a break for a
+      // nurse from a unit they don't normally cover (favor, cross-coverage).
+      // The shift/date checks below still apply.
+      if(!isManualBreak(b) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
 
       // Same-shift, same-date: this BN covers — UNLESS the slot is in the
@@ -11801,8 +11819,15 @@ async function undoBreakStatus(id){
 async function populateManualSlots(){
   const unit = document.getElementById('manualUnit').value;
   const sel  = document.getElementById('manualSlotTime');
+  const applyMoreSection = document.getElementById('manualApplyMoreSection');
+  const applyMoreCheck   = document.getElementById('manualApplyMoreCheck');
+  const applyMoreWrap    = document.getElementById('manualApplyMoreWrap');
   sel.innerHTML = '<option value="">— loading... —</option>';
-  if(!unit){ sel.innerHTML = '<option value="">— select unit first —</option>'; return; }
+  // Reset Apply-to-more state whenever unit changes
+  if(applyMoreCheck) applyMoreCheck.checked = false;
+  if(applyMoreWrap){ applyMoreWrap.innerHTML = ''; applyMoreWrap.style.display = 'none'; }
+  if(applyMoreSection) applyMoreSection.style.display = 'none';
+  if(!unit){ sel.innerHTML = '<option value="">— select unit first —</option>'; updateManualSaveBtnLabel(); return; }
 
   const dt    = BNS.date || today();
   const shift = BNS.shift;
@@ -11821,6 +11846,7 @@ async function populateManualSlots(){
     const available = allSlots.filter(s => !claimed.has(s));
     if(!available.length){
       sel.innerHTML = '<option value="">No available slots</option>';
+      updateManualSaveBtnLabel();
       return;
     }
     sel.innerHTML = '<option value="">— select time —</option>' +
@@ -11828,9 +11854,91 @@ async function populateManualSlots(){
         const label = bnBreaks.has(s) ? `${fmt12(s)} (BN break — manual only)` : fmt12(s);
         return `<option value="${s}">${label}</option>`;
       }).join('');
+
+    // Populate Apply-to-more chips with the same available list.
+    // refreshManualApplyMoreChips will hide whichever slot is currently
+    // selected as primary (no chip for the dropdown's value).
+    if(applyMoreWrap){
+      applyMoreWrap.innerHTML = available.map(s => {
+        const label = bnBreaks.has(s) ? `${fmt12(s)} (BN break)` : fmt12(s);
+        return `<span id="manualChip_${s}" class="chip" data-slot="${s}" onclick="toggleManualApplyMoreChip('${s}')" style="display:inline-flex;align-items:center;padding:4px 10px;border:1px solid var(--border);border-radius:12px;font-size:.75rem;cursor:pointer;user-select:none;background:var(--bg)">${label}</span>`;
+      }).join(' ');
+    }
+    // Show the section now that we have chips to offer
+    if(applyMoreSection && available.length > 1) applyMoreSection.style.display = 'block';
+    refreshManualApplyMoreChips();
   } catch(e) {
     sel.innerHTML = '<option value="">Error loading slots</option>';
   }
+  updateManualSaveBtnLabel();
+}
+
+// Show/hide the chip-picker wrap when the "Apply to more times" checkbox toggles.
+function toggleManualApplyMore(){
+  const cb   = document.getElementById('manualApplyMoreCheck');
+  const wrap = document.getElementById('manualApplyMoreWrap');
+  if(wrap) wrap.style.display = cb?.checked ? 'flex' : 'none';
+  updateManualSaveBtnLabel();
+}
+
+// Toggle a single chip's selected state. Mirrors the Prod Log Apply-to-more
+// chip pattern (toggleApplyMoreChip).
+function toggleManualApplyMoreChip(s){
+  const chip = document.getElementById(`manualChip_${s}`);
+  if(!chip) return;
+  const isSelected = chip.classList.toggle('selected');
+  if(isSelected){
+    chip.style.background  = 'var(--teal-mid)';
+    chip.style.borderColor = 'var(--teal-dk)';
+    chip.style.color       = 'var(--teal-dk)';
+    chip.style.fontWeight  = '600';
+  } else {
+    chip.style.background  = 'var(--bg)';
+    chip.style.borderColor = 'var(--border)';
+    chip.style.color       = '';
+    chip.style.fontWeight  = '';
+  }
+  updateManualSaveBtnLabel();
+}
+
+// Hide the chip that matches the Time dropdown's current value, so the
+// primary slot doesn't double-appear as a chip. Re-show any chip that
+// was previously hidden but is no longer the primary.
+function refreshManualApplyMoreChips(){
+  const primary = (document.getElementById('manualSlotTime') || {}).value || '';
+  const wrap = document.getElementById('manualApplyMoreWrap');
+  if(!wrap) return;
+  wrap.querySelectorAll('.chip').forEach(chip => {
+    const s = chip.dataset.slot;
+    if(s === primary){
+      chip.style.display = 'none';
+      // De-select if it was selected (now it's the primary)
+      if(chip.classList.contains('selected')){
+        chip.classList.remove('selected');
+        chip.style.background  = 'var(--bg)';
+        chip.style.borderColor = 'var(--border)';
+        chip.style.color       = '';
+        chip.style.fontWeight  = '';
+      }
+    } else {
+      chip.style.display = '';
+    }
+  });
+  updateManualSaveBtnLabel();
+}
+
+// Update the save button label to reflect how many breaks will be created.
+function updateManualSaveBtnLabel(){
+  const btn  = document.getElementById('manualSaveBtn');
+  if(!btn) return;
+  const cb   = document.getElementById('manualApplyMoreCheck');
+  const wrap = document.getElementById('manualApplyMoreWrap');
+  let n = 1;
+  if(cb?.checked && wrap){
+    const selected = wrap.querySelectorAll('.chip.selected');
+    n = 1 + selected.length;
+  }
+  btn.textContent = n === 1 ? 'Save Break' : `Save ${n} Breaks`;
 }
 
 function toggleManualBreakForm(){
@@ -11845,6 +11953,14 @@ function toggleManualBreakForm(){
     document.getElementById('manualSlotTime').innerHTML = '<option value="">— select unit first —</option>';
     document.getElementById('manualNurseName').value = '';
     document.getElementById('manualNurseExt').value = '';
+    // Reset Apply-to-more state
+    const cb = document.getElementById('manualApplyMoreCheck');
+    if(cb) cb.checked = false;
+    const wrap = document.getElementById('manualApplyMoreWrap');
+    if(wrap){ wrap.innerHTML = ''; wrap.style.display = 'none'; }
+    const section = document.getElementById('manualApplyMoreSection');
+    if(section) section.style.display = 'none';
+    updateManualSaveBtnLabel();
   }
 }
 
@@ -11859,31 +11975,66 @@ async function saveManualBreak(){
   if(!name)     { toast('Please enter a nurse name', true); return; }
   if(!/^\d{5}$/.test(ext)){ toast('Please enter a 5-digit extension', true); return; }
 
+  // Collect target slot times: primary + any selected Apply-to-more chips.
+  // Dedupe via Set in case a chip somehow matches the primary.
+  const slots = new Set([slotTime]);
+  const cb = document.getElementById('manualApplyMoreCheck');
+  if(cb?.checked){
+    const wrap = document.getElementById('manualApplyMoreWrap');
+    wrap?.querySelectorAll('.chip.selected').forEach(chip => {
+      const s = chip.dataset.slot;
+      if(s) slots.add(s);
+    });
+  }
+  const slotList = [...slots];
+
   const nurseName = `${name} (${ext})`;
   const dt = BNS.date || today(), shift = BNS.shift;
 
   try {
-    // Block if this nurse already has a manual break at the same time on any unit
+    // Pre-flight check: any slot where this nurse already has a break would
+    // violate "one nurse, one place at a time". Block the whole save if any
+    // conflict exists so the user can adjust before any record gets created.
     const existingAtTime = await spGet(LISTS.bookings,
-      `NurseName eq '${esc(nurseName)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and SlotTime eq '${slotTime}' and ShiftType eq '${shift}'`);
-    if(existingAtTime.filter(b => isStaffBooking(b)).length){
-      toast(`${nurseName} already has a break at ${fmt12(slotTime)} — a nurse can only be in one place at a time.`, true);
+      `NurseName eq '${esc(nurseName)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const existingSlots = new Set(existingAtTime.filter(b => isStaffBooking(b)).map(b => String(b.SlotTime).padStart(4,'0')));
+    const conflicts = slotList.filter(s => existingSlots.has(s));
+    if(conflicts.length){
+      const list = conflicts.map(fmt12).join(', ');
+      toast(`${nurseName} already has break(s) at ${list}. A nurse can only be in one place at a time.`, true);
       return;
     }
 
-    await spPost(LISTS.bookings, {
-      Title: `MANUAL-${unit}-${dt}-${slotTime}`,
-      NurseName: nurseName, Unit: unit, SlotTime: slotTime,
-      SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
-    });
+    // Save all slots. Done sequentially to preserve order and keep error
+    // handling simple; manual entries are low-volume so the latency hit
+    // of N posts is acceptable for the clarity benefit.
+    let saved = 0;
+    for(const s of slotList){
+      await spPost(LISTS.bookings, {
+        Title: `MANUAL-${unit}-${dt}-${s}`,
+        NurseName: nurseName, Unit: unit, SlotTime: s,
+        SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
+      });
+      saved++;
+    }
 
     // Clear fields
     document.getElementById('manualSlotTime').innerHTML = '<option value="">— select unit first —</option>';
     document.getElementById('manualUnit').value = '';
     document.getElementById('manualNurseName').value = '';
     document.getElementById('manualNurseExt').value = '';
+    // Reset Apply-to-more state
+    const cbReset = document.getElementById('manualApplyMoreCheck');
+    if(cbReset) cbReset.checked = false;
+    const wrapReset = document.getElementById('manualApplyMoreWrap');
+    if(wrapReset){ wrapReset.innerHTML = ''; wrapReset.style.display = 'none'; }
+    const sectionReset = document.getElementById('manualApplyMoreSection');
+    if(sectionReset) sectionReset.style.display = 'none';
 
-    toast(`✓ Manual break saved for ${nurseName} at ${fmt12(slotTime)} on ${unit}`);
+    const msg = saved === 1
+      ? `✓ Manual break saved for ${nurseName} at ${fmt12(slotList[0])} on ${unit}`
+      : `✓ ${saved} manual breaks saved for ${nurseName} on ${unit}`;
+    toast(msg);
     // Close form and refresh list
     const form = document.getElementById('bnManualForm');
     if(form) form.style.display = 'none';
@@ -11925,7 +12076,9 @@ async function confirmAllBreaks(){
     // Overlap-aware coverage predicate (same as loadBNConfirm)
     const bnCovers = (b) => {
       if(isBNBreak(b)) return false;
-      if(!responsibleUnits.has(b.Unit)) return false;
+      // Manual breaks bypass the unit filter — see loadBNConfirm bnCovers
+      // for rationale (cross-unit favors / coverage).
+      if(!isManualBreak(b) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
         if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
