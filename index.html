@@ -441,8 +441,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div id="prodLogSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--teal-mid);border-radius:10px;border:1.5px solid var(--teal);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
             <span id="prodLogSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
             <div style="display:flex;gap:8px">
-              <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="clearStagedActions()">Clear</button>
-              <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="submitStagedActions()">Submit</button>
+              <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="const _b=this;_b.disabled=true;_b.textContent='Clearing…';Promise.resolve(clearStagedActions()).finally(()=>{_b.disabled=false;_b.textContent='Clear'})">Clear</button>
+              <button class="btn btn-sm" style="background:var(--teal);color:white;font-weight:600" id="prodLogSubmit" onclick="const _b=this;_b.disabled=true;_b.textContent='Submitting…';Promise.resolve(submitStagedActions()).finally(()=>{_b.disabled=false;_b.textContent='Submit'})">Submit</button>
             </div>
           </div>
 
@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-03';
+const APP_VERSION = '2026-05-15-04';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2498,7 +2498,7 @@ function refreshUnitStatusGrid(){
       if(next){
         const fmt = _fmtUnitDateTime(parseLocalIso(next.effectiveAt));
         const verb = next.status === 'open' ? 'Open' : 'Close';
-        lines.push(`<div style="margin-top:4px"><strong>${u}</strong>: ${verb} at ${fmt} · <a href="#" onclick="event.preventDefault();cancelScheduledUnitChangeUI('${u}','${next.effectiveAt}')" style="color:var(--red);text-decoration:underline">Cancel</a></div>`);
+        lines.push(`<div style="margin-top:4px"><strong>${u}</strong>: ${verb} at ${fmt} · <a href="#" onclick="event.preventDefault();const _a=this;_a.textContent='Cancelling…';_a.style.pointerEvents='none';Promise.resolve(cancelScheduledUnitChangeUI('${u}','${next.effectiveAt}')).finally(()=>{_a.textContent='Cancel';_a.style.pointerEvents=''})" style="color:var(--red);text-decoration:underline">Cancel</a></div>`);
       }
     });
     sched.innerHTML = lines.length
@@ -3081,7 +3081,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" onclick="commitUnitChange()">${confirmLabel}</button>
+          <button type="button" class="btn btn-primary" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';Promise.resolve(commitUnitChange()).finally(()=>{_b.disabled=false;_b.textContent=${JSON.stringify(confirmLabel)}})">${confirmLabel}</button>
           <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
         </div>
       </div>`;
@@ -5499,7 +5499,7 @@ async function loadSlots(silent=false){
         ? '📡 Could not reach the server — check your connection'
         : e.message;
     list.innerHTML=`<div class="empty" style="color:var(--red)">${msg}<br><br>
-      <button class="btn btn-ghost btn-sm" onclick="loadSlots()">↺ Try again</button></div>`;
+      <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Loading…';Promise.resolve(loadSlots()).finally(()=>{_b.disabled=false;_b.textContent='↺ Try again'})">↺ Try again</button></div>`;
   }
   loader.style.display='none';
 }
@@ -8342,7 +8342,7 @@ async function loadAssignments(){
     }).join('');
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(e.message)}<br><br>
-      <button class="btn btn-ghost btn-sm" onclick="loadAssignments()">↺ Try again</button></div>`;
+      <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Loading…';Promise.resolve(loadAssignments()).finally(()=>{_b.disabled=false;_b.textContent='↺ Try again'})">↺ Try again</button></div>`;
   }
 }
 
@@ -9364,7 +9364,7 @@ async function restoreLastImport(){
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
         }).join('')}
       </div>
-      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="saveImportRow(${i})">✓ Save</button>
+      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
       <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
       <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
     </div>`;
@@ -9528,7 +9528,7 @@ async function renderImportRows(entries, forceReplace = false){
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
         }).join('')}
       </div>
-      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="saveImportRow(${i})">✓ Save</button>
+      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
       <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
       <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
     </div>`;
