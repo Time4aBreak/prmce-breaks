@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-12-02';
+const APP_VERSION = '2026-05-13-02';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3578,35 +3578,17 @@ function init(){
         return;
       }
       // Adding: if unit is closed at the currently-selected aDate+aShift,
-      // fire the same prompt the import grid uses. Single decision point.
+      // block the toggle and direct admin to the Unit Status card. All
+      // unit status changes happen in one place (Schedule tab → Unit
+      // Status) which surfaces the full booking + BN impact preview.
       // Effective check: NOW for in-progress shifts, shift-start otherwise.
       const date = (document.getElementById('aDate') || {}).value || '';
       const shift = S.aShift;
       if(date && shift && u !== 'C_PAIR'){
         const open = isUnitOpenForShiftEffective(u, date, shift);
         if(!open){
-          // Resolve BN name for the modal — prefer dropdown, fall back to typed
-          const sel = document.getElementById('aNurse');
-          const typed = (document.getElementById('aNurseText')||{}).value || '';
-          const bnName = (sel && sel.value) || typed || '';
-          const choice = await _promptClosedUnitAssignment(u, date, shift, bnName);
-          if(choice === 'cancel') return;
-          if(choice === 'now'){
-            try {
-              if(u === '3C'){
-                await set3CDefault('open');
-                recompute3CAffectedRotations().catch(()=>{});
-              } else {
-                await setUnitStatus(u, 'open');
-                recomputeUnitAffectedRotations(u).catch(()=>{});
-              }
-              toast(`${u} opened`);
-              // Refresh grid styling — the unit is now open
-              updateAdminUnitGrid();
-            } catch(e){ toast(`Could not open ${u}: ${e.message}`, true); return; }
-          } else if(choice === 'later'){
-            await _scheduleUnitOpen(u);
-          }
+          toast(`Please open ${u} in UNIT STATUS to assign`);
+          return;
         }
       }
       S.aUnits.push(u);
@@ -7954,8 +7936,8 @@ function setAShift(sh){
 
 // Style closed units in the admin manual-assign grid as grayed (visible
 // but muted) for the currently-selected aDate+aShift. Tapping a closed
-// unit fires _promptClosedUnitAssignment via the click handler — the
-// decision point. Mirrors the import grid treatment for consistency.
+// unit shows a toast directing admin to the Unit Status card on the
+// Schedule tab — all unit status changes happen in one place.
 function updateAdminUnitGrid(){
   const date  = (document.getElementById('aDate') || {}).value || '';
   const shift = S.aShift;
@@ -8003,11 +7985,12 @@ async function saveAssign(){
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
-  // No save-time closed-unit guard. The decision point is at TAP time
-  // (toggleU / toggleIU fire _promptClosedUnitAssignment when a closed
-  // unit is selected). Save just persists the array — closed units that
-  // remain are intentional. Rotation excludes them via filterClosedUnits
-  // until the unit reopens.
+  // No save-time closed-unit guard. The decision point is at TAP time —
+  // the manual grid and import grid block toggling in a closed unit via
+  // a toast directing admin to the Unit Status card. Save just persists
+  // the array — any closed units that survived (e.g., an existing edit
+  // of an assignment created before the unit closed) are intentional.
+  // Rotation excludes them via filterClosedUnits until the unit reopens.
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
     const allScheds = await spGet(LISTS.schedule,
@@ -9321,9 +9304,9 @@ async function restoreLastImport(){
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
         ${UNITS.map(u => {
           // Gray closed units so admin sees they're closed but can still tap
-          // them — the toggleIU handler fires _promptClosedUnitAssignment, the
-          // single decision point. No save-time modal; the choice made at tap
-          // time is what gets persisted.
+          // them — tapping a closed unit shows a toast directing admin to the
+          // Unit Status card on the Schedule tab — single decision point.
+          // All unit status changes happen in one place.
           const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
@@ -9485,9 +9468,9 @@ async function renderImportRows(entries, forceReplace = false){
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
         ${UNITS.map(u => {
           // Gray closed units so admin sees they're closed but can still tap
-          // them — the toggleIU handler fires _promptClosedUnitAssignment, the
-          // single decision point. No save-time modal; the choice made at tap
-          // time is what gets persisted.
+          // them — tapping a closed unit shows a toast directing admin to the
+          // Unit Status card on the Schedule tab — single decision point.
+          // All unit status changes happen in one place.
           const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
@@ -9549,35 +9532,18 @@ async function toggleIU(i, u, el){
   const idx = arr.indexOf(u);
   if (idx < 0) {
     // Adding this unit. If it's currently closed at this BN's date+shift,
-    // prompt the admin so they don't silently assign work to a closed unit.
-    // Effective check: NOW for in-progress shifts (mid-shift closures fire
-    // the modal immediately), shift-start for past/future. The helper handles
+    // block the toggle and direct admin to the Unit Status card. All unit
+    // status changes happen in one place (Schedule tab → Unit Status)
+    // which surfaces the full booking + BN impact preview.
+    // Effective check: NOW for in-progress shifts (mid-shift closures
+    // block immediately), shift-start for past/future. The helper handles
     // 3C internally via effectiveUnitStatusAt → effective3CStatusAt.
     const entry = _currentImportEntries[i];
     if(entry && u !== 'C_PAIR'){
       const open = isUnitOpenForShiftEffective(u, entry.date, entry.shift);
       if(!open){
-        const choice = await _promptClosedUnitAssignment(u, entry.date, entry.shift, entry.name);
-        if(choice === 'cancel') return; // admin backed out, don't toggle
-        if(choice === 'now'){
-          // Apply Now: open the unit immediately, then continue with the toggle
-          try {
-            if(u === '3C'){
-              await set3CDefault('open');
-              recompute3CAffectedRotations().catch(()=>{});
-            } else {
-              await setUnitStatus(u, 'open');
-              recomputeUnitAffectedRotations(u).catch(()=>{});
-            }
-            toast(`${u} opened`);
-          } catch(e){ toast(`Could not open ${u}: ${e.message}`, true); return; }
-        } else if(choice === 'later'){
-          // Schedule: defer to existing 3C scheduling UI for 3C, or generic
-          // path for other units. Toggle proceeds either way — the BN's
-          // assignment includes the unit, but rotation will exclude it
-          // until the scheduled open takes effect.
-          await _scheduleUnitOpen(u);
-        }
+        toast(`Please open ${u} in UNIT STATUS to assign`);
+        return;
       }
     }
     arr.push(u); el.classList.add('on');
@@ -9586,114 +9552,6 @@ async function toggleIU(i, u, el){
   }
 }
 
-// Prompt admin when assigning a closed unit. Returns one of:
-//   'now'    — Open Now
-//   'later'  — Schedule open time
-//   'cancel' — Don't toggle/save
-async function _promptClosedUnitAssignment(unit, date, shift, bnName){
-  // Format date as "Friday 05/15" — full day name + MM/DD, no year
-  let dateStr = date;
-  try {
-    const d = new Date(date + 'T12:00:00');
-    const dayName = d.toLocaleDateString('en-US', { weekday: 'long' });
-    const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const dd = String(d.getDate()).padStart(2, '0');
-    dateStr = `${dayName} ${mm}/${dd}`;
-  } catch{}
-  const bnDisplay = bnName ? firstName(bnName) : 'this BN';
-  return new Promise(resolve => {
-    const m = document.createElement('div');
-    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-    m.innerHTML = `
-      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1.05rem;margin-bottom:10px">${unit} is closed</div>
-        <div style="font-size:.88rem;color:var(--muted);margin-bottom:16px">
-          To assign ${unit} to ${bnDisplay} on ${dateStr} please select
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" data-act="now">Open Now</button>
-          <button type="button" class="btn btn-ghost"   data-act="later">Schedule open time</button>
-          <button type="button" class="btn btn-ghost"   data-act="cancel">Cancel</button>
-        </div>
-      </div>`;
-    m.addEventListener('click', e => {
-      const a = e.target.dataset?.act;
-      if(!a) return;
-      m.remove();
-      resolve(a);
-    });
-    document.body.appendChild(m);
-  });
-}
-
-// Open scheduling UI for a closed unit.
-// 3C delegates to the existing scheduling flow (preserved untouched).
-// Other units: date+time picker mirroring the 3C modal pattern, then
-// addUnitScheduleEntry persists the future open transition.
-function _scheduleUnitOpen(unit){
-  return new Promise(resolve => {
-    if(unit === '3C'){
-      // Reuse the parameterized scheduling chain for 3C — full preview/
-      // confirm flow including booking/BN impact analysis.
-      if(typeof _unitScheduleLater === 'function'){
-        _unitScheduleLater('3C', 'open');
-        resolve();
-        return;
-      }
-    }
-    const today = new Date();
-    const defDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
-    const defTime = '08:00';
-
-    const modal = document.createElement('div');
-    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
-    modal.innerHTML = `
-      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1.05rem;margin-bottom:4px">Schedule ${unit} to Open</div>
-        <div style="font-size:.85rem;color:var(--muted);margin-bottom:14px">When should this take effect?</div>
-        <div style="display:flex;gap:8px;margin-bottom:18px">
-          <div style="flex:1">
-            <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Date</label>
-            <input type="date" data-fld="date" value="${defDate}" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
-          </div>
-          <div style="flex:1">
-            <label style="font-size:.72rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Time</label>
-            <input type="time" data-fld="time" value="${defTime}" step="900" style="width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:8px;background:var(--card);font-size:.95rem;color:var(--text);box-sizing:border-box"/>
-          </div>
-        </div>
-        <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" data-act="save">Save</button>
-          <button type="button" class="btn btn-ghost"   data-act="cancel">Go back</button>
-        </div>
-      </div>`;
-    modal.addEventListener('click', async e => {
-      const a = e.target.dataset?.act;
-      if(!a) return;
-      if(a === 'cancel'){ modal.remove(); resolve(); return; }
-      if(a === 'save'){
-        const dateVal = modal.querySelector('input[data-fld="date"]').value;
-        const timeVal = modal.querySelector('input[data-fld="time"]').value;
-        if(!dateVal || !timeVal){ toast('Date and time required', true); return; }
-        const [y,m,d] = dateVal.split('-').map(Number);
-        const [hh,mm] = timeVal.split(':').map(Number);
-        const effectiveAt = new Date(y, m-1, d, hh, mm);
-        if(effectiveAt <= new Date()){
-          toast('Scheduled time must be in the future. Use Open Now for immediate changes.', true);
-          return;
-        }
-        try {
-          await addUnitScheduleEntry(unit, toLocalIso(effectiveAt), 'open');
-          toast(`${unit} scheduled to open ${dateVal} ${timeVal}`);
-          modal.remove();
-          resolve();
-        } catch(err){
-          toast(`Could not schedule: ${err.message||err}`, true);
-        }
-      }
-    });
-    document.body.appendChild(modal);
-  });
-}
 
 // Count suggested units as slots (3C+4C = 1 slot)
 function suggestedSlotCount(units, date, shift){
