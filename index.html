@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-13-02';
+const APP_VERSION = '2026-05-14-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3173,11 +3173,24 @@ async function commitUnitChange(){
     }
 
     refreshUnitStatusGrid();
+    // Refresh the manual assign grid styling — closed/open state changed,
+    // so the .uc button opacities for the currently-selected aDate/aShift
+    // need to be recomputed. Cheap call; no-op if the grid isn't visible.
+    if(typeof updateAdminUnitGrid === 'function') updateAdminUnitGrid();
+    // Refresh any active import grid rows — same reason. Re-render only
+    // when an import is in flight (entries cached); otherwise a no-op.
+    if(typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length
+       && typeof renderImportRows === 'function'){
+      renderImportRows(_currentImportEntries, true).catch(()=>{});
+    }
     // For 3C only: sync the legacy ticker's last-status so it doesn't
     // re-trigger recomputation based on a commit we just handled. Other
     // units don't have a ticker yet (chunk 6 territory).
     if(unit === '3C') _3CTickLastStatus = effective3CStatusAt(new Date());
-    setTimeout(refreshUnitStatusGrid, 500);
+    setTimeout(() => {
+      refreshUnitStatusGrid();
+      if(typeof updateAdminUnitGrid === 'function') updateAdminUnitGrid();
+    }, 500);
     setTimeout(refreshUnitStatusGrid, 2000);
     loadAssignments();
     if(unit === '3C' && typeof notifyProdLog3CFlipped === 'function') notifyProdLog3CFlipped();
