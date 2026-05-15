@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-14-01';
+const APP_VERSION = '2026-05-15-01';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5459,6 +5459,14 @@ async function loadSlots(silent=false){
         <div>${actionHtml}</div>
       </div>`;
     });
+    // Stale-callback guard: if a newer loadSlots() invocation has started,
+    // bail BEFORE touching the DOM. Previously this check ran AFTER the
+    // innerHTML assignment, which meant a stale call could repaint with
+    // old data and then bail out of the cache update too late. Order
+    // matters: any side effect (DOM mutation, cache write, timer
+    // (re)scheduling) must be gated by the gen check.
+    if(_myGen !== _loadSlotsGen) return;
+
     // Silent DOM update — only re-render if content changed
     updateNameExtLock();
     if(list.dataset.lastHtml !== html){
@@ -5467,7 +5475,6 @@ async function loadSlots(silent=false){
     }
 
     // Populate cache for instant pending re-renders
-    if(_myGen !== _loadSlotsGen){ return; } // stale — a newer call has started
     _slotRenderCache = {
       future, bMap, bnBreaks, nurseName, nurseExt: document.getElementById('nurseExt').value.trim(),
       covering, oppCovering, shift, overlapRange
@@ -5534,7 +5541,11 @@ async function silentRefreshSlots(){
     const bMap = {};
     bookings.forEach(b => { if(isStaffBooking(b)) bMap[b.SlotTime] = b.NurseName; });
     const bnBreakTimes = new Set(
-      allBNBreaks.filter(b => allBNNames.includes(b.NurseName)).map(b => b.SlotTime)
+      // SlotTime canon is 4-digit padded ('0835', '2055'). Sheets may
+      // return numeric strings unpadded — apply normSlot/padStart so
+      // membership checks against also-padded comparators match.
+      allBNBreaks.filter(b => allBNNames.includes(b.NurseName))
+        .map(b => String(b.SlotTime).padStart(4,'0'))
     );
 
     const _nurseFirst = document.getElementById('nurseName').value.trim();
@@ -7365,7 +7376,12 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       const respUnits = responsibleUnitsFor(bn);
       bnResponsibleUnits[bnName2] = respUnits;
 
-      const breaks = allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName2).map(b => b.SlotTime);
+      // SlotTime canon = 4-digit padded; Sheets may return unpadded.
+      // bnBreakSets is used downstream for T+1 conflict checks and busy
+      // computation — membership checks compare against padded slot keys,
+      // so the values stored here must be padded.
+      const breaks = allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName2)
+        .map(b => String(b.SlotTime).padStart(4,'0'));
       bnBreakSets[bnName2] = new Set(breaks);
 
       const busy = new Set(breaks);  // own breaks count as busy
@@ -10157,7 +10173,13 @@ async function loadBNView(){
             (s.ShiftDate.slice(0,10) > BNS.date || (s.ShiftDate.slice(0,10) === BNS.date && s.ShiftType !== BNS.shift)))
           .sort((a,b) => a.ShiftDate.localeCompare(b.ShiftDate) || a.ShiftType.localeCompare(b.ShiftType));
         if(future.length){
-          BNS.date  = future[0].ShiftDate;
+          // Sheets returns ShiftDate as an ISO timestamp ('2026-05-15T00:00:00').
+          // The BNS.date convention is YYYY-MM-DD throughout the rest of
+          // the app (date input value, query interpolation, .slice(0,10)
+          // comparisons). Storing the full timestamp here breaks subsequent
+          // queries (`ShiftDate ge '2026-05-15T00:00:00'`) and the date
+          // input which expects 'YYYY-MM-DD'.
+          BNS.date  = future[0].ShiftDate.slice(0,10);
           BNS.shift = future[0].ShiftType;
           const dp = document.getElementById('bnDate');
           if(dp) dp.value = BNS.date;
