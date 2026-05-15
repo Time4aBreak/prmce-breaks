@@ -1507,7 +1507,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-02';
+const APP_VERSION = '2026-05-15-03';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11900,7 +11900,10 @@ function dismissNotifications(ids, dismissKey){
   const dismissed = new Set(JSON.parse(localStorage.getItem(dismissKey) || '[]'));
   ids.forEach(id => dismissed.add(id));
   localStorage.setItem(dismissKey, JSON.stringify([...dismissed]));
-  loadBNConfirm();
+  // Re-render from cache for instant response. Fall through to network
+  // only if cache is empty (first-load edge case). Same pattern used by
+  // toggleUnclaimedExpand / stage/unstage etc.
+  if(!_renderBNConfirm()) loadBNConfirm();
 }
 
 
