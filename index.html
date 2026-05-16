@@ -422,6 +422,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
             <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
+            <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.7rem" onclick="showDebugDiag()">🔍 Debug</button>
           </div>
 
           <!-- Start-time selector — for late-arrival BNs. Defaults to "full shift".
@@ -1496,7 +1497,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-17';
+const APP_VERSION = '2026-05-15-18';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11918,6 +11919,57 @@ function undoBreakStatus(id){
     });
 }
 
+
+// Diagnostic snapshot for mobile debugging — no DevTools needed.
+// Surfaces BN identity, covered units, and the cached bookings (with
+// their CreatedBy attribution) in a screenshotable modal. The Copy
+// button puts the text on the clipboard for pasting into chat.
+function showDebugDiag(){
+  const cache = _bnConfirmCache;
+  const myUnits = [];
+  (cache?.scheds || []).forEach(s => {
+    try { JSON.parse(s.Units || '[]').forEach(u => { if(!myUnits.includes(u)) myUnits.push(u); }); } catch {}
+  });
+  const visible = (cache?.allBookings || [])
+    .filter(b => !isBNBreak(b))
+    .map(b => ({
+      nurse: b.NurseName,
+      unit: b.Unit,
+      slot: b.SlotTime,
+      createdBy: b.CreatedBy || '(empty)',
+      status: b.BreakStatus || '(pending)'
+    }));
+  const responsibleUnits = new Set(myUnits);
+  const visibleToMe = visible.filter(b => {
+    const fauxB = { Unit: b.unit, CreatedBy: b.createdBy === '(empty)' ? null : b.createdBy, IsBNBreak: 0 };
+    return responsibleUnits.has(b.unit) || isManualBreak(fauxB, responsibleUnits, BNS.name);
+  });
+
+  const report = {
+    build: APP_VERSION,
+    BN: BNS.name || '(not set)',
+    date: BNS.date || '(not set)',
+    shift: BNS.shift || '(not set)',
+    units: myUnits,
+    cachedBookings: visible.length,
+    visibleToMe: visibleToMe.length,
+    bookings: visible
+  };
+  const text = JSON.stringify(report, null, 2);
+
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
+  wrap.innerHTML = `
+    <div style="background:var(--card);border-radius:12px;padding:16px;max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column;gap:10px">
+      <div style="font-size:.85rem;font-weight:600;color:var(--text)">Debug Snapshot</div>
+      <pre id="debugDiagText" style="background:var(--bg);padding:10px;border-radius:8px;font-size:.7rem;line-height:1.4;overflow:auto;flex:1;color:var(--text);white-space:pre-wrap;word-break:break-all">${escHTML(text)}</pre>
+      <div style="display:flex;gap:8px;justify-content:flex-end">
+        <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard?.writeText(document.getElementById('debugDiagText').textContent).then(()=>toast('Copied')).catch(()=>toast('Copy failed — screenshot instead',true))">Copy</button>
+        <button class="btn btn-primary btn-sm" onclick="this.closest('div[style*=fixed]').remove()">Close</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+}
 
 function dismissNotifications(ids, dismissKey){
   const dismissed = new Set(JSON.parse(localStorage.getItem(dismissKey) || '[]'));
