@@ -1499,7 +1499,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-13';
+const APP_VERSION = '2026-05-15-16';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10305,6 +10305,14 @@ async function clearBNBreaks(){
       // Track deletes so the immediate re-render filters them out even if
       // Sheets returns stale pre-delete state for a brief window.
       breaks.forEach(b => trackDelete(b.Id));
+      // Optimistic: remove deleted rows from the cache in place so
+      // _renderBNConfirm reflects the cleared state instantly without
+      // waiting for the trailing loadBNConfirm refetch.
+      if(_bnConfirmCache && _bnConfirmCache.allBookings){
+        const deletedIds = new Set(breaks.map(b => String(b.Id)));
+        _bnConfirmCache.allBookings = _bnConfirmCache.allBookings.filter(b => !deletedIds.has(String(b.Id)));
+      }
+      _renderBNConfirm();
     }
     // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
     // so existing staff bookings keep their BN attribution.
@@ -10426,13 +10434,32 @@ function trackCreate(record){
   }, MUTATION_TTL_MS + 100);
 }
 
+// Track a partial update to an existing booking. Used for instant-feedback
+// patches (e.g., BreakStatus undo) where we want the BN portal to reflect
+// the new state immediately without waiting for the network round trip
+// + full refetch. reconcileBookings merges the patch into freshly fetched
+// rows by Id, overriding any stale fields the server hasn't yet returned.
+function trackPatch(id, fields){
+  if(id == null || !fields) return;
+  const key = String(id);
+  _recentMutations.set(key, { op:'patch', fields, ts:Date.now() });
+  setTimeout(() => {
+    const m = _recentMutations.get(key);
+    if(m && m.op === 'patch' && Date.now() - m.ts >= MUTATION_TTL_MS) _recentMutations.delete(key);
+  }, MUTATION_TTL_MS + 100);
+}
+
 // Apply pending mutations to a freshly fetched bookings array. Filters
 // out client-side deletes and injects client-side creates that the server
 // may not yet be returning. Idempotent — safe to call multiple times.
 function reconcileBookings(bookings){
   if(!_recentMutations.size) return bookings;
-  // 1. Drop deletes
-  const filtered = bookings.filter(b => {
+  // 1. Drop deletes; merge patches into matching rows
+  const filtered = bookings.map(b => {
+    const m = _recentMutations.get(String(b.Id));
+    if(m && m.op === 'patch') return { ...b, ...m.fields };
+    return b;
+  }).filter(b => {
     const m = _recentMutations.get(String(b.Id));
     return !(m && m.op === 'delete');
   });
@@ -11809,13 +11836,36 @@ async function cancelStaffBooking(id, nurseName, slotTime){
     'Keep it'
   );
   if(!confirmed) return;
-  try {
-    await spDel(LISTS.bookings, id);
-    toast(`${formatNurse(nurseName)}'s ${fmt12(slotTime)} break cancelled — slot is now open`);
-    loadSummary();
-    loadBNConfirm();
-    if(S.unit) loadSlots(true);
-  } catch(e){ toast(e.message, true); }
+  // Optimistic: track delete + remove from cache + render instantly,
+  // fire spDel in background. Refreshes for Summary/Slots aren't
+  // cache-backed so they still need their refetches — those happen
+  // after the spDel resolves so the data is consistent.
+  let removed = null;
+  if(_bnConfirmCache && _bnConfirmCache.allBookings){
+    const idx = _bnConfirmCache.allBookings.findIndex(b => String(b.Id) === String(id));
+    if(idx >= 0){
+      removed = _bnConfirmCache.allBookings[idx];
+      _bnConfirmCache.allBookings.splice(idx, 1);
+    }
+  }
+  trackDelete(id);
+  _renderBNConfirm();
+  toast(`${formatNurse(nurseName)}'s ${fmt12(slotTime)} break cancelled — slot is now open`);
+  // Network in background; non-cache surfaces refresh after it lands
+  spDel(LISTS.bookings, id)
+    .then(() => {
+      loadSummary();
+      if(S.unit) loadSlots(true);
+    })
+    .catch(e => {
+      // Roll back: re-inject the removed row, untrack delete, re-render
+      if(removed && _bnConfirmCache && _bnConfirmCache.allBookings){
+        _bnConfirmCache.allBookings.push(removed);
+      }
+      _recentMutations.delete(String(id));
+      toast(`Cancel failed: ${e.message}`, true);
+      _renderBNConfirm();
+    });
 }
 
 async function setBreakStatus(id, status){
@@ -11825,11 +11875,44 @@ async function setBreakStatus(id, status){
   } catch(e) { toast(e.message, true); }
 }
 
-async function undoBreakStatus(id){
-  try {
-    await spPatch(LISTS.bookings, id, { BreakStatus: null, IsCompleted: 0 });
-    loadBNConfirm();
-  } catch(e) { toast(e.message, true); }
+// Undo a confirmed/not-taken break status. Optimistic: patch the cache
+// and re-render IMMEDIATELY, fire the network spPatch in the background.
+// On failure, roll back via trackPatch with the original values and toast
+// the error. Pattern mirrors how stage/unstage work — instant UI response
+// is non-negotiable on a tap-heavy workflow.
+function undoBreakStatus(id){
+  // Optimistically reflect the change in the cache so _renderBNConfirm
+  // paints the row's new state before the network call returns.
+  const cache = _bnConfirmCache;
+  let originalFields = null;
+  if(cache && cache.allBookings){
+    const b = cache.allBookings.find(x => String(x.Id) === String(id));
+    if(b){
+      originalFields = { BreakStatus: b.BreakStatus, IsCompleted: b.IsCompleted };
+      b.BreakStatus = null;
+      b.IsCompleted = 0;
+    }
+  }
+  trackPatch(id, { BreakStatus: null, IsCompleted: 0 });
+  // Re-render from cache for instant feedback. If cache is empty, fall
+  // through to network (rare — cache is normally populated by the
+  // previous loadBNConfirm).
+  if(!_renderBNConfirm()) loadBNConfirm();
+  // Fire the actual write in the background. On failure, roll back the
+  // optimistic state and re-render.
+  spPatch(LISTS.bookings, id, { BreakStatus: null, IsCompleted: 0 })
+    .catch(e => {
+      if(cache && cache.allBookings && originalFields){
+        const b = cache.allBookings.find(x => String(x.Id) === String(id));
+        if(b){
+          b.BreakStatus = originalFields.BreakStatus;
+          b.IsCompleted = originalFields.IsCompleted;
+        }
+      }
+      trackPatch(id, originalFields || { BreakStatus: 'confirmed', IsCompleted: 1 });
+      toast(`Undo failed: ${e.message}`, true);
+      if(!_renderBNConfirm()) loadBNConfirm();
+    });
 }
 
 
@@ -11844,13 +11927,97 @@ function dismissNotifications(ids, dismissKey){
 }
 
 
-async function confirmAllBreaks(){
+// Submit all pending breaks as Taken. Optimistic: patch the cache rows
+// in place and re-render IMMEDIATELY, then fire all spPatch calls in
+// PARALLEL (Promise.all) in the background. Each write is also tracked
+// in the mutation cache so any concurrent refetch respects the optimistic
+// state. On any failure, the failed rows are rolled back and re-rendered.
+function confirmAllBreaks(){
   const dt = BNS.date || today(), shift = BNS.shift;
+  const cache = _bnConfirmCache;
+  if(!cache || !cache.allBookings){
+    // Cache miss — fall back to the legacy fetch-then-iterate flow with
+    // a single toast at the end. Should be rare; the cache is populated
+    // by the previous loadBNConfirm and this button can only be tapped
+    // once the BN portal has rendered.
+    _confirmAllBreaksFallback(dt, shift);
+    return;
+  }
+
+  // Derive responsibleUnits SYNCHRONOUSLY from cache.scheds — eliminates
+  // the network round-trip that getBNUnits would do. scheds is already
+  // populated by the previous loadBNConfirm and is exactly the data
+  // getBNUnits reads from the server.
+  const responsibleUnits = new Set();
+  (cache.scheds || []).forEach(s => {
+    try { JSON.parse(s.Units || '[]').forEach(u => responsibleUnits.add(u)); } catch {}
+  });
+
+  const nextDt = cache.nextDt;
+  const bnCovers = (b) => {
+    if(isBNBreak(b)) return false;
+    if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
+    const bDate = (b.SlotDate || '').slice(0, 10);
+    if(b.ShiftType === shift && bDate === dt){
+      if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
+      if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;
+      return true;
+    }
+    if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt) return isOverlapSlot(b.SlotTime, 'Day');
+    if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt)     return isOverlapSlot(b.SlotTime, 'Noc');
+    return false;
+  };
+
+  const pending = cache.allBookings.filter(b => bnCovers(b) && isPending(b));
+  if(!pending.length){ toast('No pending breaks to confirm'); return; }
+
+  // Snapshot pre-state for rollback
+  const originals = pending.map(b => ({
+    id: b.Id,
+    ref: b,
+    prev: { BreakStatus: b.BreakStatus, IsCompleted: b.IsCompleted }
+  }));
+
+  // Optimistic patches: cache + mutation tracker
+  originals.forEach(({ ref, id }) => {
+    ref.BreakStatus = 'confirmed';
+    ref.IsCompleted = 1;
+    trackPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 });
+  });
+
+  // Re-render once from cache — all rows flip instantly
+  if(!_renderBNConfirm()) loadBNConfirm();
+  toast(`✓ ${pending.length} break${pending.length!==1?'s':''} confirmed`);
+
+  // Fire all writes in PARALLEL in the background. Track per-row outcomes
+  // for rollback. No await — the function returns immediately after the
+  // optimistic render.
+  Promise.allSettled(
+    originals.map(({ id }) => spPatch(LISTS.bookings, id, { BreakStatus: 'confirmed', IsCompleted: 1 }))
+  ).then(results => {
+    const failed = results
+      .map((r, i) => r.status === 'rejected' ? originals[i] : null)
+      .filter(Boolean);
+    if(failed.length){
+      // Roll back failed rows only
+      failed.forEach(({ ref, id, prev }) => {
+        ref.BreakStatus = prev.BreakStatus;
+        ref.IsCompleted = prev.IsCompleted;
+        trackPatch(id, prev);
+      });
+      toast(`${failed.length} of ${originals.length} confirmations failed — please retry`, true);
+      if(!_renderBNConfirm()) loadBNConfirm();
+    }
+  });
+}
+
+// Legacy fallback path when the cache isn't populated. Sequential and
+// blocking — kept for safety. Should rarely fire in practice since the
+// BN portal must have rendered before this button is tappable.
+async function _confirmAllBreaksFallback(dt, shift){
   try {
     const units = await getBNUnits(BNS.name, dt, shift);
     const responsibleUnits = new Set(units);
-    // Match the widened query used by loadBNConfirm so overlap bookings
-    // this BN actually covers are included in "Submit all as Taken".
     const nextDt = (function(d){
       const x = new Date(d + 'T12:00:00');
       x.setDate(x.getDate() + 1);
@@ -11859,11 +12026,8 @@ async function confirmAllBreaks(){
     const maxDt = shift === 'Noc' ? nextDt : dt;
     const allBookings = await spGet(LISTS.bookings,
       `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
-    // Overlap-aware coverage predicate (same as loadBNConfirm)
     const bnCovers = (b) => {
       if(isBNBreak(b)) return false;
-      // Manual breaks bypass the unit filter — see loadBNConfirm bnCovers
-      // for rationale (cross-unit favors / coverage).
       if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
@@ -11871,18 +12035,14 @@ async function confirmAllBreaks(){
         if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;
         return true;
       }
-      if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt){
-        return isOverlapSlot(b.SlotTime, 'Day');
-      }
-      if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt){
-        return isOverlapSlot(b.SlotTime, 'Noc');
-      }
+      if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt) return isOverlapSlot(b.SlotTime, 'Day');
+      if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt)     return isOverlapSlot(b.SlotTime, 'Noc');
       return false;
     };
     const pending = allBookings.filter(b => bnCovers(b) && isPending(b));
-    for(const b of pending){
-      await spPatch(LISTS.bookings, b.Id, { BreakStatus: 'confirmed', IsCompleted: 1 });
-    }
+    await Promise.all(pending.map(b =>
+      spPatch(LISTS.bookings, b.Id, { BreakStatus: 'confirmed', IsCompleted: 1 })
+    ));
     toast(`✓ ${pending.length} break${pending.length!==1?'s':''} confirmed`);
     loadBNConfirm();
   } catch(e) { toast(e.message, true); }
