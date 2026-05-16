@@ -1508,7 +1508,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-27';
+const APP_VERSION = '2026-05-15-31';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -7864,6 +7864,20 @@ async function loadSummary(){
     fillSlotOwner(scheds, slotOwnerBN, slotOwnerExt, dt, shift);
     fillSlotOwner(oppScheds, oppSlotOwnerBN, oppSlotOwnerExt, oppDt, oppShift);
 
+    // BN-name → ext lookup. Built from all scheds (active + inactive,
+    // main + opposite shift) so CreatedBy attribution can resolve the
+    // CREATOR's ext directly, not the unit BN's. Previously the ext
+    // lookup was unit-based, which made attributed bookings show the
+    // covering BN's ext (e.g. Tomas's manual break on Janice's unit
+    // appeared as "Tomas · {Janice's ext}").
+    const bnNameExt = {};
+    [...scheds, ...oppScheds].forEach(s => {
+      const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
+      if(ext && s.BreakNurseName && !bnNameExt[s.BreakNurseName]){
+        bnNameExt[s.BreakNurseName] = ext;
+      }
+    });
+
     // Helper: get covering BN for a booking — overlap slots use opp BN map
     const getBNForBooking = (b) => {
       // Attribution takes precedence: if a BN explicitly created this
@@ -7881,6 +7895,9 @@ async function loadSummary(){
       return slotOwnerBN[key] || unitBN[b.Unit];
     };
     const getBNExtForBooking = (b) => {
+      // Mirror getBNForBooking: CreatedBy attribution wins. Look up the
+      // creator's ext directly so the displayed BN name and ext agree.
+      if(b.CreatedBy) return bnNameExt[b.CreatedBy] || '';
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
       const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
@@ -7931,32 +7948,40 @@ async function loadSummary(){
 
     let html=`<div class="info-bar"><span>${staffBookings.length} staff break${staffBookings.length!==1?'s':''} &nbsp;·&nbsp; ${bnOwnBreaks.length} BN break${bnOwnBreaks.length!==1?'s':''} blocked</span></div>`;
 
-    staffBookings.forEach(b=>{
-      const bn = getBNForBooking(b);
-      const bnExt = getBNExtForBooking(b);
-      const bnUnavailable = bn && inactiveBNs.has(bn) && !isPast(b.SlotTime, shift);
-      html+=`<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
-        <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
-        <div class="summ-unit">${b.Unit}</div>
-        <div class="summ-nurse">${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}</div>
-        <div class="summ-bn">${bnUnavailable
-          ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
-          : (bn ? firstName(bn) + (bnExt ? ` · ${bnExt}` : '') : '')
-        }</div>
-      </div>`;
-    });
+    // Combine staff bookings and BN own breaks into one chronological list.
+    // Each row keeps its visual treatment: white background + BN attribution
+    // for staff bookings; yellow tint + "BN break" label for BN own breaks.
+    // Sort by SlotTime so the list reads as a single timeline of events on
+    // the unit/shift.
+    const allRows = [
+      ...staffBookings.map(b => ({ b, kind: 'staff' })),
+      ...bnOwnBreaks.map(b => ({ b, kind: 'bn' }))
+    ];
+    allRows.sort((x,y) => sortKey(x.b.SlotTime, shift) - sortKey(y.b.SlotTime, shift));
 
-    if(bnOwnBreaks.length){
-      html+=`<div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:14px 0 6px;padding:0 2px">🔒 Break Nurse Own Breaks (blocked for staff)</div>`;
-      bnOwnBreaks.forEach(b=>{
-        html+=`<div class="summ-row" style="background:#fef9ec;border-color:#f0c040">
+    allRows.forEach(({ b, kind }) => {
+      if(kind === 'bn'){
+        html += `<div class="summ-row" style="background:#fef9ec;border-color:#f0c040">
           <div class="summ-time" style="color:#b07800">${fmt12(b.SlotTime)}</div>
           <div class="summ-unit">${b.Unit}</div>
-          <div class="summ-nurse" style="color:var(--muted);font-style:italic">${b.NurseName}</div>
-          <div class="summ-bn" style="color:var(--muted)">BN break</div>
+          <div class="summ-nurse" style="color:var(--muted);font-style:italic">${firstName(b.NurseName)}</div>
+          <div class="summ-bn" style="color:var(--muted)">🔒 BN break</div>
         </div>`;
-      });
-    }
+      } else {
+        const bn = getBNForBooking(b);
+        const bnExt = getBNExtForBooking(b);
+        const bnUnavailable = bn && inactiveBNs.has(bn) && !isPast(b.SlotTime, shift);
+        html += `<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
+          <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
+          <div class="summ-unit">${b.Unit}</div>
+          <div class="summ-nurse">${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}</div>
+          <div class="summ-bn">${bnUnavailable
+            ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
+            : (bn ? firstName(bn) + (bnExt ? ` · ${bnExt}` : '') : '')
+          }</div>
+        </div>`;
+      }
+    });
     el.innerHTML=html;
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}</div>`;
@@ -12301,9 +12326,13 @@ function renderVolBN(bookings, scheds){
     const sched = schedMap[key];
     if(!sched) return;
     if(_rptVolBNShift !== 'both' && sched.shift !== _rptVolBNShift) return;
-    if(!byBN[sched.bn]) byBN[sched.bn] = { total: 0, day: 0, noc: 0 };
-    byBN[sched.bn].total++;
-    byBN[sched.bn][sched.shift === 'Day' ? 'day' : 'noc']++;
+    // Attribution-first: a manual break logged via CreatedBy credits the
+    // creator, not the unit's covering BN. Shift bucket still comes from
+    // the unit's schedule.
+    const attrBN = b.CreatedBy || sched.bn;
+    if(!byBN[attrBN]) byBN[attrBN] = { total: 0, day: 0, noc: 0 };
+    byBN[attrBN].total++;
+    byBN[attrBN][sched.shift === 'Day' ? 'day' : 'noc']++;
   });
 
   const sorted = Object.entries(byBN).sort((a,b) => b[1].total - a[1].total);
@@ -12670,7 +12699,9 @@ async function loadReports(){
     const byBN = {};
     confirmedBookings.forEach(b => {
       const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      const bn  = schedMap[key] || 'Unknown';
+      // Attribution-first: manual breaks (with CreatedBy) credit the
+      // creator. Sign Up / legacy bookings fall back to unit schedule.
+      const bn  = b.CreatedBy || schedMap[key] || 'Unknown';
       byBN[bn] = (byBN[bn]||0) + 1;
     });
     const bnSorted = Object.entries(byBN).sort((a,b) => b[1]-a[1]);
