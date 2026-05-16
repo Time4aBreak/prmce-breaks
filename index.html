@@ -1401,28 +1401,25 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 // also the blank-cell case (old staff bookings have no IsBNBreak value).
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
-// "Manual break" detection — context-aware. Title prefix doesn't survive the
-// Apps Script backend (Title isn't in the persisted column set), so we infer
-// from the relationship: a staff booking on this BN's shift+date but on a
-// unit they don't normally cover is a manual entry made via the
-// "+ Add Manual Break" form. (Regular claim flow can't reach a unit outside
-// the BN's responsibleUnits — the claim modal filters by covered units.)
+// "Manual break" detection — strict attribution via CreatedBy column.
+// Returns true ONLY when:
+//   1. It's a staff booking (not a BN break)
+//   2. The booking is on a unit not in this BN's responsibleUnits (cross-unit)
+//   3. CreatedBy matches the current BN's name
 //
-// Usage: pass the booking AND the BN's responsibleUnits Set. The bnCovers
-// predicate then accepts the booking either when:
-//   1. Unit is in responsibleUnits (regular flow), OR
-//   2. Unit is NOT in responsibleUnits (manual flow) — bypasses the unit
-//      filter so the BN sees the manual break they just logged.
+// Without all three, the booking is treated as belonging to whoever covers
+// the unit (normal flow). This prevents the leakage where every BN would
+// see every other BN's bookings on units they don't cover.
 //
-// This means EVERY BN who is on shift on the same date sees this manual
-// break appear in their Prod Log. Acceptable: there's only one BN per shift
-// per wing per unit, so the cross-visibility is naturally bounded. If we
-// later need stricter ownership tracking, add a CreatedBy column to the
-// backend schema.
-function isManualBreak(b, responsibleUnits){
+// Legacy bookings created before the CreatedBy column was added will have
+// b.CreatedBy undefined/null, so they'll never satisfy the bnName match
+// and will fall back to the strict per-unit visibility rule — which is
+// the correct behavior for unattributed legacy data.
+function isManualBreak(b, responsibleUnits, bnName){
   if(!b || isBNBreak(b)) return false;
-  if(!responsibleUnits) return false;
-  return !responsibleUnits.has(b.Unit);
+  if(!responsibleUnits || !bnName) return false;
+  if(responsibleUnits.has(b.Unit)) return false;   // on a covered unit → not a manual break
+  return b.CreatedBy === bnName;                    // off-unit + I created it
 }
 
 // Normalize a SlotTime into the 4-digit string form used as keys throughout
@@ -1499,7 +1496,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-16';
+const APP_VERSION = '2026-05-15-17';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10941,7 +10938,12 @@ async function submitStagedActions(){
           ShiftType: shift,
           IsCompleted: 1,
           BreakStatus: 'confirmed',
-          IsBNBreak: 0
+          IsBNBreak: 0,
+          // Track creator so cross-unit manual breaks are visible to the
+          // logging BN but NOT to other BNs covering the same shift. Legacy
+          // bookings without CreatedBy fall back to the original strict
+          // per-unit visibility rule.
+          CreatedBy: BNS.name
         });
         trackCreate(created);
         // Remember the last successfully submitted claim for "Copy last" on
@@ -10966,7 +10968,8 @@ async function submitStagedActions(){
           SlotDate: dt,
           SlotTime: info.slotTime,
           ShiftType: shift,
-          IsBNBreak: 1
+          IsBNBreak: 1,
+          CreatedBy: BNS.name
         });
         trackCreate(created);
       } else if(info.action === 'remove_break'){
@@ -11401,7 +11404,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // Manual breaks bypass the unit filter — BN may log a break for a
       // nurse from a unit they don't normally cover (favor, cross-coverage).
       // The shift/date checks below still apply.
-      if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
+      if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
 
       // Same-shift, same-date: this BN covers — UNLESS the slot is in the
@@ -11956,7 +11959,7 @@ function confirmAllBreaks(){
   const nextDt = cache.nextDt;
   const bnCovers = (b) => {
     if(isBNBreak(b)) return false;
-    if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
+    if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
     const bDate = (b.SlotDate || '').slice(0, 10);
     if(b.ShiftType === shift && bDate === dt){
       if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
@@ -12028,7 +12031,7 @@ async function _confirmAllBreaksFallback(dt, shift){
       `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
     const bnCovers = (b) => {
       if(isBNBreak(b)) return false;
-      if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
+      if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
         if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
