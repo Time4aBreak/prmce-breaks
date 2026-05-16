@@ -121,7 +121,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .slot-name.filled{color:var(--text);font-weight:500}
 
 /* ── Summary ── */
-.summ-row{display:grid;grid-template-columns:80px 52px 1fr 110px auto;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:7px}
+.summ-row{display:grid;grid-template-columns:80px 52px 1fr 110px;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;border:1px solid var(--border);background:white;margin-bottom:7px}
 .summ-time{font-family:'DM Mono',monospace;font-size:.9rem;font-weight:500;color:var(--teal-dk)}
 .summ-unit{background:var(--teal-lt);color:var(--teal-dk);padding:3px 7px;border-radius:5px;font-family:'DM Mono',monospace;font-size:.72rem;font-weight:700;text-align:center}
 .summ-nurse{font-size:.875rem;font-weight:500}
@@ -171,7 +171,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .nav-brand span{display:none}
   .tab{padding:14px 12px 60px}
   .slot-row{grid-template-columns:78px 1fr auto}
-  .summ-row{grid-template-columns:70px 44px 1fr auto}
+  .summ-row{grid-template-columns:70px 44px 1fr}
   .summ-bn{display:none}
 
   /* My Shift tab mobile */
@@ -1403,19 +1403,22 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
 // Attribution-based visibility predicate. Returns true when THIS BN should
-// see this booking in their Prod Log.
+// see this booking on their My Shift / Prod Log.
 //
-//   1. If CreatedBy is set on the booking, attribution is authoritative:
-//      visible only to the creator, regardless of which BN covers the
-//      unit. This is what gives "manual breaks" their privacy — Tomas
-//      logs a cross-unit favor; only Tomas sees it.
-//   2. If CreatedBy is empty (legacy bookings + staff Sign Up claims),
-//      fall back to unit-based visibility: visible to the BN whose
-//      responsibleUnits includes the booking's unit.
+// My Shift is strictly the selected BN's coverage:
+//   1. Bookings with CreatedBy set belong to the creator. Only they see
+//      it on My Shift — even when another BN happens to cover the same
+//      unit. Cross-coverage visibility lives on the Coverage tab.
+//   2. Bookings without CreatedBy (legacy + staff Sign Up claims) fall
+//      back to unit-based visibility: visible to whichever BN covers the
+//      unit.
 //
-// This is the only predicate that should be used to decide whether a
-// booking belongs in a given BN's view; do NOT also check responsibleUnits
-// separately, the function already handles that branch.
+// Side effect to know: a cross-unit manual break logged by BN A on a
+// unit also covered by BN B will be invisible to B in their Prod Log
+// AND will block double-bookings (pre-flight conflict check will fire
+// if B tries to log at the same slot+unit). If that surfaces as
+// confusing, the toast wording from the pre-flight can be revisited;
+// the visibility rule itself stays strict.
 function bnOwns(b, responsibleUnits, bnName){
   if(!b || isBNBreak(b)) return false;
   if(b.CreatedBy) return b.CreatedBy === bnName;
@@ -1505,7 +1508,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-23';
+const APP_VERSION = '2026-05-15-27';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -6956,7 +6959,12 @@ async function markBNAvailable(schedId, bnName){
       const { ShiftDate, ShiftType } = sched[0];
       const allScheds = await spGet(LISTS.schedule,
         `ShiftDate ge '${ShiftDate.slice(0,10)}' and ShiftDate le '${ShiftDate.slice(0,10)}T23' and ShiftType eq '${ShiftType}'`);
-      const suppls = allScheds.filter(s => s.IsSupplemental == 1);
+      // Exclude supplementals owned by the BN being reactivated. Those rows
+      // represent times THIS BN absorbed someone else's slots (when they
+      // were active), unrelated to coverage taken over WHILE this BN was
+      // unavailable. Including them would surface a nonsensical modal like
+      // "Janice took over coverage while Janice was unavailable."
+      const suppls = allScheds.filter(s => s.IsSupplemental == 1 && s.BreakNurseName !== bnName);
       if(suppls.length){
         hideBusy(); // let user see the decision modal clearly
         const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
@@ -7121,7 +7129,10 @@ async function toggleSelfAvailability(){
       // by another decision modal.
       const allScheds2 = await spGet(LISTS.schedule,
         `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
-      const suppls = allScheds2.filter(s => s.IsSupplemental == 1);
+      // Exclude supplementals owned by this BN — those represent slots THIS BN
+      // absorbed for someone else, unrelated to coverage taken over while this
+      // BN was unavailable. See markBNAvailable for full rationale.
+      const suppls = allScheds2.filter(s => s.IsSupplemental == 1 && s.BreakNurseName !== BNS.name);
 
       let keepRedist = false; // default (no suppls) = restore (nothing to keep)
       if(suppls.length){
@@ -7931,10 +7942,6 @@ async function loadSummary(){
         <div class="summ-bn">${bnUnavailable
           ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
           : (bn ? firstName(bn) + (bnExt ? ` · ${bnExt}` : '') : '')
-        }</div>
-        <div>${!isPast(b.SlotTime, shift)
-          ? `<button class="btn btn-ghost btn-sm" style="color:var(--red);font-size:.72rem;padding:3px 8px" onclick="cancelStaffBooking(${b.Id},'${b.NurseName}','${b.SlotTime}')">✕ Cancel</button>`
-          : ''
         }</div>
       </div>`;
     });
@@ -10851,7 +10858,14 @@ function stageClaimFromInputs(slotTime){
       String(b.SlotTime).padStart(4,'0') === slotTime
     );
     if(conflict){
-      toast(`${unit} at ${fmt12(slotTime)} is already claimed by ${conflict.NurseName.split('(')[0].trim()}`, true);
+      // Surface WHO blocked this slot so the toast makes sense even when
+      // the conflicting booking is hidden from this BN's My Shift view
+      // (attributed cross-unit manual break by another BN). For legacy /
+      // Sign Up conflicts, fall back to the staff nurse name as before.
+      const blockerLabel = conflict.CreatedBy
+        ? `${firstName(conflict.CreatedBy)} already logged a break here`
+        : `claimed by ${conflict.NurseName.split('(')[0].trim()}`;
+      toast(`${unit} at ${fmt12(slotTime)} — ${blockerLabel}`, true);
       return;
     }
   }
