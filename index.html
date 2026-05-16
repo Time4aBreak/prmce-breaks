@@ -1522,7 +1522,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-08';
+const APP_VERSION = '2026-05-15-09';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12008,13 +12008,17 @@ async function saveManualBreak(){
     // Save all slots. Done sequentially to preserve order and keep error
     // handling simple; manual entries are low-volume so the latency hit
     // of N posts is acceptable for the clarity benefit.
+    // Track each create so reconcileBookings injects it into the next
+    // render even if the spGet immediately after this loop predates the
+    // sheets-backend's read-after-write visibility for the new rows.
     let saved = 0;
     for(const s of slotList){
-      await spPost(LISTS.bookings, {
+      const created = await spPost(LISTS.bookings, {
         Title: `MANUAL-${unit}-${dt}-${s}`,
         NurseName: nurseName, Unit: unit, SlotTime: s,
         SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
       });
+      trackCreate(created);
       saved++;
     }
 
