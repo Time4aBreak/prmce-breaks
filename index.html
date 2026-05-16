@@ -1402,25 +1402,33 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 // also the blank-cell case (old staff bookings have no IsBNBreak value).
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
-// "Manual break" detection — strict attribution via CreatedBy column.
-// Returns true ONLY when:
-//   1. It's a staff booking (not a BN break)
-//   2. The booking is on a unit not in this BN's responsibleUnits (cross-unit)
-//   3. CreatedBy matches the current BN's name
+// Attribution-based visibility predicate. Returns true when THIS BN should
+// see this booking in their Prod Log.
 //
-// Without all three, the booking is treated as belonging to whoever covers
-// the unit (normal flow). This prevents the leakage where every BN would
-// see every other BN's bookings on units they don't cover.
+//   1. If CreatedBy is set on the booking, attribution is authoritative:
+//      visible only to the creator, regardless of which BN covers the
+//      unit. This is what gives "manual breaks" their privacy — Tomas
+//      logs a cross-unit favor; only Tomas sees it.
+//   2. If CreatedBy is empty (legacy bookings + staff Sign Up claims),
+//      fall back to unit-based visibility: visible to the BN whose
+//      responsibleUnits includes the booking's unit.
 //
-// Legacy bookings created before the CreatedBy column was added will have
-// b.CreatedBy undefined/null, so they'll never satisfy the bnName match
-// and will fall back to the strict per-unit visibility rule — which is
-// the correct behavior for unattributed legacy data.
+// This is the only predicate that should be used to decide whether a
+// booking belongs in a given BN's view; do NOT also check responsibleUnits
+// separately, the function already handles that branch.
+function bnOwns(b, responsibleUnits, bnName){
+  if(!b || isBNBreak(b)) return false;
+  if(b.CreatedBy) return b.CreatedBy === bnName;
+  return responsibleUnits && responsibleUnits.has(b.Unit);
+}
+// Legacy alias retained for any caller still using the older name.
+// Returns true when the booking is a cross-unit attributed entry for
+// this BN. New code should call bnOwns directly.
 function isManualBreak(b, responsibleUnits, bnName){
   if(!b || isBNBreak(b)) return false;
   if(!responsibleUnits || !bnName) return false;
-  if(responsibleUnits.has(b.Unit)) return false;   // on a covered unit → not a manual break
-  return b.CreatedBy === bnName;                    // off-unit + I created it
+  if(responsibleUnits.has(b.Unit)) return false;
+  return b.CreatedBy === bnName;
 }
 
 // Normalize a SlotTime into the 4-digit string form used as keys throughout
@@ -1497,7 +1505,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-18';
+const APP_VERSION = '2026-05-15-19';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11405,7 +11413,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // Manual breaks bypass the unit filter — BN may log a break for a
       // nurse from a unit they don't normally cover (favor, cross-coverage).
       // The shift/date checks below still apply.
-      if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
+      if(!bnOwns(b, responsibleUnits, BNS.name)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
 
       // Same-shift, same-date: this BN covers — UNLESS the slot is in the
@@ -11942,7 +11950,7 @@ function showDebugDiag(){
   const responsibleUnits = new Set(myUnits);
   const visibleToMe = visible.filter(b => {
     const fauxB = { Unit: b.unit, CreatedBy: b.createdBy === '(empty)' ? null : b.createdBy, IsBNBreak: 0 };
-    return responsibleUnits.has(b.unit) || isManualBreak(fauxB, responsibleUnits, BNS.name);
+    return bnOwns(fauxB, responsibleUnits, BNS.name);
   });
 
   const report = {
@@ -12011,7 +12019,7 @@ function confirmAllBreaks(){
   const nextDt = cache.nextDt;
   const bnCovers = (b) => {
     if(isBNBreak(b)) return false;
-    if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
+    if(!bnOwns(b, responsibleUnits, BNS.name)) return false;
     const bDate = (b.SlotDate || '').slice(0, 10);
     if(b.ShiftType === shift && bDate === dt){
       if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
@@ -12083,7 +12091,7 @@ async function _confirmAllBreaksFallback(dt, shift){
       `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`);
     const bnCovers = (b) => {
       if(isBNBreak(b)) return false;
-      if(!isManualBreak(b, responsibleUnits, BNS.name) && !responsibleUnits.has(b.Unit)) return false;
+      if(!bnOwns(b, responsibleUnits, BNS.name)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
         if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
