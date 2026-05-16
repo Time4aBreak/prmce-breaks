@@ -1441,12 +1441,29 @@ function isPending(b)    { return !isConfirmed(b) && !isNotTaken(b); }
 // also the blank-cell case (old staff bookings have no IsBNBreak value).
 function isBNBreak(b)    { return b && (b.IsBNBreak == 1 || b.IsBNBreak === true); }
 function isStaffBooking(b){ return b && !isBNBreak(b); }
-// Manual breaks are staff bookings logged by the BN via the "+ Add Manual
-// Break" form. They bypass the BN's responsibleUnits filter because the BN
-// may legitimately give a break to a nurse from a different unit (favor,
-// cross-coverage, etc.) and that booking must still appear on their Prod
-// Log. Detected via the MANUAL-* Title prefix set by saveManualBreak.
-function isManualBreak(b){ return b && String(b.Title || '').startsWith('MANUAL-'); }
+// "Manual break" detection — context-aware. Title prefix doesn't survive the
+// Apps Script backend (Title isn't in the persisted column set), so we infer
+// from the relationship: a staff booking on this BN's shift+date but on a
+// unit they don't normally cover is a manual entry made via the
+// "+ Add Manual Break" form. (Regular claim flow can't reach a unit outside
+// the BN's responsibleUnits — the claim modal filters by covered units.)
+//
+// Usage: pass the booking AND the BN's responsibleUnits Set. The bnCovers
+// predicate then accepts the booking either when:
+//   1. Unit is in responsibleUnits (regular flow), OR
+//   2. Unit is NOT in responsibleUnits (manual flow) — bypasses the unit
+//      filter so the BN sees the manual break they just logged.
+//
+// This means EVERY BN who is on shift on the same date sees this manual
+// break appear in their Prod Log. Acceptable: there's only one BN per shift
+// per wing per unit, so the cross-visibility is naturally bounded. If we
+// later need stricter ownership tracking, add a CreatedBy column to the
+// backend schema.
+function isManualBreak(b, responsibleUnits){
+  if(!b || isBNBreak(b)) return false;
+  if(!responsibleUnits) return false;
+  return !responsibleUnits.has(b.Unit);
+}
 
 // Normalize a SlotTime into the 4-digit string form used as keys throughout
 // the app. Sheets strips leading zeros on numeric cells, so a 00:15 slot
@@ -1522,7 +1539,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-09';
+const APP_VERSION = '2026-05-15-11';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11370,7 +11387,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // Manual breaks bypass the unit filter — BN may log a break for a
       // nurse from a unit they don't normally cover (favor, cross-coverage).
       // The shift/date checks below still apply.
-      if(!isManualBreak(b) && !responsibleUnits.has(b.Unit)) return false;
+      if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
 
       // Same-shift, same-date: this BN covers — UNLESS the slot is in the
@@ -11835,13 +11852,27 @@ async function populateManualSlots(){
     // All slots for this shift — no future filter since BN may enter breaks after the fact
     const allSlots = generateSlots(shift).filter(s => getSlotTier(s, shift) !== 'hardBlocked');
 
-    // Get existing bookings on this unit to exclude already-claimed ones
+    // Get existing bookings ACROSS ALL UNITS on this shift/date. The Time
+    // dropdown should only offer times where no staff break is already
+    // claimed — anywhere. Reasoning: "one nurse, one break per time" is
+    // already enforced by the NurseName check, but more importantly the BN
+    // shouldn't see a time as "available" when any other nurse is already
+    // taking a break at that time. Widened from per-unit to all-units so
+    // the dropdown reflects the true time-availability picture.
     const bookings = await spGet(LISTS.bookings,
-      `Unit eq '${esc(unit)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    const claimed = new Set(bookings.filter(b => isStaffBooking(b)).map(b => b.SlotTime));
+      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const claimed = new Set(
+      bookings.filter(b => isStaffBooking(b))
+        .map(b => String(b.SlotTime).padStart(4,'0'))
+    );
 
-    // Get BN's own break slots to show (blocked for staff but valid for manual entry)
-    const bnBreaks = new Set(bookings.filter(b => isBNBreak(b)).map(b => b.SlotTime));
+    // BN-break labeling stays unit-scoped — only THIS unit's BN breaks
+    // get the "BN break — manual only" tag. Other BNs' breaks on other
+    // units aren't relevant to the labeling.
+    const bnBreaks = new Set(
+      bookings.filter(b => isBNBreak(b) && b.Unit === unit)
+        .map(b => String(b.SlotTime).padStart(4,'0'))
+    );
 
     const available = allSlots.filter(s => !claimed.has(s));
     if(!available.length){
@@ -12014,7 +12045,6 @@ async function saveManualBreak(){
     let saved = 0;
     for(const s of slotList){
       const created = await spPost(LISTS.bookings, {
-        Title: `MANUAL-${unit}-${dt}-${s}`,
         NurseName: nurseName, Unit: unit, SlotTime: s,
         SlotDate: dt, ShiftType: shift, BreakStatus: 'confirmed', IsCompleted: 1
       });
@@ -12082,7 +12112,7 @@ async function confirmAllBreaks(){
       if(isBNBreak(b)) return false;
       // Manual breaks bypass the unit filter — see loadBNConfirm bnCovers
       // for rationale (cross-unit favors / coverage).
-      if(!isManualBreak(b) && !responsibleUnits.has(b.Unit)) return false;
+      if(!isManualBreak(b, responsibleUnits) && !responsibleUnits.has(b.Unit)) return false;
       const bDate = (b.SlotDate || '').slice(0, 10);
       if(b.ShiftType === shift && bDate === dt){
         if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;
