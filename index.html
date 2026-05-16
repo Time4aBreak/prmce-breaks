@@ -1505,7 +1505,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-19';
+const APP_VERSION = '2026-05-15-23';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5027,13 +5027,18 @@ async function loadSlots(silent=false){
         banner.style.color = 'var(--red)';
         banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
       } else {
-        // Window closed but coverage exists today — no upcoming dates, "opens X" says it all
+        // Window not yet open but coverage exists today — switch from alarming
+        // red to the same celebratory green used when coverage is active.
+        // Staff still can't claim yet, but the meaningful information is
+        // "you have a BN" — the opens-at timing is the secondary detail.
+        // Plural reuses the same logic as the active-coverage banner.
         setNameCardEnabled(false);
+        const plural = covering.length > 1 ? 'Break Nurses' : 'a Break Nurse';
         banner.style.display = 'block';
-        banner.style.background = 'var(--red-lt)';
-        banner.style.borderColor = 'var(--red)';
-        banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> unavailable · opens ${shift === 'Day' ? '6:30 AM' : '6:30 PM'}`;
+        banner.style.background = 'var(--teal-lt)';
+        banner.style.borderColor = 'var(--teal)';
+        banner.style.color = 'var(--teal-dk)';
+        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has ${plural}! Opens at ${shift === 'Day' ? '6:30 AM' : '6:30 PM'}`;
       }
     }
 
@@ -7850,6 +7855,12 @@ async function loadSummary(){
 
     // Helper: get covering BN for a booking — overlap slots use opp BN map
     const getBNForBooking = (b) => {
+      // Attribution takes precedence: if a BN explicitly created this
+      // booking (via in-row + Log or "+ My Break"), they own it regardless
+      // of which BN covers the unit. Mirrors bnOwns in the BN portal.
+      // Legacy/Sign Up bookings (no CreatedBy) fall back to unit-based
+      // ownership via slotOwnerBN / unitBN.
+      if(b.CreatedBy) return b.CreatedBy;
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
       const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
@@ -12188,12 +12199,12 @@ function renderUtilization(bookings, scheds, filter){
   } else if(filter === 'bn'){
     const bns = [...new Set(staffBookings.map(b => {
       const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      return schedMap[key] || 'Unknown';
+      return b.CreatedBy || schedMap[key] || 'Unknown';
     }))].sort();
     list.innerHTML = bns.map(bn => {
       const bnBook = staffBookings.filter(b => {
         const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-        return (schedMap[key] || 'Unknown') === bn;
+        return (b.CreatedBy || schedMap[key] || 'Unknown') === bn;
       });
       const bConf = bnBook.filter(b => isConfirmed(b)).length;
       const bNot  = bnBook.filter(b => isNotTaken(b)).length;
@@ -12206,7 +12217,7 @@ function renderUtilization(bookings, scheds, filter){
     const groups = {};
     staffBookings.forEach(b => {
       const key2 = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      const bn = schedMap[key2] || 'Unknown';
+      const bn = b.CreatedBy || schedMap[key2] || 'Unknown';
       const gkey = `${bn} — ${b.Unit}`;
       if(!groups[gkey]) groups[gkey] = [];
       groups[gkey].push(b);
