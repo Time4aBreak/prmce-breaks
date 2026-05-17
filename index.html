@@ -1508,7 +1508,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-31';
+const APP_VERSION = '2026-05-15-33';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2252,6 +2252,24 @@ function fmt12(hhmm){
 function sortKey(hhmm, shift){
   const m = toMin(hhmm);
   return (shift==='Noc' && m < 720) ? m+1440 : m;
+}
+
+// Real-world event time for a booking, in epoch ms. Combines SlotDate +
+// SlotTime, rolling Noc post-midnight slots (HH < 12) to the next calendar
+// day so we get the actual wall-clock moment the break occurs. Used for
+// retroactive CreatedBy attribution at BN reactivation time — we need to
+// compare each booking's event-time against the [EndedAt, now] outage
+// window to decide which bookings the absorber actually covered.
+function slotEventTime(b){
+  const slot = String(b.SlotTime || '').padStart(4, '0');
+  const hh = parseInt(slot.slice(0,2), 10);
+  const mm = parseInt(slot.slice(2,4), 10);
+  const baseDate = (b.SlotDate || '').slice(0, 10);
+  if(!baseDate || isNaN(hh) || isNaN(mm)) return 0;
+  const d = new Date(baseDate + 'T00:00:00');
+  if(b.ShiftType === 'Noc' && hh < 12) d.setDate(d.getDate() + 1);
+  d.setHours(hh, mm, 0, 0);
+  return d.getTime();
 }
 
 function nowKey(shift){
@@ -6931,6 +6949,44 @@ ${nurseLines}`;
   }
 }
 
+// Stamp absorbing BN's CreatedBy onto outage bookings whose event-time is
+// before `cutoverMs`, on units that the absorber covered. Shared between
+// admin and BN-self reactivation paths. Returns the count of patches.
+//
+// Only stamps bookings without an existing CreatedBy. Manual breaks (which
+// already self-attribute) and BN-own breaks are skipped.
+//
+// `suppls` is the array of supplemental schedule records for absorbing BNs.
+// Each supplemental's Units field tells us which units that BN covered;
+// bookings on those units within [outageStart, cutoverMs] get credited.
+async function stampOutageAttribution(suppls, outageStartMs, cutoverMs, dStr, shiftType){
+  if(!suppls.length || !outageStartMs || isNaN(outageStartMs) || outageStartMs >= cutoverMs){
+    return 0;
+  }
+  const outageBookings = await spGet(LISTS.bookings,
+    `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`
+  ).catch(() => []);
+  const patches = [];
+  for(const s of suppls){
+    let absorbedUnits = [];
+    try { absorbedUnits = JSON.parse(s.Units || '[]'); } catch{}
+    const unitsSet = new Set(absorbedUnits);
+    outageBookings.forEach(b => {
+      if(b.CreatedBy) return;
+      if(isBNBreak(b)) return;
+      if(!unitsSet.has(b.Unit)) return;
+      const t = slotEventTime(b);
+      if(t >= outageStartMs && t < cutoverMs){
+        patches.push({ id: b.Id, bn: s.BreakNurseName });
+      }
+    });
+  }
+  await Promise.allSettled(
+    patches.map(p => spPatch(LISTS.bookings, p.id, { CreatedBy: p.bn }))
+  );
+  return patches.length;
+}
+
 // Mark a BN unavailable from Admin tab
 async function markBNUnavailable(schedId, bnName, date, shift){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
@@ -6953,60 +7009,76 @@ async function markBNAvailable(schedId, bnName){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…'
   showBusy(`Reactivating ${firstName(bnName)}…`);
   try {
-    // Check for supplemental records created during redistribution
     const sched = await spGet(LISTS.schedule, `Id eq ${schedId}`);
-    if(sched.length){
-      const { ShiftDate, ShiftType } = sched[0];
-      const allScheds = await spGet(LISTS.schedule,
-        `ShiftDate ge '${ShiftDate.slice(0,10)}' and ShiftDate le '${ShiftDate.slice(0,10)}T23' and ShiftType eq '${ShiftType}'`);
-      // Exclude supplementals owned by the BN being reactivated. Those rows
-      // represent times THIS BN absorbed someone else's slots (when they
-      // were active), unrelated to coverage taken over WHILE this BN was
-      // unavailable. Including them would surface a nonsensical modal like
-      // "Janice took over coverage while Janice was unavailable."
-      const suppls = allScheds.filter(s => s.IsSupplemental == 1 && s.BreakNurseName !== bnName);
-      if(suppls.length){
-        hideBusy(); // let user see the decision modal clearly
-        const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
-        const keepRedist = await customConfirm(
-          `${suppFirstNames} took over coverage while ${firstName(bnName)} was unavailable.`,
-          `Keep ${suppFirstNames}'s coverage`,
-          `Restore ${firstName(bnName)}'s assignments`
-        );
-        showBusy(keepRedist ? `Keeping ${suppFirstNames}'s coverage…` : `Restoring ${firstName(bnName)}'s assignments…`);
-        if(!keepRedist){
-          // Delete supplementals AND recompute rotations for those BNs so their
-          // absorbed slots drop out of rotation (otherwise fillSlotOwner keeps
-          // attributing those slots to them even though the supplemental is gone).
-          const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
-          for(const s of suppls) await spDel(LISTS.schedule, s.Id);
-          for(const otherBN of affectedBNs){
-            const bnDef = getDefaultTemplate(otherBN, ShiftType);
-            const d = ShiftDate.slice(0,10);
-            if(bnDef && bnDef.length > 0){
-              await applyDefaultToShift(otherBN, d, ShiftType, bnDef).catch(()=>{});
-            } else {
-              await recalculateRotation(otherBN, d, ShiftType).catch(()=>{});
-            }
-          }
+    if(!sched.length){
+      hideBusy();
+      toast('Assignment record not found', true);
+      return;
+    }
+    const { ShiftDate, ShiftType, EndedAt } = sched[0];
+    const dStr = ShiftDate.slice(0,10);
+    const allScheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${dStr}' and ShiftDate le '${dStr}T23' and ShiftType eq '${ShiftType}'`);
+    // Exclude supplementals owned by the BN being reactivated. Those rows
+    // represent times THIS BN absorbed someone else's slots when active,
+    // unrelated to coverage taken over while this BN was unavailable.
+    const suppls = allScheds.filter(s => s.IsSupplemental == 1 && s.BreakNurseName !== bnName);
+
+    let cutoverMs = Date.now();
+    let dontTakeBack = false;
+    if(suppls.length){
+      hideBusy(); // let user see the decision modal clearly
+      const absorberNames = [...new Set(suppls.map(s => s.BreakNurseName))];
+      const outageStartMs = EndedAt ? new Date(EndedAt).getTime() : 0;
+      const result = await confirmReactivation(bnName, absorberNames, ShiftType, dStr, outageStartMs);
+      if(result.choice === 'back') return;
+      cutoverMs = result.cutoverMs;
+      dontTakeBack = result.choice === 'dont_take_back';
+      showBusy(dontTakeBack
+        ? `Keeping ${absorberNames.map(firstName).join(', ')}'s coverage for this shift…`
+        : `Restoring ${firstName(bnName)}'s assignments…`);
+
+      // Stamp absorber's CreatedBy on outage bookings before cutoverMs.
+      const outageStart = outageStartMs;
+      if(outageStart && !isNaN(outageStart) && outageStart < cutoverMs){
+        await stampOutageAttribution(suppls, outageStart, cutoverMs, dStr, ShiftType);
+      }
+    }
+
+    if(!dontTakeBack){
+      // Take back path (immediate or with chosen past cutover): delete
+      // supplementals so absorbers drop out of rotation, then recompute
+      // their rotations, then reactivate Tess.
+      const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
+      for(const s of suppls) await spDel(LISTS.schedule, s.Id);
+      for(const otherBN of affectedBNs){
+        const bnDef = getDefaultTemplate(otherBN, ShiftType);
+        if(bnDef && bnDef.length > 0){
+          await applyDefaultToShift(otherBN, dStr, ShiftType, bnDef).catch(()=>{});
+        } else {
+          await recalculateRotation(otherBN, dStr, ShiftType).catch(()=>{});
         }
       }
-    }
-    await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
-    // Also recompute the restored BN's own rotation so their units are properly
-    // reflected in their rotation after reactivation.
-    if(sched.length){
-      const { ShiftDate, ShiftType } = sched[0];
-      const d = ShiftDate.slice(0,10);
+      await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
       const bnDef = getDefaultTemplate(bnName, ShiftType);
       if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(bnName, d, ShiftType, bnDef).catch(()=>{});
+        await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
       } else {
-        await recalculateRotation(bnName, d, ShiftType).catch(()=>{});
+        await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
       }
+      hideBusy();
+      toast(`${firstName(bnName)} is back on — assignment reactivated.`);
+    } else {
+      // Don't take back: leave supplementals intact, leave Tess's record
+      // inactive on this shift. Outage bookings are already stamped above
+      // (cutoverMs = end-of-shift, so the entire outage window is covered).
+      // Tess remains "unavailable" on this shift; tomorrow's records are
+      // separate and unaffected.
+      hideBusy();
+      const absorberLabel = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
+      toast(`${absorberLabel} will continue covering ${firstName(bnName)}'s units this shift.`);
     }
-    hideBusy();
-    toast(`${firstName(bnName)} is back on — assignment reactivated.`);
+
     await new Promise(r => setTimeout(r, 100));
     loadAssignments();
     notifyProdLogChanged(bnName);
@@ -7124,56 +7196,42 @@ async function toggleSelfAvailability(){
 
   try {
     if(inactive){
-      // Reactivate — check for supplementals first so we can offer the Keep/Restore
-      // decision as a single modal, rather than a redundant "are you sure?" followed
-      // by another decision modal.
+      // Reactivate — check for supplementals first so we can show the
+      // unified take-back/don't-take-back decision modal.
       const allScheds2 = await spGet(LISTS.schedule,
         `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
       // Exclude supplementals owned by this BN — those represent slots THIS BN
-      // absorbed for someone else, unrelated to coverage taken over while this
-      // BN was unavailable. See markBNAvailable for full rationale.
+      // absorbed for someone else when active, unrelated to coverage taken
+      // over while this BN was unavailable. See markBNAvailable rationale.
       const suppls = allScheds2.filter(s => s.IsSupplemental == 1 && s.BreakNurseName !== BNS.name);
 
-      let keepRedist = false; // default (no suppls) = restore (nothing to keep)
+      let cutoverMs = Date.now();
+      let dontTakeBack = false;
       if(suppls.length){
-        const suppFirstNames = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
-        // 3-way modal: Keep / Restore / Go back. Real decision — must stay.
-        const choice = await new Promise(resolve => {
-          const modal = document.getElementById('customConfirmModal');
-          document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(
-            `Mark ${firstName(BNS.name)} as available again?\n\n${suppFirstNames} took over coverage while you were unavailable.`
-          );
-          document.getElementById('customConfirmOk').textContent = `Keep ${suppFirstNames}'s coverage`;
-          document.getElementById('customConfirmCancel').textContent = `Restore your assignments`;
-          const goBackBtn = document.createElement('button');
-          goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
-          goBackBtn.textContent = 'Go back';
-          const btnWrap = document.getElementById('customConfirmCancel').parentNode;
-          btnWrap.appendChild(goBackBtn);
-          modal.style.display = 'flex';
-          const cleanup = (result) => {
-            modal.style.display = 'none';
-            goBackBtn.remove();
-            document.getElementById('customConfirmOk').onclick = null;
-            document.getElementById('customConfirmCancel').onclick = null;
-            resolve(result);
-          };
-          document.getElementById('customConfirmOk').onclick = () => cleanup('keep');
-          document.getElementById('customConfirmCancel').onclick = () => cleanup('restore');
-          goBackBtn.onclick = () => cleanup('back');
-        });
-        if(choice === 'back') return; // finalInactive stays true (no change)
-        keepRedist = choice === 'keep';
+        const absorberNames = [...new Set(suppls.map(s => s.BreakNurseName))];
+        const outageStartMs = inactive.EndedAt ? new Date(inactive.EndedAt).getTime() : 0;
+        const result = await confirmReactivation(BNS.name, absorberNames, shift, dt, outageStartMs);
+        if(result.choice === 'back') return; // finalInactive stays true (no change)
+        cutoverMs = result.cutoverMs;
+        dontTakeBack = result.choice === 'dont_take_back';
       }
-      // No-supplementals case: no confirm needed. Button click IS the
-      // user's intent, and reactivation is non-destructive (just restores
-      // their original assignment). Removed the redundant confirm modal.
+      // No-supplementals case: no modal needed — straight reactivation.
 
-      showBusy(keepRedist ? 'Keeping coverage…' : `Restoring ${firstName(BNS.name)}'s assignments…`);
+      showBusy(dontTakeBack
+        ? `Keeping absorber's coverage for this shift…`
+        : `Restoring ${firstName(BNS.name)}'s assignments…`);
       try {
-        if(!keepRedist && suppls.length){
-          // Delete supplementals AND recompute rotations for those BNs so their
-          // absorbed slots drop out of rotation (matches markBNAvailable admin flow).
+        // Stamp outage bookings before cutoverMs with absorber's CreatedBy.
+        if(suppls.length){
+          const outageStartMs = inactive.EndedAt ? new Date(inactive.EndedAt).getTime() : 0;
+          if(outageStartMs && !isNaN(outageStartMs) && outageStartMs < cutoverMs){
+            await stampOutageAttribution(suppls, outageStartMs, cutoverMs, dt, shift);
+          }
+        }
+
+        if(!dontTakeBack){
+          // Take back path: delete supplementals, recompute rotations,
+          // reactivate Tess.
           const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
           for(const otherBN of affectedBNs){
@@ -7184,19 +7242,26 @@ async function toggleSelfAvailability(){
               await recalculateRotation(otherBN, dt, shift).catch(()=>{});
             }
           }
-        }
-        await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-        // Recompute reactivated BN's own rotation so their units show up again
-        const bnDef = getDefaultTemplate(BNS.name, shift);
-        if(bnDef && bnDef.length > 0){
-          await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
+          await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
+          const bnDef = getDefaultTemplate(BNS.name, shift);
+          if(bnDef && bnDef.length > 0){
+            await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
+          } else {
+            await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+          }
+          hideBusy();
+          toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
+          loadBNConfirm();
+          finalInactive = false; // flipped to active
         } else {
-          await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+          // Don't take back: supplementals stay, Tess's record stays inactive
+          // on this shift. Tomorrow's records unaffected.
+          hideBusy();
+          const absorberLabel = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
+          toast(`${absorberLabel} will continue covering this shift.`);
+          loadBNConfirm();
+          finalInactive = true; // record stays inactive
         }
-        hideBusy();
-        toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
-        loadBNConfirm();
-        finalInactive = false; // flipped to active
       } catch(e){ hideBusy(); toast(e.message, true); /* finalInactive stays true */ }
     } else if(active){
       // Mark unavailable — shared modal with admin path (confirmMarkUnavailable).
@@ -8918,6 +8983,119 @@ function customConfirm(msg, okLabel, cancelLabel){
     };
     document.getElementById('customConfirmOk').onclick = () => cleanup(true);
     document.getElementById('customConfirmCancel').onclick = () => cleanup(false);
+  });
+}
+
+// Unified BN reactivation modal. Asks "when did [Tess] take back coverage?"
+// and offers a slot-time picker plus "Don't take back this shift" + "Go back".
+//
+// Returns Promise<{choice, cutoverMs}>:
+//   - choice 'take_back', cutoverMs = epoch ms of chosen slot's event-time
+//   - choice 'dont_take_back', cutoverMs = end-of-shift epoch ms (used only
+//     for retroactive CreatedBy stamping coverage of the full outage)
+//   - choice 'back', cutoverMs = 0 (user dismissed)
+//
+// Slot picker shows past+current slots only; future slots omitted to avoid
+// the "deleted supplemental during not-yet-cutover gap" edge case. If the
+// outage is so recent that no shift slot has occurred yet within it, the
+// picker is empty and the only meaningful choice is "Don't take back" or
+// "Go back" — we default to a "take back now" button using Date.now() in
+// that case so the user isn't trapped.
+function confirmReactivation(bnName, absorberNames, shift, dt, outageStartMs){
+  return new Promise(resolve => {
+    const allSlots = getAvailableSlots(shift);
+    const nowMs = Date.now();
+    // Build slot options: only those whose event time falls within
+    // [outageStart, now] inclusive. Ordered chronologically by sortKey
+    // so the dropdown reads top→bottom in shift order (Noc post-midnight
+    // slots come after pre-midnight in the sortKey).
+    const sortedSlots = [...allSlots].sort((a,b) => sortKey(a, shift) - sortKey(b, shift));
+    const validSlots = sortedSlots.filter(s => {
+      const ms = slotEventTime({ SlotTime: s, SlotDate: dt, ShiftType: shift });
+      return ms >= outageStartMs && ms <= nowMs;
+    });
+    // Default = latest valid slot (closest to now) so "take back now" is one tap.
+    const defaultSlot = validSlots.length ? validSlots[validSlots.length - 1] : '';
+
+    const absorberLabel = absorberNames.map(firstName).join(', ');
+    const tess = firstName(bnName);
+
+    // Use customConfirmModal as the host since the same DOM is reused
+    // app-wide. Inject custom controls in customConfirmMsg.
+    const modal = document.getElementById('customConfirmModal');
+    const msgEl = document.getElementById('customConfirmMsg');
+    const okBtn = document.getElementById('customConfirmOk');
+    const cancelBtn = document.getElementById('customConfirmCancel');
+
+    const slotOptions = validSlots.map(s => `<option value="${s}">${fmt12(s)}</option>`).join('');
+    const slotPicker = validSlots.length
+      ? `<div style="margin:14px 0 4px;font-size:.78rem;color:var(--muted)">When did ${tess} take back coverage?</div>
+         <select id="reactSlotPicker" style="width:100%;padding:10px;border-radius:8px;border:1px solid var(--border);background:var(--card);font-size:.9rem">${slotOptions}</select>`
+      : `<div style="margin:14px 0 4px;font-size:.78rem;color:var(--muted)">No prior slots in this outage — taking back will be effective immediately.</div>`;
+
+    msgEl.innerHTML = `
+      <div style="font-size:.9rem;line-height:1.5">
+        <strong>${absorberLabel}</strong> took over coverage while <strong>${tess}</strong> was unavailable.
+      </div>
+      ${slotPicker}
+    `;
+    if(validSlots.length && defaultSlot){
+      // requestAnimationFrame avoids the DOM-not-attached race
+      requestAnimationFrame(() => {
+        const sel = document.getElementById('reactSlotPicker');
+        if(sel) sel.value = defaultSlot;
+      });
+    }
+
+    okBtn.textContent = 'Take back coverage';
+    okBtn.className = 'btn btn-primary';
+    cancelBtn.textContent = `Don't take back this shift`;
+    cancelBtn.className = 'btn btn-ghost';
+
+    // Add a "Go back" button alongside. Removed on cleanup so subsequent
+    // customConfirm calls don't see a stale extra button.
+    const goBackBtn = document.createElement('button');
+    goBackBtn.className = 'btn btn-ghost';
+    goBackBtn.style.width = '100%';
+    goBackBtn.textContent = 'Go back';
+    const btnWrap = cancelBtn.parentNode;
+    btnWrap.appendChild(goBackBtn);
+
+    modal.style.display = 'flex';
+
+    const cleanup = (result) => {
+      modal.style.display = 'none';
+      goBackBtn.remove();
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      goBackBtn.onclick = null;
+      resolve(result);
+    };
+
+    okBtn.onclick = () => {
+      let cutoverMs;
+      if(validSlots.length){
+        const sel = document.getElementById('reactSlotPicker');
+        const chosen = sel ? sel.value : defaultSlot;
+        cutoverMs = slotEventTime({ SlotTime: chosen, SlotDate: dt, ShiftType: shift });
+      } else {
+        // No valid past slot — take back as of now
+        cutoverMs = Date.now();
+      }
+      cleanup({ choice: 'take_back', cutoverMs });
+    };
+    cancelBtn.onclick = () => {
+      // End-of-shift = the last slot's event time + buffer (so retroactive
+      // stamping covers every outage booking). We use the last slot in the
+      // shift's full slot list, not just validSlots, since the shift may
+      // extend past current time.
+      const lastSlot = sortedSlots[sortedSlots.length - 1];
+      const endMs = lastSlot
+        ? slotEventTime({ SlotTime: lastSlot, SlotDate: dt, ShiftType: shift }) + 60 * 60 * 1000
+        : Date.now() + 24 * 60 * 60 * 1000;
+      cleanup({ choice: 'dont_take_back', cutoverMs: endMs });
+    };
+    goBackBtn.onclick = () => cleanup({ choice: 'back', cutoverMs: 0 });
   });
 }
 
