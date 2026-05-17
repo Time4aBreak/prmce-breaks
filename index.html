@@ -1508,7 +1508,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-35';
+const APP_VERSION = '2026-05-15-36';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -6923,24 +6923,31 @@ ${nurseLines}`;
     return new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal');
       document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
-      document.getElementById('customConfirmOk').textContent     = `Give eligible bookings to ${sameWingNames.join('/')}`;
-      document.getElementById('customConfirmCancel').textContent = `Cancel all affected bookings`;
+      const okBtn = document.getElementById('customConfirmOk');
+      const cancelBtn = document.getElementById('customConfirmCancel');
+      okBtn.textContent     = `Give eligible bookings to ${sameWingNames.join('/')}`;
+      cancelBtn.textContent = `Cancel all affected bookings`;
       const goBackBtn = document.createElement('button');
       goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
       goBackBtn.textContent = 'Go back';
-      const btnWrap = document.getElementById('customConfirmCancel').parentNode;
+      const btnWrap = cancelBtn.parentNode;
+      // Defensive: strip any leftover dynamic buttons from prior modal calls
+      // whose cleanup may have been skipped. Keeps only the static OK and Cancel.
+      [...btnWrap.children].forEach(child => {
+        if(child !== okBtn && child !== cancelBtn) child.remove();
+      });
       btnWrap.appendChild(goBackBtn);
       modal.style.display = 'flex';
       const cleanup = (result) => {
         modal.style.display = 'none';
         goBackBtn.remove();
-        document.getElementById('customConfirmOk').onclick = null;
-        document.getElementById('customConfirmCancel').onclick = null;
+        okBtn.onclick = null;
+        cancelBtn.onclick = null;
         resolve(result);
       };
-      document.getElementById('customConfirmOk').onclick     = () => cleanup('give');
-      document.getElementById('customConfirmCancel').onclick = () => cleanup('cancel');
-      goBackBtn.onclick                                       = () => cleanup('back');
+      okBtn.onclick     = () => cleanup('give');
+      cancelBtn.onclick = () => cleanup('cancel');
+      goBackBtn.onclick = () => cleanup('back');
     });
   } else {
     // No redistribution path — single confirm with cancel/back
@@ -9030,17 +9037,25 @@ function customConfirm(msg, okLabel, cancelLabel){
   return new Promise(resolve => {
     const modal = document.getElementById('customConfirmModal');
     document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
-    document.getElementById('customConfirmOk').textContent = okLabel;
-    document.getElementById('customConfirmCancel').textContent = cancelLabel;
+    const okBtn = document.getElementById('customConfirmOk');
+    const cancelBtn = document.getElementById('customConfirmCancel');
+    okBtn.textContent = okLabel;
+    cancelBtn.textContent = cancelLabel;
+    // Defensive: strip any leftover dynamic buttons from prior modal calls
+    // that may have skipped cleanup.
+    const btnWrap = cancelBtn.parentNode;
+    [...btnWrap.children].forEach(child => {
+      if(child !== okBtn && child !== cancelBtn) child.remove();
+    });
     modal.style.display = 'flex';
     const cleanup = (result) => {
       modal.style.display = 'none';
-      document.getElementById('customConfirmOk').onclick = null;
-      document.getElementById('customConfirmCancel').onclick = null;
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
       resolve(result);
     };
-    document.getElementById('customConfirmOk').onclick = () => cleanup(true);
-    document.getElementById('customConfirmCancel').onclick = () => cleanup(false);
+    okBtn.onclick = () => cleanup(true);
+    cancelBtn.onclick = () => cleanup(false);
   });
 }
 
@@ -9117,6 +9132,12 @@ function confirmReactivation(bnName, absorberNames, shift, dt, outageStartMs){
     goBackBtn.style.width = '100%';
     goBackBtn.textContent = 'Go back';
     const btnWrap = cancelBtn.parentNode;
+    // Defensive: strip any leftover dynamic buttons from prior modal calls
+    // whose cleanup may have been skipped (e.g. error mid-flow). The static
+    // OK and Cancel buttons stay; anything else is a stale append.
+    [...btnWrap.children].forEach(child => {
+      if(child !== okBtn && child !== cancelBtn) child.remove();
+    });
     btnWrap.appendChild(goBackBtn);
 
     modal.style.display = 'flex';
