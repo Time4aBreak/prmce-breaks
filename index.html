@@ -1508,7 +1508,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-33';
+const APP_VERSION = '2026-05-15-35';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -6949,6 +6949,31 @@ ${nurseLines}`;
   }
 }
 
+// Returns the number of staff bookings whose event-time fell within the
+// outage window, on units that absorbers covered. Used to decide whether
+// the full reactivation modal (slot picker + take-back/don't-take-back)
+// is needed, or just a simple "Resume coverage now?" prompt. Skips
+// bookings that already have a CreatedBy (manual breaks self-attribute)
+// and BN-own breaks.
+async function countOutageBookings(suppls, outageStartMs, dStr, shiftType){
+  if(!suppls.length || !outageStartMs || isNaN(outageStartMs)) return 0;
+  const all = await spGet(LISTS.bookings,
+    `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`
+  ).catch(() => []);
+  const absorbedUnits = new Set();
+  suppls.forEach(s => {
+    try { JSON.parse(s.Units || '[]').forEach(u => absorbedUnits.add(u)); } catch{}
+  });
+  const nowMs = Date.now();
+  return all.filter(b => {
+    if(b.CreatedBy) return false;
+    if(isBNBreak(b)) return false;
+    if(!absorbedUnits.has(b.Unit)) return false;
+    const t = slotEventTime(b);
+    return t >= outageStartMs && t <= nowMs;
+  }).length;
+}
+
 // Stamp absorbing BN's CreatedBy onto outage bookings whose event-time is
 // before `cutoverMs`, on units that the absorber covered. Shared between
 // admin and BN-self reactivation paths. Returns the count of patches.
@@ -7027,21 +7052,36 @@ async function markBNAvailable(schedId, bnName){
     let cutoverMs = Date.now();
     let dontTakeBack = false;
     if(suppls.length){
-      hideBusy(); // let user see the decision modal clearly
-      const absorberNames = [...new Set(suppls.map(s => s.BreakNurseName))];
       const outageStartMs = EndedAt ? new Date(EndedAt).getTime() : 0;
-      const result = await confirmReactivation(bnName, absorberNames, ShiftType, dStr, outageStartMs);
-      if(result.choice === 'back') return;
-      cutoverMs = result.cutoverMs;
-      dontTakeBack = result.choice === 'dont_take_back';
+      const absorberNames = [...new Set(suppls.map(s => s.BreakNurseName))];
+      hideBusy(); // let user see the decision modal clearly
+
+      // If zero breaks happened during outage, there's nothing to attribute,
+      // so collapse to a simple confirm — no slot picker, no "don't take
+      // back" option needed. The latter only matters when there's actual
+      // outage coverage to preserve.
+      const outageBookingCount = await countOutageBookings(suppls, outageStartMs, dStr, ShiftType);
+      if(outageBookingCount === 0){
+        const proceed = await customConfirm(
+          `No breaks were taken while ${firstName(bnName)} was unavailable.`,
+          'Resume coverage now',
+          'Go back'
+        );
+        if(!proceed) return;
+        // cutoverMs stays at Date.now(); dontTakeBack stays false.
+      } else {
+        const result = await confirmReactivation(bnName, absorberNames, ShiftType, dStr, outageStartMs);
+        if(result.choice === 'back') return;
+        cutoverMs = result.cutoverMs;
+        dontTakeBack = result.choice === 'dont_take_back';
+      }
       showBusy(dontTakeBack
         ? `Keeping ${absorberNames.map(firstName).join(', ')}'s coverage for this shift…`
         : `Restoring ${firstName(bnName)}'s assignments…`);
 
       // Stamp absorber's CreatedBy on outage bookings before cutoverMs.
-      const outageStart = outageStartMs;
-      if(outageStart && !isNaN(outageStart) && outageStart < cutoverMs){
-        await stampOutageAttribution(suppls, outageStart, cutoverMs, dStr, ShiftType);
+      if(outageStartMs && !isNaN(outageStartMs) && outageStartMs < cutoverMs){
+        await stampOutageAttribution(suppls, outageStartMs, cutoverMs, dStr, ShiftType);
       }
     }
 
@@ -7080,9 +7120,14 @@ async function markBNAvailable(schedId, bnName){
     }
 
     await new Promise(r => setTimeout(r, 100));
+  } catch(e){ hideBusy(); toast(e.message, true); }
+  finally {
+    // Always re-render the assignment row so the "Processing…" button
+    // returns to its idle state ("Mark Available" or "Unavailable"),
+    // regardless of which exit path was taken (Go back, success, error).
     loadAssignments();
     notifyProdLogChanged(bnName);
-  } catch(e){ hideBusy(); toast(e.message, true); loadAssignments(); notifyProdLogChanged(bnName); }
+  }
 }
 
 function getBNStartKey(){ return `bnStart_${BNS.name}_${BNS.date||today()}_${BNS.shift}`; }
@@ -7210,10 +7255,23 @@ async function toggleSelfAvailability(){
       if(suppls.length){
         const absorberNames = [...new Set(suppls.map(s => s.BreakNurseName))];
         const outageStartMs = inactive.EndedAt ? new Date(inactive.EndedAt).getTime() : 0;
-        const result = await confirmReactivation(BNS.name, absorberNames, shift, dt, outageStartMs);
-        if(result.choice === 'back') return; // finalInactive stays true (no change)
-        cutoverMs = result.cutoverMs;
-        dontTakeBack = result.choice === 'dont_take_back';
+
+        // If no breaks happened during outage, simplify to a 2-button confirm.
+        const outageBookingCount = await countOutageBookings(suppls, outageStartMs, dt, shift);
+        if(outageBookingCount === 0){
+          const proceed = await customConfirm(
+            `No breaks were taken while ${firstName(BNS.name)} was unavailable.`,
+            'Resume coverage now',
+            'Go back'
+          );
+          if(!proceed) return; // finalInactive stays true
+          // cutoverMs stays at Date.now(); dontTakeBack stays false.
+        } else {
+          const result = await confirmReactivation(BNS.name, absorberNames, shift, dt, outageStartMs);
+          if(result.choice === 'back') return; // finalInactive stays true (no change)
+          cutoverMs = result.cutoverMs;
+          dontTakeBack = result.choice === 'dont_take_back';
+        }
       }
       // No-supplementals case: no modal needed — straight reactivation.
 
