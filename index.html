@@ -1525,7 +1525,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-17-38';
+const APP_VERSION = '2026-05-17-39';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3117,7 +3117,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
         <div style="display:flex;flex-direction:column;gap:8px">
-          <button type="button" class="btn btn-primary" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';Promise.resolve(commitUnitChange()).finally(()=>{_b.disabled=false;_b.textContent=${JSON.stringify(confirmLabel)}})">${confirmLabel}</button>
+          <button type="button" class="btn btn-primary" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';Promise.resolve(commitUnitChange()).finally(()=>{_b.disabled=false;_b.textContent='${confirmLabel}'})">${confirmLabel}</button>
           <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
         </div>
       </div>`;
