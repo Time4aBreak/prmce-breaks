@@ -565,6 +565,23 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="rptUnitList"></div>
     </div>
 
+    <!-- Coverage Offered per Unit by Tier -->
+    <div class="card" id="rptTierCard" style="display:none">
+      <div class="card-label">Coverage Offered per Unit by Tier</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
+        Format <code style="background:var(--bg);padding:1px 4px;border-radius:3px">X / Y</code>: offered after BN breaks / total assigned.
+        <strong>Shifts</strong> column: open / total in range. Tap any column header to sort.
+      </div>
+      <div style="margin-bottom:18px">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
+        <div id="rptTierDayTable" style="overflow-x:auto"></div>
+      </div>
+      <div>
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--noc)">🌙 Noc Shift</div>
+        <div id="rptTierNocTable" style="overflow-x:auto"></div>
+      </div>
+    </div>
+
     <!-- Popular time slots -->
     <div class="card" id="rptTimeCard" style="display:none">
       <div class="card-label">Most In-Demand Break Times</div>
@@ -1508,7 +1525,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-15-36';
+const APP_VERSION = '2026-05-17-37';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12799,6 +12816,134 @@ function fmtDateRange(from, to){
   return from === to ? f : `${f} – ${t}`;
 }
 
+// ═══════════════════════════════════════════════════════
+// Coverage Offered per Unit by Tier — answers
+// "How many slots is each unit offered per tier?"
+// (Foundation for fairness analysis.)
+// ═══════════════════════════════════════════════════════
+const _TIER_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
+const _TIER_WING_FLOOR = {
+  '3A':1,'4A':2,'5A':3,'6A':4,'7A':5,'3C':6,'4C':7,
+  '6N':8,'7N':9,'8N':10,'8S':11,'9N':12,'9S':13,'10N':14,'10S':15
+};
+const _TIER_NAMES = ['earlyLow','prime','lateLow','thirdLow'];
+
+let _tierMatrixData = { Day: [], Noc: [] };
+let _tierSort = { Day: {col:'unit', dir:'asc'}, Noc: {col:'unit', dir:'asc'} };
+
+function _computeTierMatrix(scheds, bnBreaks, shift, datesByShift){
+  // Index BN breaks for this shift by name+date → set of slot times
+  const breakIndex = {};
+  bnBreaks.filter(b => b.ShiftType === shift).forEach(b => {
+    const date = String(b.SlotDate).slice(0,10);
+    const key = `${b.NurseName}|${date}`;
+    if(!breakIndex[key]) breakIndex[key] = new Set();
+    breakIndex[key].add(normSlot(b.SlotTime));
+  });
+
+  // Initialize matrix
+  const matrix = {};
+  _TIER_UNITS.forEach(u => {
+    matrix[u] = { open: 0 };
+    _TIER_NAMES.forEach(t => matrix[u][t] = { raw: 0, eff: 0 });
+  });
+
+  // Count open shifts per unit across all dates where any BN was scheduled
+  datesByShift.forEach(date => {
+    _TIER_UNITS.forEach(u => {
+      if(isUnitOpenForShift(u, date, shift)) matrix[u].open++;
+    });
+  });
+
+  // Walk schedule rows of this shift, load each BN's rotation, tally cells
+  scheds.filter(s => s.ShiftType === shift).forEach(s => {
+    const date = String(s.ShiftDate).slice(0,10);
+    const rotation = loadRotationWithFallback(s.BreakNurseName, date, shift, s);
+    if(!rotation) return;
+    const bnBreakSet = breakIndex[`${s.BreakNurseName}|${date}`] || new Set();
+    Object.entries(rotation).forEach(([slot, unit]) => {
+      if(!matrix[unit]) return; // skip C_PAIR or unknown
+      const slotKey = normSlot(slot);
+      const tier = getSlotTier(slotKey, shift);
+      if(!_TIER_NAMES.includes(tier)) return; // skip hardBlocked
+      matrix[unit][tier].raw++;
+      if(!bnBreakSet.has(slotKey)) matrix[unit][tier].eff++;
+    });
+  });
+
+  return _TIER_UNITS.map(u => {
+    const m = matrix[u];
+    const totalRaw = _TIER_NAMES.reduce((a,t) => a + m[t].raw, 0);
+    const totalEff = _TIER_NAMES.reduce((a,t) => a + m[t].eff, 0);
+    return {
+      unit: u,
+      shiftsOpen: m.open,
+      shiftsTotal: datesByShift.size,
+      earlyLow: m.earlyLow, prime: m.prime, lateLow: m.lateLow, thirdLow: m.thirdLow,
+      totalRaw, totalEff
+    };
+  });
+}
+
+function _renderTierMatrix(rows, shift){
+  const sort = _tierSort[shift];
+  const sorted = [...rows].sort((a,b) => {
+    let av, bv;
+    switch(sort.col){
+      case 'unit':   av = _TIER_WING_FLOOR[a.unit] || 99; bv = _TIER_WING_FLOOR[b.unit] || 99; break;
+      case 'shifts': av = a.shiftsOpen; bv = b.shiftsOpen; break;
+      case 'total':  av = a.totalEff;  bv = b.totalEff; break;
+      default:       av = a[sort.col]?.eff ?? 0; bv = b[sort.col]?.eff ?? 0;
+    }
+    return sort.dir === 'asc' ? av - bv : bv - av;
+  });
+
+  const ind = c => sort.col === c ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const thStyle = 'cursor:pointer;padding:6px 4px;font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);user-select:none;white-space:nowrap';
+  const tdStyle = 'padding:6px 4px;text-align:center;font-family:"DM Mono",monospace;font-size:.8rem;border-bottom:1px solid var(--border)';
+  const tdUnitStyle = 'padding:6px 4px;text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--border)';
+
+  const head = `<tr>
+    <th style="${thStyle};text-align:left" onclick="sortTierMatrix('${shift}','unit')">Unit${ind('unit')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','shifts')">Shifts${ind('shifts')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','earlyLow')">Early${ind('earlyLow')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','prime')">Prime${ind('prime')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','lateLow')">Late${ind('lateLow')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','thirdLow')">Third${ind('thirdLow')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','total')">Total${ind('total')}</th>
+  </tr>`;
+
+  const body = sorted.map(r => {
+    const dim = r.shiftsOpen === 0 ? 'opacity:0.45' : '';
+    return `<tr style="${dim}">
+      <td style="${tdUnitStyle}">${r.unit}</td>
+      <td style="${tdStyle}">${r.shiftsOpen}/${r.shiftsTotal}</td>
+      <td style="${tdStyle}">${r.earlyLow.eff}/${r.earlyLow.raw}</td>
+      <td style="${tdStyle}">${r.prime.eff}/${r.prime.raw}</td>
+      <td style="${tdStyle}">${r.lateLow.eff}/${r.lateLow.raw}</td>
+      <td style="${tdStyle}">${r.thirdLow.eff}/${r.thirdLow.raw}</td>
+      <td style="${tdStyle};font-weight:600">${r.totalEff}/${r.totalRaw}</td>
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse">
+    <thead>${head}</thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function sortTierMatrix(shift, col){
+  const s = _tierSort[shift];
+  if(s.col === col){
+    s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    s.col = col;
+    s.dir = col === 'unit' ? 'asc' : 'desc';
+  }
+  const tbl = document.getElementById(`rptTier${shift}Table`);
+  if(tbl) tbl.innerHTML = _renderTierMatrix(_tierMatrixData[shift], shift);
+}
+
 async function loadReports(){
   if (!RPT.unlocked) return;
   const { from, to } = getRangeDates();
@@ -12807,7 +12952,7 @@ async function loadReports(){
   const kpis = document.getElementById('rptKPIs');
   kpis.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   ['rptCovCard','rptUnitCard','rptTimeCard','rptBNCard','rptShiftCard',
-   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard']
+   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
 
   try {
@@ -12941,6 +13086,25 @@ async function loadReports(){
     renderVolBN(bookings, scheds);
     renderEngagement(bookings, scheds);
     renderPopularity(bookings);
+
+    // ── Coverage Offered per Unit by Tier ──────────────
+    {
+      const bnBreaksForTier = bookings.filter(b => isBNBreak(b));
+      const dayDates = new Set(), nocDates = new Set();
+      scheds.forEach(s => {
+        const date = String(s.ShiftDate).slice(0,10);
+        if(s.ShiftType === 'Day') dayDates.add(date);
+        else if(s.ShiftType === 'Noc') nocDates.add(date);
+      });
+      _tierMatrixData.Day = _computeTierMatrix(scheds, bnBreaksForTier, 'Day', dayDates);
+      _tierMatrixData.Noc = _computeTierMatrix(scheds, bnBreaksForTier, 'Noc', nocDates);
+      const dayEl = document.getElementById('rptTierDayTable');
+      const nocEl = document.getElementById('rptTierNocTable');
+      if(dayEl) dayEl.innerHTML = _renderTierMatrix(_tierMatrixData.Day, 'Day');
+      if(nocEl) nocEl.innerHTML = _renderTierMatrix(_tierMatrixData.Noc, 'Noc');
+      const tierCard = document.getElementById('rptTierCard');
+      if(tierCard) tierCard.style.display = 'block';
+    }
 
         // ── Break Nurse Workload ───────────────────────────
     // Match confirmed bookings to their assigned BN via schedule
