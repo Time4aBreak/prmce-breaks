@@ -1525,7 +1525,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-17-37';
+const APP_VERSION = '2026-05-17-38';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12800,7 +12800,7 @@ function getRangeDates(){
       return { from: f, to: t };
     }
     case 'ytd': return { from: `${now.getFullYear()}-01-01`, to: t };
-    case 'cum': return { from: '2000-01-01', to: t };
+    case 'cum': return { from: '2000-01-01', to: '9999-12-31' };
     case 'cust': return {
       from: document.getElementById('rptFrom').value || t,
       to:   document.getElementById('rptTo').value   || t
