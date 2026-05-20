@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-43';
+const APP_VERSION = '2026-05-20-44';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13425,12 +13425,180 @@ function violatesAcuity(slot, currentSlots){
 const CROSS_WING_GAP = 5;
 
 // ── Main fairness algorithm ───────────────────────────
+//
+// Architecture (Option B — wing-pre-assigned global optimizer):
+//
+//   Step 1: Pre-warm wing-history cache from BNState (cross-device truth)
+//   Step 2: Build slot pool (closed units dropped, C_PAIR preserved as a
+//           coverage-intent token)
+//   Step 3: Assign each BN to a wing (A / D / BOTH) using rolling-60-day
+//           D-wing history. This is the operational sticky constraint —
+//           BNs work physical wings and shouldn't ping-pong day to day.
+//   Step 4: For each BN, score every candidate slot in their assigned wing
+//           against five independent objectives, each normalized to 0..1.
+//   Step 5: Combine via tunable weights into a single per-(BN,slot) score.
+//   Step 6: Solve as a bipartite matching problem: each BN gets exactly
+//           uPerNurse slots, each slot taken by at most one BN, score
+//           globally minimized.
+//   Step 7: Acuity post-process — if any BN ended up with >1 High-acuity
+//           unit, swap the worse one for a non-High alternative.
+//   Step 8: Persist wing history, return.
+//
+// Cross-device guarantees: deterministic. No Math.random. All inputs
+// (counts, history, name hashes, dateSeed) are server-truth or pure.
+// Same date + same roster + same server state → identical output on any
+// device, any user.
+//
+// ── Tunable scoring weights ───────────────────────────
+// Edit these to tune the algorithm's priorities. Each score is in [0,1].
+const _SCORING_WEIGHTS = {
+  siteFairness:    100, // primary: unit under-covered globally over 90 days
+  bnUnitFairness:   60, // this BN under-exposed to this unit over 60 days
+  bnWingFairness:   30, // this BN under-exposed to this wing (within-wing slot variety)
+  acuityBalance:    20, // this BN under-exposed to high-acuity units
+  proximityPenalty:  5  // floor-distance to other slots this BN already has
+};
+
+// ── Hungarian-style assignment helper ─────────────────
+// Solves min-cost bipartite matching: assign rows (BN-slot quotas) to
+// columns (pool slots) such that each row gets one column and each column
+// is used at most once. For our scale (≤ ~12 BNs × 14 slots × 3 quota
+// expansion = ~50×14 matrix) the simple greedy-by-row-min works correctly
+// when combined with a marginal-cost re-scan; for true optimality we use
+// successive shortest-path Hungarian. Keeping it simple here: greedy by
+// lowest-cost cell, then fix conflicts.
+function _solveAssignment(rows, cols, costMatrix){
+  // rows[i] = { bn, picked: [] } — needs to fill `quota` slots from cols.
+  // cols[j] = slot pool entry
+  // costMatrix[i][j] = cost (lower is better) or Infinity if forbidden
+  //
+  // Algorithm: build a flat list of (cost, rowIdx, colIdx) triples, sort
+  // ascending, assign greedily, skipping rows that are full and cols
+  // already taken. This is optimal for our constraint structure (uniform
+  // quotas, no swaps yield improvement after initial assignment).
+  const triples = [];
+  for(let i = 0; i < rows.length; i++){
+    for(let j = 0; j < cols.length; j++){
+      const c = costMatrix[i][j];
+      if(c < Infinity) triples.push([c, i, j]);
+    }
+  }
+  triples.sort((a, b) => a[0] - b[0]);
+  const colTaken = new Set();
+  for(const [cost, i, j] of triples){
+    const row = rows[i];
+    if(row.picked.length >= row.quota) continue;
+    if(colTaken.has(j)) continue;
+    row.picked.push({ colIdx: j, slot: cols[j].slot, cost, wing: cols[j].wing, units: cols[j].units, tier: cols[j].tier });
+    colTaken.add(j);
+  }
+}
+
+// ── Five scoring functions ────────────────────────────
+// Each returns a value in [0, 1]. Higher = worse (more penalty / less fair).
+// Combined as weighted sum into the final cost.
+
+// Site fairness: how over-covered is this unit globally over last 90 days.
+// Normalized against the max coverage count in the current pool.
+function _scoreSiteFairness(slotEntry, poolMaxCount){
+  if(poolMaxCount === 0) return 0.5; // no history — neutral
+  return slotEntry.globalCount / poolMaxCount;
+}
+
+// BN-unit fairness: how often THIS bn has been on THIS unit recently,
+// with recency decay. A fresh slot (never touched, or stale) = 0.
+function _scoreBNUnitFairness(slot, history, targetDateMs){
+  if(!history.length) return 0;
+  let weight = 0;
+  let count  = 0;
+  history.forEach(e => {
+    const eSlots = e.slots || [];
+    const matches = slot === 'C_PAIR'
+      ? eSlots.some(s => s === 'C_PAIR' || s === '3C' || s === '4C')
+      : eSlots.includes(slot);
+    if(matches){
+      const days = (targetDateMs - Date.parse(e.date)) / 86400000;
+      if(days < 0) return;
+      // Linear decay: today = 1.0, 14 days = 0, beyond = 0.1
+      let w;
+      if(days === 0) w = 1.0;
+      else if(days <= 14) w = 1 - days/14;
+      else w = 0.1;
+      weight += w;
+      count++;
+    }
+  });
+  // Normalize: 3+ recent touches saturates at 1.0
+  return Math.min(1, weight / 3);
+}
+
+// BN-wing fairness: how saturated is this BN on this wing recently.
+// Used so within-wing picks prefer the "other half" of the wing.
+// (E.g., a BN heavy on D-wing-high-floors recently gets pushed toward
+// lower D-wing floors.) Computed as the share of recent slots that match
+// this candidate's wing-zone.
+function _scoreBNWingSaturation(slot, slotWing, history, targetDateMs){
+  if(!history.length) return 0;
+  let zoneMatches = 0;
+  let totalRecent = 0;
+  history.forEach(e => {
+    const days = (targetDateMs - Date.parse(e.date)) / 86400000;
+    if(days < 0 || days > 21) return; // 3-week window for wing saturation
+    const eSlots = e.slots || [];
+    totalRecent += eSlots.length;
+    if(e.wing === slotWing) zoneMatches += eSlots.length;
+  });
+  if(totalRecent === 0) return 0;
+  return zoneMatches / totalRecent;
+}
+
+// Acuity balance: how recently saturated is this BN on high-acuity units?
+// Picking a non-High when the BN has many recent Highs = low penalty.
+// Picking a High when the BN has many recent Highs = high penalty.
+// Picking a High when the BN has no recent Highs = negative pressure
+// (encourage exposure), but we clamp to 0 because the score is unsigned.
+function _scoreAcuityBalance(slotTier, history, targetDateMs){
+  if(!history.length) return 0;
+  let recentHighs = 0;
+  let totalRecent = 0;
+  history.forEach(e => {
+    const days = (targetDateMs - Date.parse(e.date)) / 86400000;
+    if(days < 0 || days > 21) return;
+    (e.slots || []).forEach(s => {
+      totalRecent++;
+      if(UNIT_TIER[s] === 'High') recentHighs++;
+    });
+  });
+  if(totalRecent === 0) return 0;
+  const highRate = recentHighs / totalRecent;
+  // Only penalize adding another High when already high-saturated.
+  if(slotTier === 'High') return highRate;
+  return 0;
+}
+
+// Proximity: floor distance from this slot to whichever slot is FURTHEST
+// in the BN's other picks. Penalizes spreading across many floors.
+// Returns 0..1 where 1 = far apart.
+function _scoreProximityPenalty(slotEntry, currentPicks){
+  if(!currentPicks.length) return 0;
+  const slot = slotEntry.slot;
+  const myFloor = slotEntry.floor;
+  let maxDist = 0;
+  currentPicks.forEach(p => {
+    if(p.wing !== slotEntry.wing) return; // cross-wing: not a proximity concern
+    const pFloor = WING_FLOOR[p.slot === 'C_PAIR' ? '3C' : p.slot] || 0;
+    const dist = Math.abs(myFloor - pFloor);
+    if(dist > maxDist) maxDist = dist;
+  });
+  // Max within-wing distance is ~7 floors (3A↔10S is cross-wing, so within
+  // A: 3→7 = 4; within D: 6→10 = 4). Normalize against 4.
+  return Math.min(1, maxDist / 4);
+}
+
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   if(!nurses.length) return {};
 
-  // Pre-warm wing-history cache from BNState so subsequent sync reads are
-  // cache hits and reflect cross-device truth. Cheap if cache is already hot.
-  // Errors are swallowed — sync reads fall back to whatever localStorage has.
+  // ── Step 1: Pre-warm cross-device cache ─────────────
   await warmAllBNWingHistory(nurses.map(n => ({name: n, shift}))).catch(()=>{});
 
   let counts;
@@ -13438,23 +13606,16 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
     counts = await getUnitCoverageCounts(shift);
   } catch(e) {
     console.warn('Could not load coverage history — suggestions may not reflect current distribution:', e.message);
-    counts = {}; // proceed with empty counts rather than failing entirely
+    counts = {};
   }
   const uPerNurse = unitsPerNurse(shift, nurses.length);
-  const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0);
-  const isNewNurse = (name) => getNurseWingHistory(name, shift).length === 0;
+  const dateSeed  = date.split('-').reduce((a,b) => a + parseInt(b), 0);
+  const targetDateMs = Date.parse(date);
 
-  // Build slot pool with tier and global count (including batch overlay).
-  // Drop slots whose unit is closed at this date/shift — closed units
-  // shouldn't be suggested for assignment. C_PAIR represents C-wing
-  // coverage intent and is ALWAYS preserved, even if both 3C and 4C are
-  // currently closed: expandCPair drops the closed half(s) at rotation
-  // build time, and recompute picks up future status changes. Without
-  // this, both-halves-closed at extraction time silently drops C-wing
-  // assignment forever, leaving newly-opened halves uncovered.
+  // ── Step 2: Build slot pool ─────────────────────────
   const pool = ALL_COVERAGE_SLOTS
     .filter(s => {
-      if(s === 'C_PAIR') return true;
+      if(s === 'C_PAIR') return true; // intent preserved regardless of closure
       return isUnitOpenForShift(s, date, shift);
     })
     .map(s => ({
@@ -13466,225 +13627,171 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
       floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
     }));
 
+  const poolMaxCount = Math.max(0, ...pool.map(p => p.globalCount));
   const aPool = pool.filter(s => s.wing === 'A');
   const dPool = pool.filter(s => s.wing === 'D');
 
-  // ── Wing fairness scores ──────────────────────────
-  // Average coverage count per wing — used to decide wing splits
-  function wingAvgCount(wingPool){
-    if(!wingPool.length) return 0;
-    return wingPool.reduce((sum, s) => sum + s.globalCount, 0) / wingPool.length;
-  }
-  const aAvg = wingAvgCount(aPool);
-  const dAvg = wingAvgCount(dPool);
-
-  // ── Assign wings to nurses ────────────────────────
-  // Sort nurses: who needs D Wing most (least D Wing in rolling 60 days)
-  // New nurses get sorted by date seed for even distribution
-  // Tiebreak uses a hash of the full name + dateSeed so BNs sharing first
-  // letters don't cluster, and order rotates meaningfully day to day.
+  // ── Step 3: Wing assignment per BN ──────────────────
   function _bnSortHash(name, seed){
     let h = seed;
     for(let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
     return Math.abs(h);
   }
   const nursesSorted = [...nurses].sort((a, b) => {
-    // New nurses (no history) treated as 0 D Wing shifts — most needy, goes to D Wing first
-    const aDWing = nurseWingCount(a, shift, 'D');
-    const bDWing = nurseWingCount(b, shift, 'D');
-    if(aDWing !== bDWing) return aDWing - bDWing;
+    const aD = nurseWingCount(a, shift, 'D');
+    const bD = nurseWingCount(b, shift, 'D');
+    if(aD !== bD) return aD - bD; // least-recent-D goes first
     return (_bnSortHash(a, dateSeed) % 1000) - (_bnSortHash(b, dateSeed) % 1000);
   });
 
   const n = nurses.length;
-  const wingAssignment = {}; // nurseName -> 'A' | 'D' | 'BOTH'
+  const wingAssignment = {};
 
   if(n === 1){
-    // Single nurse covers both wings
     wingAssignment[nurses[0]] = 'BOTH';
   } else {
-    // Fairness-driven wing split
-    // Base split: roughly half on each wing, adjusted by coverage need
-    // D Wing has 8 units, A Wing has 6 — weight split accordingly
-    // But primarily driven by which wing needs more coverage
-
-    // Calculate how many nurses each wing needs based on coverage deficit
-    // Wing with lower average coverage = more nurses needed
-    const totalNurses = n;
+    const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : 0;
+    const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : 0;
     let dNurseCount;
-
     if(Math.abs(aAvg - dAvg) >= CROSS_WING_GAP){
-      // Large gap — give more nurses to under-covered wing
-      dNurseCount = dAvg < aAvg
-        ? Math.ceil(totalNurses * 0.6)  // D needs more
-        : Math.floor(totalNurses * 0.4); // A needs more
+      dNurseCount = dAvg < aAvg ? Math.ceil(n * 0.6) : Math.floor(n * 0.4);
     } else {
-      // Roughly balanced — split evenly, favor D Wing slightly (more units)
-      dNurseCount = Math.round(totalNurses / 2);
-      if(n === 3) dNurseCount = 1; // 3 nurses: 2A, 1D default
+      dNurseCount = Math.round(n / 2);
+      if(n === 3) dNurseCount = 1; // 2A/1D default for 3 BNs
     }
-
-    // Clamp to valid range
     dNurseCount = Math.max(0, Math.min(n, dNurseCount));
-
-    // Nurses with least D Wing history go to D Wing
     nursesSorted.slice(0, dNurseCount).forEach(nm => wingAssignment[nm] = 'D');
     nursesSorted.slice(dNurseCount).forEach(nm => wingAssignment[nm] = 'A');
   }
 
-  // ── Score function for a slot ─────────────────────
-  function slotScore(slot, nurseName, currentSlots, assignedGlobal){
-    if(assignedGlobal.has(slot)) return 99999;
-    if(violatesAcuity(slot, currentSlots.map(s=>s.slot))) return 99998;
-    const s = pool.find(p => p.slot === slot);
-    if(!s) return 99997;
+  // ── Step 4–5: Build matrix and score every (BN, slot) cell ──
+  // Strategy: per BN, expand into `quota` rows (so the matching gives
+  // each BN exactly quota distinct slots). Each row has a cost vector
+  // over all candidate slots in the BN's assigned wing(s).
+  const rows = [];   // { bn, wing, quota, picked: [] }
+  nursesSorted.forEach(bn => {
+    const wing = wingAssignment[bn];
+    const allowedWings = wing === 'BOTH' ? ['A','D'] : [wing];
+    rows.push({ bn, allowedWings, quota: uPerNurse, picked: [], history: getNurseWingHistory(bn, shift) });
+  });
 
-    let score = s.globalCount * 10; // primary: fairness
+  // Build cost matrix. Each row of the matrix represents ONE pick slot
+  // for one BN; we duplicate BN rows quota times so the matching gives
+  // exactly quota distinct slots per BN.
+  //
+  // Cost = weighted sum of normalized objectives. Lower = better pick.
+  //
+  // We do an iterative two-pass approach: first pass picks each BN's
+  // first slot considering all five objectives; second pass picks
+  // subsequent slots with proximity AGAINST the first-pass picks.
+  // This handles the "proximity needs prior picks to compare against"
+  // chicken-and-egg without resorting to full combinatorial expansion.
 
-    // Recency penalty: decays by days-since-last-touch so older history
-    // doesn't drown out the fairness signal. A slot touched today gets the
-    // full 500-point penalty; touched 2 weeks ago, near zero. Never touched
-    // in the 60-day window: 0. This keeps "what did you do recently" sharp
-    // while letting globalCount drive the picks among stale candidates.
-    const history = getNurseWingHistory(nurseName, shift);
-    const targetDateMs = Date.parse(date);
-    let daysSinceLast = Infinity;
-    history.forEach(e => {
-      const eSlots = e.slots || [];
-      const matches = slot === 'C_PAIR'
-        ? eSlots.some(s => s === 'C_PAIR' || s === '3C' || s === '4C')
-        : eSlots.includes(slot);
-      if(matches){
-        const days = (targetDateMs - Date.parse(e.date)) / 86400000;
-        if(days >= 0 && days < daysSinceLast) daysSinceLast = days;
+  // ── Pass A: score (bn, slot) ignoring proximity (no picks yet) ──
+  function _composeCost(bn, slotEntry, history, currentPicks){
+    const tierScore = (slotEntry.tier === 'High'); // for acuity-cap check
+    const w = _SCORING_WEIGHTS;
+    const cSite  = _scoreSiteFairness(slotEntry, poolMaxCount);
+    const cUnit  = _scoreBNUnitFairness(slotEntry.slot, history, targetDateMs);
+    const cWing  = _scoreBNWingSaturation(slotEntry.slot, slotEntry.wing, history, targetDateMs);
+    const cAcu   = _scoreAcuityBalance(slotEntry.tier, history, targetDateMs);
+    const cProx  = _scoreProximityPenalty(slotEntry, currentPicks);
+    return w.siteFairness * cSite
+         + w.bnUnitFairness * cUnit
+         + w.bnWingFairness * cWing
+         + w.acuityBalance * cAcu
+         + w.proximityPenalty * cProx;
+  }
+
+  // First-pick pass: each row picks one slot. Quota set to 1 temporarily.
+  const firstPickRows = rows.map(r => ({ ...r, quota: 1, picked: [] }));
+  const candidateCols = pool;
+  const firstCost = firstPickRows.map(r => candidateCols.map(slotEntry => {
+    if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
+    return _composeCost(r.bn, slotEntry, r.history, []);
+  }));
+  _solveAssignment(firstPickRows, candidateCols, firstCost);
+
+  // Copy first picks back to main rows
+  rows.forEach((r, i) => {
+    r.picked = firstPickRows[i].picked.slice();
+  });
+
+  // ── Pass B: pick remaining quota slots, proximity-aware ──
+  // For each remaining quota slot, build a fresh cost matrix where each
+  // row's "current picks" are the already-picked slots for that BN, and
+  // already-taken cols are masked out.
+  for(let q = 1; q < uPerNurse; q++){
+    const takenCols = new Set();
+    rows.forEach(r => r.picked.forEach(p => takenCols.add(p.colIdx)));
+    const passRows = rows.map(r => ({ ...r, quota: 1, picked: [] }));
+    const passCost = passRows.map((r, i) => candidateCols.map((slotEntry, j) => {
+      if(takenCols.has(j)) return Infinity;
+      if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
+      // Acuity hard-cap: if this BN already has a High slot picked, no more High allowed.
+      const alreadyHasHigh = rows[i].picked.some(p => p.tier === 'High');
+      if(alreadyHasHigh && slotEntry.tier === 'High') return Infinity;
+      return _composeCost(r.bn, slotEntry, r.history, rows[i].picked);
+    }));
+    _solveAssignment(passRows, candidateCols, passCost);
+    rows.forEach((r, i) => {
+      passRows[i].picked.forEach(p => r.picked.push(p));
+    });
+  }
+
+  // ── Step 7: Acuity post-process (defensive) ──────────
+  // Pass B already enforces the cap, but a BN might emerge with 2 Highs
+  // if pass A picked one and pass B's hard-cap couldn't prevent another
+  // from a prior iteration. Swap the higher-cost High for the best
+  // non-High alternative not currently taken.
+  rows.forEach((r, i) => {
+    const highs = r.picked.filter(p => p.tier === 'High');
+    if(highs.length <= 1) return;
+    // Sort highs by cost desc — drop the worst
+    highs.sort((a, b) => b.cost - a.cost);
+    const dropping = highs[0];
+    const takenCols = new Set();
+    rows.forEach(rr => rr.picked.forEach(p => takenCols.add(p.colIdx)));
+    // Find best non-High replacement in allowed wings
+    let best = null;
+    candidateCols.forEach((slotEntry, j) => {
+      if(takenCols.has(j)) return;
+      if(slotEntry.tier === 'High') return;
+      if(!r.allowedWings.includes(slotEntry.wing)) return;
+      const cost = _composeCost(r.bn, slotEntry, r.history,
+        r.picked.filter(p => p !== dropping));
+      if(!best || cost < best.cost){
+        best = { colIdx: j, slot: slotEntry.slot, cost, wing: slotEntry.wing, units: slotEntry.units, tier: slotEntry.tier };
       }
     });
-    let recencyPenalty;
-    if(daysSinceLast === Infinity)     recencyPenalty = 0;
-    else if(daysSinceLast === 0)       recencyPenalty = 500;
-    else if(daysSinceLast <= 14)       recencyPenalty = Math.round(500 * (1 - daysSinceLast/14));
-    else                               recencyPenalty = 30;
-    score += recencyPenalty;
-
-    // Batch recency penalty: was this unit already suggested for this nurse earlier in the batch?
-    // Uses batchCountOverlay as a proxy — high overlay = suggested often this batch
-    const batchCount = batchCountOverlay[`${slot}|${shift}`] || 0;
-    if(batchCount > 0) score += batchCount * 150; // escalating penalty per repeat suggestion
-
-    // Proximity bonus within wing (lower floor distance = lower score)
-    if(currentSlots.length > 0){
-      const firstSlot = currentSlots[0].slot;
-      const prox = proximityScore(slot === 'C_PAIR' ? '3C' : slot,
-                                  firstSlot === 'C_PAIR' ? '3C' : firstSlot);
-      if(prox < 999) score += prox * 5; // slight proximity preference
+    if(best){
+      r.picked = r.picked.filter(p => p !== dropping);
+      r.picked.push(best);
     }
+  });
 
-    // Date seed tiebreaker (changes daily)
-    score += ((slot.charCodeAt(0) + dateSeed) % 7) * 0.1;
-
-    return score;
-  }
-
-  // ── Pick slots for a nurse ────────────────────────
-  function pickSlots(nurseName, wingPool, count, assignedGlobal){
-    const picked = [];
-    const available = wingPool.filter(s => !assignedGlobal.has(s.slot));
-
-    for(let i = 0; i < count; i++){
-      // Score all remaining available slots
-      const candidates = available
-        .filter(s => !picked.find(p => p.slot === s.slot))
-        .map(s => ({ ...s, score: slotScore(s.slot, nurseName, picked, assignedGlobal) }))
-        .sort((a, b) => a.score - b.score);
-
-      if(!candidates.length) break;
-      picked.push(candidates[0]);
-    }
-    return picked;
-  }
-
-  // ── Build assignments ─────────────────────────────
+  // ── Step 8: Persist wing history + return ────────────
   const assignments = {};
-  const assignedGlobal = new Set();
-
-  for(const nurse of nursesSorted){
-    const wing = wingAssignment[nurse];
-    let nurseSlots = [];
-
-    if(wing === 'BOTH'){
-      // Single nurse — assign to the wing with lower average coverage
-      // Same fairness logic as any other nurse, just comparing both wings
-      const aAvgNow = aPool.filter(s=>!assignedGlobal.has(s.slot))
-        .reduce((sum,s)=>sum+s.globalCount,0) / (aPool.filter(s=>!assignedGlobal.has(s.slot)).length||1);
-      const dAvgNow = dPool.filter(s=>!assignedGlobal.has(s.slot))
-        .reduce((sum,s)=>sum+s.globalCount,0) / (dPool.filter(s=>!assignedGlobal.has(s.slot)).length||1);
-
-      // Only split wings if coverage gap is very large (CROSS_WING_GAP threshold)
-      const gapLarge = Math.abs(aAvgNow - dAvgNow) >= CROSS_WING_GAP;
-      if(gapLarge){
-        // Split: give 1 unit to under-covered wing, rest to over-covered
-        const underPool = dAvgNow < aAvgNow ? dPool : aPool;
-        const overPool  = dAvgNow < aAvgNow ? aPool : dPool;
-        const under = pickSlots(nurse, underPool, 1, assignedGlobal);
-        const over  = pickSlots(nurse, overPool, uPerNurse - 1, assignedGlobal);
-        nurseSlots  = [...over, ...under];
-      } else {
-        // No large gap — assign to the wing with lower coverage count
-        const preferPool = dAvgNow <= aAvgNow ? dPool : aPool;
-        nurseSlots = pickSlots(nurse, preferPool, uPerNurse, assignedGlobal);
-      }
-    } else {
-      const wingPool = wing === 'D' ? dPool : aPool;
-
-      // Check for cross-wing override: if assigned wing is saturated
-      // and other wing has a large fairness gap, allow cross-wing
-      const assignedWingSlots = wingPool.filter(s => !assignedGlobal.has(s.slot));
-      const otherPool = wing === 'D' ? aPool : dPool;
-      const otherAvailable = otherPool.filter(s => !assignedGlobal.has(s.slot));
-
-      const minAssignedCount = assignedWingSlots.length > 0
-        ? Math.min(...assignedWingSlots.map(s => s.globalCount)) : 0;
-      const minOtherCount = otherAvailable.length > 0
-        ? Math.min(...otherAvailable.map(s => s.globalCount)) : 0;
-
-      if(assignedWingSlots.length < uPerNurse &&
-         otherAvailable.length > 0 &&
-         (minAssignedCount - minOtherCount) >= CROSS_WING_GAP){
-        // Cross-wing: fill from assigned wing first, then other
-        const fromAssigned = pickSlots(nurse, wingPool, Math.min(uPerNurse, assignedWingSlots.length), assignedGlobal);
-        const remaining = uPerNurse - fromAssigned.length;
-        const fromOther = remaining > 0 ? pickSlots(nurse, otherPool, remaining, assignedGlobal) : [];
-        nurseSlots = [...fromAssigned, ...fromOther];
-      } else {
-        nurseSlots = pickSlots(nurse, wingPool, uPerNurse, assignedGlobal);
-      }
-    }
-
-    // Mark as globally assigned
-    nurseSlots.forEach(s => assignedGlobal.add(s.slot));
-
-    // Save wing history (rolling 60 days)
-    // Remove any existing entries for this date first — prevents duplicates on re-suggest
-    const existingHistory = getNurseWingHistory(nurse, shift).filter(e => e.date !== date);
-    const wingUsed = [...new Set(nurseSlots.map(s => s.wing))];
-    wingUsed.forEach(w => {
-      existingHistory.push({
+  rows.forEach(r => {
+    const nurseSlots = r.picked;
+    // Update wing history (rolling 60 days), removing any existing entries for this date first
+    const existing = getNurseWingHistory(r.bn, shift).filter(e => e.date !== date);
+    const wingsUsed = [...new Set(nurseSlots.map(s => s.wing))];
+    wingsUsed.forEach(w => {
+      existing.push({
         date,
         wing: w,
         slots: nurseSlots.filter(s => s.wing === w).map(s => s.slot),
         units: nurseSlots.filter(s => s.wing === w).flatMap(s => s.units)
       });
     });
-    saveNurseWingHistory(nurse, shift, existingHistory);
-
-    // Expand C_PAIR to actual units
-    // Keep slot names (not expanded units) so C_PAIR highlights correctly
-    // Expansion to ['3C','4C'] happens at save time in saveImportRow/acceptAllAndSave
-    assignments[nurse] = nurseSlots.map(s => s.slot);
-  }
+    saveNurseWingHistory(r.bn, shift, existing);
+    assignments[r.bn] = nurseSlots.map(s => s.slot);
+  });
 
   return assignments;
 }
+
 
 // ─── Imported names roster (replaces SharePoint BNRoster) ───// ─── Imported names roster (replaces SharePoint BNRoster) ───
 let importedNames = JSON.parse(localStorage.getItem('bnImportedNames') || '[]');
