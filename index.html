@@ -582,6 +582,22 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+    <!-- BN × Unit Assignment Matrix -->
+    <div class="card" id="rptBNUnitCard" style="display:none">
+      <div class="card-label">BN × Unit Assignments</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
+        Counts how many times each BN was assigned each unit in range. Reveals whether unit spreads come from BN concentration or algorithm choice. Tap any column header to sort.
+      </div>
+      <div style="margin-bottom:18px">
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
+        <div id="rptBNUnitDayTable" style="overflow-x:auto"></div>
+      </div>
+      <div>
+        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--noc)">🌙 Noc Shift</div>
+        <div id="rptBNUnitNocTable" style="overflow-x:auto"></div>
+      </div>
+    </div>
+
     <!-- Popular time slots -->
     <div class="card" id="rptTimeCard" style="display:none">
       <div class="card-label">Most In-Demand Break Times</div>
@@ -1525,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-17-40';
+const APP_VERSION = '2026-05-19-41';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12944,6 +12960,112 @@ function sortTierMatrix(shift, col){
   if(tbl) tbl.innerHTML = _renderTierMatrix(_tierMatrixData[shift], shift);
 }
 
+// ═══════════════════════════════════════════════════════
+// BN × Unit assignment matrix — answers
+// "Are spreads driven by BN concentration or algorithm bias?"
+// One row per BN. Columns = units they were assigned, count = days
+// in range. Closed-unit columns excluded; C-wing columns shown only
+// if any BN actually had them assigned in this range.
+// ═══════════════════════════════════════════════════════
+let _bnUnitMatrixData = { Day: {bns:[], units:[]}, Noc: {bns:[], units:[]} };
+let _bnUnitSort = { Day: {col:'bn', dir:'asc'}, Noc: {col:'bn', dir:'asc'} };
+
+function _computeBNUnitMatrix(scheds, shift){
+  // counts[bn][unit] = number of days that BN was assigned that unit
+  const counts = {};
+  const unitsSeen = new Set();
+
+  scheds.filter(s => s.ShiftType === shift && s.Status !== 'inactive').forEach(s => {
+    const bn = s.BreakNurseName;
+    if(!bn) return;
+    const date = String(s.ShiftDate).slice(0,10);
+    let rawUnits = [];
+    try { rawUnits = JSON.parse(s.Units || '[]'); } catch {}
+    // Expand C_PAIR to its open halves at the row's date; drop closed units.
+    const units = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
+    if(!counts[bn]) counts[bn] = {};
+    units.forEach(u => {
+      counts[bn][u] = (counts[bn][u] || 0) + 1;
+      unitsSeen.add(u);
+    });
+  });
+
+  // Sort units in wing-then-floor order, filtered to only ones we saw
+  const orderedUnits = _TIER_UNITS.filter(u => unitsSeen.has(u));
+  const bns = Object.keys(counts).sort().map(bn => {
+    const row = { bn, total: 0 };
+    orderedUnits.forEach(u => {
+      row[u] = counts[bn][u] || 0;
+      row.total += row[u];
+    });
+    return row;
+  });
+  return { bns, units: orderedUnits };
+}
+
+function _renderBNUnitMatrix(data, shift){
+  if(!data.bns.length){
+    return `<div style="font-size:.85rem;color:var(--muted);padding:8px 4px">No assignments in range.</div>`;
+  }
+  const sort = _bnUnitSort[shift];
+  const sorted = [...data.bns].sort((a,b) => {
+    let av, bv;
+    if(sort.col === 'bn'){ av = a.bn; bv = b.bn; return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av); }
+    if(sort.col === 'total'){ av = a.total; bv = b.total; }
+    else { av = a[sort.col] || 0; bv = b[sort.col] || 0; }
+    return sort.dir === 'asc' ? av - bv : bv - av;
+  });
+
+  const ind = c => sort.col === c ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
+  const thStyle = 'cursor:pointer;padding:6px 4px;font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);user-select:none;white-space:nowrap';
+  const tdStyle = 'padding:6px 4px;text-align:center;font-family:"DM Mono",monospace;font-size:.8rem;border-bottom:1px solid var(--border)';
+  const tdNameStyle = 'padding:6px 8px 6px 4px;text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--border);white-space:nowrap';
+
+  // Find max non-zero per column to highlight hotspots subtly
+  const colMax = {};
+  data.units.forEach(u => {
+    colMax[u] = Math.max(0, ...sorted.map(r => r[u]));
+  });
+
+  const head = `<tr>
+    <th style="${thStyle};text-align:left" onclick="sortBNUnitMatrix('${shift}','bn')">BN${ind('bn')}</th>
+    ${data.units.map(u => `<th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','${u}')">${u}${ind(u)}</th>`).join('')}
+    <th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','total')">Total${ind('total')}</th>
+  </tr>`;
+
+  const body = sorted.map(r => {
+    const cells = data.units.map(u => {
+      const v = r[u];
+      if(v === 0) return `<td style="${tdStyle};color:var(--muted)">·</td>`;
+      const isMax = v === colMax[u] && v > 0;
+      const bg = isMax ? 'background:rgba(20,184,166,0.12);font-weight:600' : '';
+      return `<td style="${tdStyle};${bg}">${v}</td>`;
+    }).join('');
+    return `<tr>
+      <td style="${tdNameStyle}">${escHTML(r.bn)}</td>
+      ${cells}
+      <td style="${tdStyle};font-weight:600">${r.total}</td>
+    </tr>`;
+  }).join('');
+
+  return `<table style="width:100%;border-collapse:collapse;min-width:${100 + data.units.length * 50}px">
+    <thead>${head}</thead>
+    <tbody>${body}</tbody>
+  </table>`;
+}
+
+function sortBNUnitMatrix(shift, col){
+  const s = _bnUnitSort[shift];
+  if(s.col === col){
+    s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+  } else {
+    s.col = col;
+    s.dir = col === 'bn' ? 'asc' : 'desc';
+  }
+  const tbl = document.getElementById(`rptBNUnit${shift}Table`);
+  if(tbl) tbl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData[shift], shift);
+}
+
 async function loadReports(){
   if (!RPT.unlocked) return;
   const { from, to } = getRangeDates();
@@ -12952,7 +13074,7 @@ async function loadReports(){
   const kpis = document.getElementById('rptKPIs');
   kpis.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   ['rptCovCard','rptUnitCard','rptTimeCard','rptBNCard','rptShiftCard',
-   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard']
+   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard','rptBNUnitCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
 
   try {
@@ -13104,6 +13226,18 @@ async function loadReports(){
       if(nocEl) nocEl.innerHTML = _renderTierMatrix(_tierMatrixData.Noc, 'Noc');
       const tierCard = document.getElementById('rptTierCard');
       if(tierCard) tierCard.style.display = 'block';
+    }
+
+    // ── BN × Unit Assignment Matrix ────────────────────
+    {
+      _bnUnitMatrixData.Day = _computeBNUnitMatrix(scheds, 'Day');
+      _bnUnitMatrixData.Noc = _computeBNUnitMatrix(scheds, 'Noc');
+      const dayEl = document.getElementById('rptBNUnitDayTable');
+      const nocEl = document.getElementById('rptBNUnitNocTable');
+      if(dayEl) dayEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Day, 'Day');
+      if(nocEl) nocEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Noc, 'Noc');
+      const card = document.getElementById('rptBNUnitCard');
+      if(card) card.style.display = 'block';
     }
 
         // ── Break Nurse Workload ───────────────────────────
