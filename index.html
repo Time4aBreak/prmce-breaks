@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-44';
+const APP_VERSION = '2026-05-20-45';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13453,7 +13453,7 @@ const CROSS_WING_GAP = 5;
 // Edit these to tune the algorithm's priorities. Each score is in [0,1].
 const _SCORING_WEIGHTS = {
   siteFairness:    100, // primary: unit under-covered globally over 90 days
-  bnUnitFairness:   60, // this BN under-exposed to this unit over 60 days
+  bnUnitFairness:  100, // this BN under-exposed to this unit over 60 days
   bnWingFairness:   30, // this BN under-exposed to this wing (within-wing slot variety)
   acuityBalance:    20, // this BN under-exposed to high-acuity units
   proximityPenalty:  5  // floor-distance to other slots this BN already has
