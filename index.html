@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-46';
+const APP_VERSION = '2026-05-20-47';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13457,7 +13457,7 @@ const CROSS_WING_GAP = 5;
 // ── Tunable scoring weights ───────────────────────────
 // Edit these to tune the algorithm's priorities. Each score is in [0,1].
 const _SCORING_WEIGHTS = {
-  siteFairness:    100, // primary: unit under-covered globally over 90 days
+  siteFairness:    200, // primary: unit under-covered globally over 90 days
   bnUnitFairness:  100, // this BN under-exposed to this unit over 60 days
   bnWingFairness:   30, // this BN under-exposed to this wing (within-wing slot variety)
   acuityBalance:    20, // this BN under-exposed to high-acuity units
@@ -13662,7 +13662,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
       dNurseCount = dAvg < aAvg ? Math.ceil(n * 0.6) : Math.floor(n * 0.4);
     } else {
       dNurseCount = Math.round(n / 2);
-      if(n === 3) dNurseCount = 1; // 2A/1D default for 3 BNs
+      if(n === 3) dNurseCount = 2; // 1A/2D default for 3 BNs — D wing has 8 units vs A's 6, so proportional allocation favors D
     }
     dNurseCount = Math.max(0, Math.min(n, dNurseCount));
     nursesSorted.slice(0, dNurseCount).forEach(nm => wingAssignment[nm] = 'D');
