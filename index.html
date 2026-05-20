@@ -1525,7 +1525,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-17-39';
+const APP_VERSION = '2026-05-17-40';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13292,13 +13292,17 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   const isNewNurse = (name) => getNurseWingHistory(name, shift).length === 0;
 
   // Build slot pool with tier and global count (including batch overlay).
-  // Drop slots whose unit(s) are closed at this date/shift — closed units
-  // shouldn't be suggested for assignment. C_PAIR survives if at least one
-  // of {3C, 4C} is open; expandCPair will drop the closed half at runtime.
+  // Drop slots whose unit is closed at this date/shift — closed units
+  // shouldn't be suggested for assignment. C_PAIR represents C-wing
+  // coverage intent and is ALWAYS preserved, even if both 3C and 4C are
+  // currently closed: expandCPair drops the closed half(s) at rotation
+  // build time, and recompute picks up future status changes. Without
+  // this, both-halves-closed at extraction time silently drops C-wing
+  // assignment forever, leaving newly-opened halves uncovered.
   const pool = ALL_COVERAGE_SLOTS
     .filter(s => {
-      const components = s === 'C_PAIR' ? ['3C', '4C'] : [s];
-      return components.some(u => isUnitOpenForShift(u, date, shift));
+      if(s === 'C_PAIR') return true;
+      return isUnitOpenForShift(s, date, shift);
     })
     .map(s => ({
       slot: s,
