@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-19-41';
+const APP_VERSION = '2026-05-20-42';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8857,7 +8857,10 @@ async function dedupAssignments(){
 
 async function clearSimData(){
   if(!await customConfirm('Clear ALL data (assignments, bookings, state)? This cannot be undone.','Clear All','Cancel')) return;
-  // Clear localStorage state keys
+  // Clear localStorage state keys. For syncedLS-backed keys (bnWingHistory_*,
+  // bnRotation_*, bnDefault_*, bnStart_*), server-side BNState is cleared
+  // below via clearSheet(LISTS.state), so dropping local mirrors here is
+  // sufficient — the warm-on-next-suggest will find BNState empty.
   Object.keys(localStorage).filter(k =>
     k.startsWith('bnNurseHistory_') || k.startsWith('bnWingHistory_') ||
     k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
@@ -13377,9 +13380,13 @@ async function getUnitCoverageCounts(shift){
 function clearCoverageCountsCache(){ _coverageCountsCache = {}; }
 
 // ── Per-nurse wing history (rolling 60 days) ──────────
+// Storage: syncedLS keys `bnWingHistory_${name}_${shift}` mirrored to BNState
+// so wing-balance is consistent across admin devices. Reads are sync (cache);
+// writes are fire-and-forget (LS instant + BNState async). Pre-warm the cache
+// via warmAllBNWingHistory before suggesting so all reads are cache hits.
 function getNurseWingHistory(nurseName, shift){
   const key = `bnWingHistory_${nurseName}_${shift}`;
-  const raw = JSON.parse(localStorage.getItem(key) || '[]');
+  const raw = syncedLS.get(key) || [];
   // Prune to 60 days
   const cutoff = new Date();
   cutoff.setDate(cutoff.getDate() - 60);
@@ -13389,7 +13396,14 @@ function getNurseWingHistory(nurseName, shift){
 
 function saveNurseWingHistory(nurseName, shift, entries){
   const key = `bnWingHistory_${nurseName}_${shift}`;
-  localStorage.setItem(key, JSON.stringify(entries));
+  // syncedLS.set updates LS synchronously and mirrors to BNState in background.
+  // Fire-and-forget: a failed network write doesn't block the suggester, and
+  // the local cache stays consistent so the next read sees the new entries.
+  syncedLS.set(key, entries).catch(()=>{});
+}
+
+async function warmAllBNWingHistory(pairs){
+  return syncedLS.warmMany(pairs.map(({name, shift}) => `bnWingHistory_${name}_${shift}`));
 }
 
 function nurseWingCount(nurseName, shift, wing){
@@ -13413,6 +13427,11 @@ const CROSS_WING_GAP = 5;
 // ── Main fairness algorithm ───────────────────────────
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   if(!nurses.length) return {};
+
+  // Pre-warm wing-history cache from BNState so subsequent sync reads are
+  // cache hits and reflect cross-device truth. Cheap if cache is already hot.
+  // Errors are swallowed — sync reads fall back to whatever localStorage has.
+  await warmAllBNWingHistory(nurses.map(n => ({name: n, shift}))).catch(()=>{});
 
   let counts;
   try {
