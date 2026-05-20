@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-42';
+const APP_VERSION = '2026-05-20-43';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13481,13 +13481,19 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   // ── Assign wings to nurses ────────────────────────
   // Sort nurses: who needs D Wing most (least D Wing in rolling 60 days)
   // New nurses get sorted by date seed for even distribution
+  // Tiebreak uses a hash of the full name + dateSeed so BNs sharing first
+  // letters don't cluster, and order rotates meaningfully day to day.
+  function _bnSortHash(name, seed){
+    let h = seed;
+    for(let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
+    return Math.abs(h);
+  }
   const nursesSorted = [...nurses].sort((a, b) => {
     // New nurses (no history) treated as 0 D Wing shifts — most needy, goes to D Wing first
     const aDWing = nurseWingCount(a, shift, 'D');
     const bDWing = nurseWingCount(b, shift, 'D');
     if(aDWing !== bDWing) return aDWing - bDWing;
-    // Tiebreak: date seed for even distribution among tied nurses
-    return ((a.charCodeAt(0) + dateSeed) % 13) - ((b.charCodeAt(0) + dateSeed) % 13);
+    return (_bnSortHash(a, dateSeed) % 1000) - (_bnSortHash(b, dateSeed) % 1000);
   });
 
   const n = nurses.length;
@@ -13535,14 +13541,30 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
 
     let score = s.globalCount * 10; // primary: fairness
 
-    // Recency penalty: was this nurse recently on this unit?
+    // Recency penalty: decays by days-since-last-touch so older history
+    // doesn't drown out the fairness signal. A slot touched today gets the
+    // full 500-point penalty; touched 2 weeks ago, near zero. Never touched
+    // in the 60-day window: 0. This keeps "what did you do recently" sharp
+    // while letting globalCount drive the picks among stale candidates.
     const history = getNurseWingHistory(nurseName, shift);
-    const recentSlots = history.flatMap(e => e.slots || []);
-    // C_PAIR matches if 'C_PAIR', '3C', or '4C' in history
-    const isRecent = slot === 'C_PAIR'
-      ? recentSlots.includes('C_PAIR') || recentSlots.includes('3C') || recentSlots.includes('4C')
-      : recentSlots.includes(slot);
-    if(isRecent) score += 500;
+    const targetDateMs = Date.parse(date);
+    let daysSinceLast = Infinity;
+    history.forEach(e => {
+      const eSlots = e.slots || [];
+      const matches = slot === 'C_PAIR'
+        ? eSlots.some(s => s === 'C_PAIR' || s === '3C' || s === '4C')
+        : eSlots.includes(slot);
+      if(matches){
+        const days = (targetDateMs - Date.parse(e.date)) / 86400000;
+        if(days >= 0 && days < daysSinceLast) daysSinceLast = days;
+      }
+    });
+    let recencyPenalty;
+    if(daysSinceLast === Infinity)     recencyPenalty = 0;
+    else if(daysSinceLast === 0)       recencyPenalty = 500;
+    else if(daysSinceLast <= 14)       recencyPenalty = Math.round(500 * (1 - daysSinceLast/14));
+    else                               recencyPenalty = 30;
+    score += recencyPenalty;
 
     // Batch recency penalty: was this unit already suggested for this nurse earlier in the batch?
     // Uses batchCountOverlay as a proxy — high overlay = suggested often this batch
