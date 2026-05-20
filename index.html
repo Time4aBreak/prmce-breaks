@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-45';
+const APP_VERSION = '2026-05-20-46';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2449,9 +2449,14 @@ const SLOT_TIERS = {
   Noc: {
     hardBlocked: s => getNocHardBlocked().includes(s) || sortKey(s,'Noc') >= sortKey(getNocHardBlocked().includes('0755') ? '0755' : '0815','Noc'),
     earlyLow:    s => { const m = sortKey(s,'Noc'); return m >= sortKey('2015','Noc') && m <= sortKey('2135','Noc'); },
-    prime:       s => { const m = sortKey(s,'Noc'); return m > sortKey('2135','Noc') && m < sortKey('0515','Noc') + 1440; },
-    lateLow:     s => { const m = sortKey(s,'Noc'); return m >= sortKey('0535','Noc') + 1440 && m <= sortKey('0615','Noc') + 1440; },
-    thirdLow:    s => { const m = sortKey(s,'Noc'); return m > sortKey('0615','Noc') + 1440 && m < sortKey('0755','Noc') + 1440; }
+    // NOTE: sortKey already adds +1440 to post-midnight Noc slots, so the
+    // right-hand side of these comparisons must NOT add another +1440.
+    // Earlier versions did, which made lateLow/thirdLow unreachable and
+    // swallowed those slots into prime — breaking both the per-tier report
+    // and the block-rotation pool split (see calculateBlockRotation).
+    prime:       s => { const m = sortKey(s,'Noc'); return m > sortKey('2135','Noc') && m < sortKey('0535','Noc'); },
+    lateLow:     s => { const m = sortKey(s,'Noc'); return m >= sortKey('0535','Noc') && m <= sortKey('0615','Noc'); },
+    thirdLow:    s => { const m = sortKey(s,'Noc'); return m > sortKey('0615','Noc') && m < sortKey('0755','Noc'); }
   },
   Day: {
     hardBlocked: s => getDayHardBlocked().includes(s),
