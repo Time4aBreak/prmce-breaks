@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-68';
+const APP_VERSION = '2026-05-20-69';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2763,7 +2763,7 @@ async function _3CTick(){
   // this, the tick paints whatever localStorage already has — meaning a
   // schedule change or app-update push made on another device never surfaces
   // here unless the user opens the admin panel.
-  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule', 'appVersion']); } catch{}
+  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule', 'unitStatuses', 'unitSchedules', 'appVersion']); } catch{}
   // Show update banner if BNState appVersion differs from this device's
   // loaded APP_VERSION. Server's value is empty until admin first pushes —
   // missing/empty values match anything, so banner only appears after admin
@@ -4014,6 +4014,8 @@ function showSubTab(name, btn){
       Promise.all([
         syncedLS.refresh('unit3CDefault'),
         syncedLS.refresh('unit3CSchedule'),
+        syncedLS.refresh('unitStatuses'),
+        syncedLS.refresh('unitSchedules'),
         syncedLS.refresh('appVersion')
       ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
     }
@@ -4095,6 +4097,8 @@ function showTab(name, btn){
     Promise.all([
       syncedLS.refresh('unit3CDefault'),
       syncedLS.refresh('unit3CSchedule'),
+      syncedLS.refresh('unitStatuses'),
+      syncedLS.refresh('unitSchedules'),
       syncedLS.refresh('appVersion')
     ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
 
@@ -5708,7 +5712,9 @@ async function silentRefreshSlots(){
       ...allBNNames.map(n => `bnStart_${n}_${dt}_${shift}`),
       ...allBNNames.map(n => `bnRotation_${n}_${dt}_${shift}`),
       'unit3CDefault',
-      'unit3CSchedule'
+      'unit3CSchedule',
+      'unitStatuses',
+      'unitSchedules'
     ];
     await syncedLS.refreshMany(watchedKeys);
 
@@ -8286,6 +8292,8 @@ function unlock(){
       Promise.all([
         syncedLS.refresh('unit3CDefault'),
         syncedLS.refresh('unit3CSchedule'),
+        syncedLS.refresh('unitStatuses'),
+        syncedLS.refresh('unitSchedules'),
         syncedLS.refresh('appVersion')
       ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
     } else {
@@ -12188,7 +12196,9 @@ async function silentRefreshProdLog(){
       `bnStart_${BNS.name}_${dt}_${shift}`,
       `bnRotation_${BNS.name}_${dt}_${shift}`,
       'unit3CDefault',
-      'unit3CSchedule'
+      'unit3CSchedule',
+      'unitStatuses',
+      'unitSchedules'
     ];
     const [[bookingsRaw, scheds], stateChanged] = await Promise.all([
       Promise.all([
@@ -12271,7 +12281,9 @@ async function silentRefreshCoverage(){
       ...activeScheds.map(s => `bnStart_${s.BreakNurseName}_${dt}_${shift}`),
       ...activeScheds.map(s => `bnRotation_${s.BreakNurseName}_${dt}_${shift}`),
       'unit3CDefault',
-      'unit3CSchedule'
+      'unit3CSchedule',
+      'unitStatuses',
+      'unitSchedules'
     ];
     await syncedLS.refreshMany(watchedKeys);
     const fp = [
