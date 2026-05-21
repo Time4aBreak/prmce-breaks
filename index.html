@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-51';
+const APP_VERSION = '2026-05-20-53';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9677,14 +9677,41 @@ async function runImport(){
     // Stash warnings globally so renderImportRows can display them in context.
     window._lastExtractionWarnings = warnings;
 
-    // If the AI flagged ANY warnings (obscured cells, non-Break entries, etc.),
-    // reject the extraction entirely. Showing partial data risks the user
-    // saving incomplete or skewed assignments. Cleaner to ask for a re-upload.
+    // If the AI flagged ANY warnings (obscured cells, popups, overlays),
+    // reject the extraction entirely. These warnings indicate data integrity
+    // issues — the AI can't see what's underneath an overlay, so we can't
+    // trust the rest of the extraction either. User must re-screenshot.
     if(warnings.length){
       _showExtractionRejected(warnings);
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
+
+    // Client-side validation pass: filter entries the AI flagged as non-Break.
+    // The AI returns an `isBreakShift` boolean per entry, based on whether the
+    // entry has both visual markers of a real Break-relief shift:
+    //   - blue vertical bar on the left edge of the cell
+    //   - two-arrows transfer icon visible
+    // Entries lacking either marker get isBreakShift=false (green bars, no
+    // transfer icon, calendar markers, meetings, etc.) and are filtered here.
+    //
+    // We only filter on `isBreakShift === false` (strict equality). Entries
+    // missing the field — e.g. from an older Apps Script deployment — pass
+    // through unchanged for backward compatibility.
+    const _validEntries = [];
+    const _filterReasons = [];
+    entries.forEach(e => {
+      if(e.isBreakShift === false){
+        _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — not a Break-relief shift (missing blue bar or transfer icon)`);
+        return;
+      }
+      _validEntries.push(e);
+    });
+    if(_filterReasons.length){
+      console.log('[extraction] Filtered non-Break entries:', _filterReasons);
+      toast(`Filtered ${_filterReasons.length} non-Break entr${_filterReasons.length === 1 ? 'y' : 'ies'}. Check console for details.`);
+    }
+    entries = _validEntries;
 
     // Remap entries whose `name` matches UKG row-header text. UKG renders the
     // logged-in user's row as "My Schedule" instead of their actual name.
@@ -9867,6 +9894,7 @@ async function restoreLastImport(){
     }
     _progressDone++;
     if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
+    await new Promise(r => requestAnimationFrame(r));
   }
 
   // Populate importUnitSel — expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
@@ -10023,6 +10051,7 @@ async function renderImportRows(entries, forceReplace = false){
     }
     _progressDone++;
     if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
+    await new Promise(r => requestAnimationFrame(r));
   }
 
   // Store authoritative entry list for this DOM render
@@ -10284,6 +10313,7 @@ async function resuggestAll(){
     }
     _progressDone++;
     if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
+    await new Promise(r => requestAnimationFrame(r));
   }
 
   for(let i = 0; i < batch.length; i++){
