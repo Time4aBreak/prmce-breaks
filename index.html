@@ -797,7 +797,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
       <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
       <div style="margin-top:10px">
-        <button class="btn btn-ghost btn-sm" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
+        <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
         <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations'})">↺ Recalculate all rotations</button>
       </div>
     </div>
@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-55';
+const APP_VERSION = '2026-05-20-58';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8938,6 +8938,9 @@ async function recalculateAllRotations(){
 }
 
 async function dedupAssignments(){
+  const btn = document.getElementById('dedupBtn');
+  const originalText = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = '🧹 Fetching…'; }
   try {
     const all = await spGet(LISTS.schedule, `ShiftDate ge '2020-01-01'`);
     // Group by nurse+date+shift
@@ -8947,24 +8950,36 @@ async function dedupAssignments(){
       if (!groups[key]) groups[key] = [];
       groups[key].push(s);
     });
-    // Delete all but the most recent in each group
-    let deleted = 0;
+    // Count duplicates we'll need to delete (everything beyond the first in each group)
+    const toDelete = [];
     for (const [key, items] of Object.entries(groups)) {
       if (items.length <= 1) continue;
-      // Keep the one with the most units (most complete)
       items.sort((a,b) => {
         try { return JSON.parse(b.Units||'[]').length - JSON.parse(a.Units||'[]').length; }
         catch { return 0; }
       });
-      for (let i = 1; i < items.length; i++) {
-        await spDel(LISTS.schedule, items[i].Id);
-        deleted++;
-      }
+      for (let i = 1; i < items.length; i++) toDelete.push(items[i]);
     }
-    toast(deleted > 0 ? `🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}` : 'No duplicates found');
+    if(toDelete.length === 0){
+      if(btn){ btn.disabled = false; btn.textContent = originalText; }
+      toast('No duplicates found');
+      return;
+    }
+    // Delete with progress feedback on the button itself
+    let deleted = 0;
+    for(const item of toDelete){
+      if(btn) btn.textContent = `🧹 Removing ${deleted + 1}/${toDelete.length}…`;
+      await spDel(LISTS.schedule, item.Id);
+      deleted++;
+    }
+    if(btn){ btn.disabled = false; btn.textContent = originalText; }
+    toast(`🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}`);
     loadAssignments();
     notifyProdLogChanged();
-  } catch(e) { toast(e.message, true); }
+  } catch(e) {
+    if(btn){ btn.disabled = false; btn.textContent = originalText; }
+    toast(e.message, true);
+  }
 }
 
 async function clearSimData(){
@@ -10442,9 +10457,16 @@ async function resuggestAll(){
 async function acceptAllAndSave(){
   const btns = document.querySelectorAll('.accept-all-btn');
   const status = document.getElementById('acceptAllStatus');
-  btns.forEach(b => { b.disabled = true; b.textContent = '⏳ Saving...'; });
-  status.textContent = 'Preparing batch...';
-  status.style.display = 'block';
+  // Helper: update phase indicator. Status div is positioned below the import
+  // rows so users scrolled to the top miss those updates. We mirror the phase
+  // to both Save All buttons (top and bottom) so progress is always visible.
+  const setPhase = (statusMsg, btnMsg) => {
+    if(status) status.textContent = statusMsg;
+    btns.forEach(b => { b.textContent = '⏳ ' + (btnMsg || statusMsg); });
+  };
+  btns.forEach(b => { b.disabled = true; });
+  setPhase('Preparing batch...', 'Preparing...');
+  if(status) status.style.display = 'block';
 
   const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
   const records = [];
@@ -10465,16 +10487,17 @@ async function acceptAllAndSave(){
   const skipped = entriesToProcess.length - indices.length;
   if(!records.length){
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-    status.textContent = `Nothing to save (${skipped} skipped)`;
+    if(status) status.textContent = `Nothing to save (${skipped} skipped)`;
     return;
   }
 
   try {
-    status.textContent = `Saving ${records.length} assignments in one batch...`;
+    setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
 
     // Warm BN defaults from BNState — coordinator device may not have them cached
     const bnPairs = indices.map(i => ({ name: entriesToProcess[i].name, shift: entriesToProcess[i].shift }));
+    setPhase('Loading BN defaults...', 'Loading defaults...');
     await warmAllBNDefaults(bnPairs);
 
     // Update UI for all saved entries
@@ -10492,7 +10515,7 @@ async function acceptAllAndSave(){
     });
 
     // Recalculate all rotations — apply default breaks if BN has them set
-    status.textContent = 'Recalculating rotations...';
+    setPhase('Recalculating rotations...', 'Recalculating...');
     const rotationEntries = [];
     const defaultApplyPromises = [];
     for(const i of indices){
@@ -10514,12 +10537,27 @@ async function acceptAllAndSave(){
         rotationEntries.push({ key, value: rotation });
       }
     }
-    // Fire default applies concurrently, then batch-save plain rotations
-    await Promise.all(defaultApplyPromises);
-    if(rotationEntries.length) await syncedLS.setMany(rotationEntries);
+    // Fire default applies concurrently, then batch-save plain rotations.
+    // Wrap each promise so its completion updates the status counter — gives
+    // the user visible progress through what can be the slowest phase
+    // (each applyDefaultToShift is multiple network calls).
+    const recalcTotal = defaultApplyPromises.length;
+    let recalcDone = 0;
+    if(recalcTotal > 0){
+      setPhase(`Recalculating rotations... 0/${recalcTotal}`, `Recalc 0/${recalcTotal}`);
+      const tracked = defaultApplyPromises.map(p => p.finally(() => {
+        recalcDone++;
+        setPhase(`Recalculating rotations... ${recalcDone}/${recalcTotal}`, `Recalc ${recalcDone}/${recalcTotal}`);
+      }));
+      await Promise.all(tracked);
+    }
+    if(rotationEntries.length){
+      setPhase(`Saving ${rotationEntries.length} rotation${rotationEntries.length === 1 ? '' : 's'}...`, 'Saving rotations...');
+      await syncedLS.setMany(rotationEntries);
+    }
 
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-    status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+    if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
     collapseExtractedRows();
 
     // Build assignment list immediately from saved data (no Sheets delay)
