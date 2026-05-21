@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-54';
+const APP_VERSION = '2026-05-20-55';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9923,6 +9923,9 @@ async function restoreLastImport(){
     for(const pe of partials){
       const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
+      // Persist wing history so the partial's coverage feeds back into their
+      // own per-BN fairness next time they appear in the suggester.
+      _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -10103,6 +10106,9 @@ async function renderImportRows(entries, forceReplace = false){
     for(const pe of partials){
       const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
+      // Persist wing history so the partial's coverage feeds back into their
+      // own per-BN fairness next time they appear in the suggester.
+      _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -10387,6 +10393,9 @@ async function resuggestAll(){
     for(const pe of partials){
       const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
+      // Persist wing history so the partial's coverage feeds back into their
+      // own per-BN fairness next time they appear in the suggester.
+      _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13958,6 +13967,33 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
     }))
     .sort((a, b) => a.total - b.total); // ascending: most under-covered first
   return pool.slice(0, n).map(p => p.slot);
+}
+
+// Update a partial BN's wing history with the slots they've been suggested.
+// This is normally done inside suggestAssignments for full BNs; we replicate
+// the same persistence for partials so future fairness calculations see the
+// partial's coverage in their per-BN history. Without this, the partial's
+// past assignments would never feed back into "who's been on which wing".
+function _savePartialWingHistory(name, shift, date, slots){
+  if(!slots || !slots.length) return;
+  // Remove any existing entry for this date first so a re-suggest replaces
+  // rather than duplicates — matches the pattern in suggestAssignments.
+  const existing = getNurseWingHistory(name, shift).filter(e => e.date !== date);
+  const slotsWithWing = slots.map(s => ({
+    slot: s,
+    wing: getWing(s),
+    units: s === 'C_PAIR' ? ['3C','4C'] : [s]
+  }));
+  const wingsUsed = [...new Set(slotsWithWing.map(s => s.wing))];
+  wingsUsed.forEach(w => {
+    existing.push({
+      date,
+      wing: w,
+      slots: slotsWithWing.filter(s => s.wing === w).map(s => s.slot),
+      units: slotsWithWing.filter(s => s.wing === w).flatMap(s => s.units)
+    });
+  });
+  saveNurseWingHistory(name, shift, existing);
 }
 
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
