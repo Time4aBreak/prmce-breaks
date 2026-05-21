@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-50';
+const APP_VERSION = '2026-05-20-51';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9496,6 +9496,38 @@ function updateProgressBar(container, done, total, label){
   if(lbl && label) lbl.textContent = label;
 }
 
+// Display a rejection modal when the AI extraction flagged ANY warnings
+// (obscured cells, partial shifts, or other suspicious entries). The whole
+// extraction is rejected — no entries are processed — to prevent partial
+// data states. The user re-screenshots and tries again. Any in-progress
+// _currentImportEntries from a previous successful extraction stays intact.
+function _showExtractionRejected(warnings){
+  const items = (warnings || []).map(w => `<li style="margin-bottom:6px;line-height:1.5">${escHTML(String(w))}</li>`).join('');
+  const wrap = document.createElement('div');
+  wrap.id = 'extractionRejectModal';
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
+  wrap.innerHTML = `
+    <div style="background:var(--card);border-radius:14px;padding:22px 24px;max-width:480px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:#bf360c">
+        <span style="font-size:1.4rem">⚠</span>
+        <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Screenshot needs re-upload</span>
+      </div>
+      <div style="font-size:.88rem;color:var(--text);line-height:1.5;margin-bottom:12px">
+        The AI couldn't fully process this screenshot:
+      </div>
+      <ul style="margin:0 0 14px 0;padding-left:22px;font-size:.85rem;color:var(--text);background:#fff8e1;border-radius:8px;padding:12px 12px 12px 32px;border:1px solid #ffb300">${items}</ul>
+      <div style="font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:18px">
+        Re-take the screenshot with no tooltips, popups, or overlays visible, then try again. Any previously-saved assignments are unaffected.
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:10px">
+        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('extractionRejectModal').remove()" style="font-size:.85rem">Close</button>
+      </div>
+    </div>`;
+  // Close on backdrop click
+  wrap.addEventListener('click', (e) => { if(e.target === wrap) wrap.remove(); });
+  document.body.appendChild(wrap);
+}
+
 // ═══════════════════════════════════════════════════════
 // AI SCHEDULE IMPORT
 // ═══════════════════════════════════════════════════════
@@ -9597,29 +9629,59 @@ async function runImport(){
     // Strip markdown fences
     const clean = raw.replace(/```json|```/g, '').trim();
 
-    // Try to grab the first [...] array found anywhere in the response
-    const arrMatch = clean.match(/\[[\s\S]*?\]/s);
-    if (!arrMatch) {
-      // Show the raw AI text in a readable error so we can diagnose
-      const preview = clean.length > 200 ? clean.slice(0,200) + '...' : clean;
-      document.getElementById('importRows').innerHTML =
-        '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:.8rem;word-break:break-word">' +
-        '<strong>AI responded but returned no JSON array.</strong><br><br>' +
-        'Raw response:<br><pre style="white-space:pre-wrap;margin-top:6px">' + preview + '</pre>' +
-        '<br>Try uploading a screenshot that shows only the schedule grid with names and dates visible.' +
-        '</div>';
-      document.getElementById('importResults').style.display = 'block';
-    updateAcceptBars();
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
+    // Parse response. The AI is expected to return either:
+    //   Old shape: a raw JSON array [{name, date, shift}, ...]
+    //   New shape: a JSON object {entries: [...], warnings: [...]}
+    // We accept both so a prompt update doesn't break the client.
+    let entries = null;
+    let warnings = [];
+
+    // Try parsing the whole thing as an object first
+    try {
+      const objMatch = clean.match(/\{[\s\S]*\}/);
+      if(objMatch){
+        const parsed = JSON.parse(objMatch[0]);
+        if(parsed && Array.isArray(parsed.entries)){
+          entries = parsed.entries;
+          warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+        }
+      }
+    } catch(e){ /* fall through to array attempt */ }
+
+    // Fallback: legacy raw-array response
+    if(entries == null){
+      const arrMatch = clean.match(/\[[\s\S]*?\]/s);
+      if(!arrMatch){
+        const preview = clean.length > 200 ? clean.slice(0,200) + '...' : clean;
+        document.getElementById('importRows').innerHTML =
+          '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:.8rem;word-break:break-word">' +
+          '<strong>AI responded but returned no JSON.</strong><br><br>' +
+          'Raw response:<br><pre style="white-space:pre-wrap;margin-top:6px">' + preview + '</pre>' +
+          '<br>Try uploading a screenshot that shows only the schedule grid with names and dates visible.' +
+          '</div>';
+        document.getElementById('importResults').style.display = 'block';
+        updateAcceptBars();
+        btn.style.display = 'inline'; spin.style.display = 'none';
+        return;
+      }
+      try {
+        entries = JSON.parse(arrMatch[0]);
+      } catch(parseErr) {
+        toast('Could not parse AI response. Check browser console for details.', true);
+        console.error('Parse error:', parseErr, 'Raw:', clean);
+        btn.style.display = 'inline'; spin.style.display = 'none';
+        return;
+      }
     }
 
-    let entries;
-    try {
-      entries = JSON.parse(arrMatch[0]);
-    } catch(parseErr) {
-      toast('Could not parse AI response. Check browser console for details.', true);
-      console.error('Parse error:', parseErr, 'Raw:', clean);
+    // Stash warnings globally so renderImportRows can display them in context.
+    window._lastExtractionWarnings = warnings;
+
+    // If the AI flagged ANY warnings (obscured cells, non-Break entries, etc.),
+    // reject the extraction entirely. Showing partial data risks the user
+    // saving incomplete or skewed assignments. Cleaner to ask for a re-upload.
+    if(warnings.length){
+      _showExtractionRejected(warnings);
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
