@@ -114,6 +114,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .range-btn{padding:6px 14px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
 .range-btn:hover{border-color:var(--teal);color:var(--teal)}
 .range-btn.active{background:var(--teal);border-color:var(--teal);color:white}
+.bn-pill{padding:4px 11px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.75rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
+.bn-pill:hover{border-color:var(--teal);color:var(--teal)}
+.bn-pill.active{background:var(--teal);border-color:var(--teal);color:white}
 .slot-row.bn-break .slot-time{color:#b07800}
 .slot-time{font-family:'DM Mono',monospace;font-size:.95rem;font-weight:500;color:var(--teal-dk)}
 .slot-row.taken .slot-time{color:var(--red)}.slot-row.taken.past .slot-time{color:var(--muted)}
@@ -790,11 +793,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div class="card-label" style="margin:0">Scheduled Assignments</div>
         <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
           <button class="range-btn active" id="va-all" onclick="setViewRange('all',this)">All Upcoming</button>
+          <button class="range-btn" id="va-thisweek" onclick="setViewRange('thisweek',this)">This Week</button>
+          <button class="range-btn" id="va-nextweek" onclick="setViewRange('nextweek',this)">Next Week</button>
           <input type="date" id="viewDateFrom" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
           <span style="font-size:.8rem;color:var(--muted)">to</span>
           <input type="date" id="viewDateTo" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
         </div>
       </div>
+      <div id="bnFilterRow" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:11px"></div>
       <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
       <div style="margin-top:10px">
         <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
@@ -1541,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-59';
+const APP_VERSION = '2026-05-20-60';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8529,18 +8535,97 @@ async function saveAssign(){
 
 let _viewRange = 'all';
 
+// Compute Sun-Sat date range for "This Week" / "Next Week" filters.
+// weekOffset: 0 = this week (Sun-Sat containing today), 1 = next week.
+// Returns {from, to} as YYYY-MM-DD strings.
+function _weekRangeSunSat(weekOffset = 0){
+  const t = new Date(today() + 'T12:00:00'); // local noon avoids DST drift
+  const dow = t.getDay(); // 0=Sun ... 6=Sat
+  const sunday = new Date(t);
+  sunday.setDate(t.getDate() - dow + (weekOffset * 7));
+  const saturday = new Date(sunday);
+  saturday.setDate(sunday.getDate() + 6);
+  const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  return { from: fmt(sunday), to: fmt(saturday) };
+}
+
 function setViewRange(range, btn){
   _viewRange = range;
-  const allBtn = document.getElementById('va-all');
-  if(allBtn) allBtn.classList.toggle('active', range === 'all');
-  // Reset date pickers when switching back to All Upcoming
+  // Reset active state on all preset buttons; we'll add it back below as needed
+  ['va-all','va-thisweek','va-nextweek'].forEach(id => {
+    const b = document.getElementById(id);
+    if(b) b.classList.remove('active');
+  });
+  const fromEl = document.getElementById('viewDateFrom');
+  const toEl   = document.getElementById('viewDateTo');
   if(range === 'all'){
-    const fromEl = document.getElementById('viewDateFrom');
-    const toEl   = document.getElementById('viewDateTo');
+    document.getElementById('va-all')?.classList.add('active');
     if(fromEl) fromEl.value = '';
     if(toEl)   toEl.value   = '';
+  } else if(range === 'thisweek' || range === 'nextweek'){
+    document.getElementById(range === 'thisweek' ? 'va-thisweek' : 'va-nextweek')?.classList.add('active');
+    const w = _weekRangeSunSat(range === 'thisweek' ? 0 : 1);
+    if(fromEl) fromEl.value = w.from;
+    if(toEl)   toEl.value   = w.to;
   }
+  // For 'range' (user typed in date inputs directly), no preset button active
   loadAssignments();
+}
+
+// ── BN filter for Scheduled Assignments ──────────────────
+// Multi-select set of BN names. Empty set = show all (current default).
+// Persisted to localStorage as a per-device preference — filters are
+// transient UI state, not server-truth, so syncedLS isn't needed.
+let _selectedBNs = (() => {
+  try { return new Set(JSON.parse(localStorage.getItem('bnAssignmentFilter') || '[]')); }
+  catch { return new Set(); }
+})();
+
+function _saveBNFilter(){
+  try { localStorage.setItem('bnAssignmentFilter', JSON.stringify([..._selectedBNs])); } catch {}
+}
+
+function toggleBNFilter(name){
+  if(_selectedBNs.has(name)) _selectedBNs.delete(name);
+  else _selectedBNs.add(name);
+  _saveBNFilter();
+  renderBNFilter();
+  loadAssignments();
+}
+
+function clearBNFilter(){
+  _selectedBNs.clear();
+  _saveBNFilter();
+  renderBNFilter();
+  loadAssignments();
+}
+
+function renderBNFilter(){
+  const row = document.getElementById('bnFilterRow');
+  if(!row) return;
+  const sortedNames = [...(importedNames || [])].sort((a,b) =>
+    firstName(a).localeCompare(firstName(b)));
+  if(!sortedNames.length){
+    row.style.display = 'none';
+    row.innerHTML = '';
+    return;
+  }
+  row.style.display = 'flex';
+  // Drop stale selections (BNs no longer in roster) so the filter stays consistent
+  const valid = new Set(sortedNames);
+  [..._selectedBNs].forEach(n => { if(!valid.has(n)) _selectedBNs.delete(n); });
+  const pills = sortedNames.map(name => {
+    const active = _selectedBNs.has(name);
+    const esc = name.replace(/'/g, "\\'");
+    return `<button class="bn-pill${active ? ' active' : ''}" onclick="toggleBNFilter('${esc}')">${escHTML(firstName(name))}</button>`;
+  }).join('');
+  const clearBtn = _selectedBNs.size > 0
+    ? `<button class="bn-pill" onclick="clearBNFilter()" style="font-style:italic">Clear</button>`
+    : '';
+  row.innerHTML = `
+    <span style="font-size:.74rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:2px">Filter:</span>
+    ${pills}
+    ${clearBtn}`;
 }
 
 // Cross-tab Prod Log invalidation after admin schedule changes. Schedule-tab
@@ -8582,10 +8667,15 @@ async function loadAssignments(){
   clearCoverageCountsCache();
   const el = document.getElementById('assignList');
   el.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
+  // Ensure the BN filter row reflects current roster + selection state.
+  // Idempotent and cheap; safest to refresh on every view load.
+  renderBNFilter();
   const t = today();
   let filter;
 
-  if(_viewRange === 'range'){
+  // Any non-'all' preset (thisweek, nextweek, range) reads from the date inputs.
+  // setViewRange populates those inputs when This Week / Next Week buttons are tapped.
+  if(_viewRange !== 'all'){
     const from = document.getElementById('viewDateFrom').value;
     const to   = document.getElementById('viewDateTo').value;
     if(!from && !to){ filter = `ShiftDate ge '${activeShiftFloor()}'`; }
@@ -8597,9 +8687,17 @@ async function loadAssignments(){
   }
 
   try{
-    const scheds = await spGet(LISTS.schedule, filter);
+    let scheds = await spGet(LISTS.schedule, filter);
+
+    // BN multi-select filter (client-side). Empty set = show all.
+    // Server-side OData would need OR-chains; small datasets make this trivial.
+    if(_selectedBNs.size > 0){
+      scheds = scheds.filter(s => _selectedBNs.has(s.BreakNurseName));
+    }
+
     if(!scheds.length){
-      el.innerHTML='<div class="empty">No assignments found.</div>';
+      const reason = _selectedBNs.size > 0 ? ' for selected BN(s)' : '';
+      el.innerHTML = `<div class="empty">No assignments found${reason}.</div>`;
       return;
     }
 
@@ -14361,6 +14459,7 @@ function renderImportedNamesList(){
   if (!el) return;
   if (!importedNames.length){
     el.innerHTML = '<div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div>';
+    renderBNFilter();
     return;
   }
   el.innerHTML = importedNames.map(n => {
@@ -14374,6 +14473,8 @@ function renderImportedNamesList(){
       <button class="btn btn-danger btn-sm" onclick="removeImportedName('${esc}')">Remove</button>
     </div>`;
   }).join('');
+  // Keep the Scheduled Assignments BN filter in sync with the roster.
+  renderBNFilter();
 }
 
 function removeImportedName(name){
