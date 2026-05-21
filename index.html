@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-47';
+const APP_VERSION = '2026-05-20-50';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1899,9 +1899,44 @@ async function deleteState(key){
 // tolerated by the get path — JSON.parse fallback returns the raw string.
 // All NEW writes go through syncedLS.set so they're uniformly JSON.
 //
+// Failed mirrors enter a retry queue (persisted in localStorage). The queue
+// drains automatically on the next successful set/setMany (network healthy
+// = drain opportunity) and on app load. Failures are silent for the first
+// few attempts and only surface a user-visible toast after repeated failure.
+// This prevents transient network blips from confusing the user when the
+// data ultimately syncs.
+//
 // Use this for any cross-device key. Direct localStorage access is reserved
 // for: per-device preferences, transient UI state, sim-mode test data, and
 // caches whose source-of-truth lives in another sheet (e.g. BNSchedule.Ext).
+
+const _SYNCED_RETRY_QUEUE_KEY = '_syncedLSRetryQueue';
+const _SYNCED_RETRY_TOAST_THRESHOLD = 3; // attempts before user-visible toast
+let _syncedRetryDrainInProgress = false;
+
+function _syncedGetRetryQueue(){
+  try { return JSON.parse(localStorage.getItem(_SYNCED_RETRY_QUEUE_KEY) || '{}'); }
+  catch { return {}; }
+}
+
+function _syncedSetRetryQueue(q){
+  try {
+    if(!q || !Object.keys(q).length) localStorage.removeItem(_SYNCED_RETRY_QUEUE_KEY);
+    else localStorage.setItem(_SYNCED_RETRY_QUEUE_KEY, JSON.stringify(q));
+  } catch{}
+}
+
+function _syncedEnqueueRetry(key){
+  const q = _syncedGetRetryQueue();
+  q[key] = (q[key] || 0) + 1;
+  _syncedSetRetryQueue(q);
+  return q[key];
+}
+
+function _syncedDequeueRetry(key){
+  const q = _syncedGetRetryQueue();
+  if(key in q){ delete q[key]; _syncedSetRetryQueue(q); }
+}
 
 const syncedLS = {
   get(key){
@@ -1969,10 +2004,20 @@ const syncedLS = {
     // even before the network call completes.
     try {
       await setState(key, value);
+      // Success — clear this key from retry queue if it was there, then
+      // opportunistically drain other queued items (network is healthy).
+      _syncedDequeueRetry(key);
+      syncedLS._drainRetryQueue().catch(()=>{});
       return true;
     } catch(e){
       console.warn(`[syncedLS.set] ${key}: ${e.message}`);
-      try { toast('Network error — change not saved to server. Other devices may not see this update.', true); } catch{}
+      const attempts = _syncedEnqueueRetry(key);
+      // Silent for the first few failures — transient blips shouldn't alarm
+      // the user. Only toast once the same key (or any) has stuck around.
+      if(attempts >= _SYNCED_RETRY_TOAST_THRESHOLD){
+        const pending = Object.keys(_syncedGetRetryQueue()).length;
+        try { toast(`Sync delayed — ${pending} change${pending === 1 ? '' : 's'} pending. Will keep retrying.`, true); } catch{}
+      }
       throw e;
     }
   },
@@ -1991,11 +2036,69 @@ const syncedLS = {
     }
     try {
       await spBatchSetState(entries);
+      // Clear all these keys from retry queue; drain any other pending items.
+      entries.forEach(({key}) => _syncedDequeueRetry(key));
+      syncedLS._drainRetryQueue().catch(()=>{});
       return true;
     } catch(e){
       console.warn(`[syncedLS.setMany] ${entries.length} entries failed: ${e.message}`);
-      try { toast('Network error — some changes not saved to server. Other devices may not see all updates.', true); } catch{}
+      // Enqueue each key individually; drain handles them one by one.
+      let maxAttempts = 0;
+      entries.forEach(({key}) => {
+        const a = _syncedEnqueueRetry(key);
+        if(a > maxAttempts) maxAttempts = a;
+      });
+      if(maxAttempts >= _SYNCED_RETRY_TOAST_THRESHOLD){
+        const pending = Object.keys(_syncedGetRetryQueue()).length;
+        try { toast(`Sync delayed — ${pending} change${pending === 1 ? '' : 's'} pending. Will keep retrying.`, true); } catch{}
+      }
       throw e;
+    }
+  },
+
+  // Drain queued retries silently. Called opportunistically after a
+  // successful set/setMany (proves network is healthy) and once at app
+  // init. Re-entrancy guarded: concurrent successful writes only kick
+  // one drain at a time. Stops on first network failure to avoid
+  // hammering when the network is actually down — leaves remaining
+  // items for the next opportunity.
+  async _drainRetryQueue(){
+    if(_syncedRetryDrainInProgress) return;
+    const q = _syncedGetRetryQueue();
+    const keys = Object.keys(q);
+    if(!keys.length) return;
+
+    _syncedRetryDrainInProgress = true;
+    let drained = 0;
+    try {
+      for(const key of keys){
+        const raw = localStorage.getItem(key);
+        if(raw == null){
+          // Local was deleted — nothing to sync. Clear from queue.
+          _syncedDequeueRetry(key);
+          continue;
+        }
+        try {
+          const value = JSON.parse(raw);
+          await setState(key, value);
+          _syncedDequeueRetry(key);
+          drained++;
+        } catch(e){
+          // Still failing — leave in queue, increment count silently.
+          _syncedEnqueueRetry(key);
+          // Network is bad — abort rest of drain to avoid hammering.
+          break;
+        }
+      }
+      if(drained > 0){
+        console.log(`[syncedLS] Drained ${drained} queued change${drained === 1 ? '' : 's'}`);
+        // If queue is now empty and we previously toasted, reassure user.
+        if(Object.keys(_syncedGetRetryQueue()).length === 0){
+          try { toast(`✓ All changes synced.`); } catch{}
+        }
+      }
+    } finally {
+      _syncedRetryDrainInProgress = false;
     }
   },
 
@@ -2016,6 +2119,10 @@ const syncedLS = {
     }
   },
 };
+
+// Attempt to drain any retries left from a previous session. Deferred so we
+// don't contend with app-init network calls; quietly noops if queue is empty.
+setTimeout(() => { syncedLS._drainRetryQueue().catch(()=>{}); }, 3000);
 
 // ── Sim mode indicator ────────────────────────────────
 function showSimBanner(){
@@ -8873,7 +8980,7 @@ async function clearSimData(){
     k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
     k.startsWith('bnBreakCancelled_') ||
     k === 'bnImportedEntries' || k === 'bnImportedNames' || k === 'unit3CDefault' ||
-    k === 'bnLastImportBatch'
+    k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue'
   ).forEach(k => localStorage.removeItem(k));
   if(SIM_MODE){
     DB.BNSchedule = []; DB.BNBookings = []; DB.BNState = [];
@@ -9361,6 +9468,34 @@ function hideBusy(){
   if(el) el.style.display = 'none';
 }
 
+// Inline progress bar helpers. Render into a container with renderProgress,
+// then call updateProgress(container, done, total, label) on each iteration.
+// Used for multi-step operations where the user benefits from "X of Y"
+// granularity rather than a spinner that hides actual throughput.
+function renderProgressBar(container, label, total){
+  if(!container) return;
+  container.innerHTML = `
+    <div style="padding:18px 20px;background:var(--bg);border-radius:10px;border:1px solid var(--border)">
+      <div style="display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:8px">
+        <span id="pbLabel" style="font-size:.85rem;color:var(--muted);font-weight:500">${label || 'Working…'}</span>
+        <span id="pbCount" style="font-size:.78rem;color:var(--muted);font-family:'DM Mono',monospace">0 / ${total}</span>
+      </div>
+      <div style="height:6px;background:var(--border);border-radius:99px;overflow:hidden">
+        <div id="pbFill" style="height:100%;width:0%;background:var(--teal);border-radius:99px;transition:width .25s ease"></div>
+      </div>
+    </div>`;
+}
+function updateProgressBar(container, done, total, label){
+  if(!container) return;
+  const fill = container.querySelector('#pbFill');
+  const count = container.querySelector('#pbCount');
+  const lbl = container.querySelector('#pbLabel');
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  if(fill) fill.style.width = pct + '%';
+  if(count) count.textContent = `${done} / ${total}`;
+  if(lbl && label) lbl.textContent = label;
+}
+
 // ═══════════════════════════════════════════════════════
 // AI SCHEDULE IMPORT
 // ═══════════════════════════════════════════════════════
@@ -9648,9 +9783,16 @@ async function restoreLastImport(){
     if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
   });
 
+  // Show progress while computing suggestions
+  const _importWrap = document.getElementById('importRows');
+  const _totalDateShifts = Object.keys(byDateShift).length;
+  if(_importWrap) renderProgressBar(_importWrap, '✨ Restoring suggestions', _totalDateShifts);
+  document.getElementById('importResults').style.display = 'block';
+
   const allSuggestions = {};
   const batchCountOverlay = {};
   const sortedKeys = Object.keys(byDateShift).sort();
+  let _progressDone = 0;
   for(const key of sortedKeys){
     const nurses = byDateShift[key];
     const [date, shift] = key.split('|');
@@ -9661,6 +9803,8 @@ async function restoreLastImport(){
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
     }
+    _progressDone++;
+    if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
   }
 
   // Populate importUnitSel — expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
@@ -9791,7 +9935,8 @@ async function renderImportRows(entries, forceReplace = false){
   const shiftsNeeded = [...new Set(entriesToProcess.map(e => e.shift))];
   // Show progress indicator while computing suggestions
   const _importWrap = document.getElementById('importRows');
-  if(_importWrap) _importWrap.innerHTML = `<div style="text-align:center;padding:24px;color:var(--muted)">⏳ Computing suggestions for ${entriesToProcess.length} entries…</div>`;
+  const _totalDateShifts = new Set(entriesToProcess.map(e => `${e.date}|${e.shift}`)).size;
+  if(_importWrap) renderProgressBar(_importWrap, '✨ Computing suggestions', _totalDateShifts);
   document.getElementById('importResults').style.display = 'block';
   expandExtractedRows();
   await Promise.allSettled(shiftsNeeded.map(sh => getUnitCoverageCounts(sh)));
@@ -9802,6 +9947,7 @@ async function renderImportRows(entries, forceReplace = false){
   // In-memory overlay counts to track what's been suggested within this batch
   // Prevents same units being suggested every day when global counts all start at 0
   const batchCountOverlay = {}; // slot -> extra count from batch suggestions so far
+  let _progressDone = 0;
   for(const key of sortedKeys){
     const nurses = byDateShift[key];
     const [date, shift] = key.split('|');
@@ -9813,6 +9959,8 @@ async function renderImportRows(entries, forceReplace = false){
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
     }
+    _progressDone++;
+    if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
   }
 
   // Store authoritative entry list for this DOM render
@@ -10053,9 +10201,15 @@ async function resuggestAll(){
     if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
   });
 
+  // Show progress while computing suggestions
+  const _importWrap = document.getElementById('importRows');
+  const _totalDateShifts = Object.keys(byDateShift).length;
+  if(_importWrap) renderProgressBar(_importWrap, '✨ Re-suggesting', _totalDateShifts);
+
   const allSuggestions = {};
   const batchCountOverlay = {};
   const sortedKeys = Object.keys(byDateShift).sort();
+  let _progressDone = 0;
   for(const key of sortedKeys){
     const nurses = byDateShift[key];
     const [date, shift] = key.split('|');
@@ -10066,6 +10220,8 @@ async function resuggestAll(){
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
     }
+    _progressDone++;
+    if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
   }
 
   for(let i = 0; i < batch.length; i++){
@@ -13353,10 +13509,16 @@ function proximityScore(a, b){
   return Math.abs((WING_FLOOR[ua]||0) - (WING_FLOOR[ub]||0));
 }
 
-// Units per nurse based on shift + nurse count
+// Units per nurse based on shift + nurse count.
+// Solo nurses are capped at 3 units even on Noc (was 4) — covering 4 units
+// across both wings alone is too much walking/load. With the solo-wing
+// constraint below, 3 well-clustered units provide reasonable coverage
+// without overloading the BN. Some units necessarily go without breaks
+// when a BN works alone; that's operational reality.
 function unitsPerNurse(shift, nurseCount){
+  if(nurseCount === 1) return 3;
   if(shift === 'Day') return nurseCount <= 2 ? 3 : 2;
-  return nurseCount === 1 ? 4 : 3;
+  return 3;
 }
 
 // ── All-time coverage counts ──────────────────────────
@@ -13653,7 +13815,20 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
   const wingAssignment = {};
 
   if(n === 1){
-    wingAssignment[nurses[0]] = 'BOTH';
+    // Solo BN: lock to the wing that needs site-level coverage most
+    // (lowest global avg coverage count). This optimizes for the SITE'S
+    // equality across units, not the BN's personal exposure history.
+    // We deliberately ignore per-BN wing history here — when only one BN
+    // is on, the question "which units need a BN" outweighs "which units
+    // has THIS BN been on." If wings are equal, tie-break by hash so the
+    // choice rotates day-to-day rather than always picking the same wing.
+    const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : Infinity;
+    const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : Infinity;
+    let soloWing;
+    if(aAvg < dAvg) soloWing = 'A';
+    else if(dAvg < aAvg) soloWing = 'D';
+    else soloWing = (_bnSortHash(nurses[0], dateSeed) % 2) === 0 ? 'A' : 'D';
+    wingAssignment[nurses[0]] = soloWing;
   } else {
     const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : 0;
     const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : 0;
