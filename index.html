@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-64';
+const APP_VERSION = '2026-05-20-65';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10139,6 +10139,60 @@ async function restoreLastImport(){
   }
 }
 
+// Builds the HTML for the imported-entries review rows. Extracted from
+// renderImportRows so resuggestAll can also re-render the rows after the
+// suggestion loop. (The progress bar wipes #importRows' innerHTML, so
+// after a re-suggest we have to rebuild rows from scratch — we can't
+// patch individual elements that no longer exist.)
+function _buildImportRowsHTML(batch){
+  return batch.map((e, i) => {
+    const suggested = importUnitSel[i] || [];
+    const uPerN = e.isPartial
+      ? (e.partialUnitCount || 1)
+      : unitsPerNurse(e.shift,
+        batch.filter(x => x.date===e.date && x.shift===e.shift && !x.isPartial).length);
+    const partialBadge = e.isPartial
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#fff8e1;border:1px solid #ffb300;color:#bf360c;font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Extra-hours pickup — review unit assignments manually">⚠ Partial · ${e.hours || '?'}h · review</span>`
+      : '';
+    return `
+    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${e.isPartial ? ';border-color:#ffb300' : ''}">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-weight:600;font-size:.9rem">${e.name}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        ${partialBadge}
+        <div style="display:flex;gap:5px;margin-left:auto">
+          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
+            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
+            onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
+          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}"
+            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
+            onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
+        </div>
+      </div>
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
+        <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
+          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
+          <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
+            onclick="clearImportSel(${i})">Clear</button>
+          <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
+            onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
+        </div>
+      </div>
+      <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
+        ${UNITS.map(u => {
+          const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
+          const dimStyle = isClosed ? 'opacity:.45' : '';
+          return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
+        }).join('')}
+      </div>
+      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
+      <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
+      <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
+    </div>`;
+  }).join('');
+}
+
 async function renderImportRows(entries, forceReplace = false){
   const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
 
@@ -10275,56 +10329,7 @@ async function renderImportRows(entries, forceReplace = false){
     importUnitSel[i] = expandSuggestionUnits(allSuggestions[key] || []);
   }
 
-  wrap.innerHTML = entriesToProcess.map((e, i) => {
-    const suggested = importUnitSel[i] || [];
-    const uPerN = e.isPartial
-      ? (e.partialUnitCount || 1)
-      : unitsPerNurse(e.shift,
-        entriesToProcess.filter(x => x.date===e.date && x.shift===e.shift && !x.isPartial).length);
-    const partialBadge = e.isPartial
-      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#fff8e1;border:1px solid #ffb300;color:#bf360c;font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Extra-hours pickup — review unit assignments manually">⚠ Partial · ${e.hours || '?'}h · review</span>`
-      : '';
-    return `
-    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${e.isPartial ? ';border-color:#ffb300' : ''}">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-        <span style="font-weight:600;font-size:.9rem">${e.name}</span>
-        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
-        ${partialBadge}
-        <div style="display:flex;gap:5px;margin-left:auto">
-          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
-            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
-            onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
-          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}"
-            style="padding:3px 10px;font-size:.75rem;cursor:pointer"
-            onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
-        <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
-          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
-          <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
-            onclick="clearImportSel(${i})">Clear</button>
-          <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
-            onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
-        </div>
-      </div>
-      <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
-        ${UNITS.map(u => {
-          // Gray closed units so admin sees they're closed but can still tap
-          // them — tapping a closed unit shows a toast directing admin to the
-          // Unit Status card on the Schedule tab — single decision point.
-          // All unit status changes happen in one place.
-          const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
-          const dimStyle = isClosed ? 'opacity:.45' : '';
-          return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
-        }).join('')}
-      </div>
-      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
-      <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
-      <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
-    </div>`;
-  }).join('');
+  wrap.innerHTML = _buildImportRowsHTML(entriesToProcess);
 
   document.getElementById('importResults').style.display = 'block';
     updateAcceptBars();
@@ -10549,35 +10554,26 @@ async function resuggestAll(){
     await new Promise(r => requestAnimationFrame(r));
   }
 
+  // Update importUnitSel for all entries with the new suggestions.
   for(let i = 0; i < batch.length; i++){
     const e = batch[i];
     importUnitSel[i] = expandSuggestionUnits(allSuggestions[`${e.name}|${e.date}|${e.shift}`] || []);
-    // Update DOM
-    UNITS.forEach(u => {
-      const el = document.getElementById(`iu-${i}-${u}`);
-      if(el){
-        if(importUnitSel[i].includes(u)) el.classList.add('on');
-        else el.classList.remove('on');
-      }
-    });
-    // Update count label
-    const countEl = document.getElementById(`suggest-count-${i}`);
-    if(countEl){
-      const uPerN = unitsPerNurse(e.shift, batch.filter(x => x.date===e.date && x.shift===e.shift).length);
-      countEl.textContent = `✨ ${suggestedSlotCount(importUnitSel[i], e.date, e.shift)} suggested · target ${uPerN}`;
-    }
-    // Re-enable save button if it was disabled
-    const savedEl = document.getElementById(`saved-${i}`);
-    const saveBtn = document.getElementById(`savebtn-${i}`);
-    const editBtn = document.getElementById(`editbtn-${i}`);
-    const unitGrid = document.getElementById(`unitgrid-${i}`);
-    if(savedEl) savedEl.style.display = 'none';
-    if(saveBtn){ saveBtn.disabled = false; saveBtn.style.opacity = '1'; }
-    if(editBtn) editBtn.style.display = 'none';
-    if(unitGrid) unitGrid.querySelectorAll('.uc').forEach(el => {
-      el.style.pointerEvents = ''; el.style.opacity = '';
-    });
   }
+
+  // The progress bar wiped #importRows. Re-render rows from scratch instead
+  // of patching individual elements (they no longer exist in the DOM).
+  if(_importWrap){
+    _importWrap.innerHTML = _buildImportRowsHTML(batch);
+    // Re-apply 'on' classes — mirror what renderImportRows does after build.
+    for(let i = 0; i < batch.length; i++){
+      const units = importUnitSel[i] || [];
+      units.forEach(u => {
+        const el = document.getElementById(`iu-${i}-${u}`);
+        if(el) el.classList.add('on');
+      });
+    }
+  }
+  updateAcceptBars();
 
   toast(`↺ Re-suggested ${batch.length} assignments`);
 }
