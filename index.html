@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-58';
+const APP_VERSION = '2026-05-20-59';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8960,20 +8960,45 @@ async function dedupAssignments(){
       });
       for (let i = 1; i < items.length; i++) toDelete.push(items[i]);
     }
-    if(toDelete.length === 0){
+    // De-dupe by Id: if past batchUpserts collided on Date.now(), multiple
+    // rows can share the same Id. Apps Script's deleteItem removes the first
+    // match by ID — attempting to delete the same Id twice would throw on
+    // the second call, aborting the whole loop. Filter to unique IDs.
+    const seenIds = new Set();
+    const uniqueToDelete = toDelete.filter(item => {
+      const id = String(item.Id);
+      if (seenIds.has(id)) return false;
+      seenIds.add(id);
+      return true;
+    });
+    if(uniqueToDelete.length === 0){
       if(btn){ btn.disabled = false; btn.textContent = originalText; }
       toast('No duplicates found');
       return;
     }
-    // Delete with progress feedback on the button itself
+    // Delete with progress feedback on the button. Continue on per-call
+    // errors so partial progress isn't lost — track failures separately.
     let deleted = 0;
-    for(const item of toDelete){
-      if(btn) btn.textContent = `🧹 Removing ${deleted + 1}/${toDelete.length}…`;
-      await spDel(LISTS.schedule, item.Id);
-      deleted++;
+    let failed = 0;
+    const failedIds = [];
+    for(const item of uniqueToDelete){
+      if(btn) btn.textContent = `🧹 Removing ${deleted + failed + 1}/${uniqueToDelete.length}…`;
+      try {
+        await spDel(LISTS.schedule, item.Id);
+        deleted++;
+      } catch(err) {
+        failed++;
+        failedIds.push(item.Id);
+        console.warn(`dedupAssignments: spDel failed for Id ${item.Id}:`, err.message);
+      }
     }
     if(btn){ btn.disabled = false; btn.textContent = originalText; }
-    toast(`🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}`);
+    if(failed > 0){
+      console.warn('dedupAssignments: IDs not deleted:', failedIds);
+      toast(`🧹 Removed ${deleted} duplicate${deleted!==1?'s':''} · ${failed} not found (see console)`);
+    } else {
+      toast(`🧹 Removed ${deleted} duplicate${deleted!==1?'s':''}`);
+    }
     loadAssignments();
     notifyProdLogChanged();
   } catch(e) {
