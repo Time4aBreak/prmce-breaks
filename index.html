@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-67';
+const APP_VERSION = '2026-05-20-68';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9844,7 +9844,8 @@ async function runImport(){
       // Three-way classification:
       //   icon=yes + hours valid Break-shape → clean KEEP
       //   icon=no  + hours clearly non-Break (0 or 12.00) → clean REJECT
-      //   anything else → FLAG for review (user must resolve before saving)
+      //   start time = 0630/1830 → FLAG (BN-as-staff pickup; icon may still be true)
+      //   signals disagree → FLAG for review
       // Hours are the second signal because color (barColor) varies too much
       // device-to-device. transferIcon is structural; hours are numeric. Both
       // strong; one rarely lies. When they disagree, flag — don't guess.
@@ -9856,7 +9857,19 @@ async function runImport(){
       const hoursLooksBreak = hoursValid && hoursNum !== 0 && hoursNum !== 12;
       const hoursLooksNotBreak = hoursValid && (hoursNum === 0 || hoursNum === 12);
 
-      if(hasIcon && hoursLooksBreak){
+      // Staff-pickup detection: when a BN picks up a unit shift as a staff
+      // nurse, the transfer icon still appears and hours may be Break-like
+      // (12.50). Only the start time gives it away — typically 06:30 or 18:30
+      // versus the Break-shift starts of 08:00 / 20:00. Normalize whatever
+      // shape the AI returns ("06:30", "0630", "630") into 4-digit HHMM.
+      const startTimeStr = String(e.startTime || '').replace(/[:.]/g, '').padStart(4, '0');
+      const isStaffPickupTime = startTimeStr === '0630' || startTimeStr === '1830';
+
+      if(isStaffPickupTime){
+        e.isFlagged = true;
+        e.flagReason = `start ${startTimeStr.slice(0,2)}:${startTimeStr.slice(2)} — possible staff pickup`;
+        _flagCount++;
+      } else if(hasIcon && hoursLooksBreak){
         // clean keep — fall through to partial detection below
       } else if(!hasIcon && hoursLooksNotBreak){
         _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — no transfer icon, hours=${hoursNum} (regular shift or off-day)`);
@@ -9887,7 +9900,7 @@ async function runImport(){
     if(entries.length){
       const sample = entries[0];
       console.log('[extraction] First entry sample (raw from AI):', sample,
-        '· hours type:', typeof sample.hours, '· transferIcon:', sample.transferIcon);
+        '· hours type:', typeof sample.hours, '· transferIcon:', sample.transferIcon, '· startTime:', sample.startTime);
     }
     if(_filterReasons.length){
       console.log('[extraction] Filtered non-Break entries:', _filterReasons);
