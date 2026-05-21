@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-60';
+const APP_VERSION = '2026-05-20-63';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8574,28 +8574,20 @@ function setViewRange(range, btn){
 
 // ── BN filter for Scheduled Assignments ──────────────────
 // Multi-select set of BN names. Empty set = show all (current default).
-// Persisted to localStorage as a per-device preference — filters are
-// transient UI state, not server-truth, so syncedLS isn't needed.
-let _selectedBNs = (() => {
-  try { return new Set(JSON.parse(localStorage.getItem('bnAssignmentFilter') || '[]')); }
-  catch { return new Set(); }
-})();
-
-function _saveBNFilter(){
-  try { localStorage.setItem('bnAssignmentFilter', JSON.stringify([..._selectedBNs])); } catch {}
-}
+// Intentionally NOT persisted across reloads — a fresh refresh shows
+// all BNs by default. Per Tomas: filter is a per-session lens, not a
+// sticky preference.
+let _selectedBNs = new Set();
 
 function toggleBNFilter(name){
   if(_selectedBNs.has(name)) _selectedBNs.delete(name);
   else _selectedBNs.add(name);
-  _saveBNFilter();
   renderBNFilter();
   loadAssignments();
 }
 
 function clearBNFilter(){
   _selectedBNs.clear();
-  _saveBNFilter();
   renderBNFilter();
   loadAssignments();
 }
@@ -8969,8 +8961,9 @@ async function confirmCloseUnit(schedId, unit, date, shift){
   const modal = document.getElementById('closeUnitModal');
   if(modal) modal.remove();
 }
-async function recalculateAllRotations(){
-  if(!await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
+async function recalculateAllRotations(opts = {}){
+  const skipConfirm = !!opts.skipConfirm;
+  if(!skipConfirm && !await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
 
   const t = activeShiftFloor();
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
@@ -14477,11 +14470,103 @@ function renderImportedNamesList(){
   renderBNFilter();
 }
 
-function removeImportedName(name){
+// Show a 3-button modal when removing a BN who has upcoming assignments.
+// Returns 'recalculate', 'remove_only', or 'cancel'.
+function _showRemoveBNModal(name, count){
+  return new Promise(resolve => {
+    const wrap = document.createElement('div');
+    wrap.id = 'removeBNModal';
+    wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
+    const safeName = escHTML(firstName(name));
+    wrap.innerHTML = `
+      <div style="background:var(--card);border-radius:14px;padding:22px 24px;max-width:460px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+          <span style="font-size:1.3rem">🗑</span>
+          <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Deleting all of ${safeName}'s assignments</span>
+        </div>
+        <div style="font-size:.88rem;color:var(--text);line-height:1.5;margin-bottom:18px">
+          ${safeName} has ${count} upcoming assignment${count!==1?'s':''}. These will be deleted from the schedule. Choose whether to also recalculate rotations for everyone else afterward.
+        </div>
+        <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-ghost btn-sm" data-choice="cancel" style="font-size:.85rem">Cancel</button>
+          <button class="btn btn-ghost btn-sm" data-choice="remove_only" style="font-size:.85rem">Just remove ${safeName}'s assignments</button>
+          <button class="btn btn-success btn-sm" data-choice="recalculate" style="font-size:.85rem">↺ Recalculate All rotations</button>
+        </div>
+      </div>`;
+    const finish = (choice) => {
+      wrap.remove();
+      resolve(choice);
+    };
+    wrap.addEventListener('click', (e) => {
+      const btn = e.target.closest('button[data-choice]');
+      if(btn){ finish(btn.dataset.choice); return; }
+      if(e.target === wrap) finish('cancel');
+    });
+    document.body.appendChild(wrap);
+  });
+}
+
+async function removeImportedName(name){
+  // Check for upcoming BNSchedule rows belonging to this BN. If any exist,
+  // ask the user how to handle them; silent removal would leave those rows
+  // "orphaned" (still in BNSchedule, never picked up since the BN is gone
+  // from the roster). See conversation 2026-05-21 for rationale.
+  let upcoming = [];
+  try {
+    const t = activeShiftFloor();
+    const all = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    upcoming = all.filter(s => s.BreakNurseName === name);
+  } catch(e) {
+    console.warn('removeImportedName: could not check assignments:', e.message);
+    // Fall through — we'll just remove from roster without deletion
+  }
+
+  // No upcoming assignments → ask for a simple confirm, then remove.
+  if(upcoming.length === 0){
+    const fn = firstName(name);
+    if(!await customConfirm(
+      `Remove ${fn} from the roster? They have no upcoming assignments.`,
+      'Remove', 'Cancel'
+    )) return;
+    importedNames = importedNames.filter(n => n !== name);
+    saveImportedNames();
+    renderImportedNamesList();
+    populateNurseDropdown();
+    toast(`${fn} removed from roster.`);
+    return;
+  }
+
+  // Has upcoming assignments → ask what to do.
+  const choice = await _showRemoveBNModal(name, upcoming.length);
+  if(choice === 'cancel') return;
+
+  // Delete the BN's upcoming BNSchedule rows in one batch.
+  try {
+    const ids = upcoming.map(s => s.Id);
+    await gasCallPost({
+      action: 'batchDelete',
+      sheet: LISTS.schedule,
+      ids: encodeURIComponent(JSON.stringify(ids))
+    });
+  } catch(e) {
+    toast(`Failed to delete ${firstName(name)}'s assignments: ${e.message}`, true);
+    return;
+  }
+
+  // Remove from roster (matches original behavior).
   importedNames = importedNames.filter(n => n !== name);
   saveImportedNames();
   renderImportedNamesList();
   populateNurseDropdown();
+
+  // Optional follow-up: recalculate rotations for everyone else.
+  if(choice === 'recalculate'){
+    await recalculateAllRotations({ skipConfirm: true });
+  }
+
+  toast(`${firstName(name)} removed · ${upcoming.length} assignment${upcoming.length!==1?'s':''} deleted`);
+  loadAssignments();
+  notifyProdLogChanged();
 }
 
 function normalizeName(name){
