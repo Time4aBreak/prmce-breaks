@@ -1541,7 +1541,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-53';
+const APP_VERSION = '2026-05-20-54';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9687,7 +9687,9 @@ async function runImport(){
       return;
     }
 
-    // Client-side validation pass: filter entries the AI flagged as non-Break.
+    // Client-side validation pass: filter entries the AI flagged as non-Break,
+    // and tag partial (short-duration) Break shifts for special handling.
+    //
     // The AI returns an `isBreakShift` boolean per entry, based on whether the
     // entry has both visual markers of a real Break-relief shift:
     //   - blue vertical bar on the left edge of the cell
@@ -9695,21 +9697,38 @@ async function runImport(){
     // Entries lacking either marker get isBreakShift=false (green bars, no
     // transfer icon, calendar markers, meetings, etc.) and are filtered here.
     //
+    // Partial shifts (BNs picking up extra hours, < 12 hr) share the same
+    // visual markers as full Break shifts but cover only part of the day.
+    // We tag them so the suggester treats them as supplementary coverage
+    // rather than a regular slot.
+    //
     // We only filter on `isBreakShift === false` (strict equality). Entries
     // missing the field — e.g. from an older Apps Script deployment — pass
     // through unchanged for backward compatibility.
     const _validEntries = [];
     const _filterReasons = [];
+    let _partialCount = 0;
     entries.forEach(e => {
       if(e.isBreakShift === false){
         _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — not a Break-relief shift (missing blue bar or transfer icon)`);
         return;
+      }
+      // Partial detection: hours present and under the full-shift threshold.
+      // Math: ceil(hours / 4) → 1 unit for ≤4 hrs, 2 for 4-8, 3 for 8-12.
+      // Min 1 to handle sub-4-hour pickups.
+      if(typeof e.hours === 'number' && e.hours > 0 && e.hours < 12){
+        e.isPartial = true;
+        e.partialUnitCount = Math.max(1, Math.ceil(e.hours / 4));
+        _partialCount++;
       }
       _validEntries.push(e);
     });
     if(_filterReasons.length){
       console.log('[extraction] Filtered non-Break entries:', _filterReasons);
       toast(`Filtered ${_filterReasons.length} non-Break entr${_filterReasons.length === 1 ? 'y' : 'ies'}. Check console for details.`);
+    }
+    if(_partialCount){
+      console.log('[extraction] Tagged partial shifts:', _validEntries.filter(e => e.isPartial));
     }
     entries = _validEntries;
 
@@ -9866,28 +9885,44 @@ async function restoreLastImport(){
 
   // Re-run fairness algorithm
   const byDateShift = {};
+  const partialsByDateShift = {};
   batch.forEach(e => {
     const key = `${e.date}|${e.shift}`;
-    if(!byDateShift[key]) byDateShift[key] = [];
-    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    if(e.isPartial){
+      if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
+      partialsByDateShift[key].push(e);
+    } else {
+      if(!byDateShift[key]) byDateShift[key] = [];
+      if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    }
   });
 
   // Show progress while computing suggestions
   const _importWrap = document.getElementById('importRows');
-  const _totalDateShifts = Object.keys(byDateShift).length;
+  const _totalDateShifts = new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)]).size;
   if(_importWrap) renderProgressBar(_importWrap, '✨ Restoring suggestions', _totalDateShifts);
   document.getElementById('importResults').style.display = 'block';
 
   const allSuggestions = {};
   const batchCountOverlay = {};
-  const sortedKeys = Object.keys(byDateShift).sort();
+  const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
   let _progressDone = 0;
   for(const key of sortedKeys){
-    const nurses = byDateShift[key];
+    const nurses = byDateShift[key] || [];
+    const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
-    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
-    for(const [name, slots] of Object.entries(suggestions)){
-      allSuggestions[`${name}|${date}|${shift}`] = slots;
+    if(nurses.length){
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      for(const [name, slots] of Object.entries(suggestions)){
+        allSuggestions[`${name}|${date}|${shift}`] = slots;
+        slots.forEach(slot => {
+          batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
+        });
+      }
+    }
+    for(const pe of partials){
+      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -10014,11 +10049,21 @@ async function renderImportRows(entries, forceReplace = false){
   }
 
   // Run fairness algorithm only on new entries
+  // byDateShift: full BNs that go through normal suggester
+  // partialsByDateShift: partial-shift entries (extra hours pickups) — handled
+  // separately as supplementary coverage so they don't perturb the main
+  // fairness allocation for full BNs on the same date.
   const byDateShift = {};
+  const partialsByDateShift = {};
   entriesToProcess.forEach(e => {
     const key = `${e.date}|${e.shift}`;
-    if(!byDateShift[key]) byDateShift[key] = [];
-    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    if(e.isPartial){
+      if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
+      partialsByDateShift[key].push(e);
+    } else {
+      if(!byDateShift[key]) byDateShift[key] = [];
+      if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    }
   });
 
   // Pre-warm coverage count caches for all shifts present — avoids 1 API call per date
@@ -10033,18 +10078,31 @@ async function renderImportRows(entries, forceReplace = false){
 
   const allSuggestions = {};
   // Process dates in chronological order so wing history and counts accumulate correctly
-  const sortedKeys = Object.keys(byDateShift).sort((a,b) => a.localeCompare(b));
+  // Union both maps' keys so date+shifts with only partials still get processed
+  const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])]
+    .sort((a,b) => a.localeCompare(b));
   // In-memory overlay counts to track what's been suggested within this batch
   // Prevents same units being suggested every day when global counts all start at 0
   const batchCountOverlay = {}; // slot -> extra count from batch suggestions so far
   let _progressDone = 0;
   for(const key of sortedKeys){
-    const nurses = byDateShift[key];
+    const nurses = byDateShift[key] || [];
+    const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
-    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
-    for(const [name, slots] of Object.entries(suggestions)){
-      allSuggestions[`${name}|${date}|${shift}`] = slots;
-      // Update overlay so these slots are "more covered" for subsequent dates
+    // Full nurses through normal suggester
+    if(nurses.length){
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      for(const [name, slots] of Object.entries(suggestions)){
+        allSuggestions[`${name}|${date}|${shift}`] = slots;
+        slots.forEach(slot => {
+          batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
+        });
+      }
+    }
+    // Partials: pick top-N under-covered units (sees overlay from full BNs above)
+    for(const pe of partials){
+      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -10069,13 +10127,19 @@ async function renderImportRows(entries, forceReplace = false){
 
   wrap.innerHTML = entriesToProcess.map((e, i) => {
     const suggested = importUnitSel[i] || [];
-    const uPerN = unitsPerNurse(e.shift,
-      entriesToProcess.filter(x => x.date===e.date && x.shift===e.shift).length);
+    const uPerN = e.isPartial
+      ? (e.partialUnitCount || 1)
+      : unitsPerNurse(e.shift,
+        entriesToProcess.filter(x => x.date===e.date && x.shift===e.shift && !x.isPartial).length);
+    const partialBadge = e.isPartial
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#fff8e1;border:1px solid #ffb300;color:#bf360c;font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Extra-hours pickup — review unit assignments manually">⚠ Partial · ${e.hours || '?'}h · review</span>`
+      : '';
     return `
-    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
+    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${e.isPartial ? ';border-color:#ffb300' : ''}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
         <span style="font-weight:600;font-size:.9rem">${e.name}</span>
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        ${partialBadge}
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
             style="padding:3px 10px;font-size:.75rem;cursor:pointer"
@@ -10286,27 +10350,43 @@ async function resuggestAll(){
   Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
 
   const byDateShift = {};
+  const partialsByDateShift = {};
   batch.forEach(e => {
     const key = `${e.date}|${e.shift}`;
-    if(!byDateShift[key]) byDateShift[key] = [];
-    if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    if(e.isPartial){
+      if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
+      partialsByDateShift[key].push(e);
+    } else {
+      if(!byDateShift[key]) byDateShift[key] = [];
+      if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
+    }
   });
 
   // Show progress while computing suggestions
   const _importWrap = document.getElementById('importRows');
-  const _totalDateShifts = Object.keys(byDateShift).length;
+  const _totalDateShifts = new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)]).size;
   if(_importWrap) renderProgressBar(_importWrap, '✨ Re-suggesting', _totalDateShifts);
 
   const allSuggestions = {};
   const batchCountOverlay = {};
-  const sortedKeys = Object.keys(byDateShift).sort();
+  const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
   let _progressDone = 0;
   for(const key of sortedKeys){
-    const nurses = byDateShift[key];
+    const nurses = byDateShift[key] || [];
+    const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
-    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
-    for(const [name, slots] of Object.entries(suggestions)){
-      allSuggestions[`${name}|${date}|${shift}`] = slots;
+    if(nurses.length){
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      for(const [name, slots] of Object.entries(suggestions)){
+        allSuggestions[`${name}|${date}|${shift}`] = slots;
+        slots.forEach(slot => {
+          batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
+        });
+      }
+    }
+    for(const pe of partials){
+      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13852,6 +13932,32 @@ function _scoreProximityPenalty(slotEntry, currentPicks){
   // Max within-wing distance is ~7 floors (3A↔10S is cross-wing, so within
   // A: 3→7 = 4; within D: 6→10 = 4). Normalize against 4.
   return Math.min(1, maxDist / 4);
+}
+
+// Pick the N most under-covered slots for a partial (extra-hours) BN.
+// Partials are supplementary coverage — they're not part of the main fairness
+// algorithm. We just hand them the slots with the lowest current coverage so
+// they fill the biggest gaps. `batchCountOverlay` reflects what full BNs have
+// already been assigned in this same batch, so partials see the latest state.
+async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
+  if(n <= 0) return [];
+  let counts;
+  try {
+    counts = await getUnitCoverageCounts(shift);
+  } catch(e) {
+    counts = {};
+  }
+  // Build pool of open units (skip closed C_PAIR variant — C_PAIR token covers
+  // both 3C/4C with a single tap on full shifts; for partials we just pick
+  // individual open units to keep things simple)
+  const pool = ALL_COVERAGE_SLOTS
+    .filter(s => s !== 'C_PAIR' && isUnitOpenForShift(s, date, shift))
+    .map(s => ({
+      slot: s,
+      total: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0)
+    }))
+    .sort((a, b) => a.total - b.total); // ascending: most under-covered first
+  return pool.slice(0, n).map(p => p.slot);
 }
 
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
