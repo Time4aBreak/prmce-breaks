@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-63';
+const APP_VERSION = '2026-05-20-64';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9845,15 +9845,28 @@ async function runImport(){
         return;
       }
       // Partial detection: hours present and under the full-shift threshold.
-      // Math: ceil(hours / 4) → 1 unit for ≤4 hrs, 2 for 4-8, 3 for 8-12.
-      // Min 1 to handle sub-4-hour pickups.
-      if(typeof e.hours === 'number' && e.hours > 0 && e.hours < 12){
+      // Be lenient about type: AI may return number ("hours":12.5) or numeric
+      // string ("hours":"12.5"). parseFloat handles both. Anything non-numeric
+      // (undefined, null, NaN) just skips the partial path → treated as full.
+      const hoursNum = typeof e.hours === 'number'
+        ? e.hours
+        : (e.hours != null ? parseFloat(e.hours) : NaN);
+      if(!isNaN(hoursNum) && hoursNum > 0 && hoursNum < 12){
         e.isPartial = true;
-        e.partialUnitCount = Math.max(1, Math.ceil(e.hours / 4));
+        e.partialUnitCount = Math.max(1, Math.ceil(hoursNum / 4));
         _partialCount++;
       }
       _validEntries.push(e);
     });
+    // Always log a summary + the first raw entry. Cheap, but lets us diagnose
+    // when the AI omits/mistypes fields without bouncing back to the user
+    // for a Network-tab paste. Surface anything suspicious here.
+    console.log('[extraction] AI returned', entries.length, 'entries · kept', _validEntries.length, '· partials tagged', _partialCount);
+    if(entries.length){
+      const sample = entries[0];
+      console.log('[extraction] First entry sample (raw from AI):', sample,
+        '· hours type:', typeof sample.hours, '· isBreakShift type:', typeof sample.isBreakShift);
+    }
     if(_filterReasons.length){
       console.log('[extraction] Filtered non-Break entries:', _filterReasons);
       toast(`Filtered ${_filterReasons.length} non-Break entr${_filterReasons.length === 1 ? 'y' : 'ies'}. Check console for details.`);
