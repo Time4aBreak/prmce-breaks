@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-65';
+const APP_VERSION = '2026-05-20-67';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9839,19 +9839,42 @@ async function runImport(){
     const _validEntries = [];
     const _filterReasons = [];
     let _partialCount = 0;
+    let _flagCount = 0;
     entries.forEach(e => {
-      if(e.isBreakShift === false){
-        _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — not a Break-relief shift (missing blue bar or transfer icon)`);
-        return;
-      }
-      // Partial detection: hours present and under the full-shift threshold.
-      // Be lenient about type: AI may return number ("hours":12.5) or numeric
-      // string ("hours":"12.5"). parseFloat handles both. Anything non-numeric
-      // (undefined, null, NaN) just skips the partial path → treated as full.
+      // Three-way classification:
+      //   icon=yes + hours valid Break-shape → clean KEEP
+      //   icon=no  + hours clearly non-Break (0 or 12.00) → clean REJECT
+      //   anything else → FLAG for review (user must resolve before saving)
+      // Hours are the second signal because color (barColor) varies too much
+      // device-to-device. transferIcon is structural; hours are numeric. Both
+      // strong; one rarely lies. When they disagree, flag — don't guess.
+      const hasIcon = e.transferIcon === true;
       const hoursNum = typeof e.hours === 'number'
         ? e.hours
         : (e.hours != null ? parseFloat(e.hours) : NaN);
-      if(!isNaN(hoursNum) && hoursNum > 0 && hoursNum < 12){
+      const hoursValid = !isNaN(hoursNum);
+      const hoursLooksBreak = hoursValid && hoursNum !== 0 && hoursNum !== 12;
+      const hoursLooksNotBreak = hoursValid && (hoursNum === 0 || hoursNum === 12);
+
+      if(hasIcon && hoursLooksBreak){
+        // clean keep — fall through to partial detection below
+      } else if(!hasIcon && hoursLooksNotBreak){
+        _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — no transfer icon, hours=${hoursNum} (regular shift or off-day)`);
+        return;
+      } else if(!hasIcon && !hoursValid){
+        _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — no transfer icon, no hours data`);
+        return;
+      } else {
+        // Signals disagree → flag for review
+        e.isFlagged = true;
+        e.flagReason = `icon: ${hasIcon ? 'yes' : 'no'} · hours: ${hoursValid ? hoursNum : '?'}`;
+        _flagCount++;
+      }
+
+      // Partial detection (applies to both clean keeps and flagged entries
+      // whose hours happen to be partial-shaped — if the user later accepts
+      // a flagged partial via Suggest, it gets sized correctly).
+      if(hoursValid && hoursNum > 0 && hoursNum < 12){
         e.isPartial = true;
         e.partialUnitCount = Math.max(1, Math.ceil(hoursNum / 4));
         _partialCount++;
@@ -9859,17 +9882,20 @@ async function runImport(){
       _validEntries.push(e);
     });
     // Always log a summary + the first raw entry. Cheap, but lets us diagnose
-    // when the AI omits/mistypes fields without bouncing back to the user
-    // for a Network-tab paste. Surface anything suspicious here.
-    console.log('[extraction] AI returned', entries.length, 'entries · kept', _validEntries.length, '· partials tagged', _partialCount);
+    // when the AI omits/mistypes fields. Surface anything suspicious here.
+    console.log('[extraction] AI returned', entries.length, 'entries · kept', _validEntries.length - _flagCount, '· flagged', _flagCount, '· partials tagged', _partialCount);
     if(entries.length){
       const sample = entries[0];
       console.log('[extraction] First entry sample (raw from AI):', sample,
-        '· hours type:', typeof sample.hours, '· isBreakShift type:', typeof sample.isBreakShift);
+        '· hours type:', typeof sample.hours, '· transferIcon:', sample.transferIcon);
     }
     if(_filterReasons.length){
       console.log('[extraction] Filtered non-Break entries:', _filterReasons);
       toast(`Filtered ${_filterReasons.length} non-Break entr${_filterReasons.length === 1 ? 'y' : 'ies'}. Check console for details.`);
+    }
+    if(_flagCount){
+      console.log('[extraction] Flagged for review (signals disagree):', _validEntries.filter(e => e.isFlagged));
+      toast(`🔍 ${_flagCount} flagged for review — resolve before saving.`);
     }
     if(_partialCount){
       console.log('[extraction] Tagged partial shifts:', _validEntries.filter(e => e.isPartial));
@@ -10032,6 +10058,8 @@ async function restoreLastImport(){
   const partialsByDateShift = {};
   batch.forEach(e => {
     const key = `${e.date}|${e.shift}`;
+    // Flagged entries are left to user-decision (Suggest button or manual)
+    if(e.isFlagged) return;
     if(e.isPartial){
       if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
       partialsByDateShift[key].push(e);
@@ -10144,21 +10172,56 @@ async function restoreLastImport(){
 // suggestion loop. (The progress bar wipes #importRows' innerHTML, so
 // after a re-suggest we have to rebuild rows from scratch — we can't
 // patch individual elements that no longer exist.)
+//
+// Handles three entry states:
+//   normal:    rendered with auto-suggested units + Save button
+//   flagged:   rendered with amber border, 🔍 Review badge, [✨ Suggest] +
+//              [✕ Discard] buttons; no Save until user assigns units. Once
+//              units are present, falls back to normal Save UI (badge stays
+//              for context, Discard remains as fallback).
+//   discarded: not rendered at all (returns empty string for that index)
 function _buildImportRowsHTML(batch){
   return batch.map((e, i) => {
+    if(e.isDiscarded) return ''; // skip — user dismissed
+
     const suggested = importUnitSel[i] || [];
+    const isFlaggedUnresolved = e.isFlagged && suggested.length === 0;
+
+    // For target-unit calculation, count active BNs on this date+shift —
+    // exclude partials, discarded, AND flagged (until they resolve, they're
+    // not "in the pool" for fairness math).
+    const peerCount = batch.filter(x =>
+      x.date===e.date && x.shift===e.shift && !x.isPartial && !x.isDiscarded
+      && (!x.isFlagged || (importUnitSel[batch.indexOf(x)] || []).length > 0)
+    ).length;
     const uPerN = e.isPartial
       ? (e.partialUnitCount || 1)
-      : unitsPerNurse(e.shift,
-        batch.filter(x => x.date===e.date && x.shift===e.shift && !x.isPartial).length);
-    const partialBadge = e.isPartial
+      : unitsPerNurse(e.shift, Math.max(1, peerCount));
+
+    const flaggedBadge = e.isFlagged
+      ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#fff3e0;border:1px solid #fb8c00;color:#bf360c;font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Signals disagree — assign units to confirm, or discard">🔍 Review · ${escHTML(e.flagReason || '')}</span>`
+      : '';
+    const partialBadge = (e.isPartial && !e.isFlagged)
       ? `<span style="display:inline-flex;align-items:center;gap:4px;padding:2px 8px;border-radius:99px;background:#fff8e1;border:1px solid #ffb300;color:#bf360c;font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Extra-hours pickup — review unit assignments manually">⚠ Partial · ${e.hours || '?'}h · review</span>`
       : '';
+
+    const borderColor = e.isFlagged ? ';border-color:#fb8c00' : (e.isPartial ? ';border-color:#ffb300' : '');
+
+    // Action row depends on flagged-unresolved status.
+    const actionRow = isFlaggedUnresolved
+      ? `<button class="btn btn-success btn-sm" onclick="suggestFlaggedRow(${i})">✨ Suggest units</button>
+         <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>`
+      : `<button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
+         <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
+         <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
+         ${e.isFlagged ? `<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>` : ''}`;
+
     return `
-    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${e.isPartial ? ';border-color:#ffb300' : ''}">
+    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${borderColor}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
         <span style="font-weight:600;font-size:.9rem">${e.name}</span>
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        ${flaggedBadge}
         ${partialBadge}
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
@@ -10186,11 +10249,75 @@ function _buildImportRowsHTML(batch){
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
         }).join('')}
       </div>
-      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
-      <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
-      <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
+      ${actionRow}
     </div>`;
   }).join('');
+}
+
+// User-action: suggest units for a flagged entry. Picks under-covered slots
+// in the entry's date+shift bucket, considering existing assignments as
+// overlay so we don't double-up.
+async function suggestFlaggedRow(i){
+  const e = _currentImportEntries[i];
+  if(!e) return;
+  // Overlay: count units already assigned by other entries in same date+shift
+  const overlay = {};
+  _currentImportEntries.forEach((other, j) => {
+    if(j !== i && other.date === e.date && other.shift === e.shift && !other.isDiscarded){
+      (importUnitSel[j] || []).forEach(slot => {
+        overlay[`${slot}|${other.shift}`] = (overlay[`${slot}|${other.shift}`] || 0) + 1;
+      });
+    }
+  });
+  // How many units this BN should cover.
+  let count;
+  if(e.isPartial){
+    count = e.partialUnitCount || 1;
+  } else {
+    const activeBNs = _currentImportEntries.filter(x =>
+      x.date === e.date && x.shift === e.shift && !x.isDiscarded && !x.isPartial
+    );
+    count = unitsPerNurse(e.shift, Math.max(1, activeBNs.length));
+  }
+  const slots = await _pickPartialSlots(e.shift, e.date, count, overlay);
+  importUnitSel[i] = expandSuggestionUnits(slots);
+  // Persist for fairness feedback (same as partial path).
+  _savePartialWingHistory(e.name, e.shift, e.date, slots);
+  // Re-render — flagged status visually persists but Save button now appears.
+  const wrap = document.getElementById('importRows');
+  if(wrap){
+    wrap.innerHTML = _buildImportRowsHTML(_currentImportEntries);
+    for(let j = 0; j < _currentImportEntries.length; j++){
+      (importUnitSel[j] || []).forEach(u => {
+        const el = document.getElementById(`iu-${j}-${u}`);
+        if(el) el.classList.add('on');
+      });
+    }
+  }
+  updateAcceptBars();
+  toast(`✨ ${count} unit${count!==1?'s':''} suggested for ${firstName(e.name)} ${e.date}`);
+}
+
+// User-action: discard a flagged entry. Marks isDiscarded; renderer skips it.
+// We don't splice out of _currentImportEntries because indices feed
+// importUnitSel and DOM ids; mutating the array breaks downstream references.
+function discardFlaggedRow(i){
+  const e = _currentImportEntries[i];
+  if(!e) return;
+  e.isDiscarded = true;
+  importUnitSel[i] = [];
+  const wrap = document.getElementById('importRows');
+  if(wrap){
+    wrap.innerHTML = _buildImportRowsHTML(_currentImportEntries);
+    for(let j = 0; j < _currentImportEntries.length; j++){
+      (importUnitSel[j] || []).forEach(u => {
+        const el = document.getElementById(`iu-${j}-${u}`);
+        if(el) el.classList.add('on');
+      });
+    }
+  }
+  updateAcceptBars();
+  toast(`✕ Discarded ${firstName(e.name)} ${e.date}`);
 }
 
 async function renderImportRows(entries, forceReplace = false){
@@ -10258,6 +10385,10 @@ async function renderImportRows(entries, forceReplace = false){
   const partialsByDateShift = {};
   entriesToProcess.forEach(e => {
     const key = `${e.date}|${e.shift}`;
+    // Flagged entries are intentionally left out of the initial suggester —
+    // they have no units until the user clicks ✨ Suggest or picks manually.
+    // This forces a deliberate decision per signals-disagree row.
+    if(e.isFlagged) return;
     if(e.isPartial){
       if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
       partialsByDateShift[key].push(e);
@@ -10508,6 +10639,8 @@ async function resuggestAll(){
   const partialsByDateShift = {};
   batch.forEach(e => {
     const key = `${e.date}|${e.shift}`;
+    // Flagged entries are left to user-decision (Suggest button or manual)
+    if(e.isFlagged) return;
     if(e.isPartial){
       if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
       partialsByDateShift[key].push(e);
@@ -10589,15 +10722,27 @@ async function acceptAllAndSave(){
     if(status) status.textContent = statusMsg;
     btns.forEach(b => { b.textContent = '⏳ ' + (btnMsg || statusMsg); });
   };
+
+  // Guard: refuse to save if any flagged entries are unresolved. The user
+  // must either Suggest/manually assign units, or Discard them, before Save All.
+  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const unresolvedFlagged = entriesToProcess.filter((e, i) =>
+    e.isFlagged && !e.isDiscarded && (importUnitSel[i] || []).length === 0
+  );
+  if(unresolvedFlagged.length){
+    toast(`🔍 ${unresolvedFlagged.length} flagged entr${unresolvedFlagged.length === 1 ? 'y needs' : 'ies need'} review — assign units or discard before saving.`, true);
+    return;
+  }
+
   btns.forEach(b => { b.disabled = true; });
   setPhase('Preparing batch...', 'Preparing...');
   if(status) status.style.display = 'block';
 
-  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
   const records = [];
   const indices = [];
 
   for(let i = 0; i < entriesToProcess.length; i++){
+    if(entriesToProcess[i].isDiscarded) continue;
     const rawUnits = importUnitSel[i] || [];
     if(!rawUnits.length) continue;
     const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
