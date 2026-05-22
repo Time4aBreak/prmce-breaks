@@ -717,8 +717,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
       <div id="importPreview" style="display:none;margin-top:12px">
         <img id="previewImg" style="max-width:100%;border-radius:10px;border:1px solid var(--border);margin-bottom:12px"/>
-        <button class="btn btn-primary" style="width:100%" onclick="runImport()">
-          <span id="importBtnTxt">✨ Extract Schedule with AI</span>
+        <button class="btn btn-primary extract-action-btn" style="width:100%" onclick="runImport()">
+          <span id="importBtnTxt">✨ Extract Schedule</span>
           <span id="importSpinner" style="display:none"><div class="spinner" style="border-top-color:white;width:16px;height:16px;display:inline-block"></div></span>
         </button>
       </div>
@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-73';
+const APP_VERSION = '2026-05-20-75';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10406,12 +10406,21 @@ async function renderImportRows(entries, forceReplace = false){
   const newEntries = entries.filter(e => !existingKeys.has(`${e.name}|${e.date}|${e.shift}`));
 
   importEntries = [...baseEntries, ...newEntries.map(e => Object.assign({}, e))];
+
+  // Auto-populate the name roster from extracted entries. addNamesToRoster
+  // returns a rename map for any names the user chose to snap to existing
+  // roster spellings (e.g. AI extracted "Traijo" but user kept "Traljo").
+  // Apply those renames to BOTH `entries` (so Save All persists the right
+  // spelling) AND `importEntries` (so the cached batch reflects the choice).
+  const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
+  const renames = addNamesToRoster(extractedNames) || {};
+  if(Object.keys(renames).length){
+    entries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
+    importEntries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
+  }
+
   importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
   localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-
-  // Auto-populate the name roster from extracted entries
-  const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
-  addNamesToRoster(extractedNames);
 
   // Process all imported entries for this batch (replacement = re-run all)
   const entriesToProcess = overlappingDates.length > 0 ? entries : (newEntries.length > 0 ? newEntries : entries);
@@ -10783,9 +10792,10 @@ async function acceptAllAndSave(){
   }
 
   btns.forEach(b => { b.disabled = true; });
-  // Disable Re-suggest All + Clear All Assignments immediately. Their work
-  // is moot during/after Save All. Re-enabled in the catch block on error.
-  document.querySelectorAll('.import-action-btn').forEach(b => {
+  // Disable Re-suggest All + Clear All Assignments + Extract Schedule
+  // immediately. Their work is moot during/after Save All. Re-enabled in
+  // the catch block on error.
+  document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
     b.disabled = true;
     b.style.opacity = '.5';
     b.style.cursor = 'not-allowed';
@@ -10888,6 +10898,13 @@ async function acceptAllAndSave(){
     // Card returns on next extraction (renderImportRows shows it) or restore.
     const importResults = document.getElementById('importResults');
     if(importResults) importResults.style.display = 'none';
+    // Re-enable the Extract Schedule button (currently hidden in importPreview)
+    // so the next upload's extraction works without staying greyed out.
+    document.querySelectorAll('.extract-action-btn').forEach(b => {
+      b.disabled = false;
+      b.style.opacity = '';
+      b.style.cursor = '';
+    });
     // Clear in-memory batch + DOM rows so a manual re-show would be empty.
     _currentImportEntries.length = 0;
     Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
@@ -10943,8 +10960,8 @@ async function acceptAllAndSave(){
     }
   } catch(e) {
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-    // Re-enable the ghost buttons so user can try again or clear and retry.
-    document.querySelectorAll('.import-action-btn').forEach(b => {
+    // Re-enable the ghost + extract buttons so user can try again or clear and retry.
+    document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
       b.disabled = false;
       b.style.opacity = '';
       b.style.cursor = '';
@@ -14834,6 +14851,12 @@ function namesSimilar(a, b){
 
 function addNamesToRoster(names){
   const pending = []; // names that need clarification
+  // Track renames we apply so callers can rewrite their entry objects to
+  // match the chosen canonical spelling. Without this, the extracted
+  // entries keep the AI's spelling and Save All persists the wrong name
+  // to BNSchedule — splitting one BN into two in reports. See conversation
+  // 2026-05-21 (Amila Traijo/Traljo case) for the bug.
+  const renames = {}; // { extractedSpelling: chosenCanonicalSpelling }
 
   names.forEach(rawName => {
     if(!rawName) return;
@@ -14847,28 +14870,42 @@ function addNamesToRoster(names){
     const similar = importedNames.find(existing => namesSimilar(normalized, existing));
 
     if(similar && similar !== normalized){
-      pending.push({ extracted: normalized, existing: similar });
+      pending.push({ extracted: normalized, existing: similar, raw: rawName });
     } else {
       importedNames.push(normalized);
+      if(normalized !== rawName) renames[rawName] = normalized;
     }
   });
 
   // Process pending clarifications one at a time
-  for(const { extracted, existing } of pending){
+  for(const { extracted, existing, raw } of pending){
     const response = prompt(
       `Two similar names were found — which is correct?\n\n  1 — Keep "${existing}" (existing)\n  2 — Use "${extracted}" (new version) and replace existing\n  3 — These are different people, add both\n\nEnter 1, 2, or 3:`,
       '1'
     );
     if(response === '2'){
-      // Replace existing with new version
+      // Replace existing with new version. Any previously-saved BNSchedule
+      // rows under "existing" stay under that spelling — caller's rename
+      // map handles only this batch. (Cleanup of stale BNSchedule rows is
+      // a separate manual task.)
       const idx = importedNames.indexOf(existing);
       if(idx !== -1) importedNames[idx] = extracted;
       else importedNames.push(extracted);
+      renames[raw] = extracted;
+      // Also map the existing spelling to the new one in case it appears
+      // in this batch via some prior path.
+      if(existing !== extracted) renames[existing] = extracted;
     } else if(response === '3'){
-      // Different people — add both
+      // Different people — add both. No rename: keep AI's spelling.
       if(!importedNames.includes(extracted)) importedNames.push(extracted);
+      if(extracted !== raw) renames[raw] = extracted;
+    } else {
+      // response === '1' or anything else — keep existing, snap extracted to it.
+      // This is the case Tomas hits with Traijo → Traljo: roster keeps Traljo,
+      // and the extracted entries in this batch get renamed to Traljo too.
+      renames[raw] = existing;
+      if(extracted !== existing) renames[extracted] = existing;
     }
-    // response === '1' or anything else — keep existing, discard extracted
   }
 
   importedNames.sort();
@@ -14876,6 +14913,8 @@ function addNamesToRoster(names){
   renderImportedNamesList();
   populateNurseDropdown();
   if (BNS.unlocked) populateBNDropdown();
+
+  return renames;
 }
 
 
