@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-72';
+const APP_VERSION = '2026-05-20-73';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10783,6 +10783,13 @@ async function acceptAllAndSave(){
   }
 
   btns.forEach(b => { b.disabled = true; });
+  // Disable Re-suggest All + Clear All Assignments immediately. Their work
+  // is moot during/after Save All. Re-enabled in the catch block on error.
+  document.querySelectorAll('.import-action-btn').forEach(b => {
+    b.disabled = true;
+    b.style.opacity = '.5';
+    b.style.cursor = 'not-allowed';
+  });
   setPhase('Preparing batch...', 'Preparing...');
   if(status) status.style.display = 'block';
 
@@ -10876,13 +10883,16 @@ async function acceptAllAndSave(){
 
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
-    collapseExtractedRows();
-    // Save All success: clear the in-memory batch and disable the three
-    // import-action controls (Re-suggest / Clear / Save All). They'll re-enable
-    // when a new extraction runs and populates fresh entries. Leaving them
-    // active would invite accidental re-suggestion of nothing or stale state.
+    // Save All success: hide the entire Extracted card. The batch is committed;
+    // showing stale rows invites confusion and a tap of Save All on nothing.
+    // Card returns on next extraction (renderImportRows shows it) or restore.
+    const importResults = document.getElementById('importResults');
+    if(importResults) importResults.style.display = 'none';
+    // Clear in-memory batch + DOM rows so a manual re-show would be empty.
     _currentImportEntries.length = 0;
     Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+    const rowsEl = document.getElementById('importRows');
+    if(rowsEl) rowsEl.innerHTML = '';
     setImportActionsActive(false);
 
     // Build assignment list immediately from saved data (no Sheets delay)
@@ -10933,6 +10943,12 @@ async function acceptAllAndSave(){
     }
   } catch(e) {
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    // Re-enable the ghost buttons so user can try again or clear and retry.
+    document.querySelectorAll('.import-action-btn').forEach(b => {
+      b.disabled = false;
+      b.style.opacity = '';
+      b.style.cursor = '';
+    });
     status.textContent = `⚠ Batch failed: ${e.message}. Try saving individually.`;
     console.error('acceptAllAndSave batch error:', e);
   }
