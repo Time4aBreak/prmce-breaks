@@ -287,7 +287,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <span id="submitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="clearPending()">Clear</button>
-          <button class="btn btn-primary" onclick="submitClaims()" id="submitBtn">Submit</button>
+          <button class="btn btn-primary" onclick="safeAsync(submitClaims)" id="submitBtn">Submit</button>
         </div>
       </div>
     </div>
@@ -490,7 +490,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
         <div id="bnDefaultGrid" class="bn-slot-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px;margin-bottom:12px"></div>
         <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="saveAndApplyDefault(this)">
+          <button class="btn btn-success btn-sm bn-apply-all" id="bnApplyAllBtn" onclick="safeAsync(saveAndApplyDefault, this)">
             Apply to all shifts
           </button>
           <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
@@ -803,7 +803,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="bnFilterRow" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:11px"></div>
       <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
       <div style="margin-top:10px">
-        <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="dedupAssignments()">🧹 Remove duplicate assignments</button>
+        <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate assignments</button>
         <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations'})">↺ Recalculate all rotations</button>
       </div>
     </div>
@@ -834,7 +834,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="card-label" style="margin:0">📢 App Version</div>
           <div id="appVersionLine" style="font-size:.85rem;color:var(--muted);margin-top:6px">Loading…</div>
         </div>
-        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="pushAppUpdate()">Push update</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="safeAsync(pushAppUpdate)">Push update</button>
       </div>
     </div>
 
@@ -954,8 +954,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
-      <button class="btn btn-primary" id="manageTransferBtn" onclick="manageSlotAction('transfer')">Transfer to another nurse</button>
-      <button class="btn btn-danger" id="manageCancelBtn" onclick="this.disabled=true;this.textContent='Cancelling…';manageSlotAction('cancel')">Give up this break time</button>
+      <button class="btn btn-primary" id="manageTransferBtn" onclick="safeAsync(manageSlotAction, 'transfer')">Transfer to another nurse</button>
+      <button class="btn btn-danger" id="manageCancelBtn" onclick="this.disabled=true;this.textContent='Cancelling…';safeAsync(manageSlotAction, 'cancel')">Give up this break time</button>
       <button class="btn btn-ghost" onclick="closeManageModal()">Go back</button>
     </div>
   </div>
@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-76';
+const APP_VERSION = '2026-05-20-78';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9137,7 +9137,7 @@ async function clearSimData(){
   // below via clearSheet(LISTS.state), so dropping local mirrors here is
   // sufficient — the warm-on-next-suggest will find BNState empty.
   Object.keys(localStorage).filter(k =>
-    k.startsWith('bnNurseHistory_') || k.startsWith('bnWingHistory_') ||
+    k.startsWith('bnWingHistory_') ||
     k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
     k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
     k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
@@ -9600,6 +9600,25 @@ function toast(msg,err=false){
   t.classList.add('show');
   clearTimeout(_toastT);
   _toastT=setTimeout(()=>t.classList.remove('show'),8000);
+}
+
+// Wraps an async function call from an HTML onclick attribute. Without this,
+// an uncaught rejection in an async onclick is silent in some browsers (or
+// shows only as an "Uncaught (in promise)" warning that's easy to miss),
+// surfacing as a hard-to-debug "nothing happened" bug. See the 2026-05-22
+// "no rows after extraction" investigation for a concrete example of how
+// painful these silent failures get.
+//
+// Usage from HTML:
+//   onclick="safeAsync(submitClaims)"
+//   onclick="safeAsync(saveAndApplyDefault, this)"
+//   onclick="safeAsync(manageSlotAction, 'transfer')"
+function safeAsync(fn, ...args){
+  return Promise.resolve().then(() => fn(...args)).catch(e => {
+    console.error('[safeAsync]', (fn && fn.name) || 'anonymous', 'failed:', e);
+    const msg = (e && e.message) || String(e) || 'Unknown error';
+    toast(`${(fn && fn.name) || 'Operation'} failed: ${msg}`, true);
+  });
 }
 
 // Global busy overlay — shown during multi-step async operations so the user
@@ -14683,11 +14702,12 @@ async function populateNurseDropdown(){
 
   const combined = [...new Set([...fromImport, ...fromScheds])].sort();
 
-  // Other BNs from the master roster who AREN'T already in combined. Adding
-  // these as a second group lets admin assign a BN to a date they weren't
-  // originally scheduled for (the most common reason to use the manual text
-  // input). Manual typing led to data-format bugs where typed first names
-  // saved as-is and broke downstream queries.
+  // Other BNs from the master roster who AREN'T already in combined. The
+  // top section shows BNs actually scheduled on this date+shift (prominent);
+  // the optgroup below lets admin assign someone who wasn't on the imported
+  // schedule (an ad-hoc pickup) without having to type the name manually.
+  // Manual typing led to data-format bugs where typed first names saved
+  // as-is and broke downstream queries.
   const others = (typeof importedNames !== 'undefined' && Array.isArray(importedNames))
     ? importedNames.filter(n => n && !combined.includes(n)).sort()
     : [];
@@ -14698,7 +14718,9 @@ async function populateNurseDropdown(){
       html += combined.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
     }
     if(others.length){
-      // Optgroup separates the two lists visually
+      // Optgroup separates the two lists visually. Label varies based on
+      // whether anyone is scheduled: when nobody is, the optgroup contents
+      // ARE the full roster.
       const groupLabel = combined.length ? '— Other Break Nurses —' : '— All Break Nurses —';
       html += `<optgroup label="${groupLabel}">` +
               others.map(n => `<option value="${n}">${firstName(n)}</option>`).join('') +
