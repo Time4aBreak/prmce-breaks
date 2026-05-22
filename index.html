@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-78';
+const APP_VERSION = '2026-05-20-79';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2575,20 +2575,30 @@ const SLOT_TIERS = {
     earlyLow:    s => { const m = sortKey(s,'Noc'); return m >= sortKey('2015','Noc') && m <= sortKey('2135','Noc'); },
     // NOTE: sortKey already adds +1440 to post-midnight Noc slots, so the
     // right-hand side of these comparisons must NOT add another +1440.
-    // Earlier versions did, which made lateLow/thirdLow unreachable and
-    // swallowed those slots into prime — breaking both the per-tier report
-    // and the block-rotation pool split (see calculateBlockRotation).
-    prime:       s => { const m = sortKey(s,'Noc'); return m > sortKey('2135','Noc') && m < sortKey('0535','Noc'); },
-    lateLow:     s => { const m = sortKey(s,'Noc'); return m >= sortKey('0535','Noc') && m <= sortKey('0615','Noc'); },
-    thirdLow:    s => { const m = sortKey(s,'Noc'); return m > sortKey('0615','Noc') && m < sortKey('0755','Noc'); }
+    // Earlier versions did, which made lateLow unreachable and swallowed
+    // those slots into prime — breaking both the per-tier report and the
+    // block-rotation pool split (see calculateBlockRotation).
+    //
+    // 2026-05-22 tuning: 0535 moved from Late into Prime. Late now spans
+    // 0555 through 0755 (0755 only on weekends — weekday 0755 is hard-blocked
+    // for BN huddle attendance). The thirdLow tier was dropped — those
+    // post-shift-change morning slots are now grouped with Late since they
+    // behave the same operationally (low desirability, used as overflow).
+    prime:       s => { const m = sortKey(s,'Noc'); return m > sortKey('2135','Noc') && m <= sortKey('0535','Noc'); },
+    lateLow:     s => { const m = sortKey(s,'Noc'); return m >= sortKey('0555','Noc') && m <= sortKey('0755','Noc'); },
+    thirdLow:    () => false  // tier retired; kept as no-op for code paths that still reference it
   },
   Day: {
     hardBlocked: s => getDayHardBlocked().includes(s),
-    earlyLow:    s => { const m = toMin(s); return m >= toMin('0835') && m <= toMin('0915'); },
-    prime:       s => { const m = toMin(s); return m > toMin('0915') && m < toMin('1715'); },
-    lateLow:     s => { const m = toMin(s); return m >= toMin('1715') && m <= toMin('1815'); },
-    // Overlap: Day BN covers early Noc staff (6:55-8:15 PM) — separate tier to avoid contaminating prime
-    thirdLow:    s => { const m = toMin(s); return m >= toMin('1915') && m <= toMin('2015'); }
+    // 2026-05-22 tuning: 0935 moved from Prime into Early (BNs are still
+    // warming up). Prime extended on both ends: 0955-1755 (was 0935-1655),
+    // capturing the slots that staff predictably claim. Late absorbed the
+    // old Third tier: 1815, 1915, 1935, 1955 — the 1835/1855 hard-blocked
+    // gap doesn't need its own tier on either side.
+    earlyLow:    s => { const m = toMin(s); return m >= toMin('0835') && m <= toMin('0935'); },
+    prime:       s => { const m = toMin(s); return m > toMin('0935') && m < toMin('1815'); },
+    lateLow:     s => { const m = toMin(s); return m >= toMin('1815') && m <= toMin('1955'); },
+    thirdLow:    () => false  // tier retired; kept as no-op for code paths that still reference it
   }
 };
 
@@ -13627,7 +13637,9 @@ const _TIER_WING_FLOOR = {
   '3A':1,'4A':2,'5A':3,'6A':4,'7A':5,'3C':6,'4C':7,
   '6N':8,'7N':9,'8N':10,'8S':11,'9N':12,'9S':13,'10N':14,'10S':15
 };
-const _TIER_NAMES = ['earlyLow','prime','lateLow','thirdLow'];
+// 2026-05-22: thirdLow tier retired — slots moved to lateLow. Column dropped
+// from the per-tier report below.
+const _TIER_NAMES = ['earlyLow','prime','lateLow'];
 
 let _tierMatrixData = { Day: [], Noc: [] };
 let _tierSort = { Day: {col:'unit', dir:'asc'}, Noc: {col:'unit', dir:'asc'} };
@@ -13680,7 +13692,7 @@ function _computeTierMatrix(scheds, bnBreaks, shift, datesByShift){
       unit: u,
       shiftsOpen: m.open,
       shiftsTotal: datesByShift.size,
-      earlyLow: m.earlyLow, prime: m.prime, lateLow: m.lateLow, thirdLow: m.thirdLow,
+      earlyLow: m.earlyLow, prime: m.prime, lateLow: m.lateLow,
       totalRaw, totalEff
     };
   });
@@ -13710,7 +13722,6 @@ function _renderTierMatrix(rows, shift){
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','earlyLow')">Early${ind('earlyLow')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','prime')">Prime${ind('prime')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','lateLow')">Late${ind('lateLow')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','thirdLow')">Third${ind('thirdLow')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','total')">Total${ind('total')}</th>
   </tr>`;
 
@@ -13722,7 +13733,6 @@ function _renderTierMatrix(rows, shift){
       <td style="${tdStyle}">${r.earlyLow.eff}/${r.earlyLow.raw}</td>
       <td style="${tdStyle}">${r.prime.eff}/${r.prime.raw}</td>
       <td style="${tdStyle}">${r.lateLow.eff}/${r.lateLow.raw}</td>
-      <td style="${tdStyle}">${r.thirdLow.eff}/${r.thirdLow.raw}</td>
       <td style="${tdStyle};font-weight:600">${r.totalEff}/${r.totalRaw}</td>
     </tr>`;
   }).join('');
