@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-75';
+const APP_VERSION = '2026-05-20-76';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -10366,15 +10366,21 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
+  // DIAGNOSTIC build 76 — trace where execution stops when rows don't appear.
+  // Remove these logs once root cause is identified.
+  console.log('[render] entry — entries=', entries.length, 'forceReplace=', forceReplace);
+  try {
   // New batch incoming → re-enable Re-suggest / Clear / Save All. They may
   // have been disabled by a previous Save All success.
   setImportActionsActive(true);
   const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+  console.log('[render] existingEntries from localStorage=', existingEntries.length);
 
   // Find overlapping dates between new import and existing entries
   const newDates = [...new Set(entries.map(e => e.date))];
   const existingDates = new Set(existingEntries.map(e => e.date));
   const overlappingDates = newDates.filter(d => existingDates.has(d));
+  console.log('[render] newDates=', newDates, 'overlappingDates=', overlappingDates);
 
   let replacementNotice = '';
 
@@ -10413,7 +10419,9 @@ async function renderImportRows(entries, forceReplace = false){
   // Apply those renames to BOTH `entries` (so Save All persists the right
   // spelling) AND `importEntries` (so the cached batch reflects the choice).
   const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
+  console.log('[render] before addNamesToRoster, extractedNames=', extractedNames.length);
   const renames = addNamesToRoster(extractedNames) || {};
+  console.log('[render] after addNamesToRoster, renames=', renames);
   if(Object.keys(renames).length){
     entries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
     importEntries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
@@ -10421,12 +10429,16 @@ async function renderImportRows(entries, forceReplace = false){
 
   importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
   localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
+  console.log('[render] persisted bnImportedEntries with', importEntries.length, 'entries');
 
   // Process all imported entries for this batch (replacement = re-run all)
   const entriesToProcess = overlappingDates.length > 0 ? entries : (newEntries.length > 0 ? newEntries : entries);
+  console.log('[render] entriesToProcess=', entriesToProcess.length, '(newEntries=', newEntries.length, ', overlap=', overlappingDates.length, ')');
 
   const wrap = document.getElementById('importRows');
+  console.log('[render] wrap element exists=', !!wrap);
   if (!entries.length) {
+    console.log('[render] BAILING — entries.length === 0');
     wrap.innerHTML = '<div class="empty">No schedule entries found. Try a clearer screenshot.</div>';
     document.getElementById('importResults').style.display = 'block';
     updateAcceptBars();
@@ -10460,10 +10472,13 @@ async function renderImportRows(entries, forceReplace = false){
   // Show progress indicator while computing suggestions
   const _importWrap = document.getElementById('importRows');
   const _totalDateShifts = new Set(entriesToProcess.map(e => `${e.date}|${e.shift}`)).size;
+  console.log('[render] before display:block — shiftsNeeded=', shiftsNeeded, 'totalDateShifts=', _totalDateShifts);
   if(_importWrap) renderProgressBar(_importWrap, '✨ Computing suggestions', _totalDateShifts);
   document.getElementById('importResults').style.display = 'block';
   expandExtractedRows();
+  console.log('[render] display:block set, expanded, awaiting coverage counts...');
   await Promise.allSettled(shiftsNeeded.map(sh => getUnitCoverageCounts(sh)));
+  console.log('[render] coverage counts done, starting suggestion loop');
 
   const allSuggestions = {};
   // Process dates in chronological order so wing history and counts accumulate correctly
@@ -10543,6 +10558,12 @@ async function renderImportRows(entries, forceReplace = false){
       const el = document.getElementById(`iu-${i}-${u}`);
       if(el) el.classList.add('on');
     });
+  }
+  console.log('[render] DONE — rendered', entriesToProcess.length, 'rows');
+  } catch(err) {
+    console.error('[render] EXCEPTION caught:', err);
+    console.error('[render] stack:', err && err.stack);
+    throw err;
   }
 }
 
