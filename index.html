@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-70';
+const APP_VERSION = '2026-05-20-71';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1740,11 +1740,18 @@ async function _spGetReal(list, filter=''){
 }
 
 async function _spPostReal(list, data){
-  const d = await gasCall({
-    action: 'post',
-    sheet: list,
-    data: encodeURIComponent(JSON.stringify(data))
-  });
+  // GET URL length tops out around 8 KB (browser + Google edge limits). For
+  // large payloads — most often BNState writes like bnImportedEntries — the
+  // request gets rejected before Apps Script sees it, and the rejection has
+  // no CORS headers so the browser surfaces it as a CORS error. Route those
+  // through POST body instead. Small writes stay on GET to keep gasCall's
+  // built-in retry-on-transient-failure behavior. Threshold is conservative
+  // (3 KB of data → total URL well under 4 KB even with base + token).
+  const dataStr = encodeURIComponent(JSON.stringify(data));
+  const params = { action: 'post', sheet: list, data: dataStr };
+  const d = dataStr.length > 3000
+    ? await gasCallPost(params)
+    : await gasCall(params);
   if(d && d.error === 'SLOT_TAKEN'){
     // Server-side race condition detected — another nurse saved first
     throw new Error(`SLOT_TAKEN:${d.takenBy || 'another nurse'}`);
@@ -1812,12 +1819,16 @@ async function spBatchGet(queries){
 }
 
 async function _spPatchReal(list, id, data){
-  await gasCall({
-    action: 'patch',
-    sheet: list,
-    id: String(id),
-    data: encodeURIComponent(JSON.stringify(data))
-  });
+  // Same GET-URL-length issue as _spPostReal: large patch payloads (e.g.
+  // updating BNState rows with big Value blobs) hit the 8 KB limit and fail
+  // as CORS errors. Route those over POST body. See _spPostReal for rationale.
+  const dataStr = encodeURIComponent(JSON.stringify(data));
+  const params = { action: 'patch', sheet: list, id: String(id), data: dataStr };
+  if(dataStr.length > 3000){
+    await gasCallPost(params);
+  } else {
+    await gasCall(params);
+  }
 }
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
