@@ -728,8 +728,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer" onclick="toggleExtractedRows()">
           <div style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Extracted — Review &amp; Assign Units</div>
           <div style="display:flex;align-items:center;gap:8px">
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();resuggestAll()" style="font-size:.72rem">↺ Re-suggest All</button>
-            <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Assignments</button>
+            <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();resuggestAll()" style="font-size:.72rem">↺ Re-suggest All</button>
+            <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Assignments</button>
             <span id="extractedChevron" style="font-size:.85rem;color:var(--muted)">▲</span>
           </div>
         </div>
@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-71';
+const APP_VERSION = '2026-05-20-72';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8004,6 +8004,19 @@ function expandExtractedRows(){
   if(chev) chev.textContent = '▼';
 }
 
+// After Save All succeeds, the extracted-entries batch has been committed.
+// Re-running Re-suggest / Clear / Save All would either no-op or act on stale
+// state. Disable the three controls until a fresh extraction populates new
+// entries. Re-enabled by setImportActionsActive(true) which fires at the
+// start of each new extraction batch (renderImportRows / restoreLastImport).
+function setImportActionsActive(active){
+  document.querySelectorAll('.import-action-btn, .accept-all-btn').forEach(b => {
+    b.disabled = !active;
+    b.style.opacity = active ? '' : '.5';
+    b.style.cursor = active ? '' : 'not-allowed';
+  });
+}
+
 function editSavedRow(i){
   // Re-enable unit buttons for this row
   const savedEl = document.getElementById(`saved-${i}`);
@@ -10072,6 +10085,8 @@ async function restoreLastImport(){
     toast('No previous import to restore', true);
     return;
   }
+  // Restored batch → re-enable Re-suggest / Clear / Save All.
+  setImportActionsActive(true);
   clearCoverageCountsCache(); // fresh fetch, then cache for duration
   const banner = document.getElementById('importRestoreBanner');
   if(banner) banner.style.display = 'none';
@@ -10351,6 +10366,9 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
+  // New batch incoming → re-enable Re-suggest / Clear / Save All. They may
+  // have been disabled by a previous Save All success.
+  setImportActionsActive(true);
   const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
 
   // Find overlapping dates between new import and existing entries
@@ -10859,6 +10877,13 @@ async function acceptAllAndSave(){
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
     collapseExtractedRows();
+    // Save All success: clear the in-memory batch and disable the three
+    // import-action controls (Re-suggest / Clear / Save All). They'll re-enable
+    // when a new extraction runs and populates fresh entries. Leaving them
+    // active would invite accidental re-suggestion of nothing or stale state.
+    _currentImportEntries.length = 0;
+    Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+    setImportActionsActive(false);
 
     // Build assignment list immediately from saved data (no Sheets delay)
     const savedScheds = records.map((r, idx) => ({
