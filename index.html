@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-83';
+const APP_VERSION = '2026-05-20-84';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8055,6 +8055,19 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
             run.forEach(b => flaggedNurses.push(b));
           }
         }
+      }
+    }
+
+    // Cleanup: delete the bookings that couldn't be absorbed. The run-rule
+    // rollback above accumulated them into flaggedNurses but left the
+    // BNBookings records intact, which orphaned them — staff bookings on
+    // units no BN now covers. Matches the no-otherBNs-available branch
+    // earlier, which deletes uncovered bookings outright. Cleanup BEFORE
+    // the alert so the BNBookings sheet is consistent when the user
+    // proceeds. Failures are non-fatal (alert still shows the list).
+    if(flaggedNurses.length){
+      for(const b of flaggedNurses){
+        await spDel(LISTS.bookings, b.Id).catch(e => console.warn(`Booking ${b.Id} cleanup failed:`, e.message));
       }
     }
 
