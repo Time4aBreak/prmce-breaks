@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-81';
+const APP_VERSION = '2026-05-20-83';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2536,6 +2536,26 @@ function staffWindowOpen(viewingShift){
 // True if an assignment's shift has fully ended (post-clockout). Used to hide
 // management buttons on past shifts that happen to still be "today's date."
 // Day shift ends at 20:30 (same day). Noc shift ends at 08:30 (next day).
+// Returns true if staff for this shift have already arrived on the floor.
+// "Staff arrival" = beginning of staff working hours, NOT BN working hours.
+// Day staff arrive at 06:30 (SIGNUP_OPEN_DAY); Noc staff arrive at 18:30.
+// Used by the Mark Unavailable / Mark Available flows to decide whether a
+// shift is "current" (absorb only — staff are operationally on the floor)
+// vs "future" (recalc fairness — no breaks are happening yet, safe to
+// redistribute units cleanly across remaining BNs). A Day BN marked
+// unavailable at 05:58 on the date of their shift counts as FUTURE since
+// staff don't arrive until 06:30 — there's still time to recalc.
+function staffShiftHasStarted(shiftDateStr, shiftType, asOf){
+  if(!shiftDateStr) return false;
+  const d = shiftDateStr.slice(0,10);
+  const startMin = shiftType === 'Day' ? SIGNUP_OPEN_DAY : SIGNUP_OPEN_NOC;
+  const hh = String(Math.floor(startMin / 60)).padStart(2,'0');
+  const mm = String(startMin % 60).padStart(2,'0');
+  const startDt = new Date(`${d}T${hh}:${mm}:00`);
+  const now = asOf ? new Date(asOf) : new Date();
+  return now >= startDt;
+}
+
 function shiftIsOver(shiftDateStr, shiftType){
   if(!shiftDateStr) return false;
   const d = shiftDateStr.slice(0,10);
@@ -4975,6 +4995,61 @@ async function recalculateRotation(bnName, date, shift){
   return rotation;
 }
 
+// Re-runs the fairness suggester for all active BNs on a date+shift, then
+// patches each BN's Units and refreshes their rotation. Called after Mark
+// Unavailable / Mark Available on a FUTURE shift (i.e., before staff arrive
+// per staffShiftHasStarted), so the unit distribution remains fair even
+// after a BN drops out or returns. Skips supplementals and inactive rows.
+//
+// options.excluding: name of a BN to exclude from the recalc pool (e.g., the
+//   BN being marked unavailable, whose row is already flipped inactive but
+//   may not yet reflect in the spGet result). If omitted, all active rows
+//   are included — appropriate when marking AVAILABLE since the returning
+//   BN belongs in the pool.
+//
+// Returns { recalced: [names], reason? } for caller feedback.
+async function recalcFairnessForShift(date, shift, options={}){
+  const all = await spGet(LISTS.schedule,
+    `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+  const active = all.filter(s =>
+    s.Status !== 'inactive' &&
+    !s.IsSupplemental &&
+    s.BreakNurseName !== options.excluding
+  );
+  if(!active.length){
+    return { recalced: [], reason: 'no-active-bns' };
+  }
+
+  const nurseNames = active.map(s => s.BreakNurseName);
+  // suggestAssignments writes wing history as a side effect (per-BN, per-date).
+  // The date-keyed dedup inside _savePartialWingHistory ensures any prior
+  // entries for these BNs on this date get overwritten with the new fair
+  // distribution, which is the correct behavior post-recalc.
+  const suggestions = await suggestAssignments(nurseNames, shift, date);
+
+  // Patch each BN's Units and refresh their rotation. Done sequentially to
+  // avoid hammering Sheets and to keep error attribution clean — if one
+  // patch fails we want to know which BN broke.
+  const succeeded = [];
+  const failed = [];
+  for(const s of active){
+    try {
+      const newUnits = suggestions[s.BreakNurseName] || [];
+      await spPatch(LISTS.schedule, s.Id, { Units: JSON.stringify(newUnits) });
+      // Best-effort rotation refresh — non-fatal if it fails; the unit
+      // assignment is the durable truth, rotation is a cache.
+      recalculateRotation(s.BreakNurseName, date, shift).catch(e =>
+        console.warn(`Rotation refresh failed for ${s.BreakNurseName}:`, e.message)
+      );
+      succeeded.push(s.BreakNurseName);
+    } catch(e){
+      console.error(`Recalc patch failed for ${s.BreakNurseName}:`, e);
+      failed.push({ name: s.BreakNurseName, error: e.message });
+    }
+  }
+  return { recalced: succeeded, failed };
+}
+
 let _loadSlotsGen = 0; // generation counter to discard stale async results
 
 async function loadSlots(silent=false){
@@ -7051,6 +7126,36 @@ async function confirmMarkUnavailable(schedId, bnName, date, shift){
   let bnUnits = [];
   try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
+  // Future-shift modal: staff haven't arrived yet, so the operation is
+  // unit redistribution (fairness recalc), not booked-break absorption.
+  // Show a simpler 2-button confirm that explains what'll happen. The
+  // return value just needs to be 'give' (proceed) or 'back' (cancel);
+  // processBNUnavailability checks staffShiftHasStarted independently and
+  // bypasses absorption for future shifts regardless.
+  if(!staffShiftHasStarted(date, shift)){
+    const remainingActive = allScheds.filter(s =>
+      String(s.Id) !== String(schedId) &&
+      s.Status !== 'inactive' &&
+      !s.IsSupplemental &&
+      s.BreakNurseName !== bnName
+    );
+    const remainingNames = [...new Set(remainingActive.map(s => firstName(s.BreakNurseName)))];
+    const unitsLabel = bnUnits.length ? bnUnits.join(', ') : '(no units)';
+    let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
+
+Covering: ${unitsLabel}
+
+This is a future shift — staff haven't started yet. ${firstName(bnName)}'s units will be redistributed for fairness across remaining BNs${remainingNames.length ? ' (' + remainingNames.join(', ') + ')' : ''}.`;
+    if(!remainingActive.length){
+      msg += `
+
+⚠️ No other BNs are scheduled. The shift will have no break coverage.`;
+    }
+    const proceed = await customConfirm(msg, `Mark unavailable`, `Go back`);
+    return proceed ? 'give' : 'back';
+  }
+
+  // ── Current shift: existing 3-button modal continues below ──
   // Staff bookings on this BN's units that haven't yet passed
   const affectedBookings = allBookings.filter(b =>
     isStaffBooking(b) && bnUnits.includes(b.Unit) &&
@@ -7285,14 +7390,35 @@ async function markBNAvailable(schedId, bnName){
         }
       }
       await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
-      const bnDef = getDefaultTemplate(bnName, ShiftType);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
+      // Future-shift reactivation: staff haven't arrived yet, so we can
+      // safely rebalance unit distribution across all active BNs (including
+      // the now-returning one). The unavailability path used recalcFairness
+      // to redistribute units; the available path mirrors it symmetrically.
+      // For current-shift reactivation, existing per-BN rotation logic
+      // below preserves the in-progress shift's stability.
+      if(!staffShiftHasStarted(dStr, ShiftType)){
+        try {
+          await recalcFairnessForShift(dStr, ShiftType);
+          hideBusy();
+          toast(`${firstName(bnName)} is back on — assignments rebalanced for fairness.`);
+        } catch(e){
+          hideBusy();
+          console.error('Reactivation fairness recalc failed:', e);
+          toast(`${firstName(bnName)} reactivated, but rebalance failed: ${e.message}`, true);
+        }
       } else {
-        await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
+        // Current-shift: keep existing per-BN rotation refresh (don't
+        // disrupt other BNs mid-shift). Apply Lindsay's default template
+        // if she has one, else just recompute her rotation from her Units.
+        const bnDef = getDefaultTemplate(bnName, ShiftType);
+        if(bnDef && bnDef.length > 0){
+          await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
+        } else {
+          await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
+        }
+        hideBusy();
+        toast(`${firstName(bnName)} is back on — assignment reactivated.`);
       }
-      hideBusy();
-      toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     } else {
       // Don't take back: leave supplementals intact, leave Tess's record
       // inactive on this shift. Outage bookings are already stamped above
@@ -7486,14 +7612,30 @@ async function toggleSelfAvailability(){
             }
           }
           await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-          const bnDef = getDefaultTemplate(BNS.name, shift);
-          if(bnDef && bnDef.length > 0){
-            await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
+          // Future-shift reactivation mirrors markBNAvailable: when staff
+          // haven't arrived yet, rebalance units across all active BNs
+          // (including the returning one). For current shift, keep the
+          // existing per-BN rotation refresh to avoid mid-shift chaos.
+          if(!staffShiftHasStarted(dt, shift)){
+            try {
+              await recalcFairnessForShift(dt, shift);
+              hideBusy();
+              toast(`${firstName(BNS.name)} is back on — assignments rebalanced for fairness.`);
+            } catch(e){
+              hideBusy();
+              console.error('Self-reactivation fairness recalc failed:', e);
+              toast(`${firstName(BNS.name)} reactivated, but rebalance failed: ${e.message}`, true);
+            }
           } else {
-            await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+            const bnDef = getDefaultTemplate(BNS.name, shift);
+            if(bnDef && bnDef.length > 0){
+              await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
+            } else {
+              await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
+            }
+            hideBusy();
+            toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
           }
-          hideBusy();
-          toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
           loadBNConfirm();
           finalInactive = false; // flipped to active
         } else {
@@ -7611,6 +7753,34 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       await spDel(LISTS.bookings, b.Id).catch(()=>{});
     }
 
+    // Branch on staff arrival. Pre-staff-arrival (future shift) → run a
+    // full fairness recalc across remaining BNs; no need to "absorb" booked
+    // breaks one-by-one since (a) future bookings are rare and (b) any that
+    // exist will follow their unit's new owner automatically (bookings are
+    // unit-bound, not BN-bound). Post-staff-arrival (current shift) →
+    // continue with the existing absorption flow; mid-shift unit
+    // redistribution would chaos already-running operations.
+    if(!staffShiftHasStarted(date, shift)){
+      try {
+        const summary = await recalcFairnessForShift(date, shift, { excluding: bnName });
+        hideBusy();
+        const names = summary.recalced.map(n => firstName(n));
+        const namesStr = names.length === 0 ? 'no remaining BNs'
+          : names.length === 1 ? names[0]
+          : names.length === 2 ? `${names[0]} and ${names[1]}`
+          : `${names.slice(0,-1).join(', ')}, and ${names[names.length-1]}`;
+        toast(`${firstName(bnName)} marked unavailable. Units redistributed to ${namesStr}.`);
+      } catch(e){
+        hideBusy();
+        console.error('Future-shift recalc failed:', e);
+        toast(`${firstName(bnName)} marked unavailable, but unit redistribution failed: ${e.message}. Reassign manually.`, true);
+      }
+      loadAssignments();
+      notifyProdLogChanged(bnName);
+      return;
+    }
+
+    // ── Current shift: existing absorption logic continues below ──
     // Only future uncovered claimed staff breaks on BN-A's units
     // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
     const uncovered = allBookings.filter(b =>
@@ -8797,7 +8967,9 @@ async function loadAssignments(){
                 ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
                 ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
-                ${s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-danger btn-sm" onclick="this.disabled=true;this.textContent='Removing…';delAssign(${s.Id})">Remove</button>` : ''}
+                <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
+                     now lives in the Break Nurses roster card (BN quit / fired scenario). Row-level
+                     Unavailable handles the "out for this shift" case with reversible semantics. -->
               </div>
             </div>
             <div class="unit-tags">${units.map(u => {
@@ -9993,6 +10165,31 @@ async function runImport(){
       }
       _validEntries.push(e);
     });
+
+    // Anomaly check: partial-shift entry on a date+shift that already has 3+
+    // full BNs. Per current policy, three full BNs is the standard maximum
+    // coverage for a shift — a fourth BN (especially a partial) is unusual
+    // and worth review. Could indicate (a) the AI mis-classified hours so
+    // a full shift is appearing as partial, (b) a one-off pickup that the
+    // BN actually wants assigned manually rather than auto-suggested, or
+    // (c) a legitimate overflow situation. Flagging surfaces the decision.
+    const _fullByDateShift = {};
+    _validEntries.forEach(e => {
+      if(e.isPartial) return;
+      const key = `${e.date}|${e.shift}`;
+      _fullByDateShift[key] = (_fullByDateShift[key] || 0) + 1;
+    });
+    _validEntries.forEach(e => {
+      if(!e.isPartial) return;
+      if(e.isFlagged) return; // already flagged for another reason
+      const key = `${e.date}|${e.shift}`;
+      if((_fullByDateShift[key] || 0) >= 3){
+        e.isFlagged = true;
+        e.flagReason = `partial on ${e.shift} with ${_fullByDateShift[key]} full BNs — unusual coverage level`;
+        _flagCount++;
+      }
+    });
+
     // Always log a summary + the first raw entry. Cheap, but lets us diagnose
     // when the AI omits/mistypes fields. Surface anything suspicious here.
     console.log('[extraction] AI returned', entries.length, 'entries · kept', _validEntries.length - _flagCount, '· flagged', _flagCount, '· partials tagged', _partialCount);
@@ -10435,21 +10632,20 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
-  // DIAGNOSTIC build 76 — trace where execution stops when rows don't appear.
-  // Remove these logs once root cause is identified.
-  console.log('[render] entry — entries=', entries.length, 'forceReplace=', forceReplace);
+  // The try-catch is intentional: surfaces unhandled errors as toasts via the
+  // catch block at the bottom. Without it, async failures here would swallow
+  // silently and present as "nothing happened after extraction" — a class of
+  // bug we hit hard during the build 75/76 era.
   try {
   // New batch incoming → re-enable Re-suggest / Clear / Save All. They may
   // have been disabled by a previous Save All success.
   setImportActionsActive(true);
   const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
-  console.log('[render] existingEntries from localStorage=', existingEntries.length);
 
   // Find overlapping dates between new import and existing entries
   const newDates = [...new Set(entries.map(e => e.date))];
   const existingDates = new Set(existingEntries.map(e => e.date));
   const overlappingDates = newDates.filter(d => existingDates.has(d));
-  console.log('[render] newDates=', newDates, 'overlappingDates=', overlappingDates);
 
   let replacementNotice = '';
 
@@ -10488,9 +10684,7 @@ async function renderImportRows(entries, forceReplace = false){
   // Apply those renames to BOTH `entries` (so Save All persists the right
   // spelling) AND `importEntries` (so the cached batch reflects the choice).
   const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
-  console.log('[render] before addNamesToRoster, extractedNames=', extractedNames.length);
   const renames = addNamesToRoster(extractedNames) || {};
-  console.log('[render] after addNamesToRoster, renames=', renames);
   if(Object.keys(renames).length){
     entries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
     importEntries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
@@ -10498,16 +10692,12 @@ async function renderImportRows(entries, forceReplace = false){
 
   importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
   localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-  console.log('[render] persisted bnImportedEntries with', importEntries.length, 'entries');
 
   // Process all imported entries for this batch (replacement = re-run all)
   const entriesToProcess = overlappingDates.length > 0 ? entries : (newEntries.length > 0 ? newEntries : entries);
-  console.log('[render] entriesToProcess=', entriesToProcess.length, '(newEntries=', newEntries.length, ', overlap=', overlappingDates.length, ')');
 
   const wrap = document.getElementById('importRows');
-  console.log('[render] wrap element exists=', !!wrap);
   if (!entries.length) {
-    console.log('[render] BAILING — entries.length === 0');
     wrap.innerHTML = '<div class="empty">No schedule entries found. Try a clearer screenshot.</div>';
     document.getElementById('importResults').style.display = 'block';
     updateAcceptBars();
@@ -10541,13 +10731,10 @@ async function renderImportRows(entries, forceReplace = false){
   // Show progress indicator while computing suggestions
   const _importWrap = document.getElementById('importRows');
   const _totalDateShifts = new Set(entriesToProcess.map(e => `${e.date}|${e.shift}`)).size;
-  console.log('[render] before display:block — shiftsNeeded=', shiftsNeeded, 'totalDateShifts=', _totalDateShifts);
   if(_importWrap) renderProgressBar(_importWrap, '✨ Computing suggestions', _totalDateShifts);
   document.getElementById('importResults').style.display = 'block';
   expandExtractedRows();
-  console.log('[render] display:block set, expanded, awaiting coverage counts...');
   await Promise.allSettled(shiftsNeeded.map(sh => getUnitCoverageCounts(sh)));
-  console.log('[render] coverage counts done, starting suggestion loop');
 
   const allSuggestions = {};
   // Process dates in chronological order so wing history and counts accumulate correctly
@@ -10628,10 +10815,11 @@ async function renderImportRows(entries, forceReplace = false){
       if(el) el.classList.add('on');
     });
   }
-  console.log('[render] DONE — rendered', entriesToProcess.length, 'rows');
   } catch(err) {
-    console.error('[render] EXCEPTION caught:', err);
-    console.error('[render] stack:', err && err.stack);
+    // Keep this log — it's the safety net that surfaced silent failures
+    // during build 75/76. Worth a single console.error if extraction blows up.
+    console.error('[renderImportRows] failed:', err);
+    toast('Failed to render suggestions: ' + (err && err.message ? err.message : 'Unknown error'), true);
     throw err;
   }
 }
