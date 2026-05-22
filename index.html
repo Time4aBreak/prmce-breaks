@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-84';
+const APP_VERSION = '2026-05-20-85';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2159,6 +2159,30 @@ function today(){
 }
 function localDate(d){
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Returns the Sunday (week start) of the week containing dateStr (YYYY-MM-DD).
+// Used by Scheduled Assignments week grouping. Sun-Sat aligns with the
+// typical UKG schedule cycle and most US calendar conventions.
+function weekStartSunday(dateStr){
+  const d = new Date(dateStr + 'T12:00:00');
+  d.setDate(d.getDate() - d.getDay()); // getDay(): Sunday is 0
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+// Formats a week range header label like "May 17 — May 23" or "May 31 — Jun 6"
+// when the range crosses a month boundary. Always shows both months on cross-
+// month ranges for unambiguous parsing.
+function formatWeekRange(weekStartStr){
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const start = new Date(weekStartStr + 'T12:00:00');
+  const end = new Date(start);
+  end.setDate(end.getDate() + 6);
+  const sameMonth = start.getMonth() === end.getMonth() && start.getFullYear() === end.getFullYear();
+  if(sameMonth){
+    return `${months[start.getMonth()]} ${start.getDate()} — ${end.getDate()}`;
+  }
+  return `${months[start.getMonth()]} ${start.getDate()} — ${months[end.getMonth()]} ${end.getDate()}`;
 }
 
 // Returns the correct shift date — for Noc shift after midnight, the shift started yesterday
@@ -8907,6 +8931,38 @@ function notifyProdLog3CFlipped(){
   if(typeof loadBNConfirm === 'function') loadBNConfirm();
 }
 
+// Scheduled Assignments week-grouping state. Session-only (intentionally not
+// persisted to localStorage — every fresh load of the app starts with the
+// current week expanded, others collapsed). null = uninitialized; populated
+// on first multi-week render.
+let _expandedWeeks = null;
+
+// Toggle a single week's expansion in Scheduled Assignments. Pure DOM
+// manipulation — does NOT trigger a loadAssignments re-fetch, so it's
+// instant even with hundreds of rows. State persists in _expandedWeeks
+// across in-session loadAssignments calls so internal actions (e.g., Mark
+// Unavailable) don't collapse weeks the user had open.
+function toggleWeekExpansion(weekStart){
+  if(!_expandedWeeks) _expandedWeeks = new Set();
+  const isExpanded = _expandedWeeks.has(weekStart);
+  if(isExpanded){
+    _expandedWeeks.delete(weekStart);
+  } else {
+    _expandedWeeks.add(weekStart);
+  }
+  const group = document.querySelector(`.week-group[data-week="${weekStart}"]`);
+  if(!group) return;
+  const content = group.querySelector('.week-content');
+  const chevron = group.querySelector('.week-chevron');
+  if(isExpanded){
+    if(content) content.style.display = 'none';
+    if(chevron) chevron.textContent = '▶';
+  } else {
+    if(content) content.style.display = '';
+    if(chevron) chevron.textContent = '▼';
+  }
+}
+
 async function loadAssignments(){
   clearSchedCache();
   clearCoverageCountsCache();
@@ -8958,7 +9014,10 @@ async function loadAssignments(){
     const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-    el.innerHTML = Object.entries(byDate).map(([date, items]) => {
+    // Renders a single date block (date header + all assignment cards for
+    // that date). Extracted so the same HTML can be embedded inside week
+    // groups (multi-week view) or rendered directly (single-week view).
+    const renderDateBlock = (date, items) => {
       const d = new Date(date + 'T12:00:00');
       const label = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
       return `<div style="margin-bottom:14px">
@@ -9000,7 +9059,56 @@ async function loadAssignments(){
           </div>`;
         }).join('')}
       </div>`;
-    }).join('');
+    };
+
+    // Group dates by week (Sun-Sat). If only 1 week is present, skip the
+    // week-grouping UI entirely and render dates directly (single-week
+    // filters like "This Week" / "Next Week" don't need the extra layer).
+    const byWeek = {};
+    Object.keys(byDate).forEach(date => {
+      const ws = weekStartSunday(date.slice(0,10));
+      if(!byWeek[ws]) byWeek[ws] = [];
+      byWeek[ws].push(date);
+    });
+    const weekStarts = Object.keys(byWeek).sort();
+
+    if(weekStarts.length <= 1){
+      // Single-week (or empty) — render as before, no grouping
+      el.innerHTML = Object.entries(byDate).map(([date, items]) => renderDateBlock(date, items)).join('');
+    } else {
+      // Multi-week — render with collapsible week headers. Initialize
+      // expansion state on first multi-week render of this session:
+      // current week starts expanded, others collapsed. If current week
+      // isn't in the result set (e.g., filter starts in the future), the
+      // earliest week with data gets the expansion instead — better UX
+      // than rendering everything collapsed on load.
+      if(_expandedWeeks === null){
+        _expandedWeeks = new Set();
+        const currentWk = weekStartSunday(today());
+        if(weekStarts.includes(currentWk)){
+          _expandedWeeks.add(currentWk);
+        } else {
+          _expandedWeeks.add(weekStarts[0]);
+        }
+      }
+      el.innerHTML = weekStarts.map(ws => {
+        const isExpanded = _expandedWeeks.has(ws);
+        const label = formatWeekRange(ws);
+        const datesInWeek = byWeek[ws].sort();
+        const contentHTML = datesInWeek.map(date => renderDateBlock(date, byDate[date])).join('');
+        return `<div class="week-group" data-week="${ws}" style="margin-bottom:16px">
+          <button type="button" class="week-header" onclick="toggleWeekExpansion('${ws}')"
+            style="display:flex;align-items:center;gap:10px;width:100%;text-align:left;
+                   padding:11px 14px;background:var(--card);border:1px solid var(--border);
+                   border-radius:8px;cursor:pointer;font-family:inherit;color:var(--text);
+                   margin-bottom:10px">
+            <span class="week-chevron" style="font-size:.85rem;color:var(--muted);min-width:12px">${isExpanded ? '▼' : '▶'}</span>
+            <span style="font-weight:700;font-size:.95rem;letter-spacing:.01em">${label}</span>
+          </button>
+          <div class="week-content" style="${isExpanded ? '' : 'display:none'}">${contentHTML}</div>
+        </div>`;
+      }).join('');
+    }
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(e.message)}<br><br>
       <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Loading…';Promise.resolve(loadAssignments()).finally(()=>{_b.disabled=false;_b.textContent='↺ Try again'})">↺ Try again</button></div>`;
