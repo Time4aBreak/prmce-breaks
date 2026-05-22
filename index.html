@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-79';
+const APP_VERSION = '2026-05-20-81';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -7906,6 +7906,26 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
         IsSupplemental: 1,
         CoveredFrom: bnName
       });
+      // Update wing history for the absorbing BN. They now cover their
+      // original units PLUS the absorbed units — fairness algorithm needs
+      // to see the full set so future suggestions route them away from
+      // the same wing/units. Compute from allScheds (their main + any
+      // existing supps that pre-dated this run), then union with the
+      // newly absorbed suppUnits before writing. Without this, only the
+      // delete path's wing-history clear runs; absorbers stay invisible.
+      try {
+        const priorRecords = allScheds.filter(s =>
+          s.BreakNurseName === assignedBN && s.Status !== 'inactive'
+        );
+        const unitsBefore = new Set();
+        priorRecords.forEach(s => {
+          try { JSON.parse(s.Units||'[]').forEach(u => unitsBefore.add(u)); } catch{}
+        });
+        const allCoveredUnits = [...new Set([...unitsBefore, ...suppUnits])];
+        _savePartialWingHistory(assignedBN, shift, date, allCoveredUnits);
+      } catch(e){
+        console.warn('Wing history write for absorber failed (non-fatal):', e);
+      }
       // Update rotation to include new units
       recalculateRotation(assignedBN, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
     }
@@ -8553,6 +8573,14 @@ async function saveAssign(){
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
       Units:JSON.stringify(units)
     });
+    // Update wing history so the fairness algorithm sees this manual
+    // assignment alongside suggester-generated ones. Without this, the
+    // suggester would happily re-pick these same units for this BN later
+    // because as far as it knows, they haven't covered them recently.
+    // The helper dedupes by dropping any existing entry for this date first,
+    // matching the pattern used by suggestAssignments and partial saves.
+    try { _savePartialWingHistory(nurse, shift, dt, units); }
+    catch(e){ console.warn('Wing history write failed (non-fatal):', e); }
     S.aUnits=[];
     S.editingAssignId = null;
     document.getElementById('aNurseText').value = '';
@@ -8834,6 +8862,10 @@ async function delAssign(id){
     if(!affected.length){
       if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')) return;
       await spDel(LISTS.schedule, id);
+      // Drop the wing-history entry for this BN/date so the fairness
+      // algorithm stops counting the now-removed coverage against them.
+      try { _clearWingHistoryForDate(s.BreakNurseName, s.ShiftType, s.ShiftDate.slice(0,10)); }
+      catch(e){ console.warn('Wing history clear failed (non-fatal):', e); }
       toast(`${firstName(s.BreakNurseName)}'s assignment removed.`);
       return;
     }
@@ -8869,6 +8901,14 @@ async function delAssign(id){
 
     // Permanently delete the assignment and any supplementals
     await spDel(LISTS.schedule, id);
+    // Drop the wing-history entry for this BN/date — same rationale as the
+    // no-bookings clean delete above. Note: any same-wing BNs absorbing
+    // this coverage have their BNSchedule.Units patched in
+    // processBNUnavailability, but their wing history is NOT updated there.
+    // That's a related gap to revisit if reassign-driven fairness drift
+    // becomes noticeable. For now this fix covers the direct delete case.
+    try { _clearWingHistoryForDate(s.BreakNurseName, s.ShiftType, s.ShiftDate.slice(0,10)); }
+    catch(e){ console.warn('Wing history clear failed (non-fatal):', e); }
     const suppls = await spGet(LISTS.schedule,
       `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
     for(const sup of suppls.filter(x => x.IsSupplemental == 1)){
@@ -14443,6 +14483,16 @@ function _savePartialWingHistory(name, shift, date, slots){
       units: slotsWithWing.filter(s => s.wing === w).flatMap(s => s.units)
     });
   });
+  saveNurseWingHistory(name, shift, existing);
+}
+
+// Removes any wing-history entries for the given BN/shift/date. Called from
+// delAssign so the fairness algorithm stops counting a deleted assignment
+// against the BN. Without this, a removed manual assignment would continue
+// to push future suggestions away from those units even though the BN no
+// longer covered them on that date.
+function _clearWingHistoryForDate(name, shift, date){
+  const existing = getNurseWingHistory(name, shift).filter(e => e.date !== date);
   saveNurseWingHistory(name, shift, existing);
 }
 
