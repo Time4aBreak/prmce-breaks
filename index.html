@@ -1547,7 +1547,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-85';
+const APP_VERSION = '2026-05-20-86';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5020,18 +5020,16 @@ async function recalculateRotation(bnName, date, shift){
 }
 
 // Re-runs the fairness suggester for all active BNs on a date+shift, then
-// patches each BN's Units and refreshes their rotation. Called after Mark
-// Unavailable / Mark Available on a FUTURE shift (i.e., before staff arrive
-// per staffShiftHasStarted), so the unit distribution remains fair even
-// after a BN drops out or returns. Skips supplementals and inactive rows.
+// patches each BN's Units and refreshes their rotation. As of post-build-83
+// revert (Tomas decision 2026-05-22), this is ONLY called from the roster
+// Remove cascade — when a BN quits or is fired and their units need to be
+// permanently absorbed by the remaining BNs. Mark Unavailable / Available
+// no longer invoke this (those are temporary no-ops for other BNs).
 //
 // options.excluding: name of a BN to exclude from the recalc pool (e.g., the
-//   BN being marked unavailable, whose row is already flipped inactive but
-//   may not yet reflect in the spGet result). If omitted, all active rows
-//   are included — appropriate when marking AVAILABLE since the returning
-//   BN belongs in the pool.
+//   BN being removed permanently). If omitted, all active rows are included.
 //
-// Returns { recalced: [names], reason? } for caller feedback.
+// Returns { recalced: [names], failed: [...], reason? } for caller feedback.
 async function recalcFairnessForShift(date, shift, options={}){
   const all = await spGet(LISTS.schedule,
     `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
@@ -5053,12 +5051,17 @@ async function recalcFairnessForShift(date, shift, options={}){
 
   // Patch each BN's Units and refresh their rotation. Done sequentially to
   // avoid hammering Sheets and to keep error attribution clean — if one
-  // patch fails we want to know which BN broke.
+  // patch fails we want to know which BN broke. Critical: expand 'C_PAIR'
+  // to ['3C','4C'] before stringifying — suggestAssignments returns
+  // 'C_PAIR' as a slot token, but BNSchedule.Units must contain the explicit
+  // half-units so downstream (expandCPair, recompute, display) work correctly.
+  // The import-flow does this via expandSuggestionUnits; recalc must too.
   const succeeded = [];
   const failed = [];
   for(const s of active){
     try {
-      const newUnits = suggestions[s.BreakNurseName] || [];
+      const rawSuggestions = suggestions[s.BreakNurseName] || [];
+      const newUnits = expandSuggestionUnits(rawSuggestions);
       await spPatch(LISTS.schedule, s.Id, { Units: JSON.stringify(newUnits) });
       // Best-effort rotation refresh — non-fatal if it fails; the unit
       // assignment is the durable truth, rotation is a cache.
@@ -7150,31 +7153,20 @@ async function confirmMarkUnavailable(schedId, bnName, date, shift){
   let bnUnits = [];
   try { bnUnits = JSON.parse(thisSched?.Units || '[]'); } catch{}
 
-  // Future-shift modal: staff haven't arrived yet, so the operation is
-  // unit redistribution (fairness recalc), not booked-break absorption.
-  // Show a simpler 2-button confirm that explains what'll happen. The
-  // return value just needs to be 'give' (proceed) or 'back' (cancel);
-  // processBNUnavailability checks staffShiftHasStarted independently and
-  // bypasses absorption for future shifts regardless.
+  // Future shift: no booking absorption (no bookings exist on future shifts
+  // per the Sign Up UI design), no unit redistribution either (per Tomas's
+  // post-build-83 decision — Mark Unavailable is now a temporary no-op for
+  // other BNs). Simple 2-button confirm. Returns 'give' or 'back'; the
+  // 'give' value is purely a non-back sentinel that processBNUnavailability
+  // doesn't actually use for future shifts (it short-circuits before the
+  // absorption code).
   if(!staffShiftHasStarted(date, shift)){
-    const remainingActive = allScheds.filter(s =>
-      String(s.Id) !== String(schedId) &&
-      s.Status !== 'inactive' &&
-      !s.IsSupplemental &&
-      s.BreakNurseName !== bnName
-    );
-    const remainingNames = [...new Set(remainingActive.map(s => firstName(s.BreakNurseName)))];
     const unitsLabel = bnUnits.length ? bnUnits.join(', ') : '(no units)';
-    let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
+    const msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
 
 Covering: ${unitsLabel}
 
-This is a future shift — staff haven't started yet. ${firstName(bnName)}'s units will be redistributed for fairness across remaining BNs${remainingNames.length ? ' (' + remainingNames.join(', ') + ')' : ''}.`;
-    if(!remainingActive.length){
-      msg += `
-
-⚠️ No other BNs are scheduled. The shift will have no break coverage.`;
-    }
+This is a future shift. Coverage on ${firstName(bnName)}'s units will be reduced for that shift. Other BNs' assignments are not affected. Reverse anytime with Mark Available.`;
     const proceed = await customConfirm(msg, `Mark unavailable`, `Go back`);
     return proceed ? 'give' : 'back';
   }
@@ -7416,33 +7408,20 @@ async function markBNAvailable(schedId, bnName){
       await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
       // Future-shift reactivation: staff haven't arrived yet, so we can
       // safely rebalance unit distribution across all active BNs (including
-      // the now-returning one). The unavailability path used recalcFairness
-      // to redistribute units; the available path mirrors it symmetrically.
-      // For current-shift reactivation, existing per-BN rotation logic
-      // below preserves the in-progress shift's stability.
-      if(!staffShiftHasStarted(dStr, ShiftType)){
-        try {
-          await recalcFairnessForShift(dStr, ShiftType);
-          hideBusy();
-          toast(`${firstName(bnName)} is back on — assignments rebalanced for fairness.`);
-        } catch(e){
-          hideBusy();
-          console.error('Reactivation fairness recalc failed:', e);
-          toast(`${firstName(bnName)} reactivated, but rebalance failed: ${e.message}`, true);
-        }
+      // Per Tomas's post-build-83 decision: Mark Available is now a simple
+      // reactivation regardless of staffShiftHasStarted. No fairness recalc
+      // — the BN comes back with their original Units intact (the row was
+      // never modified during unavailability, only Status was flipped),
+      // and other BNs are unchanged. Permanent redistribution lives in
+      // the roster-card Remove cascade instead.
+      const bnDef = getDefaultTemplate(bnName, ShiftType);
+      if(bnDef && bnDef.length > 0){
+        await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
       } else {
-        // Current-shift: keep existing per-BN rotation refresh (don't
-        // disrupt other BNs mid-shift). Apply Lindsay's default template
-        // if she has one, else just recompute her rotation from her Units.
-        const bnDef = getDefaultTemplate(bnName, ShiftType);
-        if(bnDef && bnDef.length > 0){
-          await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
-        } else {
-          await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
-        }
-        hideBusy();
-        toast(`${firstName(bnName)} is back on — assignment reactivated.`);
+        await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
       }
+      hideBusy();
+      toast(`${firstName(bnName)} is back on — assignment reactivated.`);
     } else {
       // Don't take back: leave supplementals intact, leave Tess's record
       // inactive on this shift. Outage bookings are already stamped above
@@ -7636,30 +7615,18 @@ async function toggleSelfAvailability(){
             }
           }
           await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-          // Future-shift reactivation mirrors markBNAvailable: when staff
-          // haven't arrived yet, rebalance units across all active BNs
-          // (including the returning one). For current shift, keep the
-          // existing per-BN rotation refresh to avoid mid-shift chaos.
-          if(!staffShiftHasStarted(dt, shift)){
-            try {
-              await recalcFairnessForShift(dt, shift);
-              hideBusy();
-              toast(`${firstName(BNS.name)} is back on — assignments rebalanced for fairness.`);
-            } catch(e){
-              hideBusy();
-              console.error('Self-reactivation fairness recalc failed:', e);
-              toast(`${firstName(BNS.name)} reactivated, but rebalance failed: ${e.message}`, true);
-            }
+          // Per Tomas's post-build-83 decision: Mark Available is now a
+          // simple reactivation regardless of staffShiftHasStarted. No
+          // fairness recalc. Apply default template or recompute rotation
+          // for the returning BN only; other BNs unchanged.
+          const bnDef = getDefaultTemplate(BNS.name, shift);
+          if(bnDef && bnDef.length > 0){
+            await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
           } else {
-            const bnDef = getDefaultTemplate(BNS.name, shift);
-            if(bnDef && bnDef.length > 0){
-              await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
-            } else {
-              await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
-            }
-            hideBusy();
-            toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
+            await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
           }
+          hideBusy();
+          toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
           loadBNConfirm();
           finalInactive = false; // flipped to active
         } else {
@@ -7777,28 +7744,18 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       await spDel(LISTS.bookings, b.Id).catch(()=>{});
     }
 
-    // Branch on staff arrival. Pre-staff-arrival (future shift) → run a
-    // full fairness recalc across remaining BNs; no need to "absorb" booked
-    // breaks one-by-one since (a) future bookings are rare and (b) any that
-    // exist will follow their unit's new owner automatically (bookings are
-    // unit-bound, not BN-bound). Post-staff-arrival (current shift) →
-    // continue with the existing absorption flow; mid-shift unit
-    // redistribution would chaos already-running operations.
+    // Branch on staff arrival. Pre-staff-arrival (future shift) → just
+    // mark inactive; no recalc, no booking absorption. Per Tomas's
+    // decision 2026-05-22 (post-build-83 review): future-shift Mark
+    // Unavailable should be a temporary no-op for other BNs. The removed
+    // BN's units simply go uncovered for that shift. Other BNs continue
+    // their normal assignments. Mark Available reverses cleanly because
+    // nothing was changed in the first place. The permanent
+    // redistribution case (BN quits / fired) lives in the roster-card
+    // Remove cascade, not here.
     if(!staffShiftHasStarted(date, shift)){
-      try {
-        const summary = await recalcFairnessForShift(date, shift, { excluding: bnName });
-        hideBusy();
-        const names = summary.recalced.map(n => firstName(n));
-        const namesStr = names.length === 0 ? 'no remaining BNs'
-          : names.length === 1 ? names[0]
-          : names.length === 2 ? `${names[0]} and ${names[1]}`
-          : `${names.slice(0,-1).join(', ')}, and ${names[names.length-1]}`;
-        toast(`${firstName(bnName)} marked unavailable. Units redistributed to ${namesStr}.`);
-      } catch(e){
-        hideBusy();
-        console.error('Future-shift recalc failed:', e);
-        toast(`${firstName(bnName)} marked unavailable, but unit redistribution failed: ${e.message}. Reassign manually.`, true);
-      }
+      hideBusy();
+      toast(`${firstName(bnName)} marked unavailable for ${shift} on ${date}.`);
       loadAssignments();
       notifyProdLogChanged(bnName);
       return;
@@ -15129,7 +15086,11 @@ function renderImportedNamesList(){
 }
 
 // Show a 3-button modal when removing a BN who has upcoming assignments.
-// Returns 'recalculate', 'remove_only', or 'cancel'.
+// Returns 'redistribute', 'remove_only', or 'cancel'. The 'redistribute'
+// branch triggers recalcFairnessForShift per affected date+shift so
+// remaining BNs absorb the removed BN's units. 'remove_only' deletes the
+// assignments cleanly without rebalancing — appropriate when fixing typos
+// or removing test entries that other BNs shouldn't need to absorb.
 function _showRemoveBNModal(name, count){
   return new Promise(resolve => {
     const wrap = document.createElement('div');
@@ -15140,15 +15101,19 @@ function _showRemoveBNModal(name, count){
       <div style="background:var(--card);border-radius:14px;padding:22px 24px;max-width:460px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
           <span style="font-size:1.3rem">🗑</span>
-          <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Deleting all of ${safeName}'s assignments</span>
+          <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Remove ${safeName} from roster</span>
         </div>
-        <div style="font-size:.88rem;color:var(--text);line-height:1.5;margin-bottom:18px">
-          ${safeName} has ${count} upcoming assignment${count!==1?'s':''}. These will be deleted from the schedule. Choose whether to also recalculate rotations for everyone else afterward.
+        <div style="font-size:.88rem;color:var(--text);line-height:1.55;margin-bottom:18px">
+          ${safeName} has ${count} upcoming assignment${count!==1?'s':''}. These will be permanently deleted. Choose what happens to ${safeName}'s units:
+          <div style="margin-top:10px;font-size:.85rem;color:var(--muted)">
+            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — remaining BNs absorb ${safeName}'s units for fairness <em>(use when ${safeName} quit / left / transferred)</em></div>
+            <div><strong style="color:var(--text)">Just remove</strong> — ${safeName}'s units go uncovered for those shifts; other BNs unchanged <em>(use for typos / test entries)</em></div>
+          </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
           <button class="btn btn-ghost btn-sm" data-choice="cancel" style="font-size:.85rem">Cancel</button>
-          <button class="btn btn-ghost btn-sm" data-choice="remove_only" style="font-size:.85rem">Just remove ${safeName}'s assignments</button>
-          <button class="btn btn-success btn-sm" data-choice="recalculate" style="font-size:.85rem">↺ Recalculate All rotations</button>
+          <button class="btn btn-ghost btn-sm" data-choice="remove_only" style="font-size:.85rem">Just remove</button>
+          <button class="btn btn-success btn-sm" data-choice="redistribute" style="font-size:.85rem">↺ Redistribute units</button>
         </div>
       </div>`;
     const finish = (choice) => {
@@ -15198,6 +15163,13 @@ async function removeImportedName(name){
   const choice = await _showRemoveBNModal(name, upcoming.length);
   if(choice === 'cancel') return;
 
+  // Snapshot date+shift combos BEFORE deletion so we know which shifts
+  // need redistribution later (in the 'redistribute' branch).
+  const dateShifts = new Set();
+  upcoming.forEach(s => {
+    dateShifts.add(`${s.ShiftDate.slice(0,10)}|${s.ShiftType}`);
+  });
+
   // Delete the BN's upcoming BNSchedule rows in one batch.
   try {
     const ids = upcoming.map(s => s.Id);
@@ -15211,18 +15183,50 @@ async function removeImportedName(name){
     return;
   }
 
+  // Clear the BN's wing history — they're gone permanently, their history
+  // shouldn't influence future fairness calcs for whoever takes their
+  // place. Same pattern used by delAssign for single-shift removals.
+  ['Day','Noc'].forEach(sh => {
+    const key = `bnWingHistory_${name}_${sh}`;
+    try { localStorage.removeItem(key); } catch{}
+    if(typeof syncedLS !== 'undefined' && syncedLS.delete){
+      syncedLS.delete(key).catch(()=>{});
+    }
+  });
+
   // Remove from roster (matches original behavior).
   importedNames = importedNames.filter(n => n !== name);
   saveImportedNames();
   renderImportedNamesList();
   populateNurseDropdown();
 
-  // Optional follow-up: recalculate rotations for everyone else.
-  if(choice === 'recalculate'){
-    await recalculateAllRotations({ skipConfirm: true });
+  // Optional follow-up: redistribute removed BN's units to remaining BNs
+  // on each affected date+shift via the fairness suggester. Done after
+  // the BN is gone from roster and BNSchedule so the recalc considers
+  // only the surviving BNs. Sequential to keep error attribution clean.
+  let recalcFailures = [];
+  if(choice === 'redistribute'){
+    showBusy(`Redistributing ${firstName(name)}'s units across remaining BNs…`);
+    for(const ds of dateShifts){
+      const [date, shift] = ds.split('|');
+      try {
+        await recalcFairnessForShift(date, shift);
+      } catch(e) {
+        console.error(`Recalc failed for ${date} ${shift}:`, e);
+        recalcFailures.push(`${date} ${shift}`);
+      }
+    }
+    hideBusy();
   }
 
-  toast(`${firstName(name)} removed · ${upcoming.length} assignment${upcoming.length!==1?'s':''} deleted`);
+  let msg = `${firstName(name)} removed · ${upcoming.length} assignment${upcoming.length!==1?'s':''} deleted`;
+  if(choice === 'redistribute'){
+    msg += `; units redistributed across ${dateShifts.size} date/shift${dateShifts.size!==1?'s':''}`;
+    if(recalcFailures.length){
+      msg += ` (${recalcFailures.length} redistribution${recalcFailures.length!==1?'s':''} failed — see console)`;
+    }
+  }
+  toast(msg);
   loadAssignments();
   notifyProdLogChanged();
 }
