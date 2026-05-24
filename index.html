@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-91';
+const APP_VERSION = '2026-05-24-92';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5431,7 +5431,13 @@ async function loadSlots(silent=false){
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
+        if(hasInactiveMain){
+          // Build N+2: main BN scheduled today is inactive — say so explicitly
+          // instead of "has no Break Relief"
+          banner.innerHTML = `&#x26d4; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
+        } else {
+          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
+        }
       } else {
         // Window not yet open but coverage exists today — switch from alarming
         // red to the same celebratory green used when coverage is active.
