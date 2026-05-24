@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-90';
+const APP_VERSION = '2026-05-24-91';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5209,6 +5209,17 @@ async function loadSlots(silent=false){
     // is limited: red banner + only the absorbed slots rendered.
     const suppCovering = covering.filter(s => String(s.IsSupplemental) === '1');
     const isAbsorbed = covering.length > 0 && covering.every(s => String(s.IsSupplemental) === '1');
+    // hasInactiveMain: separately detects the case where a main (non-supplemental)
+    // BN row exists for this unit today BUT is marked inactive. Distinct from
+    // isAbsorbed because the inactive BN may have no absorber for THIS unit
+    // (e.g., no bookings to absorb). When true, the user-facing banner says
+    // "Unfortunately, {unit}'s Break Nurse is currently not available" instead
+    // of the generic "no Break Relief" message.
+    const hasInactiveMain = scheds.some(s =>
+      s.Status === 'inactive' &&
+      String(s.IsSupplemental) !== '1' &&
+      unitCoveredBy(s, S.unit, dt, shift)
+    );
     const oppCoveringBanner = oppScheds.filter(s => {
       try { return JSON.parse(s.Units||'[]').includes(S.unit) && s.Status !== 'inactive'; } catch { return false; }
     });
@@ -5297,9 +5308,8 @@ async function loadSlots(silent=false){
         banner.style.background = 'var(--red-lt)';
         banner.style.borderColor = 'var(--red)';
         banner.style.color = 'var(--red)';
-        const _inactiveBN = suppCovering[0].CoveredFrom || 'the original break nurse';
         const _absorberNames = [...new Set(suppCovering.map(s => firstName(s.BreakNurseName)))].join(' and ');
-        banner.innerHTML = `Unfortunately, <strong>${escHTML(firstName(_inactiveBN))}</strong> is no longer available for <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong>. ${escHTML(_absorberNames)} can only cover the slots shown below.`;
+        banner.innerHTML = `Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available. ${escHTML(_absorberNames)} can only cover the slots shown below.`;
 
       } else if(covering.length > 0 && !staffWindowClosed){
         // Full main-shift coverage — green
@@ -5321,7 +5331,14 @@ async function loadSlots(silent=false){
           banner.style.background = 'var(--red-lt)';
           banner.style.borderColor = 'var(--red)';
           banner.style.color = 'var(--red)';
-          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime2 ? `had Break Relief until ${_limTime2}` : 'has no Break Relief'}${_upcomingNote2}`;
+          // Build N+2: if the main BN that was supposed to cover this unit
+          // today is inactive (vs no BN ever scheduled), prefer the more
+          // context-rich wording. Same icon + upcoming info as before.
+          if(hasInactiveMain){
+            banner.innerHTML = `&#x26d4; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
+          } else {
+            banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime2 ? `had Break Relief until ${_limTime2}` : 'has no Break Relief'}${_upcomingNote2}`;
+          }
         } else {
           setNameCardEnabled(true);
           banner.style.background = '#fff8e6';
