@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-92';
+const APP_VERSION = '2026-05-24-93';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5556,6 +5556,27 @@ async function loadSlots(silent=false){
         bookings.filter(b => String(b.IsCancelled) !== '1').map(b => normSlot(b.SlotTime))
       );
       allSlots = allSlots.filter(s => _absorbedOnUnit.has(normSlot(s)));
+    }
+
+    // Build N+3 (2026-05-24): when viewing a covering BN's MAIN unit (not an
+    // absorbed unit — that case is handled by the isAbsorbed branch above),
+    // hide slot times where the covering BN is absorbed elsewhere. Otherwise
+    // the BN appears available at the same slot times she's actually
+    // committed to absorbed bookings on another unit, creating a phantom
+    // double-coverage in Sign Up.
+    //
+    // Q2 design (locked 2026-05-23): "Show empty/uncovered (treat as gap)"
+    // — slot is removed from the list rather than greyed out.
+    if(!isAbsorbed && covering.length){
+      const _absorberCommitments = new Set();
+      for(const _sched of covering){
+        const _abs = await getAbsorbedSlots(_sched.BreakNurseName, dt, shift,
+          { scheds: allSchedsRaw, bookings: allBookingsRaw });
+        _abs.forEach(t => _absorberCommitments.add(t));
+      }
+      if(_absorberCommitments.size){
+        allSlots = allSlots.filter(s => !_absorberCommitments.has(normSlot(s)));
+      }
     }
 
     // For 3C only: filter out slot times that fall after a scheduled closure —
