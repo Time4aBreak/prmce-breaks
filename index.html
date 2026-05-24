@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-88';
+const APP_VERSION = '2026-05-24-89';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5203,6 +5203,12 @@ async function loadSlots(silent=false){
     ];
 
     const covering = scheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, shift));
+    // Build N+2 (2026-05-24): detect "absorbed unit" — where all active coverage
+    // is supplemental (no main BN active). This means the original BN went
+    // unavailable and an absorber picked up specific slots. UI for such units
+    // is limited: red banner + only the absorbed slots rendered.
+    const suppCovering = covering.filter(s => String(s.IsSupplemental) === '1');
+    const isAbsorbed = covering.length > 0 && covering.every(s => String(s.IsSupplemental) === '1');
     const oppCoveringBanner = oppScheds.filter(s => {
       try { return JSON.parse(s.Units||'[]').includes(S.unit) && s.Status !== 'inactive'; } catch { return false; }
     });
@@ -5281,7 +5287,21 @@ async function loadSlots(silent=false){
         return { limLast: _limLast, limPassed: _limPassed };
       };
 
-      if(covering.length > 0 && !staffWindowClosed){
+      if(isAbsorbed && !staffWindowClosed){
+        // Build N+2: absorbed unit — original BN unavailable, supplemental
+        // absorber covers only specific slots. Existing claims (the absorbed
+        // ones) can still be managed; new claims are not possible because
+        // the slot list is filtered to absorbed-only slots downstream.
+        setNameCardEnabled(true);
+        banner.style.display = 'block';
+        banner.style.background = 'var(--red-lt)';
+        banner.style.borderColor = 'var(--red)';
+        banner.style.color = 'var(--red)';
+        const _inactiveBN = suppCovering[0].CoveredFrom || 'the original break nurse';
+        const _absorberNames = [...new Set(suppCovering.map(s => firstName(s.BreakNurseName)))].join(' and ');
+        banner.innerHTML = `Unfortunately, <strong>${escHTML(firstName(_inactiveBN))}</strong> is no longer available for <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong>. ${escHTML(_absorberNames)} can only cover the slots shown below.`;
+
+      } else if(covering.length > 0 && !staffWindowClosed){
         // Full main-shift coverage — green
         setNameCardEnabled(true);
         const plural = covering.length > 1 ? 'Break Nurses' : 'a Break Nurse';
@@ -5497,6 +5517,20 @@ async function loadSlots(silent=false){
     // Merge and sort all slots by time-of-day (handling midnight wrap for Noc)
     let allSlots = [...new Set([...overlapSlots, ...mainSlots])];
     allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
+
+    // Build N+2: for absorbed units, restrict to slot times the absorber actually
+    // picked up. Un-absorbed slot times are hidden — the unit has no break nurse
+    // for those times. The banner explains this. Existing absorbed bookings
+    // remain visible for management (cancel, mark taken, etc).
+    if(isAbsorbed && suppCovering.length){
+      const _absorbedAcc = new Set();
+      for(const _supp of suppCovering){
+        const _abs = await getAbsorbedSlots(_supp.BreakNurseName, dt, shift,
+          { scheds: allSchedsRaw, bookings: allBookingsRaw });
+        _abs.forEach(t => _absorbedAcc.add(t));
+      }
+      allSlots = allSlots.filter(s => _absorbedAcc.has(normSlot(s)));
+    }
 
     // For 3C only: filter out slot times that fall after a scheduled closure —
     // but skip this filter when a BN is manually assigned to 3C on this shift
