@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-87';
+const APP_VERSION = '2026-05-24-88';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5057,8 +5057,15 @@ async function recalculateRotation(bnName, date, shift){
   // Get BN's covered units
   const scheds = await spGet(LISTS.schedule,
     `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
+  // Build the BN's effective unit set from their active main row only.
+  // Supplemental rows are EXCLUDED here (Option B build N+1, 2026-05-24): a
+  // BN absorbing for an inactive peer shouldn't have their main-unit rotation
+  // diluted by the absorbed units. The supplemental coverage is overlaid at
+  // render time via getAbsorbedSlots, not folded into the rotation.
   const rawUnits = [];
   scheds.forEach(s => {
+    if(String(s.IsSupplemental) === '1') return;
+    if((s.Status || '') === 'inactive') return;
     try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
   });
   if(!rawUnits.length) return null;
