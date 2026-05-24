@@ -1407,6 +1407,69 @@ function unitCoveredBy(sched, unit, date, shift){
   return units.includes(unit);
 }
 
+// Returns a Set of 4-digit slot time strings representing the slots this BN
+// has absorbed from an inactive peer via supplemental coverage on the given
+// date+shift. Reads supplemental rows in BNSchedule and the active staff
+// bookings on those rows' units. The absorption algorithm in
+// processBNUnavailability is the source of truth: it picks up only eligible
+// slots and (via build 84 orphan cleanup) deletes any bookings it couldn't
+// place. Therefore the staff bookings remaining on supp.Units after Mark
+// Unavailable completes ARE the absorbed slots.
+//
+// Used by the Sign Up display, rotation rebuild, and absorber main-unit
+// rendering (build 87+) to attribute the absorbing BN ONLY to slots they
+// actually agreed to take — not to every slot on the absorbed unit.
+//
+// Q1 design (locked 2026-05-23): staff bookings only. The inactive BN's own
+// + My Breaks are moot (they're not there to take them) and not absorbed.
+//
+// Interim state during build N → N+2 rollout: until the Sign Up display
+// blocks new claims on absorbed units (B-Strict + Disabled), a stray claim
+// could land and over-count here. Downstream code is expected to tolerate
+// this until the full build chain ships.
+//
+// @param {string} bnName     - Absorbing BN's full canonical name (e.g. "Smith, Michelle S")
+// @param {string} date       - Shift identity date (YYYY-MM-DD)
+// @param {string} shift      - 'Day' or 'Noc'
+// @param {Object} [prefetched] - Optional { scheds, bookings } to avoid refetch in render loops
+// @returns {Promise<Set<string>>} - 4-digit slot times, e.g. new Set(['0015','0035','0615'])
+async function getAbsorbedSlots(bnName, date, shift, prefetched = null){
+  const scheds = (prefetched && prefetched.scheds) || await spGet(LISTS.schedule);
+
+  // 1. This BN's active supplemental rows for the target date+shift.
+  const supps = scheds.filter(s =>
+    s.BreakNurseName === bnName &&
+    s.ShiftDate      === date &&
+    s.ShiftType      === shift &&
+    String(s.IsSupplemental) === '1' &&
+    (s.Status || '') !== 'inactive'
+  );
+  if(!supps.length) return new Set();
+
+  // 2. Union of absorbed unit sets across this BN's supp rows.
+  const absorbedUnits = new Set();
+  supps.forEach(s => {
+    let units = [];
+    try { units = JSON.parse(s.Units || '[]'); } catch{}
+    units.forEach(u => absorbedUnits.add(u));
+  });
+  if(!absorbedUnits.size) return new Set();
+
+  // 3. Active staff bookings on those units for this shift. SlotDate ===
+  //    shift identity date (post-midnight slots use shift-start date).
+  const bookings = (prefetched && prefetched.bookings) || await spGet(LISTS.bookings);
+  const out = new Set();
+  bookings.forEach(b => {
+    if(!absorbedUnits.has(b.Unit))    return;
+    if(!isStaffBooking(b))            return;
+    if(String(b.IsCancelled) === '1') return;
+    if(b.SlotDate !== date)           return;
+    if(b.ShiftType !== shift)         return;
+    out.add(normSlot(b.SlotTime));
+  });
+  return out;
+}
+
 // Return the full set of units a schedule entry covers, with C_PAIR expanded
 function getSchedUnits(sched, date, shift){
   let raw = []; try { raw = JSON.parse(sched.Units||'[]'); } catch{}
@@ -1547,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-20-86';
+const APP_VERSION = '2026-05-24-87';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
