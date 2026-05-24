@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-89';
+const APP_VERSION = '2026-05-24-90';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -5518,18 +5518,21 @@ async function loadSlots(silent=false){
     let allSlots = [...new Set([...overlapSlots, ...mainSlots])];
     allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
 
-    // Build N+2: for absorbed units, restrict to slot times the absorber actually
-    // picked up. Un-absorbed slot times are hidden — the unit has no break nurse
-    // for those times. The banner explains this. Existing absorbed bookings
-    // remain visible for management (cancel, mark taken, etc).
-    if(isAbsorbed && suppCovering.length){
-      const _absorbedAcc = new Set();
-      for(const _supp of suppCovering){
-        const _abs = await getAbsorbedSlots(_supp.BreakNurseName, dt, shift,
-          { scheds: allSchedsRaw, bookings: allBookingsRaw });
-        _abs.forEach(t => _absorbedAcc.add(t));
-      }
-      allSlots = allSlots.filter(s => _absorbedAcc.has(normSlot(s)));
+    // Build N+2: for absorbed units, restrict to slot times that have an
+    // active staff booking ON THIS UNIT specifically. Un-claimed slot times
+    // are hidden — the unit has no break nurse for those times. The banner
+    // explains this. Existing absorbed bookings remain visible for management
+    // (cancel, mark taken, etc).
+    //
+    // Note: we filter using `bookings` (already scoped to S.unit at line 5198)
+    // rather than getAbsorbedSlots(), because getAbsorbedSlots returns the
+    // union across all the absorber's absorbed units — which over-includes
+    // slots booked on OTHER absorbed units. We need the per-unit slice here.
+    if(isAbsorbed){
+      const _absorbedOnUnit = new Set(
+        bookings.filter(b => String(b.IsCancelled) !== '1').map(b => normSlot(b.SlotTime))
+      );
+      allSlots = allSlots.filter(s => _absorbedOnUnit.has(normSlot(s)));
     }
 
     // For 3C only: filter out slot times that fall after a scheduled closure —
