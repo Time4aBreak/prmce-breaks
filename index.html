@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-93';
+const APP_VERSION = '2026-05-24-94';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8534,6 +8534,29 @@ async function loadSummary(){
       }
     });
 
+    // Build N+4 (2026-05-24): inactive-main lookup for historical-attribution.
+    // When a BN is marked unavailable mid-shift, bookings BEFORE the outage
+    // start were actually relieved by the original BN — not the absorber.
+    // The Coverage tab should reflect that historical accuracy. Map each
+    // unit covered by an inactive main row to that BN's name + outage start
+    // time (EndedAt). Same-shift only; opposite-shift overlap doesn't apply.
+    const inactiveMainByUnit = {};
+    scheds.forEach(s => {
+      if(s.Status !== 'inactive') return;
+      if(String(s.IsSupplemental) === '1') return;
+      if(!s.EndedAt) return;
+      const endedAtMs = new Date(s.EndedAt).getTime();
+      if(isNaN(endedAtMs)) return;
+      try {
+        const sDate = s.ShiftDate.slice(0,10);
+        filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u => {
+          if(!inactiveMainByUnit[u]){
+            inactiveMainByUnit[u] = { bnName: s.BreakNurseName, endedAtMs };
+          }
+        });
+      } catch{}
+    });
+
     // Helper: get covering BN for a booking — overlap slots use opp BN map
     const getBNForBooking = (b) => {
       // Attribution takes precedence: if a BN explicitly created this
@@ -8542,6 +8565,13 @@ async function loadSummary(){
       // Legacy/Sign Up bookings (no CreatedBy) fall back to unit-based
       // ownership via slotOwnerBN / unitBN.
       if(b.CreatedBy) return b.CreatedBy;
+      // Build N+4: historical attribution — if the unit had a main BN
+      // who's now inactive AND this booking's slot time predates the
+      // outage, attribute to the original BN (they actually covered it).
+      const inactive = inactiveMainByUnit[b.Unit];
+      if(inactive && slotEventTime(b) < inactive.endedAtMs){
+        return inactive.bnName;
+      }
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
       const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
@@ -8554,6 +8584,12 @@ async function loadSummary(){
       // Mirror getBNForBooking: CreatedBy attribution wins. Look up the
       // creator's ext directly so the displayed BN name and ext agree.
       if(b.CreatedBy) return bnNameExt[b.CreatedBy] || '';
+      // Build N+4: same historical-attribution rule — past bookings on
+      // an outage'd unit show the inactive BN's ext.
+      const inactive = inactiveMainByUnit[b.Unit];
+      if(inactive && slotEventTime(b) < inactive.endedAtMs){
+        return bnNameExt[inactive.bnName] || '';
+      }
       const m = toMin(b.SlotTime);
       const isOverlap = m >= overlapMin && m < overlapMax;
       const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
