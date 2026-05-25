@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-97';
+const APP_VERSION = '2026-05-24-98';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -14308,6 +14308,14 @@ function _computeBNUnitMatrix(scheds, shift){
   // worked" = one active main schedule row (not supplemental, not inactive).
   // Same filtering as the assignment count below.
   const shiftsByBN = {};
+  // Build 98: per-shift unit-count distribution and C_PAIR usage. For the
+  // expandable row that shows the workload mix per BN — exposes whether
+  // a BN's lower Avg/Sh comes from many small shifts vs fewer large ones,
+  // and whether C_PAIR (3C+4C combined) is concentrated on certain BNs.
+  // distribution[bn] = { '1': N, '2': M, '3': K, '4': J, '5+': L }
+  // cpairShifts[bn]  = count of shifts that included C_PAIR
+  const distribution = {};
+  const cpairShifts  = {};
 
   scheds.filter(s => s.ShiftType === shift && s.Status !== 'inactive' && String(s.IsSupplemental) !== '1').forEach(s => {
     const bn = s.BreakNurseName;
@@ -14326,6 +14334,15 @@ function _computeBNUnitMatrix(scheds, shift){
       counts[bn][u] = (counts[bn][u] || 0) + 1;
       unitsSeen.add(u);
     });
+    // Distribution bucket — clamp at 5+ so wide assignments don't blow up
+    // the chart. Effective unit count (post-expansion / post-closure).
+    if(!distribution[bn]) distribution[bn] = {};
+    const bucket = units.length >= 5 ? '5+' : String(units.length);
+    distribution[bn][bucket] = (distribution[bn][bucket] || 0) + 1;
+    // C_PAIR detection — check the RAW units array, not expanded
+    if(rawUnits.includes('C_PAIR')){
+      cpairShifts[bn] = (cpairShifts[bn] || 0) + 1;
+    }
   });
 
   // Sort units in wing-then-floor order, filtered to only ones we saw
@@ -14338,6 +14355,8 @@ function _computeBNUnitMatrix(scheds, shift){
     });
     row.shifts = shiftsByBN[bn] || 0;
     row.avgPerShift = row.shifts > 0 ? (row.total / row.shifts) : 0;
+    row.distribution = distribution[bn] || {};
+    row.cpairShifts  = cpairShifts[bn] || 0;
     return row;
   });
   return { bns, units: orderedUnits };
@@ -14377,7 +14396,7 @@ function _renderBNUnitMatrix(data, shift){
     <th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','avg')">Avg/Sh${ind('avg')}</th>
   </tr>`;
 
-  const body = sorted.map(r => {
+  const body = sorted.map((r, i) => {
     const cells = data.units.map(u => {
       const v = r[u];
       if(v === 0) return `<td style="${tdStyle};color:var(--muted)">·</td>`;
@@ -14386,12 +14405,34 @@ function _renderBNUnitMatrix(data, shift){
       return `<td style="${tdStyle};${bg}">${v}</td>`;
     }).join('');
     const avgDisplay = r.shifts > 0 ? r.avgPerShift.toFixed(1) : '–';
+    // Build 98: per-BN expansion row. Tap name to toggle. Shows distribution
+    // of unit count per shift + C_PAIR usage. Helps diagnose why two BNs
+    // with similar shifts have different totals (often C_PAIR concentration).
+    const expId = `bnExp-${shift}-${i}`;
+    const buckets = ['1','2','3','4','5+'];
+    const distItems = buckets
+      .map(k => ({ k, v: r.distribution[k] || 0 }))
+      .filter(x => x.v > 0);
+    const distHtml = distItems.length
+      ? distItems.map(x => `<span style="display:inline-block;margin-right:14px;font-family:'DM Mono',monospace;font-size:.78rem">${x.k} ${x.k === '1' ? 'unit' : 'units'}: <strong>${x.v}</strong> ${x.v === 1 ? 'shift' : 'shifts'}</span>`).join('')
+      : '<span style="color:var(--muted);font-size:.8rem">No shifts recorded.</span>';
+    const cpairPct = r.shifts > 0 ? Math.round(r.cpairShifts * 100 / r.shifts) : 0;
+    const cpairLine = r.cpairShifts > 0
+      ? `<div style="margin-top:6px;font-size:.78rem">C_PAIR (3C+4C combined) included on <strong>${r.cpairShifts}</strong> of ${r.shifts} shifts (${cpairPct}%)</div>`
+      : `<div style="margin-top:6px;font-size:.78rem;color:var(--muted)">No C_PAIR assignments</div>`;
     return `<tr>
-      <td style="${tdNameStyle}">${escHTML(r.bn)}</td>
+      <td style="${tdNameStyle};cursor:pointer;user-select:none" onclick="toggleBNExpansion('${expId}', this)"><span class="bn-exp-caret" style="display:inline-block;transition:transform .2s;color:var(--muted);font-size:.7rem;margin-right:4px">▶</span>${escHTML(r.bn)}</td>
       ${cells}
       <td style="${tdStyle};font-weight:600">${r.total}</td>
       <td style="${tdStyle};color:var(--muted)">${r.shifts}</td>
       <td style="${tdStyle};font-weight:600">${avgDisplay}</td>
+    </tr>
+    <tr id="${expId}" style="display:none;background:var(--bg-soft,#f7f7f5)">
+      <td colspan="${3 + data.units.length + 3}" style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.85rem;line-height:1.5">
+        <div style="font-weight:600;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Units per shift distribution</div>
+        <div>${distHtml}</div>
+        ${cpairLine}
+      </td>
     </tr>`;
   }).join('');
 
@@ -14399,6 +14440,17 @@ function _renderBNUnitMatrix(data, shift){
     <thead>${head}</thead>
     <tbody>${body}</tbody>
   </table>`;
+}
+
+// Toggle a BN expansion row. Tapping the BN name swaps display: none/table-row
+// and rotates the caret. Per-shift since each shift table has its own ids.
+function toggleBNExpansion(rowId, nameCell){
+  const row = document.getElementById(rowId);
+  if(!row) return;
+  const open = row.style.display !== 'none';
+  row.style.display = open ? 'none' : 'table-row';
+  const caret = nameCell && nameCell.querySelector('.bn-exp-caret');
+  if(caret) caret.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
 }
 
 function sortBNUnitMatrix(shift, col){
