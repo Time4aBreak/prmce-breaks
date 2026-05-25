@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-95';
+const APP_VERSION = '2026-05-24-96';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11401,6 +11401,12 @@ async function acceptAllAndSave(){
       b.style.cursor = '';
     });
     if(status) status.textContent = `Nothing to save (${skipped} skipped)`;
+    // Toast so the user gets visible feedback. The status element below the
+    // import card is easy to miss when the user is scrolled near the buttons.
+    toast(skipped > 0
+      ? `No assignments selected — ${skipped} ${skipped === 1 ? 'entry' : 'entries'} need units before saving.`
+      : 'No assignments to save.',
+      true);
     return;
   }
 
