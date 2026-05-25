@@ -1668,7 +1668,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-100';
+const APP_VERSION = '2026-05-25-101';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -8070,6 +8070,31 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // Also inactivate supplementals — their bookings will be included in redistribution below
     for(const sup of suppToInactivate){
       await spPatch(LISTS.schedule, sup.Id, { Status: 'inactive', EndedAt: new Date().toISOString() });
+    }
+
+    // Build 101 (2026-05-25): Frozen supp cleanup before absorption.
+    // A frozen supp = IsSupp=1 owned by OTHER BNs but CoveredFrom=bnName (the
+    // BN we're now marking unavailable again). Created during a prior Mark
+    // Available "Let absorber keep" — its purpose was to mark the absorber's
+    // commitment to specific bookings. Once those bookings are stamped with
+    // CreatedBy, attribution lives on the bookings themselves; the supp row
+    // is redundant after that.
+    //
+    // Why we MUST delete it now: the absorption planner below treats every
+    // staff booking on a BN's responsible units as a "busy" slot for that
+    // BN. The frozen supp gives the prior absorber 9S in her responsible
+    // units, so the 9S bookings get marked as her busy slots. She then
+    // fails the truly-free check at exactly the slots we need her to
+    // absorb — orphan cleanup deletes the bookings.
+    //
+    // Deleting the frozen supp restores normal absorption mechanics. The
+    // CreatedBy stamps on the bookings keep Coverage tab attribution correct.
+    const frozenSupps = await spGet(LISTS.schedule,
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and IsSupplemental eq 1 and CoveredFrom eq '${esc(bnName)}'`
+    ).catch(() => []);
+    for(const fs of frozenSupps){
+      if(String(fs.Status || '') === 'inactive') continue;
+      await spDel(LISTS.schedule, fs.Id).catch(()=>{});
     }
 
     // Get future uncovered claimed breaks for BN-A's units (main + supplemental)
