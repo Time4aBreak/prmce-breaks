@@ -1610,7 +1610,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-24-94';
+const APP_VERSION = '2026-05-24-95';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -6954,6 +6954,16 @@ function renderOtherSlotsFromCache(){
   }).join('');
 }
 
+// Bug #8 (build 95, 2026-05-24): in-process dedup guard to prevent the same
+// client from POSTing duplicate bookings during the eventual-consistency
+// window. The race-condition check at line ~7030 reads from a pre-fetched
+// snapshot, which can be stale if a prior POST hasn't been visible to GET
+// yet — e.g. a network-slow tap, browser stall, or rapid Submit retry.
+// Without this guard, the race check passes and a second identical row
+// gets created. Key includes unit+slot+shift+ext so it doesn't block
+// legitimate distinct claims.
+const _claimsInFlight = new Set();
+
 async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null){
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
@@ -7055,11 +7065,28 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       return `BN on break`;
     }
 
-    await spPost(LISTS.bookings,{
-      Title:`${S.unit}-${dt}-${slotTime}`,
-      NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
-      IsOtherShift: (S.shift === 'Other') ? 1 : 0
-    });
+    // Bug #8: in-flight guard. Block this exact (unit, slot, shift, ext)
+    // combination if a prior POST is still pending or just completed.
+    // Prevents network-slow tap-retry from creating duplicate rows.
+    const _inFlightKey = `${S.unit}|${slotTime}|${slotShift}|${nurseExt}`;
+    if(_claimsInFlight.has(_inFlightKey)){
+      if(!silent){ toast(`${fmt12(slotTime)} is already being claimed.`, true); }
+      return 'duplicate-in-flight';
+    }
+    _claimsInFlight.add(_inFlightKey);
+    try {
+      await spPost(LISTS.bookings,{
+        Title:`${S.unit}-${dt}-${slotTime}`,
+        NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
+        IsOtherShift: (S.shift === 'Other') ? 1 : 0
+      });
+    } finally {
+      // Clear the guard ~3 seconds after the POST completes — long enough
+      // to cover the eventual-consistency window where the next GET might
+      // not yet see our row, but short enough that a legitimate later
+      // cancel-and-re-claim isn't blocked.
+      setTimeout(() => _claimsInFlight.delete(_inFlightKey), 3000);
+    }
     if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(_nurseFirst)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
   }catch(e){
@@ -8303,7 +8330,7 @@ async function checkDuplicateExt(){
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
     const conflict = scheds.find(s =>
       s.Status !== 'inactive' && s.Ext === nurseExt &&
-      s.BreakNurseName && !s.BreakNurseName.toLowerCase().startsWith(_nurseFirst.toLowerCase())
+      s.BreakNurseName && firstName(s.BreakNurseName).toLowerCase() !== _nurseFirst.toLowerCase()
     );
     if(conflict){
       if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${firstName(conflict.BreakNurseName)}.`,'Take over extension','Cancel')){
@@ -11365,6 +11392,14 @@ async function acceptAllAndSave(){
   const skipped = entriesToProcess.length - indices.length;
   if(!records.length){
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    // Bug #1 fix: also re-enable the import/extract action buttons so the
+    // user can clear and re-extract without refreshing. Mirrors the catch
+    // branch's recovery below.
+    document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
+      b.disabled = false;
+      b.style.opacity = '';
+      b.style.cursor = '';
+    });
     if(status) status.textContent = `Nothing to save (${skipped} skipped)`;
     return;
   }
@@ -13623,7 +13658,7 @@ function dismissNotifications(ids, dismissKey){
 // PARALLEL (Promise.all) in the background. Each write is also tracked
 // in the mutation cache so any concurrent refetch respects the optimistic
 // state. On any failure, the failed rows are rolled back and re-rendered.
-function confirmAllBreaks(){
+async function confirmAllBreaks(){
   const dt = BNS.date || today(), shift = BNS.shift;
   const cache = _bnConfirmCache;
   if(!cache || !cache.allBookings){
