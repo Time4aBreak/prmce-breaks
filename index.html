@@ -1668,7 +1668,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-103';
+const APP_VERSION = '2026-05-25-105';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3066,12 +3066,21 @@ async function recomputeBNWithPastPreserved(bnName, date, shift){
   // Snapshot BEFORE recompute overwrites the cache
   const oldRotation = isActive ? (loadRotation(bnName, date, shift) || {}) : null;
 
+  // Build 104 (2026-05-25): when mid-shift, recompute must filter units by
+  // their effective status RIGHT NOW, not at shift-start. Without this, a
+  // mid-shift unit closure doesn't redistribute future slots — the rotation
+  // builder sees the unit as "still open at 08:00" and keeps assigning it.
+  // For future/past shifts, asOf stays null → shift-start filtering (correct
+  // because the unit's status at that future shift's start is what determines
+  // its availability for that shift).
+  const recomputeAsOf = isActive ? new Date() : null;
+
   // Standard recompute (writes new rotation to cache + backend)
   const bnDef = getDefaultTemplate(bnName, shift);
   if(bnDef && bnDef.length > 0){
-    await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
+    await applyDefaultToShift(bnName, date, shift, bnDef, false, recomputeAsOf).catch(()=>{});
   } else {
-    await recalculateRotation(bnName, date, shift).catch(()=>{});
+    await recalculateRotation(bnName, date, shift, recomputeAsOf).catch(()=>{});
   }
 
   if(!isActive || !oldRotation) return;
@@ -3482,26 +3491,79 @@ async function commitUnitChange(){
 
       if(bnUpdates.length){
         showBusy(`Updating ${bnUpdates.length} BN assignment${bnUpdates.length!==1?'s':''}…`);
-        await Promise.all(bnUpdates.map(async (i) => {
-          const sched = await spGet(LISTS.schedule, `Id eq ${i.schedId}`);
-          if(!sched.length) return;
-          let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
+        // Build 105 (2026-05-25): Pre-fetch all schedules ONCE for substitute
+        // lookups. Each findSubstituteUnit call needs to see which units are
+        // taken by other BNs on the same date+shift. Doing this in the loop
+        // would re-query for every BN; pre-fetching is cheaper and keeps the
+        // "available units" view consistent across the batch.
+        const _scheFloor = activeShiftFloor();
+        const _allSchedsForSub = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFloor}'`);
+        // Track substitutes picked in this batch so two BNs on the same shift
+        // don't both grab the same available unit. Key by date|shift.
+        const _picksThisBatch = {};
+
+        // Determine asOf for substitute open-check: use the effective time
+        // of the closure (now vs scheduled). For scheduled-future closures,
+        // pick the substitute as of that future time.
+        const _subAsOf = pending.effectiveAt;
+
+        const _substitutes = []; // {schedId, bn, date, shift, oldUnits, newUnits, substitute}
+
+        // Sequentially compute substitutes per BN so the "already taken in this batch"
+        // tracker stays consistent. spPatch can still parallelize after.
+        for(const i of bnUpdates){
+          const sched = _allSchedsForSub.find(s => String(s.Id) === String(i.schedId));
+          if(!sched) continue;
+          let units = []; try { units = JSON.parse(sched.Units||'[]'); } catch{}
           // Legacy C_PAIR migration — only applies when closing 3C or 4C.
-          // Splits 'C_PAIR' into ['3C','4C'] in the saved Units so both halves
-          // remain visible as tags. Closure is reflected via runtime
-          // is3COpen / filterClosedUnits, not by stripping units. Preserves
-          // intent so reopening restores coverage automatically.
           if((unit === '3C' || unit === '4C') && units.includes('C_PAIR')){
-            const migrated = units.filter(u => u !== 'C_PAIR');
-            if(!migrated.includes('3C')) migrated.push('3C');
-            if(!migrated.includes('4C')) migrated.push('4C');
-            await spPatch(LISTS.schedule, i.schedId, { Units: JSON.stringify(migrated) });
+            units = units.filter(u => u !== 'C_PAIR');
+            if(!units.includes('3C')) units.push('3C');
+            if(!units.includes('4C')) units.push('4C');
+          }
+
+          // Build a snapshot of allScheds adjusted for picks already made in this batch
+          // (so the same substitute isn't picked for two BNs on the same shift).
+          const batchKey = `${i.date}|${i.shift}`;
+          const adjustedScheds = _allSchedsForSub.map(s => {
+            if(_picksThisBatch[batchKey] && _picksThisBatch[batchKey][s.BreakNurseName]){
+              // Inject the prior pick into this BN's units so findSubstituteUnit
+              // treats it as already-taken
+              try {
+                const u = JSON.parse(s.Units||'[]');
+                return { ...s, Units: JSON.stringify([...u, _picksThisBatch[batchKey][s.BreakNurseName]]) };
+              } catch { return s; }
+            }
+            return s;
+          });
+
+          const substitute = findSubstituteUnit(i.bn, unit, i.date, i.shift, adjustedScheds, _subAsOf);
+
+          // Build new Units array: remove closed unit, add substitute (if any)
+          let newUnits = units.filter(u => u !== unit);
+          if(substitute){
+            newUnits.push(substitute);
+            if(!_picksThisBatch[batchKey]) _picksThisBatch[batchKey] = {};
+            _picksThisBatch[batchKey][i.bn] = substitute;
+          }
+          _substitutes.push({ schedId: i.schedId, bn: i.bn, date: i.date, shift: i.shift, oldUnits: units, newUnits, substitute });
+        }
+
+        // Patch each schedule with the new Units, then recompute rotation.
+        // Parallelize spPatch but sequence recompute per BN so wing history
+        // is updated cleanly.
+        await Promise.all(_substitutes.map(async (s) => {
+          if(JSON.stringify(s.oldUnits) !== JSON.stringify(s.newUnits)){
+            await spPatch(LISTS.schedule, s.schedId, { Units: JSON.stringify(s.newUnits) }).catch(()=>{});
           }
           // Mid-shift-safe recompute: preserves past slots, redistributes
-          // future slots without the closed unit. Fire-and-forget — render
-          // path's fallback rotation reflects new state immediately.
-          recomputeBNWithPastPreserved(i.bn, i.date, i.shift).catch(()=>{});
+          // future slots according to the (possibly substituted) Units.
+          recomputeBNWithPastPreserved(s.bn, s.date, s.shift).catch(()=>{});
         }));
+
+        // Cache substitutes on pending so the toast can mention them
+        pending._substitutesApplied = _substitutes.filter(s => s.substitute);
+        pending._substitutesUnavailable = _substitutes.filter(s => !s.substitute);
       }
 
       hideBusy();
@@ -3515,7 +3577,17 @@ async function commitUnitChange(){
       const cancelTail = pending.affectedBookings.length
         ? ` · ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''} cancelled · please notify nurses`
         : '';
-      toast(`${unit} closing ${when}${cancelTail}`);
+      // Build 105: surface substitute swaps in the toast so admin sees what happened.
+      const subsApplied = pending._substitutesApplied || [];
+      const subsUnavail = pending._substitutesUnavailable || [];
+      let subTail = '';
+      if(subsApplied.length){
+        subTail = ` · ${subsApplied.length} BN${subsApplied.length!==1?'s':''} substituted`;
+      }
+      if(subsUnavail.length){
+        subTail += ` · ⚠ ${subsUnavail.length} BN${subsUnavail.length!==1?'s':''} without replacement`;
+      }
+      toast(`${unit} closing ${when}${cancelTail}${subTail}`);
     } else {
       // Opening — recompute affected rotations in background. Dispatch:
       // 3C uses recompute3CAffectedRotations (covers 3C and C_PAIR BNs);
@@ -4781,7 +4853,7 @@ async function applyDefaultToAll(){
   }
 }
 
-async function applyDefaultToShift(name, date, shift, defaultSlots, force=false){
+async function applyDefaultToShift(name, date, shift, defaultSlots, force=false, asOf=null){
   const units = await getBNUnits(name, date, shift);
   if(!units.length) return;
 
@@ -4805,7 +4877,8 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false)
     // Preserve existing breaks. Just recalculate rotation so unit assignments
     // match the (possibly updated) unit set, using the BN's current break
     // times as fixed exclusions. No writes to bookings.
-    await recalculateRotation(name, date, shift).catch(()=>{});
+    // Build 104: pass asOf so mid-shift recompute uses effective-now status
+    await recalculateRotation(name, date, shift, asOf).catch(()=>{});
     return;
   }
 
@@ -5111,7 +5184,7 @@ async function warmRotationCache(bnName, date, shift){
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
-async function recalculateRotation(bnName, date, shift){
+async function recalculateRotation(bnName, date, shift, asOf=null){
   // Get BN's covered units
   const scheds = await spGet(LISTS.schedule,
     `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
@@ -5127,8 +5200,16 @@ async function recalculateRotation(bnName, date, shift){
     try { JSON.parse(s.Units||'[]').forEach(u => { if(!rawUnits.includes(u)) rawUnits.push(u); }); } catch{}
   });
   if(!rawUnits.length) return null;
-  // Expand C_PAIR based on 3C status for this date, then drop any closed units
-  const units = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
+  // Expand C_PAIR based on 3C status for this date, then drop any closed units.
+  // Build 104 (2026-05-25): when caller passes asOf (e.g., the current
+  // moment for mid-shift recompute), filter by status AT THAT MOMENT
+  // instead of at shift-start. Default null preserves prior behavior
+  // (shift-start filtering) for non-mid-shift callers — initial assignment,
+  // edits, import, etc.
+  const expanded = expandCPair(rawUnits, date, shift);
+  const units = asOf
+    ? expanded.filter(u => isUnitOpenAt(u, asOf))
+    : filterClosedUnits(expanded, date, shift);
 
   // Get BN's own break slots
   const breaks = await spGet(LISTS.bookings,
@@ -7434,6 +7515,105 @@ function getUnitWing(unit){
   if(WING_A.includes(unit) || unit==='3C' || unit==='4C' || unit==='C_PAIR') return 'A';
   if(WING_D.includes(unit)) return 'D';
   return '?';
+}
+
+// Build 105 (2026-05-25): Find a replacement unit for a BN whose unit is
+// being closed. Returns a unit name, or null if no candidate is available.
+//
+// Selection rules (locked with Tomas):
+//   1. Same wing first — prefer units in the same wing as the closed unit
+//   2. Other wing fallback — if no same-wing candidates, try the opposite wing
+//   3. Must not already be covered by another active BN on this date+shift
+//   4. Must be currently open at the moment of substitution (asOf)
+//   5. Among candidates, fairness picker uses the BN's recent wing history
+//      (least-recently-covered wins) — falls back to first-available
+//
+// Args:
+//   bnName        — the BN getting a substitute
+//   closedUnit    — the unit being closed
+//   date / shift  — the BN's affected shift
+//   allScheds     — pre-fetched list of all schedules on date+shift (used to
+//                   compute which units are taken by other BNs)
+//   asOf          — Date for status check; null = shift-start
+//
+// Returns: substitute unit name (e.g. '3A') or null.
+function findSubstituteUnit(bnName, closedUnit, date, shift, allScheds, asOf=null){
+  // Build set of units already covered by OTHER active BNs on this shift
+  const otherBNsUnits = new Set();
+  allScheds.forEach(s => {
+    if(s.BreakNurseName === bnName) return;
+    if((s.Status || '') === 'inactive') return;
+    if(String(s.IsSupplemental) === '1') return;
+    if(s.ShiftDate.slice(0,10) !== date) return;
+    if(s.ShiftType !== shift) return;
+    try {
+      JSON.parse(s.Units || '[]').forEach(u => {
+        if(u === 'C_PAIR'){ otherBNsUnits.add('3C'); otherBNsUnits.add('4C'); }
+        else otherBNsUnits.add(u);
+      });
+    } catch{}
+  });
+
+  // This BN's existing OTHER units (so we don't pick one they already have)
+  const thisBNExistingUnits = new Set();
+  allScheds.forEach(s => {
+    if(s.BreakNurseName !== bnName) return;
+    if((s.Status || '') === 'inactive') return;
+    if(String(s.IsSupplemental) === '1') return;
+    if(s.ShiftDate.slice(0,10) !== date) return;
+    if(s.ShiftType !== shift) return;
+    try {
+      JSON.parse(s.Units || '[]').forEach(u => {
+        if(u === 'C_PAIR'){ thisBNExistingUnits.add('3C'); thisBNExistingUnits.add('4C'); }
+        else thisBNExistingUnits.add(u);
+      });
+    } catch{}
+  });
+  thisBNExistingUnits.delete(closedUnit); // the closing unit isn't "existing" anymore
+
+  const closedWing = getUnitWing(closedUnit);
+  const sameWingUnits = closedWing === 'A' ? [...WING_A, '3C', '4C'] : [...WING_D];
+  const otherWingUnits = closedWing === 'A' ? [...WING_D] : [...WING_A, '3C', '4C'];
+
+  const isOpen = (u) => asOf ? isUnitOpenAt(u, asOf) : isUnitOpenForShift(u, date, shift);
+
+  const filterCandidates = (pool) => pool.filter(u =>
+    u !== closedUnit &&
+    !otherBNsUnits.has(u) &&
+    !thisBNExistingUnits.has(u) &&
+    isOpen(u)
+  );
+
+  let candidates = filterCandidates(sameWingUnits);
+  if(!candidates.length){
+    candidates = filterCandidates(otherWingUnits);
+  }
+  if(!candidates.length) return null;
+
+  // Fairness pick: prefer least-recently-covered by this BN.
+  // Wing history is stored per-BN per-date as a list of units (most recent first).
+  // Pull recent history for this BN across the last 30 days for context.
+  // Falls back to alphabetical if no history found.
+  const historyCounts = {}; // unit -> times covered in recent history
+  try {
+    const baseDate = new Date(date + 'T12:00:00');
+    for(let i = 0; i < 30; i++){
+      const d = new Date(baseDate); d.setDate(d.getDate() - i);
+      const dStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+      const hist = JSON.parse(localStorage.getItem(`bnWingHistory_${bnName}_${dStr}`) || '[]');
+      hist.forEach(u => { historyCounts[u] = (historyCounts[u] || 0) + 1; });
+    }
+  } catch{}
+
+  // Sort candidates: lowest history count first, then alphabetical
+  candidates.sort((a, b) => {
+    const aCount = historyCounts[a] || 0;
+    const bCount = historyCounts[b] || 0;
+    if(aCount !== bCount) return aCount - bCount;
+    return a.localeCompare(b);
+  });
+
+  return candidates[0];
 }
 
 // ─────────────────────────────────────────────────────────
