@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-126';
+const APP_VERSION = '2026-05-26-127';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3082,6 +3082,14 @@ async function _3CTick(){
   } else {
     show3CDefaultToggle();
   }
+
+  // Build 126 (2026-05-26): Refresh the Manual Assign card's unit grid
+  // styling too. _3CTick already refreshed unitStatuses/unitSchedules
+  // above; refreshUnitStatusGrid handles the admin Unit Status panel,
+  // but updateAdminUnitGrid handles the Manual Assign card's separate
+  // chip grid. Without this, cross-device closures wouldn't dim the
+  // Manual Assign chips until the user re-touched date/shift/dropdown.
+  if(typeof updateAdminUnitGrid === 'function') updateAdminUnitGrid();
 
   // Staff-side: also refresh the "3C manually assigned" flag so the 3C button
   // appears/disappears on Sign Up when admin makes an assignment from another
