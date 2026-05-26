@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-110';
+const APP_VERSION = '2026-05-25-112';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1965,12 +1965,12 @@ async function spBatchSetState(entries){
   // BNState writes were lost, and the user saw no indication. setMany has
   // its own try/catch that toasts and re-throws — that path was unreachable
   // because of this swallow.
-  // Build 110 (2026-05-25): chunk size 5 → 20, and send chunks in parallel.
-  // Original 5 was a defensive carryover from when this used GET (URL length
-  // limits). With POST the body has 50MB headroom; 20 entries is well under
-  // any practical limit. Combined with parallel dispatch, 50 entries goes
-  // from 10 sequential HTTP calls to 3 parallel — back-end is the floor.
-  const CHUNK_SIZE = 20;
+  // Build 110 v3 (2026-05-25): chunk size 20 → 200. With POST body limit
+  // at 50MB and typical entries ~2KB, even 1000 entries fits in <2MB.
+  // Why so big: each chunk has overhead — sheet read + setValues calls.
+  // 13 chunks of 20 = 13× the overhead. 1 chunk of 256 ≈ 1× the overhead.
+  // Server-side bulk column write makes one big chunk fast.
+  const CHUNK_SIZE = 200;
   const chunks = [];
   for(let i = 0; i < entries.length; i += CHUNK_SIZE){
     chunks.push(entries.slice(i, i + CHUNK_SIZE));
@@ -2083,7 +2083,7 @@ async function deleteState(key){
 //   syncedLS.warm(key)          → ensures local cache populated from BNState
 //   syncedLS.set(key, value)    → updates cache + mirrors to BNState
 //   syncedLS.delete(key)        → clears cache + BNState
-//   syncedLS.warmMany([keys])   → parallel warm of N keys (one round trip each)
+//   syncedLS.warmMany([keys])   → bulk fetch all missing keys (1 round trip for N>5)
 //
 // Values are JSON-encoded internally. Strings, arrays, objects, numbers all
 // round-trip cleanly. Legacy raw-string entries (pre-syncedLS writes that
@@ -2152,7 +2152,30 @@ const syncedLS = {
   async warmMany(keys){
     const missing = keys.filter(k => k && localStorage.getItem(k) == null);
     if(!missing.length) return;
-    await Promise.all(missing.map(k => syncedLS.warm(k)));
+    // For small N, parallel single-key fetches are fine.
+    if(missing.length <= 5){
+      await Promise.all(missing.map(k => syncedLS.warm(k)));
+      return;
+    }
+    // Build 111 (2026-05-25): for large N, bulk-fetch ALL of BNState in
+    // one round trip and partition client-side. Apps Script serializes
+    // per-script execution, so N parallel spGets all queue serverside —
+    // 256 keys at ~200ms each = ~50s. One bulk fetch of ~500-2000 rows
+    // is ~500ms-2s.
+    try {
+      const all = await spGet(LISTS.state);
+      const wanted = new Set(missing);
+      all.forEach(item => {
+        if(wanted.has(item.Key)){
+          try {
+            // item.Value is the JSON-stringified payload; store as-is in LS
+            // (matches what syncedLS.warm does after JSON.parse + re-stringify).
+            const parsed = JSON.parse(item.Value || 'null');
+            if(parsed != null) localStorage.setItem(item.Key, JSON.stringify(parsed));
+          } catch {}
+        }
+      });
+    } catch {}
   },
 
   // Force-refresh a single key from BNState, ignoring local cache. Returns
