@@ -1211,6 +1211,45 @@ function getUnitSchedule(unit){
   return Array.isArray(list) ? list : [];
 }
 
+// ── Substitution log (build 107, 2026-05-25) ──────────────
+// When a unit closes and a BN's assignment includes that unit, v105's
+// findSubstituteUnit swaps in another open same-wing (or other-wing) unit.
+// The log here records each swap so the reopen path can reverse it.
+//
+// Schema: array of { date, shift, bn, schedId, original, substitute, appliedAt }
+// Storage: syncedLS key 'unitSubLog' — cross-device so reopens from any
+// device see the same substitutions.
+//
+// Entries are removed when the substitution is reverted (auto on future
+// reopen) or kept-as-permanent (mid-shift "Keep substitute" choice).
+function getUnitSubLog(){
+  const parsed = syncedLS.get('unitSubLog');
+  if(!parsed) return [];
+  if(typeof parsed === 'string'){
+    try {
+      const reparsed = JSON.parse(parsed);
+      syncedLS.set('unitSubLog', reparsed).catch(()=>{});
+      return Array.isArray(reparsed) ? reparsed : [];
+    } catch { return []; }
+  }
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+async function appendUnitSubLog(entries){
+  if(!entries || !entries.length) return;
+  const existing = getUnitSubLog();
+  const merged = [...existing, ...entries];
+  await syncedLS.set('unitSubLog', merged);
+}
+
+async function removeUnitSubLogEntries(filterFn){
+  const existing = getUnitSubLog();
+  const remaining = existing.filter(e => !filterFn(e));
+  if(remaining.length !== existing.length){
+    await syncedLS.set('unitSubLog', remaining);
+  }
+}
+
 // ── Write helpers ─────────────────────────────────────
 function setUnitStatus(unit, val){
   // Throws and toasts on remote failure — caller should catch if it cares.
@@ -1668,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-106';
+const APP_VERSION = '2026-05-25-107';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3570,6 +3609,21 @@ async function commitUnitChange(){
         // Cache substitutes on pending so the toast can mention them
         pending._substitutesApplied = _substitutes.filter(s => s.substitute);
         pending._substitutesUnavailable = _substitutes.filter(s => !s.substitute);
+
+        // Build 107 (2026-05-25): record substitutions in the log so the
+        // reopen path can revert them. Each successful swap gets one entry.
+        if(pending._substitutesApplied.length){
+          const appliedAt = new Date().toISOString();
+          await appendUnitSubLog(pending._substitutesApplied.map(s => ({
+            date: s.date,
+            shift: s.shift,
+            bn: s.bn,
+            schedId: s.schedId,
+            original: unit,
+            substitute: s.substitute,
+            appliedAt
+          })));
+        }
       }
 
       hideBusy();
@@ -3602,8 +3656,85 @@ async function commitUnitChange(){
       // Both internally use recomputeBNWithPastPreserved so mid-shift
       // opens add slots to future rotation only, preserving past history.
       _recomputeAffectedFor(unit).catch(()=>{});
+
+      // Build 107 (2026-05-25): revert any substitutions that were applied
+      // when this unit was previously closed. Walks the substitution log
+      // for entries with original === this unit, then per entry:
+      //   - Future shifts → auto-revert (Units patch + recompute)
+      //   - Past shifts   → drop log entry, no Units change
+      //   - Current mid-shift → choice modal (Keep substitute / Switch back)
+      const allLog = getUnitSubLog();
+      const relevantSubs = allLog.filter(e => e.original === unit);
+      if(relevantSubs.length){
+        const futureSubs = [];
+        const pastSubs = [];
+        const midShiftSubs = [];
+        const reopenAt = pending.effectiveAt;
+        for(const e of relevantSubs){
+          // Determine the BN's shift window vs reopen time
+          const shiftStart = slotDateTime(e.date, e.shift === 'Day' ? '0800' : '2000', e.shift);
+          const shiftEnd = slotDateTime(e.date, e.shift === 'Day' ? '2030' : '0830', e.shift);
+          if(reopenAt < shiftStart) futureSubs.push(e);
+          else if(reopenAt > shiftEnd) pastSubs.push(e);
+          else midShiftSubs.push(e);
+        }
+
+        // Past entries: just drop them
+        if(pastSubs.length){
+          await removeUnitSubLogEntries(e =>
+            pastSubs.some(p => p.schedId === e.schedId && p.original === e.original && p.substitute === e.substitute)
+          );
+        }
+
+        // Future entries: auto-revert each
+        if(futureSubs.length){
+          for(const e of futureSubs){
+            const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
+            if(!sched.length) continue;
+            let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
+            // Remove substitute, add original back (if not already present)
+            const newUnits = units.filter(u => u !== e.substitute);
+            if(!newUnits.includes(e.original)) newUnits.push(e.original);
+            if(JSON.stringify(newUnits) !== JSON.stringify(units)){
+              await spPatch(LISTS.schedule, e.schedId, { Units: JSON.stringify(newUnits) }).catch(()=>{});
+            }
+            recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
+          }
+          // Remove these from log
+          await removeUnitSubLogEntries(e =>
+            futureSubs.some(f => f.schedId === e.schedId && f.original === e.original && f.substitute === e.substitute)
+          );
+        }
+
+        // Mid-shift entries: show choice modal per BN (sequential)
+        if(midShiftSubs.length){
+          for(const e of midShiftSubs){
+            const choice = await confirmSubstituteRevert(e);
+            if(choice === 'switch_back'){
+              const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
+              if(sched.length){
+                let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
+                const newUnits = units.filter(u => u !== e.substitute);
+                if(!newUnits.includes(e.original)) newUnits.push(e.original);
+                if(JSON.stringify(newUnits) !== JSON.stringify(units)){
+                  await spPatch(LISTS.schedule, e.schedId, { Units: JSON.stringify(newUnits) }).catch(()=>{});
+                }
+                recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
+              }
+            }
+            // Either way (keep or switch_back), remove from log — the
+            // substitution is no longer "pending revert"; the user has decided.
+            await removeUnitSubLogEntries(le =>
+              le.schedId === e.schedId && le.original === e.original && le.substitute === e.substitute
+            );
+          }
+        }
+      }
+
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
-      toast(`${unit} opening ${when}`);
+      const revertedCount = relevantSubs ? relevantSubs.length : 0;
+      const revertTail = revertedCount ? ` · ${revertedCount} substitute${revertedCount!==1?'s':''} handled` : '';
+      toast(`${unit} opening ${when}${revertTail}`);
     }
 
     refreshUnitStatusGrid();
@@ -10235,6 +10366,40 @@ function formatNurse(nurseName){
   const name = m ? escHTML(m[1].trim()) : escHTML(nurseName||'');
   const ext  = m ? m[2] : '';
   return ext ? `${name} ${ext}` : name;
+}
+
+// Build 107 (2026-05-25): Choice modal shown when a unit reopens MID-SHIFT
+// and there's an active substitution to handle. Per Tomas's design:
+//   "Keep substitute" — substitute stays in BN's Units; reopened unit goes
+//                       uncovered for the rest of the shift. Log entry removed.
+//   "Switch back"    — substitute removed from Units, original restored.
+//                       Recompute redistributes future slots back to original.
+//
+// Returns: 'keep_substitute' | 'switch_back'
+function confirmSubstituteRevert(entry){
+  return new Promise(resolve => {
+    const msg = `<strong>${entry.original}</strong> is reopening mid-shift, and <strong>${firstName(entry.bn)}</strong> is currently substituting on <strong>${entry.substitute}</strong>.\n\nWhat should happen?`;
+    const modal = document.getElementById('customConfirmModal');
+    document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
+    const okBtn = document.getElementById('customConfirmOk');
+    const cancelBtn = document.getElementById('customConfirmCancel');
+    okBtn.textContent = `Switch back to ${entry.original}`;
+    cancelBtn.textContent = `Keep ${entry.substitute}`;
+    const btnWrap = cancelBtn.parentNode;
+    // Strip any leftover dynamic buttons
+    [...btnWrap.children].forEach(child => {
+      if(child !== okBtn && child !== cancelBtn) child.remove();
+    });
+    modal.style.display = 'flex';
+    const cleanup = (result) => {
+      modal.style.display = 'none';
+      okBtn.onclick = null;
+      cancelBtn.onclick = null;
+      resolve(result);
+    };
+    okBtn.onclick = () => cleanup('switch_back');
+    cancelBtn.onclick = () => cleanup('keep_substitute');
+  });
 }
 
 function customConfirm(msg, okLabel, cancelLabel){
