@@ -1668,7 +1668,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-102';
+const APP_VERSION = '2026-05-25-103';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -11894,6 +11894,19 @@ async function saveImportRow(i){
 // ═══════════════════════════════════════════════════════
 const BNS = { shift: null, name: '', date: '' };
 
+// Build 103 (2026-05-25): in-memory ring buffer for [dateTrace] log lines so
+// the Debug button can surface them in the modal. Captures the last 30 entries
+// to keep memory bounded. Older entries shift out as new ones come in.
+const _dateTraceLog = [];
+function _logDateTrace(msg){
+  const ts = new Date();
+  const stamp = `${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}:${String(ts.getSeconds()).padStart(2,'0')}`;
+  const line = `[${stamp}] ${msg}`;
+  _dateTraceLog.push(line);
+  if(_dateTraceLog.length > 30) _dateTraceLog.shift();
+  console.log(`[dateTrace] ${msg}`);
+}
+
 function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
   if (!sel) return;
@@ -11960,7 +11973,7 @@ async function loadBNView(){
   // Build 102 diagnostic: trace where BNS.date is set, to chase the
   // intermittent "date jumps to tomorrow" bug observed 2026-05-25.
   // Remove after the cause is identified.
-  console.log(`[dateTrace] loadBNView set BNS.date=${BNS.date} shift=${BNS.shift} (resolvedFrom=${resolvedShift && resolvedDate === (typeof shiftDate === 'function' ? shiftDate(resolvedShift) : null) ? 'fallback-shiftDate' : 'detectBNShiftForName'}) localToday=${today()}`);
+  _logDateTrace(`loadBNView set BNS.date=${BNS.date} shift=${BNS.shift} (resolvedFrom=${resolvedShift && resolvedDate === (typeof shiftDate === 'function' ? shiftDate(resolvedShift) : null) ? 'fallback-shiftDate' : 'detectBNShiftForName'}) localToday=${today()}`);
   BNS.defaultShift = BNS.shift;
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
@@ -12035,7 +12048,7 @@ async function loadBNView(){
           const _prevDate = BNS.date;
           BNS.date  = future[0].ShiftDate.slice(0,10);
           BNS.shift = future[0].ShiftType;
-          console.log(`[dateTrace] forward-scan jumped BNS.date from ${_prevDate} → ${BNS.date} (${BNS.shift}). Future records found: ${future.length}. localToday=${today()}`);
+          _logDateTrace(`forward-scan jumped BNS.date from ${_prevDate} → ${BNS.date} (${BNS.shift}). Future records found: ${future.length}. localToday=${today()}`);
           const dp = document.getElementById('bnDate');
           if(dp) dp.value = BNS.date;
           renderBNShiftPill();
@@ -12067,7 +12080,7 @@ function onBNDateChange(){
   const _prevDate = BNS.date;
   BNS.date = dp.value;
   // Build 102 diagnostic: catch manual date-picker changes vs programmatic
-  console.log(`[dateTrace] onBNDateChange: BNS.date ${_prevDate} → ${BNS.date} (picker tapped or set programmatically). localToday=${today()}`);
+  _logDateTrace(`onBNDateChange: BNS.date ${_prevDate} → ${BNS.date} (picker tapped or set programmatically). localToday=${today()}`);
   // Auto-detect shift based on imported entries for this date
   const entry = importEntries.find(e => e.name === BNS.name && e.date === BNS.date);
   if (entry) {
@@ -13809,6 +13822,9 @@ function showDebugDiag(){
     units: myUnits,
     cachedBookings: visible.length,
     visibleToMe: visibleToMe.length,
+    // Build 103: include the dateTrace ring buffer so date-jump bugs can be
+    // captured without console access. Empty array if no traces have fired.
+    dateTrace: _dateTraceLog.slice(),
     bookings: visible
   };
   const text = JSON.stringify(report, null, 2);
