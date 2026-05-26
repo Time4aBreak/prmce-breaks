@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-121';
+const APP_VERSION = '2026-05-26-123';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -13051,18 +13051,31 @@ let _coverageLastFingerprint = null;
 function startProdLogPolling(){
   stopProdLogPolling();
   if(document.hidden) return; // visibilitychange listener will start when visible
-  _prodLogPollTmr = setInterval(silentRefreshProdLog, POLL_INTERVAL_MS);
+  // Build 123 (2026-05-26): Random 0-3s jitter on poll start. Without it,
+  // 8 BNs signing in at shift change would all poll at the exact same
+  // 10s offset and stack up against Apps Script's 30-concurrent-execution
+  // limit — caused intermittent CORS errors during perf testing. Jitter
+  // spreads the load across the 10s window.
+  const jitter = Math.floor(Math.random() * 3000);
+  _prodLogPollTmr = setTimeout(function start(){
+    silentRefreshProdLog();
+    _prodLogPollTmr = setInterval(silentRefreshProdLog, POLL_INTERVAL_MS);
+  }, jitter);
 }
 function stopProdLogPolling(){
-  if(_prodLogPollTmr){ clearInterval(_prodLogPollTmr); _prodLogPollTmr = null; }
+  if(_prodLogPollTmr){ clearInterval(_prodLogPollTmr); clearTimeout(_prodLogPollTmr); _prodLogPollTmr = null; }
 }
 function startCoveragePolling(){
   stopCoveragePolling();
   if(document.hidden) return;
-  _coverageTmr = setInterval(silentRefreshCoverage, POLL_INTERVAL_MS);
+  const jitter = Math.floor(Math.random() * 3000);
+  _coverageTmr = setTimeout(function start(){
+    silentRefreshCoverage();
+    _coverageTmr = setInterval(silentRefreshCoverage, POLL_INTERVAL_MS);
+  }, jitter);
 }
 function stopCoveragePolling(){
-  if(_coverageTmr){ clearInterval(_coverageTmr); _coverageTmr = null; }
+  if(_coverageTmr){ clearInterval(_coverageTmr); clearTimeout(_coverageTmr); _coverageTmr = null; }
 }
 
 // Tab/visibility coordination: pause polling when the browser tab is hidden,
@@ -13754,12 +13767,14 @@ async function silentRefreshProdLog(){
     // would compare queued actions against pre-delete state.
     const bookings = reconcileBookings(bookingsRaw);
 
-    // Build fingerprint from booking fields + this BN's schedule status/units
+    // Build fingerprint from booking fields + this BN's schedule status/units/ext
     // + watched BNState values (so cross-device changes wake the renderer).
+    // Build 123 (2026-05-26): Added s.Ext so cross-device ext updates are
+    // picked up by the existing 10s prodlog poll — no new HTTP call.
     const bookFp = bookings.map(b =>
       `${b.Id}:${normSlot(b.SlotTime)}:${b.Unit}:${b.BreakStatus||''}:${b.IsCompleted||''}:${b.IsBNBreak||''}`
     ).sort().join('|');
-    const schedFp = scheds.map(s => `${s.Id}:${s.Status||''}:${s.Units||''}`).sort().join('|');
+    const schedFp = scheds.map(s => `${s.Id}:${s.Status||''}:${s.Units||''}:${s.Ext||''}`).sort().join('|');
     const stateFp = watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|');
     const fp = bookFp + '||' + schedFp + '||' + stateFp;
 
@@ -13772,6 +13787,28 @@ async function silentRefreshProdLog(){
     if(fp !== _prodLogLastFingerprint || conflictsResolved > 0){
       _prodLogLastFingerprint = fp;
       loadBNConfirm();
+      // Build 123 (2026-05-26): If this BN's schedule.Ext changed (likely
+      // a cross-device update from another phone/desktop), reflect it in
+      // the input + cache. Skip if user is currently typing — don't clobber
+      // mid-edit. Only updates when the input is empty or shows the prior
+      // cached value (i.e., no in-flight edit).
+      const mySched = scheds.find(s => s.Status !== 'inactive');
+      if(mySched){
+        const remoteExt = (mySched.Ext != null) ? String(mySched.Ext).trim() : '';
+        const cacheKey = `bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`;
+        const cached = localStorage.getItem(cacheKey) || '';
+        if(remoteExt && remoteExt !== cached){
+          const input = document.getElementById('bnExtInput');
+          // Only auto-sync the visible field if it's empty, disabled, or
+          // matches the prior cached value (no mid-edit). Otherwise
+          // respect the user's in-progress typing.
+          if(input && (input.disabled || !input.value || input.value === cached)){
+            input.value = remoteExt;
+          }
+          localStorage.setItem(cacheKey, remoteExt);
+          BNS.ext = remoteExt;
+        }
+      }
       // If a watched bnDefault_* changed, repaint the normal-breaks grid too
       // — it lives outside the Prod Log proper and isn't refreshed by loadBNConfirm.
       if(stateChanged.some(k => k.startsWith('bnDefault_'))){
