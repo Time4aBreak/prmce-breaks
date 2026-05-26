@@ -761,7 +761,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div class="row" style="margin-bottom:12px">
           <div class="field">
             <label>Date</label>
-            <input type="date" id="aDate" onchange="populateNurseDropdown();update3CToggle();updateAdminUnitGrid()"/>
+            <input type="date" id="aDate" onchange="onAssignContextChange()"/>
           </div>
           <div class="field">
             <label>Shift</label>
@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-114';
+const APP_VERSION = '2026-05-25-115';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9436,8 +9436,9 @@ function setAShift(sh){
   S.aShift=sh;
   document.getElementById('aDay').classList.toggle('active',sh==='Day');
   document.getElementById('aNoc').classList.toggle('active',sh==='Noc');
-  populateNurseDropdown();
-  updateAdminUnitGrid();
+  // Build 115 (2026-05-26): include assignment lookup refresh so unit
+  // grid reflects existing assignment for the new shift (if any).
+  onAssignContextChange();
 }
 
 // Style closed units in the admin manual-assign grid as grayed (visible
@@ -16378,9 +16379,17 @@ function addNamesToRoster(names){
 
 async function syncNurseInput(val){
   document.getElementById('aNurseText').value = '';
-  if(!val) return;
+  await _loadExistingAssignmentFor(val);
+}
 
-  // Look up this BN's existing assignment for the selected date + shift
+// Build 115 (2026-05-26): Extracted lookup logic so date/shift change
+// handlers can re-run it without clearing the typed-name input. Previously
+// the lookup only fired on dropdown change; if user picked a name and then
+// changed date or shift, the unit grid kept showing the prior date's units
+// (data risk mitigated by saveAssign re-querying by name+date+shift, but
+// the UX confusion was real).
+async function _loadExistingAssignmentFor(val){
+  if(!val) return;
   const date = document.getElementById('aDate').value;
   const shift = S.aShift;
   if(!date || !shift) return;
@@ -16392,22 +16401,18 @@ async function syncNurseInput(val){
     const active = scheds.filter(s => s.Status !== 'inactive' && !s.IsSupplemental);
 
     if(active.length){
-      // Consolidate units across records (shouldn't be multiple, but just in case)
       const allUnits = [...new Set(active.flatMap(s => {
         try { return JSON.parse(s.Units || '[]'); } catch { return []; }
       }))];
-      // Pre-select units in the grid
       S.aUnits = [...allUnits];
       document.querySelectorAll('.uc').forEach(c => {
         const u = c.id.replace('au-','');
         c.classList.toggle('on', S.aUnits.includes(u));
       });
-      // Track editing so saveAssign patches instead of posting new
       S.editingAssignId = active[0].Id;
       hideBusy();
       toast(`Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`);
     } else {
-      // No existing assignment — clear unit grid and exit edit mode
       S.aUnits = [];
       S.editingAssignId = null;
       document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
@@ -16415,8 +16420,34 @@ async function syncNurseInput(val){
     }
   } catch(e){
     hideBusy();
-    console.warn('syncNurseInput lookup failed:', e.message);
+    console.warn('_loadExistingAssignmentFor lookup failed:', e.message);
   }
+}
+
+// Run after date or shift change. Resolves the currently-active name
+// (dropdown wins; typed fallback canonicalized) and re-runs the lookup.
+// Skips silently if neither is set.
+async function refreshAssignmentForCurrentInputs(){
+  const dropdownVal = document.getElementById('aNurse').value;
+  if(dropdownVal){
+    await _loadExistingAssignmentFor(dropdownVal);
+    return;
+  }
+  const typedRaw = (document.getElementById('aNurseText').value || '').trim();
+  if(typedRaw){
+    const resolved = (typeof canonicalizeBNName === 'function') ? canonicalizeBNName(typedRaw) : null;
+    if(resolved) await _loadExistingAssignmentFor(resolved);
+  }
+}
+
+// Wrapper for date/shift onchange — sequences the existing updates with
+// the new assignment refresh. populateNurseDropdown must complete first
+// (it may reset dropdown value if name not in new date's roster).
+async function onAssignContextChange(){
+  await populateNurseDropdown();
+  update3CToggle();
+  updateAdminUnitGrid();
+  await refreshAssignmentForCurrentInputs();
 }
 
 function toggleBNList(){
