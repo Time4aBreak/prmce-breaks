@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-119';
+const APP_VERSION = '2026-05-25-120';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -2604,7 +2604,7 @@ async function detectBNShiftForName(name){
       else bStart.setHours(20, 0, 0, 0);
       return bStart - aStart;
     });
-    return { shift: live[0].ShiftType, date: (live[0].ShiftDate || '').slice(0, 10) };
+    return { shift: live[0].ShiftType, date: (live[0].ShiftDate || '').slice(0, 10), sched: live[0] };
   } catch(e){
     return null;
   }
@@ -12487,12 +12487,15 @@ async function loadBNView(){
   // Resolve the BN's current shift+date. First try schedule-based lookup
   // (most accurate — handles overlap windows, doubles, and boundary cases),
   // then fall back to BN-hour time boundaries if no active schedule found.
-  let resolvedShift = null, resolvedDate = null;
+  let resolvedShift = null, resolvedDate = null, resolvedSched = null;
   try {
     const lookup = await detectBNShiftForName(name);
     if(lookup){
       resolvedShift = lookup.shift;
       resolvedDate  = lookup.date;
+      // Build 120 (2026-05-26): also retain the schedule record so we
+      // can read its Ext field as the cross-device source of truth.
+      resolvedSched = lookup.sched || null;
     }
   } catch(e){ /* fall through to time-based guess */ }
   if(!resolvedShift){
@@ -12500,9 +12503,22 @@ async function loadBNView(){
     resolvedDate  = shiftDate(resolvedShift);
   }
 
-  // Restore saved ext for this BN if available (key is shift-scoped)
+  // Source-of-truth ext resolution:
+  //   1. Whatever the user just typed (`ext`), if any
+  //   2. The remote BNSchedule.Ext for the live shift (cross-device truth)
+  //   3. localStorage cache (fast path; may be stale across devices)
+  //   4. Empty
+  // Without (2), a device that received a cross-device update would keep
+  // showing its own stale localStorage value forever (Phase 8.3 fail).
+  const remoteExt = (resolvedSched && resolvedSched.Ext) ? String(resolvedSched.Ext).trim() : '';
   const savedExt = localStorage.getItem(`bnExt_${name}_${resolvedDate}_${resolvedShift}`);
-  const resolvedExt = ext || savedExt || '';
+  const resolvedExt = ext || remoteExt || savedExt || '';
+
+  // If BNSchedule's value differs from our cache, the remote won. Update
+  // cache to match so subsequent reads hit the right value.
+  if(remoteExt && remoteExt !== savedExt){
+    localStorage.setItem(`bnExt_${name}_${resolvedDate}_${resolvedShift}`, remoteExt);
+  }
 
   // Require ext — prompt if not entered and not saved
   // Ext is optional for viewing — only required for saving to schedule record
