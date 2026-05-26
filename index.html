@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-124';
+const APP_VERSION = '2026-05-26-126';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -4383,6 +4383,7 @@ function showSubTab(name, btn){
   // based on which subtab we're switching to.
   stopProdLogPolling();
   stopCoveragePolling();
+  stopSchedulePolling();
 
   document.querySelectorAll('.subtab').forEach(t => { t.style.display='none'; t.classList.remove('active'); });
   document.querySelectorAll('.sub-tab').forEach(b => b.classList.remove('active'));
@@ -4461,6 +4462,11 @@ function showSubTab(name, btn){
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
       update3CToggle();
+      // Build 125 (2026-05-26): Start schedule polling so the Schedule
+      // tab reflects cross-device changes (Mark Unavailable, manual
+      // adds, Remove cascades) within ~10s without manual refresh.
+      _scheduleLastFingerprint = null;
+      startSchedulePolling();
     }
   }
 }
@@ -4489,6 +4495,7 @@ function showTab(name, btn){
   if(name !== 'portal'){
     stopProdLogPolling();
     stopCoveragePolling();
+    stopSchedulePolling();
   }
 
   // Scroll to top on every tab switch
@@ -6372,7 +6379,11 @@ async function silentRefreshSlots(){
       return `${s}:open`;
     }).join('|') +
     // Append watched bnStart values so cross-device updates wake the renderer.
-    '||' + watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|');
+    '||' + watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|') +
+    // Build 126 (2026-05-26): Append BN ext values for covering BNs so the
+    // "Break nurse for {unit}: {BN} · Ext. {ext}" header refreshes when ext
+    // is updated on another device.
+    '||' + covering.map(s => `${s.BreakNurseName}:${s.Ext||''}`).sort().join('|');
 
     // Only trigger full re-render if state changed
     if(list.dataset.fingerprint !== fingerprint){
@@ -13052,6 +13063,11 @@ let _prodLogPollTmr = null;
 let _prodLogLastFingerprint = null;
 let _coverageTmr = null;
 let _coverageLastFingerprint = null;
+// Build 125 (2026-05-26): Schedule tab polling. Detects cross-device
+// schedule changes (Mark Unavailable, Mark Available, new manual
+// assignments, Remove cascades) without requiring a manual refresh.
+let _schedulePollTmr = null;
+let _scheduleLastFingerprint = null;
 
 function startProdLogPolling(){
   stopProdLogPolling();
@@ -13083,6 +13099,22 @@ function stopCoveragePolling(){
   if(_coverageTmr){ clearInterval(_coverageTmr); clearTimeout(_coverageTmr); _coverageTmr = null; }
 }
 
+// Build 125 (2026-05-26): Schedule tab polling. Mirrors prodlog/coverage
+// pattern — jittered start, 10s interval, fingerprint diff to skip
+// re-renders. Stops when subtab inactive or browser tab hidden.
+function startSchedulePolling(){
+  stopSchedulePolling();
+  if(document.hidden) return;
+  const jitter = Math.floor(Math.random() * 3000);
+  _schedulePollTmr = setTimeout(function start(){
+    silentRefreshSchedule();
+    _schedulePollTmr = setInterval(silentRefreshSchedule, POLL_INTERVAL_MS);
+  }, jitter);
+}
+function stopSchedulePolling(){
+  if(_schedulePollTmr){ clearInterval(_schedulePollTmr); clearTimeout(_schedulePollTmr); _schedulePollTmr = null; }
+}
+
 // Tab/visibility coordination: pause polling when the browser tab is hidden,
 // resume when it becomes visible. Prevents needless backend calls and battery
 // drain while user is in another app.
@@ -13092,6 +13124,7 @@ if(typeof window !== 'undefined' && !window._pollVisStarted){
     if(document.hidden){
       stopProdLogPolling();
       stopCoveragePolling();
+      stopSchedulePolling();
     } else {
       // Re-check which subtab is active and restart the appropriate poller.
       const activeSub = document.querySelector('.subtab.active');
@@ -13103,6 +13136,9 @@ if(typeof window !== 'undefined' && !window._pollVisStarted){
         } else if(activeSub.id === 'subtab-summary'){
           silentRefreshCoverage();
           startCoveragePolling();
+        } else if(activeSub.id === 'subtab-admin'){
+          silentRefreshSchedule();
+          startSchedulePolling();
         }
       }
     }
@@ -13869,7 +13905,9 @@ async function silentRefreshCoverage(){
     await syncedLS.refreshMany(watchedKeys);
     const fp = [
       ...bookings.map(b => `${b.Id}:${b.Unit}:${normSlot(b.SlotTime)}:${b.BreakStatus||''}:${b.IsCompleted||''}`),
-      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}`),
+      // Build 126 (2026-05-26): include s.Ext so the "Ext. {N}" badges in
+      // coverage rows update when a BN changes their ext on another device.
+      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}:${s.Ext||''}`),
       ...watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`)
     ].sort().join('|');
     if(fp !== _coverageLastFingerprint){
@@ -13878,6 +13916,47 @@ async function silentRefreshCoverage(){
     }
   } catch(e){
     console.warn('[coverage poll] refresh failed:', e.message);
+  }
+}
+
+// Build 125 (2026-05-26): Schedule tab silent refresh. Mirrors Mark
+// Unavailable / Mark Available / new manual assignments / Remove
+// cascades across devices without manual refresh.
+//
+// Filter mirrors loadAssignments' (preset window or date-range or
+// "from today" default) so the fingerprint and re-render see the same
+// rows. BN multi-select filter is applied client-side in loadAssignments,
+// so the unfiltered fetch still detects changes the user cares about.
+async function silentRefreshSchedule(){
+  if(document.hidden) return;
+  const el = document.getElementById('assignList');
+  if(!el) return;
+  const activeSub = document.querySelector('.subtab.active');
+  if(!activeSub || activeSub.id !== 'subtab-admin') return;
+  try {
+    let filter;
+    if(_viewRange !== 'all'){
+      const from = document.getElementById('viewDateFrom').value;
+      const to   = document.getElementById('viewDateTo').value;
+      if(!from && !to){ filter = `ShiftDate ge '${activeShiftFloor()}'`; }
+      else if(from && to){ filter = `ShiftDate ge '${from}' and ShiftDate le '${to}'`; }
+      else if(from){ filter = `ShiftDate ge '${from}'`; }
+      else { filter = `ShiftDate le '${to}'`; }
+    } else {
+      filter = `ShiftDate ge '${activeShiftFloor()}'`;
+    }
+    const scheds = await spGet(LISTS.schedule, filter);
+    // Fingerprint covers the fields that affect display: BN identity,
+    // date/shift, units, status, ext. Order-independent via sort.
+    const fp = scheds.map(s =>
+      `${s.Id}:${s.BreakNurseName}:${(s.ShiftDate||'').slice(0,10)}:${s.ShiftType}:${s.Units||''}:${s.Status||''}:${s.Ext||''}`
+    ).sort().join('|');
+    if(fp !== _scheduleLastFingerprint){
+      _scheduleLastFingerprint = fp;
+      loadAssignments();
+    }
+  } catch(e){
+    console.warn('[schedule poll] refresh failed:', e.message);
   }
 }
 
