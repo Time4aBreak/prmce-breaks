@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-115';
+const APP_VERSION = '2026-05-25-117';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12527,14 +12527,13 @@ async function loadBNView(){
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
 
-  // Save ext keyed to this shift and patch to schedule record
-  localStorage.setItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`, resolvedExt);
-  spGet(LISTS.schedule,
-    `ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`)
-    .then(scheds => {
-      const active = scheds.find(s => s.Status !== 'inactive');
-      if(active) spPatch(LISTS.schedule, active.Id, { Ext: resolvedExt }).catch(()=>{});
-    }).catch(()=>{});
+  // Build 117 (2026-05-26): Removed the auto-save+patch block here. The
+  // new design saves ext only via onBNExtInput → saveExtForLiveShift,
+  // gated to the BN's CURRENT live shift. loadBNView still populates
+  // the input from localStorage cache for visual continuity, but it
+  // no longer pushes that cache value to BNSchedule (which would
+  // silently fail or write to the wrong record when the user has the
+  // date picker on a non-live shift).
   // Set date picker to shift start date (handles Noc shifts that started yesterday)
   const dp = document.getElementById('bnDate');
   if (dp) dp.value = BNS.date;
@@ -12614,12 +12613,74 @@ async function loadBNView(){
   })();
 }
 
-function onBNExtInput(){
+async function onBNExtInput(){
   const ext = document.getElementById('bnExtInput').value.trim();
-  // If name is selected and ext is now valid, auto-load the view (which will save the ext)
-  if(/^\d{5}$/.test(ext)){
-    const name = document.getElementById('bnNameSelect').value.trim();
-    if(name) loadBNView();
+  if(!/^\d{5}$/.test(ext)) return;
+  const name = document.getElementById('bnNameSelect').value.trim();
+  if(!name) return;
+  // Build 117 (2026-05-26): Spectra ext entry is for the CURRENT shift
+  // only. Day BNs can enter from 08:00, Noc from 20:00 — matches the
+  // detectBNShiftForName "live window" definition (Day 08:00-20:30,
+  // Noc 20:00-next 08:30). Outside those windows, entry is blocked.
+  // Operational reality: Day/Noc share phones — the ext belongs to
+  // whoever is in shift right now.
+  let live;
+  try { live = await detectBNShiftForName(name); }
+  catch(e){ toast('Could not verify your shift: ' + e.message, true); return; }
+
+  if(!live){
+    toast(`No active shift for ${firstName(name)} right now. Day BNs can enter ext from 08:00, Noc from 20:00.`, true);
+    return;
+  }
+
+  await saveExtForLiveShift(name, ext, live).catch(e => {
+    console.warn('saveExtForLiveShift failed:', e.message);
+    toast('Failed to save ext: ' + e.message, true);
+  });
+}
+
+// Save ext for the BN's LIVE current shift. Patches BNSchedule.Ext so
+// the value syncs across devices. Within the shift, warns (but allows
+// with confirm) if another BN is using the same ext — sometimes two BNs
+// deliberately share a phone (handoff, training), so operational reality
+// wins over strict uniqueness.
+async function saveExtForLiveShift(name, ext, live){
+  // Fetch live-shift schedule records to find this BN's own row AND
+  // check for collisions with other BNs on the same shift.
+  const scheds = await spGet(LISTS.schedule,
+    `ShiftDate ge '${live.date}' and ShiftDate le '${live.date}T23' and ShiftType eq '${live.shift}'`);
+  const active = scheds.filter(s => s.Status !== 'inactive');
+
+  const collisions = active.filter(s => s.BreakNurseName !== name && (s.Ext || '').trim() === ext);
+  if(collisions.length){
+    const names = collisions.map(s => firstName(s.BreakNurseName)).join(', ');
+    if(!await customConfirm(
+      `Ext ${ext} is already in use this shift by ${names}.\n\nUse it anyway?`,
+      'Use anyway', 'Cancel'
+    )){
+      // Restore previous ext value in input (or clear if none)
+      document.getElementById('bnExtInput').value = BNS.ext || '';
+      return;
+    }
+  }
+
+  const myRec = active.find(s => s.BreakNurseName === name);
+
+  // Update local state to match live shift
+  BNS.name = name;
+  BNS.date = live.date;
+  BNS.shift = live.shift;
+  BNS.ext = ext;
+  localStorage.setItem(`bnExt_${name}_${live.date}_${live.shift}`, ext);
+
+  if(myRec){
+    await spPatch(LISTS.schedule, myRec.Id, { Ext: ext });
+    toast(`Ext saved · ${live.shift} ${live.date}`);
+  } else {
+    // BN is in a live window but has no schedule record — unusual (BN
+    // would have had to be added without a schedule row). Save locally
+    // but flag that cross-device sync won't work.
+    toast(`Saved locally, but no ${live.shift} schedule on ${live.date} for ${firstName(name)} — won't sync across devices.`, true);
   }
 }
 
