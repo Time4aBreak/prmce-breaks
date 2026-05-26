@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-113';
+const APP_VERSION = '2026-05-25-114';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9491,6 +9491,21 @@ async function saveAssign(){
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
+  // Build 114 (2026-05-26): Confirm before saving for a past shift. Day
+  // ends 20:30, Noc ends 08:30 next day. Backfill is allowed (e.g., to
+  // record actual coverage after a missed extraction), but it's easy to
+  // fat-finger the date or shift and end up writing to an already-ended
+  // shift. One-tap confirm gives admin a chance to catch a mistake.
+  const shiftEnd = slotDateTime(dt, shift === 'Day' ? '2030' : '0830', shift);
+  if(shiftEnd < new Date()){
+    if(!await customConfirm(
+      `${shift} shift on ${dt} has already ended.\n\nRecord assignment anyway?`,
+      'Record', 'Cancel'
+    )){
+      loadAssignments();
+      return;
+    }
+  }
   // No save-time closed-unit guard. The decision point is at TAP time —
   // the manual grid and import grid block toggling in a closed unit via
   // a toast directing admin to the Unit Status card. Save just persists
