@@ -1668,7 +1668,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-105';
+const APP_VERSION = '2026-05-25-106';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3356,8 +3356,14 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
           ? (units.includes(unit) || units.includes('C_PAIR'))
           : units.includes(unit);
         if(!coversChangingUnit) return false;
-        // Only include if shift hasn't ended yet at effectiveAt
-        const shiftEnd = slotDateTime(s.ShiftDate.slice(0,10), s.ShiftType === 'Noc' ? '0830' : '1830', s.ShiftType);
+        // Only include if shift hasn't ended yet at effectiveAt.
+        // Build 106 (2026-05-25): use BN-perspective shift end (Day 20:30,
+        // Noc 08:30) not staff shift end (Day 18:30). BNs work past staff
+        // shift end to cover the staff transition. A unit closure at 7 PM
+        // still needs to redistribute future break slots in the BN's
+        // remaining window (7-8:30 PM for Day), which the old 18:30 cutoff
+        // dropped silently — leaving stale unit assignments on those slots.
+        const shiftEnd = slotDateTime(s.ShiftDate.slice(0,10), s.ShiftType === 'Noc' ? '0830' : '2030', s.ShiftType);
         return shiftEnd >= effectiveAt;
       });
       bnImpacts = affectedScheds.map(s => {
