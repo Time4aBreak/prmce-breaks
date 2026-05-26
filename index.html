@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-117';
+const APP_VERSION = '2026-05-25-118';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12534,6 +12534,9 @@ async function loadBNView(){
   // no longer pushes that cache value to BNSchedule (which would
   // silently fail or write to the wrong record when the user has the
   // date picker on a non-live shift).
+  // Build 118 (2026-05-26): Refresh ext input enable/disable + cached
+  // value based on whether BNS.date+shift is live right now.
+  updateBNExtInputState();
   // Set date picker to shift start date (handles Noc shifts that started yesterday)
   const dp = document.getElementById('bnDate');
   if (dp) dp.value = BNS.date;
@@ -12613,17 +12616,61 @@ async function loadBNView(){
   })();
 }
 
+// Build 118 (2026-05-26): Helper — is the given (date, shift) live RIGHT NOW?
+// Live windows match detectBNShiftForName's definition:
+//   Day: 08:00–20:30 on the given date
+//   Noc: 20:00 on the given date – 08:30 the next day
+// Returns false for any malformed/missing input.
+function isShiftLiveNow(date, shift){
+  if(!date || !shift) return false;
+  const now = new Date();
+  const start = new Date(date + 'T12:00:00');
+  if(isNaN(start)) return false;
+  if(shift === 'Day'){
+    const s0 = new Date(start); s0.setHours(8, 0, 0, 0);
+    const s1 = new Date(start); s1.setHours(20, 30, 0, 0);
+    return now >= s0 && now < s1;
+  }
+  if(shift === 'Noc'){
+    const s0 = new Date(start); s0.setHours(20, 0, 0, 0);
+    const s1 = new Date(start); s1.setDate(s1.getDate() + 1); s1.setHours(8, 30, 0, 0);
+    return now >= s0 && now < s1;
+  }
+  return false;
+}
+
+// Disable the Spectra ext input unless the BN's currently-selected
+// (BNS.date, BNS.shift) is live right now. Day BNs can enter their ext
+// from 08:00 (until 20:30); Noc BNs from 20:00 (until 08:30 next day).
+// Outside those windows the field is disabled — no typing possible,
+// placeholder explains why.
+function updateBNExtInputState(){
+  const input = document.getElementById('bnExtInput');
+  if(!input) return;
+  const live = isShiftLiveNow(BNS.date, BNS.shift);
+  input.disabled = !live;
+  if(live){
+    input.placeholder = '— — — — —';
+    // Populate with this shift's cached ext if not currently being edited
+    if(!input.value && BNS.name){
+      const saved = localStorage.getItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`);
+      if(saved) input.value = saved;
+    }
+  } else {
+    input.placeholder = 'Available during your shift';
+    input.value = '';
+  }
+}
+
 async function onBNExtInput(){
   const ext = document.getElementById('bnExtInput').value.trim();
   if(!/^\d{5}$/.test(ext)) return;
   const name = document.getElementById('bnNameSelect').value.trim();
   if(!name) return;
-  // Build 117 (2026-05-26): Spectra ext entry is for the CURRENT shift
-  // only. Day BNs can enter from 08:00, Noc from 20:00 — matches the
-  // detectBNShiftForName "live window" definition (Day 08:00-20:30,
-  // Noc 20:00-next 08:30). Outside those windows, entry is blocked.
-  // Operational reality: Day/Noc share phones — the ext belongs to
-  // whoever is in shift right now.
+  // Build 118 (2026-05-26): Defensive — the input is disabled outside
+  // live shifts via updateBNExtInputState, so reaching here implies a
+  // live shift. Re-detect anyway in case of an edge case (input fired
+  // before disabled state propagated).
   let live;
   try { live = await detectBNShiftForName(name); }
   catch(e){ toast('Could not verify your shift: ' + e.message, true); return; }
@@ -12697,6 +12744,10 @@ function onBNDateChange(){
     BNS.shift = entry.shift;
     renderBNShiftPill();
   }
+  // Build 118 (2026-05-26): Re-evaluate ext input live state. A future or
+  // past date selection disables the field; switching back to today re-
+  // enables it.
+  updateBNExtInputState();
   loadBNConfirm();
   // Start background polling so cross-device updates (other devices changing
   // bnDefault, bnStart, bookings, schedule) propagate within ~10s while
@@ -12713,6 +12764,8 @@ function flipBNShift(){
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across shifts.
   _prodLogResetShiftState();
   renderBNShiftPill();
+  // Build 118 (2026-05-26): Re-evaluate ext input live state.
+  updateBNExtInputState();
   loadBNConfirm();
 }
 
