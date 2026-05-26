@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-118';
+const APP_VERSION = '2026-05-25-119';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12603,6 +12603,13 @@ async function loadBNView(){
           const dp = document.getElementById('bnDate');
           if(dp) dp.value = BNS.date;
           renderBNShiftPill();
+          // Build 118 (2026-05-26): Forward-scan changed BNS.date/shift to
+          // a future record. The earlier updateBNExtInputState() call (at
+          // the top of loadBNView, before this async forward-scan) ran
+          // against the FALLBACK shift, which is typically live "now" —
+          // so the field was enabled. Re-evaluate now that we've jumped
+          // to a likely-not-live future shift.
+          updateBNExtInputState();
         }
       }
     } catch(e){ /* fall through — loadBNConfirm will handle */ }
