@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-120';
+const APP_VERSION = '2026-05-25-121';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -12593,8 +12593,18 @@ async function loadBNView(){
 
   // Before first render: check if BN is scheduled for this date/shift.
   // If not, scan forward up to 30 days and jump to their next scheduled shift.
+  // Build 121 (2026-05-26): Skip forward-scan entirely if detectBNShiftForName
+  // already returned a live shift (resolvedSched present). The earlier check
+  // query was redundant — detection already confirmed the record exists —
+  // and could spuriously return 0 records under transient conditions, then
+  // jumping the BN AWAY from their currently-live shift. The forward-scan
+  // is only meaningful in the no-live-shift case.
   (async () => {
     try {
+      if(resolvedSched){
+        // Detection confirmed a live shift; nothing to scan for.
+        return;
+      }
       const check = await spGet(LISTS.schedule,
         `ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and ShiftType eq '${BNS.shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
       if(!check.length){
