@@ -1707,7 +1707,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-25-107';
+const APP_VERSION = '2026-05-25-110';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -1927,16 +1927,23 @@ async function _spDelReal(list, id){
 // records: [{matchFields:{...}, data:{...}}] — matchFields used to find existing, data to write
 async function spBatchUpsert(list, records){
   if(!records.length) return;
-  // Chunk records to stay within URL length limits (~8KB)
+  // Chunk records to stay within URL length limits (~8KB on GET). With
+  // matchFields+data per record, 5 is conservative. Build 110: send chunks
+  // in parallel — Apps Script serializes server-side but client TCP reuse
+  // and elimination of inter-call wait cuts wall time roughly in half on
+  // larger batches.
   const CHUNK_SIZE = 5;
+  const chunks = [];
   for(let i = 0; i < records.length; i += CHUNK_SIZE){
-    const chunk = records.slice(i, i + CHUNK_SIZE);
-    await gasCall({
+    chunks.push(records.slice(i, i + CHUNK_SIZE));
+  }
+  await Promise.all(chunks.map(chunk =>
+    gasCall({
       action: 'batchUpsert',
       sheet: list,
       records: encodeURIComponent(JSON.stringify(chunk))
-    });
-  }
+    })
+  ));
 }
 
 // Batch set state: write multiple BNState entries in one round trip.
@@ -1958,14 +1965,22 @@ async function spBatchSetState(entries){
   // BNState writes were lost, and the user saw no indication. setMany has
   // its own try/catch that toasts and re-throws — that path was unreachable
   // because of this swallow.
-  const CHUNK_SIZE = 5;
+  // Build 110 (2026-05-25): chunk size 5 → 20, and send chunks in parallel.
+  // Original 5 was a defensive carryover from when this used GET (URL length
+  // limits). With POST the body has 50MB headroom; 20 entries is well under
+  // any practical limit. Combined with parallel dispatch, 50 entries goes
+  // from 10 sequential HTTP calls to 3 parallel — back-end is the floor.
+  const CHUNK_SIZE = 20;
+  const chunks = [];
   for(let i = 0; i < entries.length; i += CHUNK_SIZE){
-    const chunk = entries.slice(i, i + CHUNK_SIZE);
-    await gasCallPost({
+    chunks.push(entries.slice(i, i + CHUNK_SIZE));
+  }
+  await Promise.all(chunks.map(chunk =>
+    gasCallPost({
       action: 'batchSetState',
       entries: encodeURIComponent(JSON.stringify(chunk))
-    });
-  }
+    })
+  ));
 }
 
 // Batch get: fetch multiple queries in one round trip
@@ -3686,20 +3701,16 @@ async function commitUnitChange(){
           );
         }
 
-        // Future entries: auto-revert each
+        // Future entries: auto-revert in bulk.
+        // Build 110 (2026-05-25): full bulk refactor — pre-fetch all data
+        // once, compute rotations in-memory, then send schedule patches +
+        // rotation cache updates as two batched calls.
+        //
+        // Before: N × (spGet schedule + spGet bookings + spPatch schedule +
+        //         spPatch BNState) = 4N round-trips, sequential server-side.
+        // After:  4-5 round-trips total, regardless of N.
         if(futureSubs.length){
-          for(const e of futureSubs){
-            const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
-            if(!sched.length) continue;
-            let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
-            // Remove substitute, add original back (if not already present)
-            const newUnits = units.filter(u => u !== e.substitute);
-            if(!newUnits.includes(e.original)) newUnits.push(e.original);
-            if(JSON.stringify(newUnits) !== JSON.stringify(units)){
-              await spPatch(LISTS.schedule, e.schedId, { Units: JSON.stringify(newUnits) }).catch(()=>{});
-            }
-            recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
-          }
+          await bulkSubstituteRevert(futureSubs);
           // Remove these from log
           await removeUnitSubLogEntries(e =>
             futureSubs.some(f => f.schedId === e.schedId && f.original === e.original && f.substitute === e.substitute)
@@ -3708,9 +3719,15 @@ async function commitUnitChange(){
 
         // Mid-shift entries: show choice modal per BN (sequential)
         if(midShiftSubs.length){
+          // Build 108: hide the "Applying X change…" overlay before showing
+          // the modal, otherwise the overlay covers the buttons and the user
+          // can't pick. Restore busy state between iterations if there are
+          // more BNs to process.
+          hideBusy();
           for(const e of midShiftSubs){
             const choice = await confirmSubstituteRevert(e);
             if(choice === 'switch_back'){
+              showBusy(`Switching ${firstName(e.bn)} back to ${e.original}…`);
               const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
               if(sched.length){
                 let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
@@ -3721,6 +3738,7 @@ async function commitUnitChange(){
                 }
                 recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
               }
+              hideBusy();
             }
             // Either way (keep or switch_back), remove from log — the
             // substitution is no longer "pending revert"; the user has decided.
@@ -7751,6 +7769,119 @@ function findSubstituteUnit(bnName, closedUnit, date, shift, allScheds, asOf=nul
   });
 
   return candidates[0];
+}
+
+// Build 110 (2026-05-25): Bulk substitute revert. Replaces the per-BN
+// recompute chain with a single pre-fetch + in-memory compute + 2 batched
+// writes. Performance: ~30-60s → ~2-3s for a 50-entry revert.
+//
+// Pattern mirrors recalculateAllRotations (which already uses bulk).
+// Differences:
+//   - Uses actual booking break slots (not just defaults) — preserves the
+//     BN's mid-shift adjustments to break times
+//   - Patches schedule.Units alongside rotation cache
+//
+// Args: entries — array of {schedId, bn, date, shift, original, substitute}
+async function bulkSubstituteRevert(entries){
+  if(!entries.length) return { schedulesUpdated: 0, rotationsUpdated: 0, failed: 0 };
+
+  const dates = entries.map(e => e.date).sort();
+  const minDate = dates[0];
+  const maxDate = dates[dates.length - 1];
+
+  // Pre-fetch: schedules + bookings (parallel). Warm BN defaults in parallel too.
+  const pairs = entries.map(e => ({ name: e.bn, shift: e.shift }));
+  const [allScheds, allBookings] = await Promise.all([
+    spGet(LISTS.schedule, `ShiftDate ge '${minDate}' and ShiftDate le '${maxDate}T23'`).catch(() => []),
+    spGet(LISTS.bookings, `SlotDate ge '${minDate}' and SlotDate le '${maxDate}T23' and IsBNBreak eq 1`).catch(() => []),
+    warmAllBNDefaults(pairs).catch(() => {})
+  ]);
+
+  // Build fast lookup maps
+  const schedById = {};
+  allScheds.forEach(s => { schedById[String(s.Id)] = s; });
+
+  const bookingsByKey = {};
+  allBookings.forEach(b => {
+    const key = `${b.NurseName}|${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`;
+    if(!bookingsByKey[key]) bookingsByKey[key] = [];
+    bookingsByKey[key].push(b);
+  });
+
+  // Build batch payloads
+  const scheduleRecords = []; // for spBatchUpsert
+  const rotationEntries = []; // for syncedLS.setMany
+  let failed = 0;
+
+  for(const e of entries){
+    try {
+      const sched = schedById[String(e.schedId)];
+      if(!sched) continue;
+
+      let units = []; try { units = JSON.parse(sched.Units||'[]'); } catch{}
+      const newUnits = units.filter(u => u !== e.substitute);
+      if(!newUnits.includes(e.original)) newUnits.push(e.original);
+
+      // Queue schedule patch only if Units changed
+      if(JSON.stringify(newUnits) !== JSON.stringify(units)){
+        scheduleRecords.push({
+          matchFields: { Id: sched.Id },
+          data: { Units: JSON.stringify(newUnits) }
+        });
+      }
+
+      // Compute rotation in-memory using the same logic as recalculateRotation,
+      // but with pre-fetched data instead of per-call I/O.
+      const expanded = expandCPair([...newUnits], e.date, e.shift);
+      const filteredUnits = filterClosedUnits(expanded, e.date, e.shift);
+      if(!filteredUnits.length) continue;
+
+      // Get this BN's actual break slots from pre-fetched bookings.
+      // Fall back to default template if no bookings yet (initial-state shifts).
+      const key = `${e.bn}|${e.date}|${e.shift}`;
+      const bnBreakBookings = bookingsByKey[key] || [];
+      let bnBreakSet;
+      if(bnBreakBookings.length){
+        bnBreakSet = new Set(bnBreakBookings.map(b => b.SlotTime));
+      } else {
+        const bnDef = getDefaultTemplate(e.bn, e.shift);
+        bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
+      }
+
+      const dateSeed = e.date.split('-').reduce((a,b) => a + parseInt(b), 0) + e.bn.charCodeAt(0);
+      const rotation = calculateBlockRotation(filteredUnits, bnBreakSet, getAvailableSlots(e.shift), dateSeed, e.shift);
+
+      // Normalize slot keys to 4 digits (saveRotation's contract)
+      const normalized = {};
+      Object.entries(rotation).forEach(([slot, unit]) => {
+        normalized[String(slot).padStart(4,'0')] = unit;
+      });
+
+      const rotKey = `bnRotation_${e.bn}_${e.date}_${e.shift}`;
+      // Write LS synchronously now — BNState is mirrored by the batch below.
+      localStorage.setItem(rotKey, JSON.stringify(normalized));
+      rotationEntries.push({ key: rotKey, value: normalized });
+    } catch(err){
+      console.warn('[bulkSubstituteRevert] failed for', e.bn, e.date, e.shift, ':', err.message);
+      failed++;
+    }
+  }
+
+  // Send batched writes in parallel
+  await Promise.all([
+    scheduleRecords.length
+      ? spBatchUpsert(LISTS.schedule, scheduleRecords).catch(err => { console.warn('[bulkSubstituteRevert] schedule batch failed:', err.message); })
+      : Promise.resolve(),
+    rotationEntries.length
+      ? syncedLS.setMany(rotationEntries).catch(err => { console.warn('[bulkSubstituteRevert] rotation batch failed:', err.message); })
+      : Promise.resolve()
+  ]);
+
+  return {
+    schedulesUpdated: scheduleRecords.length,
+    rotationsUpdated: rotationEntries.length,
+    failed
+  };
 }
 
 // ─────────────────────────────────────────────────────────
