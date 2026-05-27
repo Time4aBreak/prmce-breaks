@@ -797,7 +797,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         </div>
 
         <div style="margin-bottom:14px">
-          <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:7px">Units to Cover</label>
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;gap:8px;flex-wrap:wrap">
+            <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase">Units to Cover</label>
+            <button type="button" class="btn btn-ghost btn-sm" id="aSuggestBtn" onclick="suggestUnitsForManualAssign(this)" style="font-size:.72rem;padding:4px 10px">✨ Suggest</button>
+          </div>
           <div class="unit-check-grid" id="aUnits"></div>
         </div>
 
@@ -1725,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-131';
+const APP_VERSION = '2026-05-26-132';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9493,6 +9496,69 @@ function updateAdminUnitGrid(){
     el.style.display = '';
     el.style.opacity = open ? '' : '0.45';
   });
+}
+
+// Build 132 (2026-05-26): Suggest button in Manual Assign card. Calls
+// the fairness suggester for the currently-selected BN+date+shift,
+// expands any C_PAIR token to ['3C','4C'] for grid display, REPLACES
+// any current selections in S.aUnits, then re-paints the grid.
+//
+// Honors the user-confirmed design: replaces (not adds), so the
+// suggester output reflects the right unit count for this BN given
+// other BNs scheduled on the same date+shift.
+//
+// Note: this is a "what would the algorithm pick" preview. Save still
+// commits the user's final selection (which may differ from suggester
+// output if they tap to adjust). Wing history is NOT written here —
+// only on Save via saveAssign's existing _savePartialWingHistory call.
+async function suggestUnitsForManualAssign(btn){
+  // Resolve target BN + date + shift the same way saveAssign does
+  const typedRaw = document.getElementById('aNurseText').value.trim();
+  const dropdownVal = document.getElementById('aNurse').value;
+  const nurseRaw = dropdownVal || typedRaw;
+  if(!nurseRaw){ toast('Pick a BN first', true); return; }
+  const nurse = dropdownVal || canonicalizeBNName(typedRaw) || typedRaw;
+  const dt = document.getElementById('aDate').value;
+  const shift = S.aShift;
+  if(!dt || !shift){ toast('Pick date and shift first', true); return; }
+
+  const originalLabel = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Suggesting…'; }
+  try {
+    // Build the BN list for the suggester. To get a fairness-appropriate
+    // count for THIS BN, the suggester needs to know who else is on the
+    // shift — otherwise it would pick units as if this BN were the only
+    // one covering. Pull existing scheduled BNs for the date+shift.
+    const existing = await spGet(LISTS.schedule,
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    const otherBNs = existing
+      .filter(s => s.Status !== 'inactive' && s.BreakNurseName !== nurse)
+      .map(s => s.BreakNurseName);
+    const nurses = [...new Set([nurse, ...otherBNs])];
+
+    const result = await suggestAssignments(nurses, shift, dt);
+    const slots = result[nurse] || [];
+    if(!slots.length){
+      toast('Suggester returned no units for this BN', true);
+      return;
+    }
+    // Expand C_PAIR → ['3C','4C'] for grid display + filter closed units.
+    const expanded = expandSuggestionUnits(slots);
+    const filtered = filterClosedUnits(expanded, dt, shift);
+
+    // Replace current selections + repaint grid
+    S.aUnits = filtered;
+    document.querySelectorAll('#aUnits .uc').forEach(c => {
+      const u = c.textContent;
+      c.classList.toggle('on', S.aUnits.includes(u));
+    });
+    toast(`Suggested ${filtered.length} unit${filtered.length!==1?'s':''} for ${firstName(nurse)}`);
+  } catch(e){
+    console.error('Suggest failed:', e);
+    toast(`Suggest failed: ${e.message}`, true);
+  } finally {
+    if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
+  }
 }
 
 async function saveAssign(){
