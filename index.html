@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-136';
+const APP_VERSION = '2026-05-26-139';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -6885,9 +6885,19 @@ async function submitClaims(){
   S.submitting = true;
   const btn = document.getElementById('submitBtn');
   if(btn){ btn.disabled = true; btn.textContent = 'Submitting…'; }
+  // Build 138 (2026-05-27): Full-screen busy overlay during submit. Blocks
+  // taps on unit chips, shift buttons, slots, etc. until all claim writes
+  // land. Defense-in-depth alongside the unitOverride capture below: even
+  // if the user pounds the screen, navigation can't fire mid-batch.
+  showBusy('Submitting your breaks…');
   clearInterval(S.refreshTmr);
 
   const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
+  // Build 138 (2026-05-27): Capture S.unit at submit-time so every claim
+  // in this batch writes to the same unit, even if the user navigates to
+  // a different unit (via pickUnit) mid-submit. Passed through to
+  // claimSlot as unitOverride. See claimSlot Build 138 comment for why.
+  const submitUnit = S.unit;
   // For Other shift, slots may span two dates (Day date + Noc date)
   // Use both dates for the pre-fetch so race checks work correctly
   const dt = S.shift === 'Other' ? today() : staffShiftDate(S.shift);
@@ -6898,6 +6908,7 @@ async function submitClaims(){
   const _resetSubmitState = () => {
     S.submitting = false;
     if(btn){ btn.disabled = false; btn.textContent = 'Submit'; }
+    hideBusy();
     if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000);
   };
 
@@ -7057,11 +7068,13 @@ async function submitClaims(){
   for(const slot of slots){
     const slotTime  = slot.includes('|') ? slot.split('|')[0] : slot;
     const slotShift = slot.includes('|') ? slot.split('|')[1] : S.shift;
-    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday);
+    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit);
     if(result === 'ok'){
       results.claimed.push(slotTime);
-      // Add to cached data so next iteration's max/race checks see it
-      allBookingsToday.push({NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false});
+      // Add to cached data so next iteration's max/race checks see it.
+      // Build 138: use submitUnit (not live S.unit) to match what claimSlot
+      // just wrote — otherwise the cache could lie if user navigated.
+      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false});
     }
     else results.failed.push({ label: fmt12(slotTime), reason: result });
   }
@@ -7413,7 +7426,16 @@ function renderOtherSlotsFromCache(){
 // legitimate distinct claims.
 const _claimsInFlight = new Set();
 
-async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null){
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null){
+  // Build 138 (2026-05-27): Capture unit at function entry. Without this,
+  // submitClaims's batch loop reads S.unit fresh on each iteration — if
+  // the user navigates to another unit mid-submit (via pickUnit), later
+  // iterations' spPost writes the wrong unit. Caller passes unitOverride
+  // (captured at submitClaims entry) so all writes/validations use a
+  // stable unit value for the duration of this claim. Solo claims (not
+  // through submitClaims) fall back to live S.unit, which is fine since
+  // the user can't navigate during a single synchronous claim flow.
+  const _unit = unitOverride || S.unit;
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
@@ -7451,7 +7473,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     if(!silent){
       const otherUnitBookings = allBookingsToday.filter(b => {
         if(isBNBreak(b)) return false;
-        if(b.Unit === S.unit) return false;
+        if(b.Unit === _unit) return false;
         const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
         return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
       });
@@ -7468,14 +7490,14 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
         const extElF = document.getElementById('nurseExt');
         if(extElF) extElF.value = '';
         loadSlots(true);
-        toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}`);
+        toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${_unit}`);
         return 'ext-cleared';
       }
     }
 
     // Max check — from pre-fetched data
     const staffMine = allBookingsToday.filter(b =>
-      b.NurseName === name && b.Unit === S.unit && b.ShiftType === slotShift && isStaffBooking(b)
+      b.NurseName === name && b.Unit === _unit && b.ShiftType === slotShift && isStaffBooking(b)
     );
     if(staffMine.length >= MAX_SLOTS){
       if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`, true);
@@ -7484,7 +7506,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
 
     // Race condition check — from pre-fetched data
     const slotBookings = allBookingsToday.filter(b =>
-      b.Unit === S.unit && b.SlotTime === slotTime && b.ShiftType === slotShift
+      b.Unit === _unit && b.SlotTime === slotTime && b.ShiftType === slotShift
     );
     const taken = slotBookings.find(b => isStaffBooking(b));
     if(taken){
@@ -7493,12 +7515,12 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     }
 
     // BN-level uniqueness: a BN can only cover one break at a time.
-    // If the BN covering this slot for S.unit is already booked on another unit
+    // If the BN covering this slot for _unit is already booked on another unit
     // at this slot time, block the claim.
     const _claimScheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${slotShift}'`);
-    const _claimSched = _claimScheds.find(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, slotShift));
-    const _bnConflict = findBNConflict(_claimSched, slotTime, S.unit, allBookingsToday, dt, slotShift);
+    const _claimSched = _claimScheds.find(s => s.Status !== 'inactive' && unitCoveredBy(s, _unit, dt, slotShift));
+    const _bnConflict = findBNConflict(_claimSched, slotTime, _unit, allBookingsToday, dt, slotShift);
     if(_bnConflict){
       if(!silent){
         toast(`${fmt12(slotTime)} is taken on ${_bnConflict.Unit}. Please choose another slot.`, true);
@@ -7517,7 +7539,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // Bug #8: in-flight guard. Block this exact (unit, slot, shift, ext)
     // combination if a prior POST is still pending or just completed.
     // Prevents network-slow tap-retry from creating duplicate rows.
-    const _inFlightKey = `${S.unit}|${slotTime}|${slotShift}|${nurseExt}`;
+    const _inFlightKey = `${_unit}|${slotTime}|${slotShift}|${nurseExt}`;
     if(_claimsInFlight.has(_inFlightKey)){
       if(!silent){ toast(`${fmt12(slotTime)} is already being claimed.`, true); }
       return 'duplicate-in-flight';
@@ -7525,8 +7547,8 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     _claimsInFlight.add(_inFlightKey);
     try {
       await spPost(LISTS.bookings,{
-        Title:`${S.unit}-${dt}-${slotTime}`,
-        NurseName:name, Unit:S.unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
+        Title:`${_unit}-${dt}-${slotTime}`,
+        NurseName:name, Unit:_unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
         IsOtherShift: (S.shift === 'Other') ? 1 : 0
       });
     } finally {
@@ -9799,6 +9821,13 @@ async function saveAssign(){
     S.aUnits=[];
     S.editingAssignId = null;
     document.getElementById('aNurseText').value = '';
+    // Build 137 (2026-05-27): Reset BN dropdown after save so the card
+    // shows a clean BN selection for the next assignment. Date + shift
+    // are intentionally preserved (batch workflow: BN assigns multiple
+    // nurses to the same shift in sequence). Without this reset, the
+    // dropdown still shows the just-saved BN, and any later field change
+    // triggers _loadExistingAssignmentFor which reloads their units.
+    document.getElementById('aNurse').value = '';
     document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
     // Auto-apply BN default template and calculate rotation — await so slots load after rotation is ready
     // Warm BN default from BNState before using it
@@ -13629,6 +13658,17 @@ async function submitStagedActions(){
   const total = _prodLogStaged.size;
   const submit = _prodLogSubmitBtn();
   if(submit){ submit.disabled = true; submit.textContent = 'Submitting…'; }
+  // Build 139 (2026-05-27): Capture BN context at submit time + busy overlay.
+  // Without this, each iteration reads BNS.name/.date/.shift live — if the
+  // BN switches BN selection or shift mid-submit (via dropdown or shift
+  // switcher), later writes get wrong attribution (e.g., a claim posts
+  // under a different BN, or a BN-break logs against the wrong shift).
+  // Same bug class as v138's submitClaims/claimSlot. Busy overlay blocks
+  // taps so the user can't accidentally trigger the race.
+  const _bnName = BNS.name;
+  const _bnDate = BNS.date || today();
+  const _bnShift = BNS.shift;
+  showBusy(`Submitting ${total} action${total!==1?'s':''}…`);
   let okCount = 0, failCount = 0;
   const errors = [];
   // Iterate a snapshot so concurrent taps don't mutate underfoot
@@ -13649,8 +13689,10 @@ async function submitStagedActions(){
         trackDelete(id);
       } else if(info.action === 'claim'){
         // Walk-up claim: create a new booking record, already confirmed.
-        const dt = BNS.date || today();
-        const shift = BNS.shift;
+        // Build 139: use captured _bnDate/_bnShift/_bnName instead of live
+        // BNS.* so a mid-loop BN/shift switch can't corrupt attribution.
+        const dt = _bnDate;
+        const shift = _bnShift;
         // SlotDate = shift-start date, NOT calendar date. Even for Noc
         // post-midnight slots (e.g. 12:15 AM), the booking belongs to the
         // shift that started yesterday evening. This matches BN-break and
@@ -13663,7 +13705,7 @@ async function submitStagedActions(){
         // re-surfaces on query in loadBNConfirm/Sign Up.
         let unit = info.unit;
         if(!unit){
-          const bnUnits = await getBNUnits(BNS.name, dt, shift);
+          const bnUnits = await getBNUnits(_bnName, dt, shift);
           unit = bnUnits[0] || '';
         }
         const nurseDisplay = info.ext ? `${info.nurseName} (${info.ext})` : info.nurseName;
@@ -13681,7 +13723,7 @@ async function submitStagedActions(){
           // logging BN but NOT to other BNs covering the same shift. Legacy
           // bookings without CreatedBy fall back to the original strict
           // per-unit visibility rule.
-          CreatedBy: BNS.name
+          CreatedBy: _bnName
         });
         trackCreate(created);
         // Remember the last successfully submitted claim for "Copy last" on
@@ -13692,22 +13734,23 @@ async function submitStagedActions(){
         // SlotDate = shift start date (NOT calendar date — Noc post-midnight
         // breaks store with shift-start). Unit comes from the rotation
         // captured at stage time, fallback to first BN unit.
-        const dt = BNS.date || today();
-        const shift = BNS.shift;
+        // Build 139: use captured _bnDate/_bnShift/_bnName.
+        const dt = _bnDate;
+        const shift = _bnShift;
         let unit = info.unit;
         if(!unit){
-          const bnUnits = await getBNUnits(BNS.name, dt, shift);
+          const bnUnits = await getBNUnits(_bnName, dt, shift);
           unit = bnUnits[0] || '';
         }
         const created = await spPost(LISTS.bookings, {
-          Title: `BN-${BNS.name}-${unit}-${dt}-${info.slotTime}`,
-          NurseName: BNS.name,
+          Title: `BN-${_bnName}-${unit}-${dt}-${info.slotTime}`,
+          NurseName: _bnName,
           Unit: unit,
           SlotDate: dt,
           SlotTime: info.slotTime,
           ShiftType: shift,
           IsBNBreak: 1,
-          CreatedBy: BNS.name
+          CreatedBy: _bnName
         });
         trackCreate(created);
       } else if(info.action === 'remove_break'){
@@ -13755,6 +13798,7 @@ async function submitStagedActions(){
     submit.textContent = 'Submit';
     submit.disabled = false;
   }
+  hideBusy();
   // Render immediately. trackDelete/trackCreate calls above ensure that even
   // if the next fetch returns stale state, reconcileBookings hides cancelled
   // rows and surfaces newly created claims/breaks.
