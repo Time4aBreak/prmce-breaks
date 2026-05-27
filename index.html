@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-139';
+const APP_VERSION = '2026-05-26-140';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -4964,6 +4964,12 @@ async function applyDefaultToAll(){
 
   const applyBtn = document.getElementById('bnApplyAllBtn');
   if(applyBtn){ applyBtn.disabled = true; applyBtn.textContent = '⏳ Applying…'; }
+  // Build 140 (2026-05-27): Busy overlay during bulk apply. Without it,
+  // taps could trigger shift switch or BN navigation mid-batch while the
+  // function reads BNS context (via getBNUnits inside applyDefaultToShift
+  // calls referenced lower). The button-disable alone doesn't block other
+  // UI interactions.
+  showBusy('Applying default to all upcoming shifts…');
 
   try {
     // ── ONE round trip: fetch all schedules + all existing BN breaks ──
@@ -4975,6 +4981,7 @@ async function applyDefaultToAll(){
     const upcoming = schedRaw.filter(s => s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType));
     if(!upcoming.length){
       toast('No upcoming shifts found', true);
+      hideBusy();
       if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply to all shifts'; }
       return;
     }
@@ -5051,6 +5058,7 @@ async function applyDefaultToAll(){
 
     const applied = upcoming.filter(s => (s.ShiftType==='Day'?dayDef:nocDef).length > 0).length;
     toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
+    hideBusy();
     if(applyBtn){
       applyBtn.disabled = false;
       applyBtn.textContent = '✓ Applied to all shifts';
@@ -5060,6 +5068,7 @@ async function applyDefaultToAll(){
     loadBNConfirm();
   } catch(e){
     toast('Error: ' + e.message, true);
+    hideBusy();
     if(applyBtn){ applyBtn.disabled = false; applyBtn.textContent = 'Apply to all shifts'; }
   }
 }
@@ -10381,11 +10390,17 @@ async function recalculateAllRotations(opts = {}){
   const skipConfirm = !!opts.skipConfirm;
   if(!skipConfirm && !await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
 
+  // Build 140 (2026-05-27): Busy overlay during the full recalc loop.
+  // This runs ~40s for a full sheet; without the overlay, taps during
+  // the loop could navigate or trigger other state changes. The overlay
+  // also makes the long wait obvious to the user (vs. silent grinding).
+  showBusy('Recalculating all rotations… (~40s)');
+
   const t = activeShiftFloor();
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
   const active = scheds.filter(s => s.Status !== 'inactive');
 
-  if(!active.length){ toast('No upcoming assignments found', true); return; }
+  if(!active.length){ hideBusy(); toast('No upcoming assignments found', true); return; }
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
 
@@ -10435,10 +10450,12 @@ async function recalculateAllRotations(opts = {}){
       // Error already toasted by syncedLS.setMany. Local cache is consistent
       // (we wrote LS in the loop above), so the device will function — but
       // other devices may not see the update until the next batch retry.
+      hideBusy();
       return;
     }
   }
 
+  hideBusy();
   const done = rotationEntries.length;
   if(failed > 0) toast(`↺ ${done} recalculated · ${failed} failed`, true);
   else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated`);
@@ -16941,6 +16958,13 @@ async function removeImportedName(name){
   const choice = await _showRemoveBNModal(name, upcoming.length);
   if(choice === 'cancel') return;
 
+  // Build 140 (2026-05-27): Busy overlay for the whole post-modal flow.
+  // Deletes are irreversible, and the redistribute branch already had
+  // showBusy but the just-remove path didn't — leaving a window where
+  // taps during batchDelete + LS cleanup could trigger other actions
+  // against partially-removed state.
+  showBusy(`Removing ${firstName(name)}…`);
+
   // Snapshot date+shift combos BEFORE deletion so we know which shifts
   // need redistribution later (in the 'redistribute' branch).
   const dateShifts = new Set();
@@ -16957,6 +16981,7 @@ async function removeImportedName(name){
       ids: encodeURIComponent(JSON.stringify(ids))
     });
   } catch(e) {
+    hideBusy();
     toast(`Failed to delete ${firstName(name)}'s assignments: ${e.message}`, true);
     return;
   }
@@ -16984,6 +17009,7 @@ async function removeImportedName(name){
   // only the surviving BNs. Sequential to keep error attribution clean.
   let recalcFailures = [];
   if(choice === 'redistribute'){
+    // Build 140: busy message updated; overlay already up from post-modal flow.
     showBusy(`Redistributing ${firstName(name)}'s units across remaining BNs…`);
     for(const ds of dateShifts){
       const [date, shift] = ds.split('|');
@@ -16994,8 +17020,8 @@ async function removeImportedName(name){
         recalcFailures.push(`${date} ${shift}`);
       }
     }
-    hideBusy();
   }
+  hideBusy();
 
   let msg = `${firstName(name)} removed · ${upcoming.length} assignment${upcoming.length!==1?'s':''} deleted`;
   if(choice === 'redistribute'){
