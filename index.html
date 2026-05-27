@@ -586,7 +586,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div class="card-label">Coverage Offered per Unit by Tier</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
         Format <code style="background:var(--bg);padding:1px 4px;border-radius:3px">X / Y</code>: offered after BN breaks / total assigned.
-        <strong>Shifts</strong> column: open / total in range. Tap any column header to sort.
+        <strong>Days Open</strong> column: dates the unit was operational / total dates in range — closed days excluded from tier totals. Tap any column header to sort.
       </div>
       <div style="margin-bottom:18px">
         <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
@@ -1725,7 +1725,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-129';
+const APP_VERSION = '2026-05-26-130';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -15313,7 +15313,7 @@ function _renderTierMatrix(rows, shift){
 
   const head = `<tr>
     <th style="${thStyle};text-align:left" onclick="sortTierMatrix('${shift}','unit')">Unit${ind('unit')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','shifts')">Shifts${ind('shifts')}</th>
+    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','shifts')">Days Open${ind('shifts')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','earlyLow')">Early${ind('earlyLow')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','prime')">Prime${ind('prime')}</th>
     <th style="${thStyle}" onclick="sortTierMatrix('${shift}','lateLow')">Late${ind('lateLow')}</th>
@@ -15360,7 +15360,7 @@ function sortTierMatrix(shift, col){
 let _bnUnitMatrixData = { Day: {bns:[], units:[]}, Noc: {bns:[], units:[]} };
 let _bnUnitSort = { Day: {col:'bn', dir:'asc'}, Noc: {col:'bn', dir:'asc'} };
 
-function _computeBNUnitMatrix(scheds, shift){
+function _computeBNUnitMatrix(scheds, shift, datesByShift){
   // counts[bn][unit] = number of days that BN was assigned that unit
   const counts = {};
   const unitsSeen = new Set();
@@ -15408,6 +15408,24 @@ function _computeBNUnitMatrix(scheds, shift){
 
   // Sort units in wing-then-floor order, filtered to only ones we saw
   const orderedUnits = _TIER_UNITS.filter(u => unitsSeen.has(u));
+
+  // Build 130 (2026-05-26): Compute open-days per unit for this shift.
+  // Used by Fairness Summary to weight unit-share CV — units that were
+  // operational rarely (e.g., 5A, 3C) shouldn't pull the overall metric
+  // up as much as units that ran daily. datesByShift may be omitted when
+  // the matrix is rebuilt by a sort handler that doesn't recompute opens;
+  // in that case openDaysPerUnit is empty and the Fairness Summary code
+  // falls back to unweighted CV.
+  const openDaysPerUnit = {};
+  if(datesByShift){
+    orderedUnits.forEach(u => { openDaysPerUnit[u] = 0; });
+    datesByShift.forEach(date => {
+      orderedUnits.forEach(u => {
+        if(isUnitOpenForShift(u, date, shift)) openDaysPerUnit[u]++;
+      });
+    });
+  }
+
   const bns = Object.keys(counts).sort().map(bn => {
     const row = { bn, total: 0 };
     orderedUnits.forEach(u => {
@@ -15420,7 +15438,7 @@ function _computeBNUnitMatrix(scheds, shift){
     row.cpairShifts  = cpairShifts[bn] || 0;
     return row;
   });
-  return { bns, units: orderedUnits };
+  return { bns, units: orderedUnits, openDaysPerUnit, totalDays: datesByShift ? datesByShift.size : 0 };
 }
 
 // Build 128 (2026-05-26): Fairness Summary — compute and render.
@@ -15454,6 +15472,13 @@ function _computeFairnessSummary(matrixData){
   // ── Unit-share spread ──
   // For each unit, compute CV across BNs (count of times each BN covered it,
   // only among BNs that ever covered that unit). Then average those CVs.
+  // Build 130 (2026-05-26): weight each unit's CV by its operational days
+  // (count of dates in range it was open for this shift). Rarely-open units
+  // (e.g., 5A closed most of the range) have small samples that produce
+  // noisy CVs — without weighting they pull the overall metric up
+  // disproportionately. With weighting, the unit-share CV reflects fairness
+  // on units that actually ran most of the range.
+  const openDays = matrixData.openDaysPerUnit || {};
   let unitCVs = [];
   units.forEach(u => {
     const colVals = bns.map(r => r[u] || 0).filter(v => v > 0);
@@ -15461,11 +15486,19 @@ function _computeFairnessSummary(matrixData){
     const mean = colVals.reduce((a,b)=>a+b,0) / colVals.length;
     if(mean <= 0) return;
     const variance = colVals.reduce((a,v) => a + (v-mean)**2, 0) / colVals.length;
-    unitCVs.push({ unit: u, cv: Math.sqrt(variance) / mean, mean, max: Math.max(...colVals), bnCount: colVals.length });
+    const weight = openDays[u] != null ? openDays[u] : 1; // fallback if not provided
+    unitCVs.push({ unit: u, cv: Math.sqrt(variance) / mean, mean, max: Math.max(...colVals), bnCount: colVals.length, weight });
   });
-  const unitShareCV = unitCVs.length
-    ? unitCVs.reduce((a,x)=>a+x.cv,0) / unitCVs.length
-    : 0;
+  let unitShareCV = 0;
+  if(unitCVs.length){
+    const totalWeight = unitCVs.reduce((a,x)=>a+x.weight,0);
+    if(totalWeight > 0){
+      unitShareCV = unitCVs.reduce((a,x)=>a+x.cv*x.weight,0) / totalWeight;
+    } else {
+      // All weights zero (no opens?) — fall back to unweighted
+      unitShareCV = unitCVs.reduce((a,x)=>a+x.cv,0) / unitCVs.length;
+    }
+  }
 
   // ── Workload outliers ──
   // BNs whose avgPerShift is > 1 SD from mean (working notably more or less)
@@ -15836,14 +15869,18 @@ async function loadReports(){
     renderPopularity(bookings);
 
     // ── Coverage Offered per Unit by Tier ──────────────
+    // Build 130 (2026-05-26): hoisted dayDates/nocDates out of the tier
+    // block so the BN×Unit matrix can also use them (needed for openDays
+    // per unit, which feeds the Fairness Summary weighting).
+    const dayDates = new Set(), nocDates = new Set();
+    scheds.forEach(s => {
+      const date = String(s.ShiftDate).slice(0,10);
+      if(s.ShiftType === 'Day') dayDates.add(date);
+      else if(s.ShiftType === 'Noc') nocDates.add(date);
+    });
+
     {
       const bnBreaksForTier = bookings.filter(b => isBNBreak(b));
-      const dayDates = new Set(), nocDates = new Set();
-      scheds.forEach(s => {
-        const date = String(s.ShiftDate).slice(0,10);
-        if(s.ShiftType === 'Day') dayDates.add(date);
-        else if(s.ShiftType === 'Noc') nocDates.add(date);
-      });
       _tierMatrixData.Day = _computeTierMatrix(scheds, bnBreaksForTier, 'Day', dayDates);
       _tierMatrixData.Noc = _computeTierMatrix(scheds, bnBreaksForTier, 'Noc', nocDates);
       const dayEl = document.getElementById('rptTierDayTable');
@@ -15856,8 +15893,8 @@ async function loadReports(){
 
     // ── BN × Unit Assignment Matrix ────────────────────
     {
-      _bnUnitMatrixData.Day = _computeBNUnitMatrix(scheds, 'Day');
-      _bnUnitMatrixData.Noc = _computeBNUnitMatrix(scheds, 'Noc');
+      _bnUnitMatrixData.Day = _computeBNUnitMatrix(scheds, 'Day', dayDates);
+      _bnUnitMatrixData.Noc = _computeBNUnitMatrix(scheds, 'Noc', nocDates);
       const dayEl = document.getElementById('rptBNUnitDayTable');
       const nocEl = document.getElementById('rptBNUnitNocTable');
       if(dayEl) dayEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Day, 'Day');
