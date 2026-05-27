@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-132';
+const APP_VERSION = '2026-05-26-133';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9778,12 +9778,38 @@ async function saveAssign(){
     // Warm BN default from BNState before using it
     await warmDefaultTemplate(nurse, shift);
     const bnDef = getDefaultTemplate(nurse, shift);
+    // Build 133 (2026-05-26): Preserve past slots when the edited shift has
+    // any slots already elapsed. Snapshot old rotation BEFORE recompute,
+    // then overlay past slots back. Without this, editing a current shift
+    // (or backfilling a recent past shift) would rewrite the entire
+    // rotation including slots that already happened — the rotation log
+    // would no longer match what actually occurred.
+    //
+    // The snapshot/overlay is unconditional (any past slots get preserved,
+    // regardless of shift state). For a fully-future shift, oldRotation
+    // has no past slots so the overlay is a no-op — safe to always run.
+    const oldRotation = loadRotation(nurse, dt, shift) || {};
     try {
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(nurse, dt, shift, bnDef);
       } else {
         await recalculateRotation(nurse, dt, shift);
       }
+      // Overlay past slots from the snapshot. slotDateTime handles Noc
+      // wrap-past-midnight so past/future split works for both shifts.
+      const newRot = loadRotation(nurse, dt, shift) || {};
+      const now = new Date();
+      let changed = false;
+      const merged = { ...newRot };
+      Object.entries(oldRotation).forEach(([slot, unit]) => {
+        try {
+          if(slotDateTime(dt, slot, shift) < now && merged[slot] !== unit){
+            merged[slot] = unit;
+            changed = true;
+          }
+        } catch{ /* skip malformed slot */ }
+      });
+      if(changed) saveRotation(nurse, dt, shift, merged);
     } catch(e){ toast('Rotation error: ' + e.message, true); }
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
