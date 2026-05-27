@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-133';
+const APP_VERSION = '2026-05-26-134';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9789,6 +9789,8 @@ async function saveAssign(){
     // regardless of shift state). For a fully-future shift, oldRotation
     // has no past slots so the overlay is a no-op — safe to always run.
     const oldRotation = loadRotation(nurse, dt, shift) || {};
+    console.log('[saveAssign overlay] oldRotation entries:', Object.keys(oldRotation).length);
+    console.log('[saveAssign overlay] oldRotation sample:', Object.entries(oldRotation).slice(0,5));
     try {
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(nurse, dt, shift, bnDef);
@@ -9799,18 +9801,25 @@ async function saveAssign(){
       // wrap-past-midnight so past/future split works for both shifts.
       const newRot = loadRotation(nurse, dt, shift) || {};
       const now = new Date();
+      console.log('[saveAssign overlay] newRot entries:', Object.keys(newRot).length, 'now:', now.toISOString());
       let changed = false;
+      let pastSlotsSeen = 0;
       const merged = { ...newRot };
       Object.entries(oldRotation).forEach(([slot, unit]) => {
         try {
-          if(slotDateTime(dt, slot, shift) < now && merged[slot] !== unit){
+          const slotTime = slotDateTime(dt, slot, shift);
+          const isPast = slotTime < now;
+          if(isPast) pastSlotsSeen++;
+          if(isPast && merged[slot] !== unit){
+            console.log(`[saveAssign overlay] preserving ${slot} (was ${unit}, new=${merged[slot]}, slotTime=${slotTime.toISOString()})`);
             merged[slot] = unit;
             changed = true;
           }
-        } catch{ /* skip malformed slot */ }
+        } catch(e){ console.log(`[saveAssign overlay] skip malformed slot ${slot}:`, e.message); }
       });
+      console.log(`[saveAssign overlay] past slots in old=${pastSlotsSeen}, changed=${changed}`);
       if(changed) saveRotation(nurse, dt, shift, merged);
-    } catch(e){ toast('Rotation error: ' + e.message, true); }
+    } catch(e){ toast('Rotation error: ' + e.message, true); console.error('[saveAssign overlay] exception:', e); }
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     loadAssignments();
