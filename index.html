@@ -529,15 +529,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div class="card-label">Date Range</div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
         <button class="range-btn active" id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
-        <button class="range-btn"        id="rb-month" onclick="setRange('month',this)">This Month</button>
         <button class="range-btn"        id="rb-ytd"  onclick="setRange('ytd',this)">Year to Date</button>
         <button class="range-btn"        id="rb-cum"  onclick="setRange('cum',this)">All Time</button>
         <button class="range-btn"        id="rb-cust" onclick="setRange('cust',this)">Custom</button>
       </div>
       <div id="customRange" style="display:none">
         <div class="row" style="margin-top:6px">
-          <div class="field"><label>From</label><input type="date" id="rptFrom" onchange="loadReports()"/></div>
-          <div class="field"><label>To</label><input type="date" id="rptTo" onchange="loadReports()"/></div>
+          <div class="field"><label>From</label><input type="date" id="rptFrom" onchange="onReportDateChange('from')"/></div>
+          <div class="field"><label>To</label><input type="date" id="rptTo" onchange="onReportDateChange('to')"/></div>
         </div>
       </div>
       <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
@@ -1726,7 +1725,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-128';
+const APP_VERSION = '2026-05-26-129';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -15174,12 +15173,35 @@ function setRange(key, btn){
   if (key !== 'cust') loadReports();
 }
 
+// Build 129 (2026-05-26): Date range validation. When user picks a From
+// date, constrain To's minimum so To >= From. When user picks a To date,
+// constrain From's maximum so From <= To. Native HTML5 attributes prevent
+// invalid picks at the OS picker level — no toast or modal needed.
+// If a picked date would invalidate the OTHER input's existing value
+// (rare since the constraint blocks it), auto-clamp to match.
+function onReportDateChange(which){
+  const fromEl = document.getElementById('rptFrom');
+  const toEl   = document.getElementById('rptTo');
+  if(!fromEl || !toEl) return;
+  if(which === 'from'){
+    toEl.min = fromEl.value || '';
+    if(fromEl.value && toEl.value && toEl.value < fromEl.value){
+      toEl.value = fromEl.value;
+    }
+  } else {
+    fromEl.max = toEl.value || '';
+    if(fromEl.value && toEl.value && fromEl.value > toEl.value){
+      fromEl.value = toEl.value;
+    }
+  }
+  loadReports();
+}
+
 function getRangeDates(){
   const t = today();
   const now = new Date();
   switch(RPT.range){
-    case 'mtd':
-    case 'month': {
+    case 'mtd': {
       const f = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
       return { from: f, to: t };
     }
