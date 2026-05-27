@@ -543,6 +543,20 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
     </div>
 
+    <!-- Build 128 (2026-05-26): Fairness Summary — top-of-page answer
+         to "is the algorithm distributing fairly?" Three core metrics
+         per shift, plus outlier callouts. -->
+    <div class="card" id="rptFairnessCard" style="display:none">
+      <div class="card-label">⚖️ Fairness Summary</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
+        Coefficient of variation across BNs — lower is fairer. Outliers flagged below each metric.
+        Color: <span style="color:var(--teal-dk);font-weight:600">green</span> &lt;15%,
+        <span style="color:#d97706;font-weight:600">yellow</span> 15-30%,
+        <span style="color:var(--red);font-weight:600">red</span> &gt;30%.
+      </div>
+      <div id="rptFairnessBody"></div>
+    </div>
+
     <!-- KPI cards -->
     <div class="rpt-grid" id="rptKPIs">
       <div class="empty"><div class="spinner"></div></div>
@@ -590,6 +604,11 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div class="card-label">BN × Unit Assignments</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
         Counts how many times each BN was assigned each unit in range. Reveals whether unit spreads come from BN concentration or algorithm choice. Tap any column header to sort.
+        Cells colored relative to BN's own row mean:
+        <span style="background:rgba(220,38,38,0.2);padding:1px 6px;border-radius:3px;color:#7c1d1d;font-weight:600">over</span>
+        <span style="background:rgba(217,119,6,0.2);padding:1px 6px;border-radius:3px;font-weight:600">elevated</span>
+        <span style="background:rgba(3,105,161,0.15);padding:1px 6px;border-radius:3px;color:#0c4a6e">under</span>
+        — for BNs who cover multiple units. Single-unit BNs unhighlighted.
       </div>
       <div style="margin-bottom:18px">
         <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
@@ -1707,7 +1726,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-127';
+const APP_VERSION = '2026-05-26-128';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -15382,6 +15401,156 @@ function _computeBNUnitMatrix(scheds, shift){
   return { bns, units: orderedUnits };
 }
 
+// Build 128 (2026-05-26): Fairness Summary — compute and render.
+//
+// Three metrics per shift:
+//   1. Workload spread (CV of avgPerShift across BNs)
+//      Low → all BNs work similar volumes per shift
+//   2. Unit-share spread (mean CV across per-unit columns)
+//      Low → each unit is shared evenly across BNs who cover it
+//   3. Outliers — specific BN/unit pairs concentrated > 2× expected,
+//      and BN workload outliers > 1 SD from mean.
+//
+// CV (coefficient of variation) = stddev / mean. Lower is more uniform.
+// Expressed as percentage for display.
+function _computeFairnessSummary(matrixData){
+  const bns = matrixData.bns;
+  const units = matrixData.units;
+  if(!bns.length || !units.length){
+    return null;
+  }
+
+  // ── Workload spread (CV across BNs' avgPerShift) ──
+  const avgs = bns.map(r => r.avgPerShift).filter(v => v > 0);
+  const workloadMean = avgs.length ? avgs.reduce((a,b)=>a+b,0) / avgs.length : 0;
+  const workloadVar = avgs.length && workloadMean > 0
+    ? avgs.reduce((a,v) => a + (v-workloadMean)**2, 0) / avgs.length
+    : 0;
+  const workloadSD = Math.sqrt(workloadVar);
+  const workloadCV = workloadMean > 0 ? (workloadSD / workloadMean) : 0;
+
+  // ── Unit-share spread ──
+  // For each unit, compute CV across BNs (count of times each BN covered it,
+  // only among BNs that ever covered that unit). Then average those CVs.
+  let unitCVs = [];
+  units.forEach(u => {
+    const colVals = bns.map(r => r[u] || 0).filter(v => v > 0);
+    if(colVals.length < 2) return;
+    const mean = colVals.reduce((a,b)=>a+b,0) / colVals.length;
+    if(mean <= 0) return;
+    const variance = colVals.reduce((a,v) => a + (v-mean)**2, 0) / colVals.length;
+    unitCVs.push({ unit: u, cv: Math.sqrt(variance) / mean, mean, max: Math.max(...colVals), bnCount: colVals.length });
+  });
+  const unitShareCV = unitCVs.length
+    ? unitCVs.reduce((a,x)=>a+x.cv,0) / unitCVs.length
+    : 0;
+
+  // ── Workload outliers ──
+  // BNs whose avgPerShift is > 1 SD from mean (working notably more or less)
+  const workloadOutliers = bns
+    .filter(r => r.shifts > 0 && workloadSD > 0)
+    .map(r => ({
+      bn: r.bn,
+      avg: r.avgPerShift,
+      z: (r.avgPerShift - workloadMean) / workloadSD
+    }))
+    .filter(x => Math.abs(x.z) >= 1)
+    .sort((a,b) => Math.abs(b.z) - Math.abs(a.z))
+    .slice(0, 3);
+
+  // ── Unit-share outliers ──
+  // Per-unit "dominator" — a BN with count > 2× per-BN mean for that unit
+  // (where that unit has at least 2 BNs covering it).
+  const unitConcentrations = [];
+  units.forEach(u => {
+    const entries = bns.map(r => ({ bn: r.bn, n: r[u] || 0 })).filter(e => e.n > 0);
+    if(entries.length < 2) return;
+    const mean = entries.reduce((a,e)=>a+e.n,0) / entries.length;
+    if(mean <= 0) return;
+    entries.forEach(e => {
+      const factor = e.n / mean;
+      if(factor >= 2){
+        unitConcentrations.push({ unit: u, bn: e.bn, n: e.n, factor, otherBns: entries.length - 1 });
+      }
+    });
+  });
+  unitConcentrations.sort((a,b) => b.factor - a.factor);
+
+  return {
+    workloadMean,
+    workloadSD,
+    workloadCV,
+    unitShareCV,
+    workloadOutliers,
+    unitConcentrations: unitConcentrations.slice(0, 3),
+    bnCount: bns.length,
+    unitCount: units.length
+  };
+}
+
+function _fairnessColor(cv){
+  // Same thresholds described in the card header (green/yellow/red)
+  if(cv < 0.15) return 'var(--teal-dk)';
+  if(cv < 0.30) return '#d97706';
+  return 'var(--red)';
+}
+
+function _renderFairnessSummary(daySum, nocSum){
+  const labelStyle = 'font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600';
+  const valStyle = 'font-family:"DM Mono",monospace;font-size:1.4rem;font-weight:700';
+  const cardStyle = 'flex:1;min-width:140px;padding:10px 12px;background:var(--bg-soft,#f7f7f5);border-radius:6px;border:1px solid var(--border)';
+
+  function shiftBlock(sum, label, icon){
+    if(!sum){
+      return `<div style="margin-bottom:18px"><div style="font-size:.85rem;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon} ${label}</div><div style="color:var(--muted);font-size:.8rem">No data in range.</div></div>`;
+    }
+    const wkPct = (sum.workloadCV * 100).toFixed(0) + '%';
+    const usPct = (sum.unitShareCV * 100).toFixed(0) + '%';
+    const wkColor = _fairnessColor(sum.workloadCV);
+    const usColor = _fairnessColor(sum.unitShareCV);
+
+    const outlierLines = [];
+    if(sum.workloadOutliers.length){
+      sum.workloadOutliers.forEach(o => {
+        const dir = o.z > 0 ? 'above' : 'below';
+        const dirColor = o.z > 0 ? 'var(--red)' : '#0369a1';
+        outlierLines.push(`<span style="color:${dirColor};font-weight:600">${escHTML(firstName(o.bn))}</span> avg ${o.avg.toFixed(1)}/shift — ${Math.abs(o.z).toFixed(1)} SD ${dir} mean (${sum.workloadMean.toFixed(1)})`);
+      });
+    }
+    if(sum.unitConcentrations.length){
+      sum.unitConcentrations.forEach(c => {
+        outlierLines.push(`<strong>${c.unit}</strong> concentrated on <span style="color:var(--red);font-weight:600">${escHTML(firstName(c.bn))}</span> — ${c.n} of ${c.otherBns + 1} BN's shifts (${c.factor.toFixed(1)}× avg)`);
+      });
+    }
+
+    const outliersHtml = outlierLines.length
+      ? `<div style="margin-top:10px;font-size:.78rem;line-height:1.7">
+           <div style="${labelStyle};margin-bottom:4px">Outliers</div>
+           ${outlierLines.map(l => `<div>• ${l}</div>`).join('')}
+         </div>`
+      : `<div style="margin-top:10px;font-size:.78rem;color:var(--teal-dk)">✓ No notable outliers — distribution looks balanced.</div>`;
+
+    return `<div style="margin-bottom:18px">
+      <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon} ${label}</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        <div style="${cardStyle}">
+          <div style="${labelStyle}">Workload spread</div>
+          <div style="${valStyle};color:${wkColor}">${wkPct}</div>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">CV of avg slots/shift across ${sum.bnCount} BNs</div>
+        </div>
+        <div style="${cardStyle}">
+          <div style="${labelStyle}">Unit-share spread</div>
+          <div style="${valStyle};color:${usColor}">${usPct}</div>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">Avg CV across ${sum.unitCount} units' BN distributions</div>
+        </div>
+      </div>
+      ${outliersHtml}
+    </div>`;
+  }
+
+  return shiftBlock(daySum, 'Day Shift', '☀️') + shiftBlock(nocSum, 'Noc Shift', '🌙');
+}
+
 function _renderBNUnitMatrix(data, shift){
   if(!data.bns.length){
     return `<div style="font-size:.85rem;color:var(--muted);padding:8px 4px">No assignments in range.</div>`;
@@ -15402,11 +15571,27 @@ function _renderBNUnitMatrix(data, shift){
   const tdStyle = 'padding:6px 4px;text-align:center;font-family:"DM Mono",monospace;font-size:.8rem;border-bottom:1px solid var(--border)';
   const tdNameStyle = 'padding:6px 8px 6px 4px;text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--border);white-space:nowrap';
 
-  // Find max non-zero per column to highlight hotspots subtly
-  const colMax = {};
-  data.units.forEach(u => {
-    colMax[u] = Math.max(0, ...sorted.map(r => r[u]));
+  // Build 128 (2026-05-26): Row-based heatmap. For each BN row, compute
+  // their mean count across units they actually cover (non-zero cells).
+  // Color each cell relative to that BN's own mean — surfaces internal
+  // concentration: a cell at 2× row mean = bright red (over-concentrated);
+  // ≤ 0.5× row mean = blue (under-covered relative to the BN's pattern).
+  // Zeros stay as muted dots — distinct visual category from "low" coverage.
+  const rowMeans = {};
+  sorted.forEach(r => {
+    const nonZero = data.units.map(u => r[u]).filter(v => v > 0);
+    rowMeans[r.bn] = nonZero.length ? nonZero.reduce((a,b)=>a+b,0) / nonZero.length : 0;
   });
+  function cellStyle(v, rowMean){
+    if(v === 0 || rowMean === 0) return '';
+    const factor = v / rowMean;
+    // Smooth bidirectional gradient anchored at 1.0.
+    if(factor >= 1.5) return `background:rgba(220,38,38,${Math.min(0.30, (factor-1.5)*0.20 + 0.12).toFixed(2)});font-weight:600;color:#7c1d1d`;
+    if(factor >= 1.15) return `background:rgba(217,119,6,${((factor-1)*0.40).toFixed(2)});font-weight:600`;
+    if(factor <= 0.5)  return `background:rgba(3,105,161,${Math.min(0.30, (0.5-factor)*0.40 + 0.10).toFixed(2)});color:#0c4a6e`;
+    if(factor <= 0.85) return `background:rgba(3,105,161,${((1-factor)*0.30).toFixed(2)})`;
+    return '';
+  }
 
   const head = `<tr>
     <th style="${thStyle};text-align:left" onclick="sortBNUnitMatrix('${shift}','bn')">BN${ind('bn')}</th>
@@ -15417,12 +15602,12 @@ function _renderBNUnitMatrix(data, shift){
   </tr>`;
 
   const body = sorted.map((r, i) => {
+    const rowMean = rowMeans[r.bn];
     const cells = data.units.map(u => {
       const v = r[u];
       if(v === 0) return `<td style="${tdStyle};color:var(--muted)">·</td>`;
-      const isMax = v === colMax[u] && v > 0;
-      const bg = isMax ? 'background:rgba(20,184,166,0.12);font-weight:600' : '';
-      return `<td style="${tdStyle};${bg}">${v}</td>`;
+      const heat = cellStyle(v, rowMean);
+      return `<td style="${tdStyle};${heat}">${v}</td>`;
     }).join('');
     const avgDisplay = r.shifts > 0 ? r.avgPerShift.toFixed(1) : '–';
     // Build 98: per-BN expansion row. Tap name to toggle. Shows distribution
@@ -15493,7 +15678,7 @@ async function loadReports(){
   const kpis = document.getElementById('rptKPIs');
   kpis.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   ['rptCovCard','rptUnitCard','rptTimeCard','rptBNCard','rptShiftCard',
-   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard','rptBNUnitCard']
+   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard','rptBNUnitCard','rptFairnessCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
 
   try {
@@ -15656,6 +15841,17 @@ async function loadReports(){
       if(dayEl) dayEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Day, 'Day');
       if(nocEl) nocEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Noc, 'Noc');
       const card = document.getElementById('rptBNUnitCard');
+      if(card) card.style.display = 'block';
+    }
+
+    // Build 128 (2026-05-26): Fairness Summary — relies on the same
+    // BN×Unit matrix data, so computed right after.
+    {
+      const daySum = _computeFairnessSummary(_bnUnitMatrixData.Day);
+      const nocSum = _computeFairnessSummary(_bnUnitMatrixData.Noc);
+      const body = document.getElementById('rptFairnessBody');
+      const card = document.getElementById('rptFairnessCard');
+      if(body) body.innerHTML = _renderFairnessSummary(daySum, nocSum);
       if(card) card.style.display = 'block';
     }
 
