@@ -1725,7 +1725,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-130';
+const APP_VERSION = '2026-05-26-131';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -15378,6 +15378,13 @@ function _computeBNUnitMatrix(scheds, shift, datesByShift){
   const distribution = {};
   const cpairShifts  = {};
 
+  // Build 131 (2026-05-26): Track per-BN scheduled dates so we can compute
+  // opportunities[bn][unit] = days where BN was scheduled AND unit was open.
+  // This drives the rate-based fairness metric (assignments / opportunities)
+  // which gives apples-to-apples comparison across BNs with different shift
+  // counts AND across units with different open-day counts.
+  const bnDates = {};
+
   scheds.filter(s => s.ShiftType === shift && s.Status !== 'inactive' && String(s.IsSupplemental) !== '1').forEach(s => {
     const bn = s.BreakNurseName;
     if(!bn) return;
@@ -15387,6 +15394,8 @@ function _computeBNUnitMatrix(scheds, shift, datesByShift){
     // Expand C_PAIR to its open halves at the row's date; drop closed units.
     const units = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
     if(!counts[bn]) counts[bn] = {};
+    if(!bnDates[bn]) bnDates[bn] = new Set();
+    bnDates[bn].add(date);
     // Count this shift even if all units happened to be closed — the BN
     // was still scheduled. A row with empty Units after closure should
     // not silently disappear from the workload calc.
@@ -15412,10 +15421,7 @@ function _computeBNUnitMatrix(scheds, shift, datesByShift){
   // Build 130 (2026-05-26): Compute open-days per unit for this shift.
   // Used by Fairness Summary to weight unit-share CV — units that were
   // operational rarely (e.g., 5A, 3C) shouldn't pull the overall metric
-  // up as much as units that ran daily. datesByShift may be omitted when
-  // the matrix is rebuilt by a sort handler that doesn't recompute opens;
-  // in that case openDaysPerUnit is empty and the Fairness Summary code
-  // falls back to unweighted CV.
+  // up as much as units that ran daily.
   const openDaysPerUnit = {};
   if(datesByShift){
     orderedUnits.forEach(u => { openDaysPerUnit[u] = 0; });
@@ -15425,6 +15431,23 @@ function _computeBNUnitMatrix(scheds, shift, datesByShift){
       });
     });
   }
+
+  // Build 131 (2026-05-26): Compute opportunities per (BN, unit) — days
+  // both BN was scheduled AND unit was open. Drives the rate-based
+  // fairness metric. Without this, a closed unit shows up as "low
+  // coverage" in raw counts even though the algorithm correctly excluded
+  // it during assignment.
+  const opportunities = {};
+  Object.keys(bnDates).forEach(bn => {
+    opportunities[bn] = {};
+    orderedUnits.forEach(u => {
+      let count = 0;
+      bnDates[bn].forEach(date => {
+        if(isUnitOpenForShift(u, date, shift)) count++;
+      });
+      opportunities[bn][u] = count;
+    });
+  });
 
   const bns = Object.keys(counts).sort().map(bn => {
     const row = { bn, total: 0 };
@@ -15438,7 +15461,7 @@ function _computeBNUnitMatrix(scheds, shift, datesByShift){
     row.cpairShifts  = cpairShifts[bn] || 0;
     return row;
   });
-  return { bns, units: orderedUnits, openDaysPerUnit, totalDays: datesByShift ? datesByShift.size : 0 };
+  return { bns, units: orderedUnits, openDaysPerUnit, opportunities, totalDays: datesByShift ? datesByShift.size : 0 };
 }
 
 // Build 128 (2026-05-26): Fairness Summary — compute and render.
@@ -15469,25 +15492,43 @@ function _computeFairnessSummary(matrixData){
   const workloadSD = Math.sqrt(workloadVar);
   const workloadCV = workloadMean > 0 ? (workloadSD / workloadMean) : 0;
 
-  // ── Unit-share spread ──
-  // For each unit, compute CV across BNs (count of times each BN covered it,
-  // only among BNs that ever covered that unit). Then average those CVs.
-  // Build 130 (2026-05-26): weight each unit's CV by its operational days
-  // (count of dates in range it was open for this shift). Rarely-open units
-  // (e.g., 5A closed most of the range) have small samples that produce
-  // noisy CVs — without weighting they pull the overall metric up
-  // disproportionately. With weighting, the unit-share CV reflects fairness
-  // on units that actually ran most of the range.
+  // ── Unit-share spread (rate-based) ──
+  // Build 131 (2026-05-26): For each unit, compute each BN's coverage RATE
+  // = assignments / opportunities. Opportunities = days both the BN was
+  // scheduled AND the unit was open. This normalizes for two sources of
+  // variation that aren't unfairness:
+  //   1. BNs with more shifts had more chances → comparing raw counts
+  //      penalizes BNs with fewer shifts.
+  //   2. Closed-unit days reduce everyone's opportunity equally → previous
+  //      raw-count CV inflated against units like 5A that were closed.
+  // Now the CV reflects only the algorithm's choices when both BN and
+  // unit were available.
   const openDays = matrixData.openDaysPerUnit || {};
+  const oppMap = matrixData.opportunities || {};
   let unitCVs = [];
   units.forEach(u => {
-    const colVals = bns.map(r => r[u] || 0).filter(v => v > 0);
-    if(colVals.length < 2) return;
-    const mean = colVals.reduce((a,b)=>a+b,0) / colVals.length;
+    // Collect (bn, rate) pairs where opportunity > 0
+    const rates = [];
+    bns.forEach(r => {
+      const opp = (oppMap[r.bn] && oppMap[r.bn][u]) || 0;
+      if(opp > 0){
+        rates.push({ bn: r.bn, rate: r[u] / opp, count: r[u], opp });
+      }
+    });
+    if(rates.length < 2) return;
+    const values = rates.map(x => x.rate);
+    const mean = values.reduce((a,b)=>a+b,0) / values.length;
     if(mean <= 0) return;
-    const variance = colVals.reduce((a,v) => a + (v-mean)**2, 0) / colVals.length;
-    const weight = openDays[u] != null ? openDays[u] : 1; // fallback if not provided
-    unitCVs.push({ unit: u, cv: Math.sqrt(variance) / mean, mean, max: Math.max(...colVals), bnCount: colVals.length, weight });
+    const variance = values.reduce((a,v) => a + (v-mean)**2, 0) / values.length;
+    const weight = openDays[u] != null ? openDays[u] : 1;
+    unitCVs.push({
+      unit: u,
+      cv: Math.sqrt(variance) / mean,
+      mean,
+      rates,
+      bnCount: rates.length,
+      weight
+    });
   });
   let unitShareCV = 0;
   if(unitCVs.length){
@@ -15495,7 +15536,6 @@ function _computeFairnessSummary(matrixData){
     if(totalWeight > 0){
       unitShareCV = unitCVs.reduce((a,x)=>a+x.cv*x.weight,0) / totalWeight;
     } else {
-      // All weights zero (no opens?) — fall back to unweighted
       unitShareCV = unitCVs.reduce((a,x)=>a+x.cv,0) / unitCVs.length;
     }
   }
@@ -15514,18 +15554,25 @@ function _computeFairnessSummary(matrixData){
     .slice(0, 3);
 
   // ── Unit-share outliers ──
-  // Per-unit "dominator" — a BN with count > 2× per-BN mean for that unit
-  // (where that unit has at least 2 BNs covering it).
+  // Per-unit "dominator" — a BN whose coverage RATE for that unit is
+  // >= 2× the mean coverage rate among BNs who had any opportunities.
+  // Build 131 (2026-05-26): rate-based instead of count-based, so a BN
+  // who had more shifts isn't flagged just for having more chances.
   const unitConcentrations = [];
-  units.forEach(u => {
-    const entries = bns.map(r => ({ bn: r.bn, n: r[u] || 0 })).filter(e => e.n > 0);
-    if(entries.length < 2) return;
-    const mean = entries.reduce((a,e)=>a+e.n,0) / entries.length;
-    if(mean <= 0) return;
-    entries.forEach(e => {
-      const factor = e.n / mean;
+  unitCVs.forEach(uc => {
+    if(uc.rates.length < 2) return;
+    uc.rates.forEach(e => {
+      const factor = e.rate / uc.mean;
       if(factor >= 2){
-        unitConcentrations.push({ unit: u, bn: e.bn, n: e.n, factor, otherBns: entries.length - 1 });
+        unitConcentrations.push({
+          unit: uc.unit,
+          bn: e.bn,
+          n: e.count,
+          opp: e.opp,
+          rate: e.rate,
+          factor,
+          otherBns: uc.rates.length - 1
+        });
       }
     });
   });
@@ -15574,7 +15621,8 @@ function _renderFairnessSummary(daySum, nocSum){
     }
     if(sum.unitConcentrations.length){
       sum.unitConcentrations.forEach(c => {
-        outlierLines.push(`<strong>${c.unit}</strong> concentrated on <span style="color:var(--red);font-weight:600">${escHTML(firstName(c.bn))}</span> — ${c.n} of ${c.otherBns + 1} BN's shifts (${c.factor.toFixed(1)}× avg)`);
+        const pct = (c.rate * 100).toFixed(0);
+        outlierLines.push(`<strong>${c.unit}</strong> concentrated on <span style="color:var(--red);font-weight:600">${escHTML(firstName(c.bn))}</span> — assigned ${c.n}/${c.opp} open shifts (${pct}% rate, ${c.factor.toFixed(1)}× peer avg)`);
       });
     }
 
@@ -15596,7 +15644,7 @@ function _renderFairnessSummary(daySum, nocSum){
         <div style="${cardStyle}">
           <div style="${labelStyle}">Unit-share spread</div>
           <div style="${valStyle};color:${usColor}">${usPct}</div>
-          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">Avg CV across ${sum.unitCount} units' BN distributions</div>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">CV of coverage rates (assigned / opportunities) across ${sum.unitCount} units</div>
         </div>
       </div>
       ${outliersHtml}
