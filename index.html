@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-143';
+const APP_VERSION = '2026-05-26-144';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -9284,7 +9284,29 @@ function hiShift(dayId, nocId, sh){
   document.getElementById(nocId).classList.toggle('active',sh==='Noc');
 }
 
-async function loadSummary(){
+// Build 143 (2026-05-27): loadSummary is serialized + stale-guarded.
+//
+// Bug: entering the Coverage tab calls loadSummary() (4 sequential spGets),
+// then startCoveragePolling fires silentRefreshCoverage after a 0-3s jitter.
+// With _coverageLastFingerprint reset to null on tab entry, that first poll
+// ALWAYS calls loadSummary again. If the entry's loadSummary was still
+// mid-fetch, the two calls fired spGets concurrently — which Apps Script
+// can't handle (see sequential-spGet note below) — and one returned empty,
+// blanking the slot list a few seconds after it first appeared.
+//
+// Fix: chain calls so only one runs at a time (no concurrent spGets), and
+// tag each call with a sequence number so a superseded call skips its
+// render entirely instead of clobbering a newer one.
+let _summaryRenderSeq = 0;
+let _summaryLoadChain = Promise.resolve();
+function loadSummary(){
+  const mySeq = ++_summaryRenderSeq;
+  _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq)).catch(()=>{});
+  return _summaryLoadChain;
+}
+async function _loadSummaryInner(mySeq){
+  // Superseded by a newer call queued behind us — skip without touching DOM.
+  if(mySeq !== _summaryRenderSeq) return;
   const dt=document.getElementById('summDate').value;
   const shift=S.summShift;
   const unit=S.summUnit;
@@ -9325,6 +9347,9 @@ async function loadSummary(){
       for(const q of queries) results.push(await spGet(q.sheet, q.filter));
     }
     const [bookingsRaw, oppBookingsRaw, scheds, oppScheds] = results;
+    // Build 143: if a newer loadSummary was queued while we awaited the
+    // fetch, abandon this render so we don't paint stale data.
+    if(mySeq !== _summaryRenderSeq) return;
     const bookings = reconcileBookings(bookingsRaw);
     const oppBookings = reconcileBookings(oppBookingsRaw);
 
