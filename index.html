@@ -1728,7 +1728,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-142';
+const APP_VERSION = '2026-05-26-143';
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3958,30 +3958,27 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     );
     return { bnName, schedId: s.Id, bnUnits, bnBreakTimes, bnBusySlots };
   });
-  // Helper: which candidate (if any) already covers a unit
-  const coverOf = (unit) => candidates.find(c => c.bnUnits.includes(unit)) || null;
-  // Helper: conflict reason for a candidate at a specific slot
-  const conflictReason = (cand, slotTime) => {
-    const t = String(slotTime).padStart(4,'0');
-    if(cand.bnBreakTimes.has(t)) return `${firstName(cand.bnName)} has own break at ${fmt12(t)}`;
-    if(cand.bnBusySlots.has(t))  return `${firstName(cand.bnName)} is on another unit at ${fmt12(t)}`;
-    return null;
-  };
+  // (Build 143: coverOf and conflictReason helpers removed — same-wing
+  // filter handles candidate selection per unit, and conflict messaging
+  // was unused. If conflict info is needed later, surface inline.)
 
   // Build per-row data: { unit, booking, defaultAction, candidatesForUnit }
   // (candidatesForUnit is the same list per unit; admin transfers a whole unit)
   const rows = [];
   removedUnitsWithBookings.forEach(({ unit, bookings }) => {
-    const cover = coverOf(unit);
     const unitWing = getUnitWing(unit);
-    // Sort candidates: implicit-cover first, then same-wing, then rest
-    const ranked = [...candidates].sort((a,b) => {
+    // Build 143 (2026-05-27): Same-wing filter. Candidates must share at
+    // least one unit's wing with the removed unit. Cross-wing BNs are
+    // excluded entirely — admin can't transfer to a BN on a different
+    // wing even via picker. If no same-wing candidates exist, the
+    // dropdown shows only Keep/Cancel with an inactive Transfer note.
+    const candidatesForUnit = candidates.filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing));
+    const cover = candidatesForUnit.find(c => c.bnUnits.includes(unit)) || null;
+    // Sort within same-wing: implicit-cover first, then everyone else
+    const ranked = [...candidatesForUnit].sort((a,b) => {
       const aCover = a.bnName === (cover && cover.bnName) ? 0 : 1;
       const bCover = b.bnName === (cover && cover.bnName) ? 0 : 1;
-      if(aCover !== bCover) return aCover - bCover;
-      const aWing = a.bnUnits.some(u => getUnitWing(u) === unitWing) ? 0 : 1;
-      const bWing = b.bnUnits.some(u => getUnitWing(u) === unitWing) ? 0 : 1;
-      return aWing - bWing;
+      return aCover - bCover;
     });
     bookings.forEach(b => {
       rows.push({
@@ -4010,12 +4007,17 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     const renderUnitSection = (unit, unitRows, startIdx) => {
       const cover = unitRows[0].coverBN;
       const candidatesList = unitRows[0].candidatesForUnit;
-      const transferOptions = candidatesList.map(c =>
-        `<option value="transfer:${c.bnName}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
-      ).join('');
+      // Build 143: Show disabled transfer note when no same-wing candidates.
+      const transferOptions = candidatesList.length
+        ? candidatesList.map(c =>
+            `<option value="transfer:${c.bnName}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
+          ).join('')
+        : `<option value="" disabled>No other Break Nurse on same wing for transfer</option>`;
       const headerNote = cover
         ? `<span style="color:var(--muted);font-size:.78rem">· ${firstName(cover)} already covers</span>`
-        : `<span style="color:var(--muted);font-size:.78rem">· no other BN covers</span>`;
+        : (candidatesList.length
+            ? `<span style="color:var(--muted);font-size:.78rem">· no other BN covers</span>`
+            : `<span style="color:var(--muted);font-size:.78rem">· no same-wing BN available</span>`);
       const rowsHtml = unitRows.map((r, j) => {
         const idx = startIdx + j;
         const t = String(r.booking.SlotTime).padStart(4,'0');
@@ -4129,7 +4131,10 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         const action = state[i];
         const slot = String(r.booking.SlotTime).padStart(4,'0');
         if(action === 'keep'){
-          keepOverrides.push({ slot, unit: r.unit });
+          // Build 143: include the booking so saveAssign can patch CreatedBy.
+          // Without CreatedBy = outgoing BN, removing the unit from Units
+          // strips bnOwns attribution and the booking orphans.
+          keepOverrides.push({ slot, unit: r.unit, booking: r.booking });
         } else if(action === 'cancel'){
           bookingsToCancel.push(r.booking);
         } else if(action.startsWith('transfer:')){
@@ -9759,20 +9764,17 @@ async function saveAssign(){
     const existing = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
 
-    // If editing an active shift, warn coordinator about rotation impact
-    const isActiveShift = dt === shiftDate(shift) && staffWindowOpen(shift);
     let bookingsToCancel = [];
     let transfers = [];     // [{unit, targetBN, targetSchedId, targetUnits, bookings}]
     let keepOverrides = []; // [{slot, unit}] — written to outgoing BN's rotation after recompute
 
-    if(existing.length > 0 && isActiveShift){
+    if(existing.length > 0){
       // Build 141 (2026-05-27): Unified per-booking decisions modal.
-      // Detect all removed units with future bookings, then ask admin
-      // per-booking what to do: Keep (this BN covers via rotation
-      // override), Cancel (delete booking), or Transfer (hand the unit
-      // and ALL its bookings to another BN whose Units field gets the
-      // unit added). Smart defaults: implicit cover → Transfer to that
-      // BN; no cover → Keep. See promptBookingDecisions for full UI.
+      // Build 143 (2026-05-27): No longer gated on isActiveShift —
+      // modal fires for ANY edit that removes a unit with future
+      // bookings, regardless of whether the shift is currently active.
+      // Previously, edits to non-active shifts bypassed the modal
+      // (e.g., Suggest+Save on a current-but-not-window-open shift).
       const existingUnits = [];
       existing.forEach(s => { try { JSON.parse(s.Units||'[]').forEach(u => { if(!existingUnits.includes(u)) existingUnits.push(u); }); } catch{} });
       const removedUnits = existingUnits.filter(u => !units.includes(u));
@@ -9825,18 +9827,38 @@ async function saveAssign(){
     }
 
     // Apply transfer unit additions — for each BN that's taking over a unit,
-    // patch their assignment to include the new unit and recompute their rotation.
-    // Build 141: renamed from takeoverResults to transfers; same downstream effect.
+    // patch their assignment to include the new unit, recompute their
+    // rotation, then move booking ownership via CreatedBy and override
+    // their rotation at the booking's slot so the booking is visible
+    // under the new BN at the original slot time.
+    // Build 143 (2026-05-27): Added CreatedBy patch + target slot override.
+    // Without these, bnOwns attribution stays with outgoing BN (if booking
+    // had CreatedBy = outgoing), or display falls back to unit-based
+    // visibility which only works if target's rotation at the booking's
+    // slot is the unit (rotation algorithm distribution can put a different
+    // unit there). Patch + override guarantee the booking moves cleanly.
     for(const r of transfers){
       if(!r.targetBN || !r.targetSchedId) continue;
-      const newTargetUnits = [...new Set([...(r.targetUnits || []), r.unit])];
-      await spPatch(LISTS.schedule, r.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+      const targetHasUnit = (r.targetUnits || []).includes(r.unit);
+      if(!targetHasUnit){
+        const newTargetUnits = [...new Set([...(r.targetUnits || []), r.unit])];
+        await spPatch(LISTS.schedule, r.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+      }
       const targetDef = getDefaultTemplate(r.targetBN, shift);
       if(targetDef && targetDef.length > 0){
         await applyDefaultToShift(r.targetBN, dt, shift, targetDef).catch(()=>{});
       } else {
         await recalculateRotation(r.targetBN, dt, shift).catch(()=>{});
       }
+      // Move booking ownership to target + override target's rotation at slot
+      const targetRot = loadRotation(r.targetBN, dt, shift) || {};
+      for(const b of r.bookings){
+        try { await spPatch(LISTS.bookings, b.Id, { CreatedBy: r.targetBN }); }
+        catch(e){ console.warn(`CreatedBy patch failed for booking ${b.Id}:`, e.message); }
+        const slot = String(b.SlotTime).padStart(4,'0');
+        targetRot[slot] = r.unit;
+      }
+      await saveRotation(r.targetBN, dt, shift, targetRot);
     }
 
     await spPost(LISTS.schedule,{
@@ -9891,7 +9913,20 @@ async function saveAssign(){
       // Units → treat as override and keep."
       if(keepOverrides.length){
         const rot = loadRotation(nurse, dt, shift) || {};
-        keepOverrides.forEach(({slot, unit}) => { rot[slot] = unit; });
+        // Build 143 (2026-05-27): Patch each kept booking's CreatedBy to
+        // the outgoing BN so attribution survives the unit removal. If
+        // the booking was already CreatedBy = outgoing (e.g., Amila
+        // created it via Prod Log Add Break), this is a no-op. If it was
+        // a Sign Up claim (no CreatedBy), this assigns ownership so the
+        // booking continues to display under outgoing BN after their
+        // Units no longer includes the kept unit.
+        for(const ko of keepOverrides){
+          rot[ko.slot] = ko.unit;
+          if(ko.booking && ko.booking.Id && ko.booking.CreatedBy !== nurse){
+            try { await spPatch(LISTS.bookings, ko.booking.Id, { CreatedBy: nurse }); }
+            catch(e){ console.warn(`CreatedBy patch failed for kept booking ${ko.booking.Id}:`, e.message); }
+          }
+        }
         await saveRotation(nurse, dt, shift, rot);
       }
     } catch(e){ toast('Rotation error: ' + e.message, true); }
@@ -9899,6 +9934,9 @@ async function saveAssign(){
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     loadAssignments();
     notifyProdLogChanged(nurse);
+    // Build 143: notify target BNs of transfers so their Prod Log + My Shift
+    // refresh and the moved bookings appear under their view.
+    transfers.forEach(t => { if(t.targetBN && t.targetBN !== nurse) notifyProdLogChanged(t.targetBN); });
   }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); notifyProdLogChanged(nurse); }
 }
 
@@ -10374,25 +10412,43 @@ async function closeUnit(schedId, unit, bnName, date, shift){
       showBusy(busyMsg);
       // Cancel decisions
       for(const b of result.bookingsToCancel) await spDel(LISTS.bookings, b.Id);
-      // Transfer decisions (closeUnit only has one unit, so 0 or 1 transfer)
+      // Transfer decisions (closeUnit only has one unit, so 0 or 1 transfer).
+      // Build 143: patch CreatedBy + apply target rotation override at slot.
       for(const t of result.transfers){
         if(!t.targetBN || !t.targetSchedId) continue;
-        const newTargetUnits = [...new Set([...(t.targetUnits || []), t.unit])];
-        await spPatch(LISTS.schedule, t.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+        const targetHasUnit = (t.targetUnits || []).includes(t.unit);
+        if(!targetHasUnit){
+          const newTargetUnits = [...new Set([...(t.targetUnits || []), t.unit])];
+          await spPatch(LISTS.schedule, t.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+        }
         const targetDef = getDefaultTemplate(t.targetBN, shift);
         if(targetDef && targetDef.length > 0){
           await applyDefaultToShift(t.targetBN, date, shift, targetDef).catch(()=>{});
         } else {
           await recalculateRotation(t.targetBN, date, shift).catch(()=>{});
         }
+        const targetRot = loadRotation(t.targetBN, date, shift) || {};
+        for(const b of t.bookings){
+          try { await spPatch(LISTS.bookings, b.Id, { CreatedBy: t.targetBN }); }
+          catch(e){ console.warn(`CreatedBy patch failed for booking ${b.Id}:`, e.message); }
+          const slot = String(b.SlotTime).padStart(4,'0');
+          targetRot[slot] = t.unit;
+        }
+        await saveRotation(t.targetBN, date, shift, targetRot);
       }
       // Remove unit from outgoing BN, then recompute their rotation
       await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
       await _recomputeAfterCloseUnit(bnName, date, shift);
-      // Apply Keep overrides to outgoing BN's rotation
+      // Apply Keep overrides to outgoing BN's rotation + patch CreatedBy
       if(result.keepOverrides.length){
         const rot = loadRotation(bnName, date, shift) || {};
-        result.keepOverrides.forEach(({slot, unit: keepUnit}) => { rot[slot] = keepUnit; });
+        for(const ko of result.keepOverrides){
+          rot[ko.slot] = ko.unit;
+          if(ko.booking && ko.booking.Id && ko.booking.CreatedBy !== bnName){
+            try { await spPatch(LISTS.bookings, ko.booking.Id, { CreatedBy: bnName }); }
+            catch(e){ console.warn(`CreatedBy patch failed for kept booking ${ko.booking.Id}:`, e.message); }
+          }
+        }
         await saveRotation(bnName, date, shift, rot);
       }
       hideBusy();
