@@ -1728,7 +1728,10 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-144';
+const APP_VERSION = '2026-05-26-146';
+// 146: Phase A — extracted planAbsorption() pure helper (logic verified
+//      byte-identical to prior inline planner). 145: overlay→re-render gap
+//      fix in submitClaims (both untested; testing continues on 144).
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3963,30 +3966,47 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
   // was unused. If conflict info is needed later, surface inline.)
 
   // Build per-row data: { unit, booking, defaultAction, candidatesForUnit }
-  // (candidatesForUnit is the same list per unit; admin transfers a whole unit)
   const rows = [];
   removedUnitsWithBookings.forEach(({ unit, bookings }) => {
     const unitWing = getUnitWing(unit);
     // Build 143 (2026-05-27): Same-wing filter. Candidates must share at
-    // least one unit's wing with the removed unit. Cross-wing BNs are
-    // excluded entirely — admin can't transfer to a BN on a different
-    // wing even via picker. If no same-wing candidates exist, the
-    // dropdown shows only Keep/Cancel with an inactive Transfer note.
-    const candidatesForUnit = candidates.filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing));
-    const cover = candidatesForUnit.find(c => c.bnUnits.includes(unit)) || null;
-    // Sort within same-wing: implicit-cover first, then everyone else
-    const ranked = [...candidatesForUnit].sort((a,b) => {
-      const aCover = a.bnName === (cover && cover.bnName) ? 0 : 1;
-      const bCover = b.bnName === (cover && cover.bnName) ? 0 : 1;
-      return aCover - bCover;
-    });
+    // least one unit's wing with the removed unit. Cross-wing BNs excluded.
+    const sameWing = candidates.filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing));
+    const coverCand = sameWing.find(c => c.bnUnits.includes(unit)) || null;
     bookings.forEach(b => {
+      const slot = String(b.SlotTime).padStart(4,'0');
+      // Build 145 (2026-05-27): PER-SLOT transfer eligibility (restores the
+      // original promptUnitTakeover behavior, 2026-04-24 design). A candidate
+      // is eligible to take THIS specific booking only if they're free at
+      // THIS slot — not on their own break, and not already covering a staff
+      // booking on another of their units at this time (a BN can only relieve
+      // one nurse at a time). Eligibility is computed per booking, so a BN
+      // busy at one slot can still take the unit's OTHER slots. Ineligible
+      // candidates render as disabled options with the reason, so the admin
+      // sees why they can't take that specific slot.
+      const candForSlot = sameWing.map(c => {
+        let conflictReason = null;
+        if(c.bnBreakTimes.has(slot)) conflictReason = 'on own break';
+        else if(c.bnBusySlots.has(slot)) conflictReason = 'covering another unit';
+        return { ...c, eligible: !conflictReason, conflictReason };
+      });
+      // Sort: eligible first, implicit-cover within eligible first, blocked last
+      const ranked = candForSlot.sort((a,b) => {
+        if(a.eligible !== b.eligible) return a.eligible ? -1 : 1;
+        const aCover = a.bnName === (coverCand && coverCand.bnName) ? 0 : 1;
+        const bCover = b.bnName === (coverCand && coverCand.bnName) ? 0 : 1;
+        return aCover - bCover;
+      });
+      // Default Transfer only if the implicit-cover BN is eligible at THIS slot
+      const coverEligibleHere = coverCand && candForSlot.find(c => c.bnName === coverCand.bnName)?.eligible;
       rows.push({
         unit,
         booking: b,
-        defaultAction: cover ? `transfer:${cover.bnName}` : 'keep',
-        candidatesForUnit: ranked,
-        coverBN: cover ? cover.bnName : null
+        slot,
+        defaultAction: coverEligibleHere ? `transfer:${coverCand.bnName}` : 'keep',
+        candidatesForSlot: ranked,
+        coverBN: coverCand ? coverCand.bnName : null,
+        anySameWing: sameWing.length > 0
       });
     });
   });
@@ -7177,9 +7197,15 @@ async function submitClaims(){
     const fail = results.failed.map(f => `${f.label}: ${f.reason}`).join(' | ');
     toast(`${ok}${results.failed.length} couldn't be saved: ${fail}`, true);
   }
-  _resetSubmitState();
-  loadSlots();
+  // Build 145 (2026-05-27): Re-render the slot list BEFORE tearing down the
+  // busy overlay. loadSlots() is async (fetches fresh bookings then rebuilds
+  // the DOM); previously hideBusy() fired first, leaving a visible gap where
+  // the overlay was gone but the claimed slots hadn't repainted with their
+  // green banner + manage UI yet. Awaiting loadSlots keeps the overlay up
+  // until the new state is on screen, so the transition is seamless.
+  await loadSlots();
   if(document.getElementById('summList')) loadSummary();
+  _resetSubmitState();
 }
 
 async function loadOtherSlots(silent=false){
@@ -8706,177 +8732,20 @@ function markCardUnavailableInDOM(bnName){
 
 // showReassignModal + handleReassignConfirm removed — modal-based reassign flow
 // replaced by processBNUnavailability + customConfirm (inline redistribution algorithm)
-async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
-  showBusy('Updating coverage…');
-  try {
-    // Get BN-A's units and mark record inactive
-    // Fetch main record + all supplementals for this BN on this shift
-    const [mainRecs, suppRecs] = await Promise.all([
-      spGet(LISTS.schedule, `Id eq ${schedId}`),
-      spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
-    ]);
-    if(!mainRecs.length){ hideBusy(); return; }
-    const bnARecord = mainRecs[0];
-
-    // Combine units from main assignment + any supplementals
-    let bnAUnits = [];
-    try { bnAUnits = JSON.parse(bnARecord.Units||'[]'); } catch{}
-    const suppToInactivate = suppRecs.filter(s =>
-      String(s.Id) !== String(schedId) && s.IsSupplemental == 1 && s.Status !== 'inactive'
-    );
-    suppToInactivate.forEach(s => {
-      try { JSON.parse(s.Units||'[]').forEach(u => { if(!bnAUnits.includes(u)) bnAUnits.push(u); }); } catch{}
-    });
-
-    // Mark main assignment inactive
-    await spPatch(LISTS.schedule, schedId, {
-      Status: 'inactive',
-      EndedAt: new Date().toISOString()
-    });
-    // Also inactivate supplementals — their bookings will be included in redistribution below
-    for(const sup of suppToInactivate){
-      await spPatch(LISTS.schedule, sup.Id, { Status: 'inactive', EndedAt: new Date().toISOString() });
-    }
-
-    // Build 101 (2026-05-25): Frozen supp cleanup before absorption.
-    // A frozen supp = IsSupp=1 owned by OTHER BNs but CoveredFrom=bnName (the
-    // BN we're now marking unavailable again). Created during a prior Mark
-    // Available "Let absorber keep" — its purpose was to mark the absorber's
-    // commitment to specific bookings. Once those bookings are stamped with
-    // CreatedBy, attribution lives on the bookings themselves; the supp row
-    // is redundant after that.
-    //
-    // Why we MUST delete it now: the absorption planner below treats every
-    // staff booking on a BN's responsible units as a "busy" slot for that
-    // BN. The frozen supp gives the prior absorber 9S in her responsible
-    // units, so the 9S bookings get marked as her busy slots. She then
-    // fails the truly-free check at exactly the slots we need her to
-    // absorb — orphan cleanup deletes the bookings.
-    //
-    // Deleting the frozen supp restores normal absorption mechanics. The
-    // CreatedBy stamps on the bookings keep Coverage tab attribution correct.
-    const frozenSupps = await spGet(LISTS.schedule,
-      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and IsSupplemental eq 1 and CoveredFrom eq '${esc(bnName)}'`
-    ).catch(() => []);
-    for(const fs of frozenSupps){
-      if(String(fs.Status || '') === 'inactive') continue;
-      await spDel(LISTS.schedule, fs.Id).catch(()=>{});
-    }
-
-    // Get future uncovered claimed breaks for BN-A's units (main + supplemental)
-    const now = nowMin();
-    const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
-
-    // Delete BN-A's own BN-break bookings — once they're off the floor, those
-    // slots should reopen for staff to claim. Coverage tab still showing them
-    // as "BN breaks blocked" was confusing and inaccurate.
-    const bnAOwnBreaks = allBookings.filter(b =>
-      isBNBreak(b) &&
-      b.NurseName === bnName &&
-      b.SlotDate >= shiftDate(shift) &&
-      sortKey(b.SlotTime, shift) > nowKey(shift)
-    );
-    for(const b of bnAOwnBreaks){
-      await spDel(LISTS.bookings, b.Id).catch(()=>{});
-    }
-
-    // Branch on staff arrival. Pre-staff-arrival (future shift) → just
-    // mark inactive; no recalc, no booking absorption. Per Tomas's
-    // decision 2026-05-22 (post-build-83 review): future-shift Mark
-    // Unavailable should be a temporary no-op for other BNs. The removed
-    // BN's units simply go uncovered for that shift. Other BNs continue
-    // their normal assignments. Mark Available reverses cleanly because
-    // nothing was changed in the first place. The permanent
-    // redistribution case (BN quits / fired) lives in the roster-card
-    // Remove cascade, not here.
-    if(!staffShiftHasStarted(date, shift)){
-      hideBusy();
-      toast(`${firstName(bnName)} marked unavailable for ${shift} on ${date}.`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
-
-    // ── Current shift: existing absorption logic continues below ──
-    // Only future uncovered claimed staff breaks on BN-A's units
-    // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
-    const uncovered = allBookings.filter(b =>
-      isStaffBooking(b) &&
-      bnAUnits.includes(b.Unit) &&
-      !isConfirmed(b) &&
-      b.SlotDate >= shiftDate(shift) &&  // exclude dates before this shift started
-      sortKey(b.SlotTime, shift) > nowKey(shift)
-    );
-
-    if(!uncovered.length){
-      hideBusy();
-      toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
-
-    // Get other active BNs on same wing
-    const allScheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-    const bnAWings = [...new Set(bnAUnits.map(u => getUnitWing(u)))];
-    const otherBNs = allScheds.filter(s =>
-      s.BreakNurseName !== bnName &&
-      s.Status !== 'inactive' &&
-      !s.IsSupplemental
-    ).filter(s => {
-      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-      return units.some(u => bnAWings.includes(getUnitWing(u)));
-    });
-
-    // If cancel all chosen, skip redistribution entirely
-    if(!redistribute){
-      hideBusy();
-      const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      // Actually delete the staff bookings — previously they were flagged only,
-      // which left orphaned records that reappeared if BN was reactivated.
-      for(const b of uncovered){
-        await spDel(LISTS.bookings, b.Id).catch(()=>{});
-      }
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
-
-    if(!otherBNs.length){
-      hideBusy();
-      // No other BNs available — delete all uncovered staff bookings and flag
-      const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      for(const b of uncovered){
-        await spDel(LISTS.bookings, b.Id).catch(()=>{});
-      }
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
-
-    // ── v4 absorption rules — safe pass ─────────────────
-    //
-    // "Truly free at slot T" for BN X means:
-    //   - T is not past
-    //   - T is not X's own break
-    //   - T has no claimed staff booking on any of X's responsible units
-    //     (responsible = original assignment + any prior supplementals)
-    //
-    // Per-subrun rules (subrun = consecutive slots one BN absorbs):
-    //   - Multi-slot (2+): BN must be truly free at every slot in the subrun
-    //   - Single-slot: BN truly free at T AND (T+1 is X's own break OR
-    //     unclaimed on X's responsible units, OR T is shift's last slot)
-    //
-    // Selection: when multiple BNs qualify, prefer the one with the most
-    // free slot-times in the shift (responsible-units-aware, largest first).
-    //
-    // Run-splitting is allowed — different BNs can absorb different subruns
-    // of the same nurse/unit run. Each subrun evaluated independently.
-    // ─────────────────────────────────────────────────────
+// Build 145 (2026-05-27): Pure absorption planner — extracted verbatim from
+// processBNUnavailability (Phase A of transfer/absorption eligibility
+// unification). Computes WHICH candidate BN absorbs WHICH uncovered booking,
+// applying the v4 rules: truly-free-at-slot + single-slot T+1 buffer +
+// consecutive-run grouping + greedy longest-subrun + all-or-nothing per run
+// (run-splitting allowed). NO side effects — caller commits supp rows, deletes
+// flagged bookings, etc. Sharing this lets the Mark Unavailable choice modal
+// (Phase C) and Transfer (Phase D) reuse identical eligibility.
+//   uncovered  — staff bookings on the unavailable BN's units needing coverage
+//   otherBNs   — same-wing active candidate schedule records (sorted in place)
+//   ctx        — { allBookings, allScheds, shift }
+// Returns { absorbed: [{booking, bnName}], flagged: [bookings] }
+function planAbsorption(uncovered, otherBNs, ctx){
+  const { allBookings, allScheds, shift } = ctx;
 
     // Pre-compute helpers used by the v4 logic.
     const allShiftSlots = generateSlots(shift);
@@ -9075,6 +8944,187 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
         }
       }
     }
+
+  return { absorbed, flagged: flaggedNurses };
+}
+
+async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
+  showBusy('Updating coverage…');
+  try {
+    // Get BN-A's units and mark record inactive
+    // Fetch main record + all supplementals for this BN on this shift
+    const [mainRecs, suppRecs] = await Promise.all([
+      spGet(LISTS.schedule, `Id eq ${schedId}`),
+      spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`)
+    ]);
+    if(!mainRecs.length){ hideBusy(); return; }
+    const bnARecord = mainRecs[0];
+
+    // Combine units from main assignment + any supplementals
+    let bnAUnits = [];
+    try { bnAUnits = JSON.parse(bnARecord.Units||'[]'); } catch{}
+    const suppToInactivate = suppRecs.filter(s =>
+      String(s.Id) !== String(schedId) && s.IsSupplemental == 1 && s.Status !== 'inactive'
+    );
+    suppToInactivate.forEach(s => {
+      try { JSON.parse(s.Units||'[]').forEach(u => { if(!bnAUnits.includes(u)) bnAUnits.push(u); }); } catch{}
+    });
+
+    // Mark main assignment inactive
+    await spPatch(LISTS.schedule, schedId, {
+      Status: 'inactive',
+      EndedAt: new Date().toISOString()
+    });
+    // Also inactivate supplementals — their bookings will be included in redistribution below
+    for(const sup of suppToInactivate){
+      await spPatch(LISTS.schedule, sup.Id, { Status: 'inactive', EndedAt: new Date().toISOString() });
+    }
+
+    // Build 101 (2026-05-25): Frozen supp cleanup before absorption.
+    // A frozen supp = IsSupp=1 owned by OTHER BNs but CoveredFrom=bnName (the
+    // BN we're now marking unavailable again). Created during a prior Mark
+    // Available "Let absorber keep" — its purpose was to mark the absorber's
+    // commitment to specific bookings. Once those bookings are stamped with
+    // CreatedBy, attribution lives on the bookings themselves; the supp row
+    // is redundant after that.
+    //
+    // Why we MUST delete it now: the absorption planner below treats every
+    // staff booking on a BN's responsible units as a "busy" slot for that
+    // BN. The frozen supp gives the prior absorber 9S in her responsible
+    // units, so the 9S bookings get marked as her busy slots. She then
+    // fails the truly-free check at exactly the slots we need her to
+    // absorb — orphan cleanup deletes the bookings.
+    //
+    // Deleting the frozen supp restores normal absorption mechanics. The
+    // CreatedBy stamps on the bookings keep Coverage tab attribution correct.
+    const frozenSupps = await spGet(LISTS.schedule,
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and IsSupplemental eq 1 and CoveredFrom eq '${esc(bnName)}'`
+    ).catch(() => []);
+    for(const fs of frozenSupps){
+      if(String(fs.Status || '') === 'inactive') continue;
+      await spDel(LISTS.schedule, fs.Id).catch(()=>{});
+    }
+
+    // Get future uncovered claimed breaks for BN-A's units (main + supplemental)
+    const now = nowMin();
+    const allBookings = await spGet(LISTS.bookings,
+      `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+
+    // Delete BN-A's own BN-break bookings — once they're off the floor, those
+    // slots should reopen for staff to claim. Coverage tab still showing them
+    // as "BN breaks blocked" was confusing and inaccurate.
+    const bnAOwnBreaks = allBookings.filter(b =>
+      isBNBreak(b) &&
+      b.NurseName === bnName &&
+      b.SlotDate >= shiftDate(shift) &&
+      sortKey(b.SlotTime, shift) > nowKey(shift)
+    );
+    for(const b of bnAOwnBreaks){
+      await spDel(LISTS.bookings, b.Id).catch(()=>{});
+    }
+
+    // Branch on staff arrival. Pre-staff-arrival (future shift) → just
+    // mark inactive; no recalc, no booking absorption. Per Tomas's
+    // decision 2026-05-22 (post-build-83 review): future-shift Mark
+    // Unavailable should be a temporary no-op for other BNs. The removed
+    // BN's units simply go uncovered for that shift. Other BNs continue
+    // their normal assignments. Mark Available reverses cleanly because
+    // nothing was changed in the first place. The permanent
+    // redistribution case (BN quits / fired) lives in the roster-card
+    // Remove cascade, not here.
+    if(!staffShiftHasStarted(date, shift)){
+      hideBusy();
+      toast(`${firstName(bnName)} marked unavailable for ${shift} on ${date}.`);
+      loadAssignments();
+      notifyProdLogChanged(bnName);
+      return;
+    }
+
+    // ── Current shift: existing absorption logic continues below ──
+    // Only future uncovered claimed staff breaks on BN-A's units
+    // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
+    const uncovered = allBookings.filter(b =>
+      isStaffBooking(b) &&
+      bnAUnits.includes(b.Unit) &&
+      !isConfirmed(b) &&
+      b.SlotDate >= shiftDate(shift) &&  // exclude dates before this shift started
+      sortKey(b.SlotTime, shift) > nowKey(shift)
+    );
+
+    if(!uncovered.length){
+      hideBusy();
+      toast(`${firstName(bnName)} marked unavailable. No uncovered future breaks to redistribute.`);
+      loadAssignments();
+      notifyProdLogChanged(bnName);
+      return;
+    }
+
+    // Get other active BNs on same wing
+    const allScheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const bnAWings = [...new Set(bnAUnits.map(u => getUnitWing(u)))];
+    const otherBNs = allScheds.filter(s =>
+      s.BreakNurseName !== bnName &&
+      s.Status !== 'inactive' &&
+      !s.IsSupplemental
+    ).filter(s => {
+      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+      return units.some(u => bnAWings.includes(getUnitWing(u)));
+    });
+
+    // If cancel all chosen, skip redistribution entirely
+    if(!redistribute){
+      hideBusy();
+      const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+      // Actually delete the staff bookings — previously they were flagged only,
+      // which left orphaned records that reappeared if BN was reactivated.
+      for(const b of uncovered){
+        await spDel(LISTS.bookings, b.Id).catch(()=>{});
+      }
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
+      loadAssignments();
+      notifyProdLogChanged(bnName);
+      return;
+    }
+
+    if(!otherBNs.length){
+      hideBusy();
+      // No other BNs available — delete all uncovered staff bookings and flag
+      const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+      for(const b of uncovered){
+        await spDel(LISTS.bookings, b.Id).catch(()=>{});
+      }
+      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
+      loadAssignments();
+      notifyProdLogChanged(bnName);
+      return;
+    }
+
+    // ── v4 absorption rules — safe pass ─────────────────
+    //
+    // "Truly free at slot T" for BN X means:
+    //   - T is not past
+    //   - T is not X's own break
+    //   - T has no claimed staff booking on any of X's responsible units
+    //     (responsible = original assignment + any prior supplementals)
+    //
+    // Per-subrun rules (subrun = consecutive slots one BN absorbs):
+    //   - Multi-slot (2+): BN must be truly free at every slot in the subrun
+    //   - Single-slot: BN truly free at T AND (T+1 is X's own break OR
+    //     unclaimed on X's responsible units, OR T is shift's last slot)
+    //
+    // Selection: when multiple BNs qualify, prefer the one with the most
+    // free slot-times in the shift (responsible-units-aware, largest first).
+    //
+    // Run-splitting is allowed — different BNs can absorb different subruns
+    // of the same nurse/unit run. Each subrun evaluated independently.
+    // ─────────────────────────────────────────────────────
+
+    // Build 145 (2026-05-27): Phase A — absorption planning extracted to the
+    // pure planAbsorption() helper (behavior-preserving). The plan (absorbed +
+    // flagged) is computed here; all side effects (supp rows, deletes, wing
+    // history, rotation recompute) remain below, unchanged.
+    const { absorbed, flagged: flaggedNurses } = planAbsorption(uncovered, otherBNs, { allBookings, allScheds, shift });
 
     // Cleanup: delete the bookings that couldn't be absorbed. The run-rule
     // rollback above accumulated them into flaggedNurses but left the
