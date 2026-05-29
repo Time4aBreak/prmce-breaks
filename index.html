@@ -1728,7 +1728,15 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-150';
+const APP_VERSION = '2026-05-29-151';
+// 151: Phase C-1 — planAbsorption deduped onto the Phase B helpers
+//      (buildAbsorptionContext + passesT1Buffer); inline pre-compute and
+//      passesT1BufferCheck removed, ~49 lines now shared. Behaviour-preserving
+//      (before/after snapshot diff on the d-wing Deepi→Leo fixture must match:
+//      4-slot run + 1235 absorbed by Leo, 1335 flagged). Greedy commit/rollback
+//      still mutates the context's free/busy/claimed sets in place via actx.*;
+//      otherBNs still sorted in place. bnCanTakeRun left for Phase D's fixed-run
+//      check (this loop finds the longest subrun, not a fixed run).
 // 150: Clear All confirm dialog relabeled to name what it wipes — "assignments,
 //      bookings, the nurse roster, and all settings" — since the now-working
 //      clearSheet (149 + backend clearContent fix) genuinely clears BNState, which
@@ -8884,71 +8892,33 @@ function bnCanTakeRun(bnName, run, actx){
 //   ctx        — { allBookings, allScheds, shift }
 // Returns { absorbed: [{booking, bnName}], flagged: [bookings] }
 function planAbsorption(uncovered, otherBNs, ctx){
-  const { allBookings, allScheds, shift } = ctx;
+  const { shift } = ctx;
 
-    // Pre-compute helpers used by the v4 logic.
-    const allShiftSlots = generateSlots(shift);
-    const shiftLastSlot = allShiftSlots[allShiftSlots.length - 1];
-
-    // responsibleUnits(bn) = bn's main units + any supplemental units they already hold
-    const responsibleUnitsFor = (bnRecord) => {
-      const bnName2 = bnRecord.BreakNurseName;
-      const units = new Set();
-      try { JSON.parse(bnRecord.Units || '[]').forEach(u => units.add(u)); } catch{}
-      // Add units from any active supplementals this BN holds for the same shift
-      allScheds.forEach(s => {
-        if(s.BreakNurseName !== bnName2) return;
-        if(s.IsSupplemental != 1) return;
-        if(s.Status === 'inactive') return;
-        try { JSON.parse(s.Units || '[]').forEach(u => units.add(u)); } catch{}
-      });
-      return units;
-    };
-
-    // busySlotTimes(bn) = slot-times where BN is occupied on any responsible unit
-    //   (own breaks + claimed staff bookings at that slot on a responsible unit).
-    // This is "not truly free" — used for both the free-slots count and the T+1 check.
-    const bnResponsibleUnits = {};
-    const bnBreakSets = {};
-    const bnBusySlotTimes = {};  // bn -> Set of slot-times
-    const bnClaimedByUnitSlot = {}; // bn -> Set of "unit|slot" for claimed lookups
-    for(const bn of otherBNs){
-      const bnName2 = bn.BreakNurseName;
-      const respUnits = responsibleUnitsFor(bn);
-      bnResponsibleUnits[bnName2] = respUnits;
-
-      // SlotTime canon = 4-digit padded; Sheets may return unpadded.
-      // bnBreakSets is used downstream for T+1 conflict checks and busy
-      // computation — membership checks compare against padded slot keys,
-      // so the values stored here must be padded.
-      const breaks = allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName2)
-        .map(b => String(b.SlotTime).padStart(4,'0'));
-      bnBreakSets[bnName2] = new Set(breaks);
-
-      const busy = new Set(breaks);  // own breaks count as busy
-      const claimedSet = new Set();
-      allBookings.forEach(b => {
-        if(isBNBreak(b)) return;
-        if(!respUnits.has(b.Unit)) return;
-        busy.add(b.SlotTime);
-        claimedSet.add(`${b.Unit}|${b.SlotTime}`);
-      });
-      bnBusySlotTimes[bnName2] = busy;
-      bnClaimedByUnitSlot[bnName2] = claimedSet;
-    }
-
-    // Truly-free slot-times for each BN (future slots only, excluding busy times)
-    const bnFreeSlots = {};  // bn -> Array of slot-times
-    for(const bn of otherBNs){
-      const bnName2 = bn.BreakNurseName;
-      const busy = bnBusySlotTimes[bnName2];
-      bnFreeSlots[bnName2] = allShiftSlots.filter(s =>
-        !busy.has(s) && sortKey(s, shift) > nowKey(shift)
-      );
-    }
+    // Build 151 (2026-05-29): Phase C-1 — the inline pre-compute (responsible
+    // units, break sets, busy/claimed maps, free slots) and the inline
+    // passesT1BufferCheck are now delegated to the Phase B helpers
+    // buildAbsorptionContext() and passesT1Buffer(), which carry byte-identical
+    // logic. This is a behaviour-preserving dedup (verified by before/after
+    // snapshot diff on the d-wing Deepi→Leo fixture), so the absorption shared
+    // with the transfer path stays in one place.
+    //
+    // IMPORTANT: the greedy commit/rollback loop below MUTATES the context's
+    // bnFreeSlots / bnBusySlotTimes / bnClaimedByUnitSlot in place (so a slot
+    // claimed by one subrun isn't reused by a later one, and a failed run is
+    // rolled back). Those sets/arrays now live on `actx`, so all mutations go
+    // through actx.* — same objects, mutated in place, exactly as before.
+    // bnCanTakeRun() is intentionally NOT used here: this loop greedily finds
+    // the LONGEST absorbable subrun rather than testing a fixed run, so the
+    // length scan stays inline and only its single-slot T+1 gate routes through
+    // passesT1Buffer(). (bnCanTakeRun fits Phase D's fixed-run check.)
+    const actx = buildAbsorptionContext(otherBNs, ctx);
+    const { allShiftSlots, shiftLastSlot, bnResponsibleUnits, bnBreakSets,
+            bnBusySlotTimes, bnClaimedByUnitSlot, bnFreeSlots } = actx;
 
     // Sort BNs by free-slot-times count descending (most free first).
     // This matches "most coverage capacity" — BN with the most slack to absorb.
+    // (In-place sort of the caller's otherBNs array, as before — selection order
+    // depends on it.)
     otherBNs.sort((a,b) => (bnFreeSlots[b.BreakNurseName]?.length||0) - (bnFreeSlots[a.BreakNurseName]?.length||0));
 
     // Group uncovered by unit
@@ -8961,21 +8931,10 @@ function planAbsorption(uncovered, otherBNs, ctx){
     const absorbed = []; // {booking, bnName}
     const flaggedNurses = []; // bookings that couldn't be covered
 
-    // Check if a slot+1 passes the single-slot buffer rule for a given BN.
-    // T+1 must be: shift's-last-slot (so no T+1 exists), BN's own break,
-    // or unclaimed on BN's responsible units.
-    const passesT1BufferCheck = (bnName2, slotTime) => {
-      if(slotTime === shiftLastSlot) return true;
-      const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
-      if(bnBreakSets[bnName2].has(nextSlot)) return true;
-      // Check if any responsible unit has a claimed booking at nextSlot
-      const respUnits = bnResponsibleUnits[bnName2];
-      const claimed = bnClaimedByUnitSlot[bnName2];
-      for(const u of respUnits){
-        if(claimed.has(`${u}|${nextSlot}`)) return false;
-      }
-      return true;
-    };
+    // Single-slot buffer rule, via the Phase B helper. T+1 must be: shift's-last
+    // slot (so no T+1 exists), BN's own break, or unclaimed on BN's responsible
+    // units. (Local alias keeps the call sites below unchanged.)
+    const passesT1BufferCheck = (bnName2, slotTime) => passesT1Buffer(bnName2, slotTime, actx);
 
     for(const [unit, bookings] of Object.entries(byUnit)){
       bookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
