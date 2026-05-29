@@ -1728,7 +1728,17 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-148';
+const APP_VERSION = '2026-05-29-149';
+// 149: Clear All (open thread #2) made trustworthy. clearSimData previously ran three
+//      clearSheet awaits in one try (a single failure aborted the rest) then showed a
+//      success toast + reload UNCONDITIONALLY — so it reported success while leaving every
+//      row (confirmed 2026-05-29: button left all rows, manual Sheets clear needed). Now
+//      clears each sheet independently, read-back-verifies row counts, and only wipes
+//      local + reloads when all three verify empty; on failure it reports exactly what
+//      remained and changes nothing locally. Also completed the local-key wipe (added
+//      unit3CSchedule/unitStatuses/unitSchedules/unitSubLog, the build-105+ keys it
+//      missed). Backend clearSheet unchanged (it is correct); if the read-back ever
+//      reports remaining rows, that isolates a genuine backend issue (→ batchDelete 150).
 // 148: Open thread #1 — normalized all 9 bare `!s.IsSupplemental` checks to
 //      `String(s.IsSupplemental) !== '1'`. The permanent-removal flow
 //      (~line 10516) writes IsSupplemental:0 when converting an absorber's
@@ -10875,56 +10885,76 @@ async function dedupAssignments(){
 
 async function clearSimData(){
   if(!await customConfirm('Clear ALL data (assignments, bookings, state)? This cannot be undone.','Clear All','Cancel')) return;
-  // Clear localStorage state keys. For syncedLS-backed keys (bnWingHistory_*,
-  // bnRotation_*, bnDefault_*, bnStart_*), server-side BNState is cleared
-  // below via clearSheet(LISTS.state), so dropping local mirrors here is
-  // sufficient — the warm-on-next-suggest will find BNState empty.
-  Object.keys(localStorage).filter(k =>
-    k.startsWith('bnWingHistory_') ||
-    k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
-    k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
-    k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
-    k.startsWith('bnBreakCancelled_') ||
-    k === 'bnImportedEntries' || k === 'bnImportedNames' || k === 'unit3CDefault' ||
-    k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue'
-  ).forEach(k => localStorage.removeItem(k));
+
+  // Local-mirror wipe. Synced keys (bnRotation_*, bnWingHistory_*, unit*, imported*)
+  // re-hydrate from BNState on next load, so dropping local copies is safe ONCE the
+  // server side is confirmed cleared. Per-device prefs (bnApiKey, bnPreferredNames,
+  // bnAssignmentFilter) are intentionally preserved. Build 149 (2026-05-29): added
+  // unit3CSchedule, unitStatuses, unitSchedules, unitSubLog — the build-105+ unit-status
+  // keys the old list missed, which would otherwise survive the wipe and desync from the
+  // cleared BNState.
+  const wipeLocalMirrors = () => {
+    Object.keys(localStorage).filter(k =>
+      k.startsWith('bnWingHistory_') ||
+      k.startsWith('bnRotation_') || k.startsWith('bnDefault_') ||
+      k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
+      k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
+      k.startsWith('bnBreakCancelled_') ||
+      k === 'bnImportedEntries' || k === 'bnImportedNames' ||
+      k === 'unit3CDefault' || k === 'unit3CSchedule' ||
+      k === 'unitStatuses' || k === 'unitSchedules' || k === 'unitSubLog' ||
+      k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue'
+    ).forEach(k => localStorage.removeItem(k));
+  };
+
   if(SIM_MODE){
+    wipeLocalMirrors();
     DB.BNSchedule = []; DB.BNBookings = []; DB.BNState = [];
     localStorage.removeItem('sim_BNSchedule');
     localStorage.removeItem('sim_BNBookings');
     localStorage.removeItem('sim_BNState');
     localStorage.removeItem('sim_idCounter');
     _simIdCounter = 1000;
-  } else {
-    // Clear all rows from each sheet using server-side clearSheet (removes ALL rows including no-Id rows)
-    try {
-      await gasCall({action:'clearSheet', sheet:LISTS.schedule});
-      await gasCall({action:'clearSheet', sheet:LISTS.bookings});
-      await gasCall({action:'clearSheet', sheet:LISTS.state});
-      // Re-write defaults after clearing state sheet
-      await syncedLS.set('unit3CDefault', 'closed');
-      show3CDefaultToggle();
-    } catch(e){ toast('Some sheets could not be cleared: ' + e.message, true); }
+    importEntries = []; importedNames = [];
+    toast('All data cleared. Reloading…');
+    setTimeout(() => location.reload(), 700);
+    return;
   }
-  // Clear in-memory assignment display immediately
-  const assignListEl = document.getElementById('assignList');
-  if(assignListEl) assignListEl.innerHTML = '<div class="empty">No assignments found.</div>';
-  clearSchedCache();
-  importEntries = [];
-  importedNames = [];
-  // Clear import suggestions
-  localStorage.removeItem('bnLastImportBatch');
-  _currentImportEntries = [];
-  window._lastEntriesToProcess = [];
-  const restoreBanner = document.getElementById('importRestoreBanner');
-  if(restoreBanner) restoreBanner.style.display = 'none';
-  const importResults = document.getElementById('importResults');
-  if(importResults) importResults.style.display = 'none';
-  populateBNDropdown();
-  renderImportedEntriesSummary();
-  renderImportedNamesList();
+
+  // ── Real backend ──
+  // Build 149 (2026-05-29): the old flow ran three sequential awaits inside ONE try, so a
+  // single clearSheet failure aborted the remaining sheets — and the success toast +
+  // reload below ran UNCONDITIONALLY, so the button reported "All data cleared" while
+  // leaving every row in place (observed 2026-05-29: button left all rows; a manual Sheets
+  // clear was needed). The backend clearSheet is itself correct (deleteRows(2,last-1)), so
+  // the failure was either transport/runtime or the masking itself. New flow: clear each
+  // sheet independently (no early abort), capture per-sheet errors, then PROVE the result
+  // with a read-back row count. Local wipe + reload happen ONLY when all three verify
+  // empty. On any failure we report exactly what remained and change NOTHING locally, so
+  // the backend and this device stay consistent and the action is retryable.
+  const sheets = [['assignments', LISTS.schedule], ['bookings', LISTS.bookings], ['state', LISTS.state]];
+  const problems = [];
+  for(const [label, sheet] of sheets){
+    try { await gasCall({ action:'clearSheet', sheet }); }
+    catch(e){ problems.push(label + ': clear failed (' + e.message + ')'); }
+  }
+  // Read-back verification — prove the clear rather than trusting the response.
+  for(const [label, sheet] of sheets){
+    let n;
+    try { n = (await spGet(sheet)).length; }
+    catch(e){ problems.push(label + ': could not verify (' + e.message + ')'); continue; }
+    if(n > 0) problems.push(label + ': ' + n + ' row' + (n!==1?'s':'') + ' still present');
+  }
+  if(problems.length){
+    toast('Clear All did NOT complete — ' + problems.join('; ') + '. Nothing changed locally; retry or clear in Sheets.', true);
+    return; // no reload, no local wipe — keep backend + device consistent and retryable
+  }
+
+  // All three sheets verified empty. Wipe local mirrors, re-seed the 3C default, reload.
+  wipeLocalMirrors();
+  try { await syncedLS.set('unit3CDefault', 'closed'); } catch(e){ /* non-fatal — reload re-warms from BNState */ }
+  show3CDefaultToggle();
   toast('All data cleared. Reloading…');
-  // Reload guarantees no stale BN/admin UI state survives the wipe
   setTimeout(() => location.reload(), 700);
 }
 
