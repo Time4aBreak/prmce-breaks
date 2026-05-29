@@ -1728,10 +1728,22 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-26-146';
+const APP_VERSION = '2026-05-29-148';
+// 148: Open thread #1 — normalized all 9 bare `!s.IsSupplemental` checks to
+//      `String(s.IsSupplemental) !== '1'`. The permanent-removal flow
+//      (~line 10516) writes IsSupplemental:0 when converting an absorber's
+//      supplemental into a permanent main row, so a "0"-string main row DOES
+//      occur in production. Bare-truthiness `!"0"` is false, which
+//      misclassified that row as supplemental and wrongly excluded it from
+//      active-assignment lookups + the absorber-candidate list. Also aligned
+//      confirmMarkUnavailable's preview candidate filter to the executor in
+//      processBNUnavailability (added the supp filter, switched
+//      getWing→getUnitWing) so the preview can no longer promise an absorber
+//      that the executor then excludes and cancels.
+// 147: Phase B — reusable eligibility primitives (buildAbsorptionContext,
+//      passesT1Buffer, bnCanTakeRun) added; unused until Phase C wires them.
 // 146: Phase A — extracted planAbsorption() pure helper (logic verified
-//      byte-identical to prior inline planner). 145: overlay→re-render gap
-//      fix in submitClaims (both untested; testing continues on 144).
+//      byte-identical + live spot-check). 145: overlay→re-render gap fix.
 // ─────────────────────────────────────────────────────
 
 // ── Google Apps Script Web App URL ────────────────────
@@ -3943,7 +3955,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
   const activeBNs = allScheds.filter(s =>
     s.BreakNurseName !== outgoingBN &&
     s.Status !== 'inactive' &&
-    !s.IsSupplemental
+    String(s.IsSupplemental) !== '1'   // build 148: was `!s.IsSupplemental` (misread "0" as supp)
   );
   // Pre-compute each candidate's Units, break times, and busy slot times
   // for conflict detection (used as informational only — not blocking,
@@ -5580,7 +5592,7 @@ async function recalcFairnessForShift(date, shift, options={}){
     `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
   const active = all.filter(s =>
     s.Status !== 'inactive' &&
-    !s.IsSupplemental &&
+    String(s.IsSupplemental) !== '1' &&   // build 148: was `!s.IsSupplemental`
     s.BreakNurseName !== options.excluding
   );
   if(!active.length){
@@ -8179,13 +8191,24 @@ This is a future shift. Coverage on ${firstName(bnName)}'s units will be reduced
     b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift)
   );
 
-  // Same-wing BNs available to absorb
+  // Same-wing BNs available to absorb.
+  // MUST mirror the executor's candidate filter in processBNUnavailability
+  // (active, non-self, NON-supplemental, same-wing). Build 148 (2026-05-29):
+  // previously this preview omitted the supplemental filter and used getWing,
+  // while the executor filters `!s.IsSupplemental` and uses getUnitWing. A BN
+  // whose ONLY same-wing presence was a supplemental row was counted here but
+  // excluded by the executor → the preview promised an absorber the executor
+  // then cancelled. Added `String(s.IsSupplemental) !== '1'` and switched to
+  // getUnitWing (behaviorally identical to getWing for these inputs — both map
+  // WING_A + 3C/4C/C_PAIR → 'A', WING_D → 'D' — so the swap is purely for one
+  // consistent wing fn across the preview and executor).
   const sameWingBNs = allScheds.filter(s =>
     s.BreakNurseName !== bnName &&
     s.Status !== 'inactive' &&
+    String(s.IsSupplemental) !== '1' &&
     (() => { try {
       const u = JSON.parse(s.Units||'[]');
-      return u.some(x => bnUnits.some(y => getWing(x)!=='?' && getWing(x)===getWing(y)));
+      return u.some(x => bnUnits.some(y => getUnitWing(x)!=='?' && getUnitWing(x)===getUnitWing(y)));
     } catch { return false; } })()
   );
   const sameWingNames = [...new Set(sameWingBNs.map(s => firstName(s.BreakNurseName)))];
@@ -8564,8 +8587,8 @@ async function toggleSelfAvailability(){
 
   const scheds = await spGet(LISTS.schedule,
     `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`);
-  const inactive = scheds.find(s => s.Status === 'inactive' && !s.IsSupplemental);
-  const active   = scheds.find(s => s.Status !== 'inactive' && !s.IsSupplemental);
+  const inactive = scheds.find(s => s.Status === 'inactive' && String(s.IsSupplemental) !== '1');
+  const active   = scheds.find(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1');
 
   // Final button state — defaults to current state (inactive=true => "Mark
   // available" label, inactive=false => "Mark unavailable" label). On
@@ -8732,6 +8755,105 @@ function markCardUnavailableInDOM(bnName){
 
 // showReassignModal + handleReassignConfirm removed — modal-based reassign flow
 // replaced by processBNUnavailability + customConfirm (inline redistribution algorithm)
+// ═══════════════════════════════════════════════════════
+// Build 147 (2026-05-28): Phase B — reusable absorption-eligibility primitives.
+// Extracted from planAbsorption's inline logic (verbatim) so the Mark
+// Unavailable choice modal (Phase C) and Transfer modal (Phase D) compute
+// IDENTICAL eligibility. NOTE: planAbsorption still carries its own inline
+// copy for now — Phase C will dedup it to call buildAbsorptionContext +
+// passesT1Buffer and re-verify, deferred tonight to keep the live-verified
+// planAbsorption untouched. These helpers are pure (no side effects).
+// ═══════════════════════════════════════════════════════
+
+// buildAbsorptionContext: precompute per-candidate occupancy for eligibility.
+//   candidates — active same-wing schedule records (each with BreakNurseName, Units)
+//   ctx        — { allBookings, allScheds, shift }
+// Returns { allShiftSlots, shiftLastSlot, bnResponsibleUnits, bnBreakSets,
+//           bnBusySlotTimes, bnClaimedByUnitSlot, bnFreeSlots, shift }
+function buildAbsorptionContext(candidates, ctx){
+  const { allBookings, allScheds, shift } = ctx;
+  const allShiftSlots = generateSlots(shift);
+  const shiftLastSlot = allShiftSlots[allShiftSlots.length - 1];
+
+  // responsibleUnits(bn) = main units + active supplemental units they hold
+  const responsibleUnitsFor = (bnRecord) => {
+    const bnName2 = bnRecord.BreakNurseName;
+    const units = new Set();
+    try { JSON.parse(bnRecord.Units || '[]').forEach(u => units.add(u)); } catch{}
+    allScheds.forEach(s => {
+      if(s.BreakNurseName !== bnName2) return;
+      if(s.IsSupplemental != 1) return;
+      if(s.Status === 'inactive') return;
+      try { JSON.parse(s.Units || '[]').forEach(u => units.add(u)); } catch{}
+    });
+    return units;
+  };
+
+  const bnResponsibleUnits = {};
+  const bnBreakSets = {};
+  const bnBusySlotTimes = {};
+  const bnClaimedByUnitSlot = {};
+  for(const bn of candidates){
+    const bnName2 = bn.BreakNurseName;
+    const respUnits = responsibleUnitsFor(bn);
+    bnResponsibleUnits[bnName2] = respUnits;
+    const breaks = allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName2)
+      .map(b => String(b.SlotTime).padStart(4,'0'));
+    bnBreakSets[bnName2] = new Set(breaks);
+    const busy = new Set(breaks);  // own breaks count as busy
+    const claimedSet = new Set();
+    allBookings.forEach(b => {
+      if(isBNBreak(b)) return;
+      if(!respUnits.has(b.Unit)) return;
+      busy.add(b.SlotTime);
+      claimedSet.add(`${b.Unit}|${b.SlotTime}`);
+    });
+    bnBusySlotTimes[bnName2] = busy;
+    bnClaimedByUnitSlot[bnName2] = claimedSet;
+  }
+
+  const bnFreeSlots = {};
+  for(const bn of candidates){
+    const bnName2 = bn.BreakNurseName;
+    const busy = bnBusySlotTimes[bnName2];
+    bnFreeSlots[bnName2] = allShiftSlots.filter(s =>
+      !busy.has(s) && sortKey(s, shift) > nowKey(shift)
+    );
+  }
+
+  return { allShiftSlots, shiftLastSlot, bnResponsibleUnits, bnBreakSets,
+           bnBusySlotTimes, bnClaimedByUnitSlot, bnFreeSlots, shift };
+}
+
+// Single-slot T+1 buffer rule: the slot after slotTime must be the shift's
+// last slot, the BN's own break, or unclaimed on the BN's responsible units.
+// Mirrors planAbsorption's passesT1BufferCheck. actx = buildAbsorptionContext output.
+function passesT1Buffer(bnName, slotTime, actx){
+  if(slotTime === actx.shiftLastSlot) return true;
+  const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
+  if(actx.bnBreakSets[bnName] && actx.bnBreakSets[bnName].has(nextSlot)) return true;
+  const respUnits = actx.bnResponsibleUnits[bnName] || new Set();
+  const claimed = actx.bnClaimedByUnitSlot[bnName] || new Set();
+  for(const u of respUnits){
+    if(claimed.has(`${u}|${nextSlot}`)) return false;
+  }
+  return true;
+}
+
+// Can bnName absorb this consecutive run of bookings? Must be free at every
+// slot in the run; single-slot runs must also pass the T+1 buffer (multi-slot
+// runs carry their own continuity). Mirrors planAbsorption's per-subrun rule.
+// `run` is an array of booking objects sorted consecutively. Uses raw SlotTime
+// for the free-set check to match planAbsorption exactly.
+function bnCanTakeRun(bnName, run, actx){
+  const free = new Set(actx.bnFreeSlots[bnName] || []);
+  for(const b of run){
+    if(!free.has(b.SlotTime)) return false;
+  }
+  if(run.length === 1 && !passesT1Buffer(bnName, run[0].SlotTime, actx)) return false;
+  return true;
+}
+
 // Build 145 (2026-05-27): Pure absorption planner — extracted verbatim from
 // processBNUnavailability (Phase A of transfer/absorption eligibility
 // unification). Computes WHICH candidate BN absorbs WHICH uncovered booking,
@@ -9066,7 +9188,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     const otherBNs = allScheds.filter(s =>
       s.BreakNurseName !== bnName &&
       s.Status !== 'inactive' &&
-      !s.IsSupplemental
+      String(s.IsSupplemental) !== '1'   // build 148: canonical supp check; confirmMarkUnavailable's preview now mirrors this exactly
     ).filter(s => {
       let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
       return units.some(u => bnAWings.includes(getUnitWing(u)));
@@ -10242,7 +10364,7 @@ async function loadAssignments(){
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
-                ${!isInactive && !s.IsSupplemental && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
                      now lives in the Break Nurses roster card (BN quit / fired scenario). Row-level
@@ -10352,7 +10474,7 @@ async function delAssign(id){
     const sameWingBNs = allScheds.filter(s2 =>
       String(s2.Id) !== String(id) &&
       s2.Status !== 'inactive' &&
-      !s2.IsSupplemental
+      String(s2.IsSupplemental) !== '1'   // build 148: was `!s2.IsSupplemental`
     ).filter(s2 => {
       let u2 = []; try { u2 = JSON.parse(s2.Units||'[]'); } catch{}
       return u2.some(u => bnAWings.includes(getUnitWing(u)));
@@ -17035,7 +17157,7 @@ async function populateNurseDropdown(){
       const scheds = await spGet(LISTS.schedule,
         `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
       fromScheds = [...new Set(scheds
-        .filter(s => s.Status !== 'inactive' && !s.IsSupplemental)
+        .filter(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1')
         .map(s => s.BreakNurseName)
         .filter(Boolean))];
     } catch(e){ /* silent — fall back to imports only */ }
@@ -17380,7 +17502,7 @@ async function _loadExistingAssignmentFor(val){
   try {
     const scheds = await spGet(LISTS.schedule,
       `BreakNurseName eq '${esc(val)}' and ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-    const active = scheds.filter(s => s.Status !== 'inactive' && !s.IsSupplemental);
+    const active = scheds.filter(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1');
 
     if(active.length){
       const allUnits = [...new Set(active.flatMap(s => {
