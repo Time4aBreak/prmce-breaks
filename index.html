@@ -1728,7 +1728,14 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-149';
+const APP_VERSION = '2026-05-29-150';
+// 150: Clear All confirm dialog relabeled to name what it wipes — "assignments,
+//      bookings, the nurse roster, and all settings" — since the now-working
+//      clearSheet (149 + backend clearContent fix) genuinely clears BNState, which
+//      backs the roster (bnImportedNames) and all per-BN config. Re-importing a
+//      schedule rebuilds the roster (addNamesToRoster) and preferred names persist
+//      (hardcoded defaults + on-device bnPreferredNames), so a full wipe is the
+//      intended, low-friction reset. Confirm text only; no behavior change.
 // 149: Clear All (open thread #2) made trustworthy. clearSimData previously ran three
 //      clearSheet awaits in one try (a single failure aborted the rest) then showed a
 //      success toast + reload UNCONDITIONALLY — so it reported success while leaving every
@@ -10884,7 +10891,7 @@ async function dedupAssignments(){
 }
 
 async function clearSimData(){
-  if(!await customConfirm('Clear ALL data (assignments, bookings, state)? This cannot be undone.','Clear All','Cancel')) return;
+  if(!await customConfirm('Clear ALL data — assignments, bookings, the nurse roster, and all settings? This cannot be undone. Re-importing a schedule rebuilds the roster.','Clear All','Cancel')) return;
 
   // Local-mirror wipe. Synced keys (bnRotation_*, bnWingHistory_*, unit*, imported*)
   // re-hydrate from BNState on next load, so dropping local copies is safe ONCE the
