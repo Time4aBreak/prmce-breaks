@@ -1728,7 +1728,13 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-151';
+const APP_VERSION = '2026-05-29-152';
+// 152: Phase C-2 step 1 — pure helpers for the editable choice modal (no UI yet):
+//      CHOICE_CANCEL sentinel, groupBookingsIntoRuns (same grouping as
+//      planAbsorption), cloneAbsorptionContext, applyPendingAssignment, and
+//      recomputeRunEligibility (the live-recompute engine — per-run eligible BNs
+//      accounting for all OTHER runs' pending assignments). Verified by console
+//      harness against planAbsorption as oracle. Foundation for the run-row modal.
 // 151: Phase C-1 — planAbsorption deduped onto the Phase B helpers
 //      (buildAbsorptionContext + passesT1Buffer); inline pre-compute and
 //      passesT1BufferCheck removed, ~49 lines now shared. Behaviour-preserving
@@ -8877,6 +8883,107 @@ function bnCanTakeRun(bnName, run, actx){
   }
   if(run.length === 1 && !passesT1Buffer(bnName, run[0].SlotTime, actx)) return false;
   return true;
+}
+
+// ── Phase C-2 step 1 (build 152, 2026-05-29): pure helpers for the editable
+// "choice" Mark-Unavailable modal. No UI here — these are the eligibility
+// engine the modal's live recompute will call, kept pure so they verify by
+// console harness against planAbsorption as the oracle. ──
+
+// Sentinel value for the "Cancel — leave uncovered" dropdown option. A run
+// assigned to this returns in flagged[] (same downstream handling as a run no
+// BN could take).
+const CHOICE_CANCEL = '__CANCEL__';
+
+// Group a flat booking list into runs the SAME way planAbsorption does: by
+// unit, then by nurse, then split into consecutive SLOT_IV-interval runs.
+// Each run is an array of bookings (all same unit+nurse, consecutive slots).
+// Returns runs in a stable order (unit insertion order, then nurse insertion
+// order, then chronological within nurse) so the modal's row order is
+// deterministic and matches the planner's traversal.
+function groupBookingsIntoRuns(bookings, shift){
+  const byUnit = {};
+  bookings.forEach(b => { (byUnit[b.Unit] ||= []).push(b); });
+  const runs = [];
+  for(const [unit, unitBookings] of Object.entries(byUnit)){
+    unitBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
+    const byNurse = {};
+    unitBookings.forEach(b => { (byNurse[b.NurseName] ||= []).push(b); });
+    for(const [nurseName, nurseBookings] of Object.entries(byNurse)){
+      nurseBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
+      let cur = [nurseBookings[0]];
+      for(let i = 1; i < nurseBookings.length; i++){
+        const prev = sortKey(nurseBookings[i-1].SlotTime, shift);
+        const curr = sortKey(nurseBookings[i].SlotTime, shift);
+        if(curr - prev === SLOT_IV){ cur.push(nurseBookings[i]); }
+        else { runs.push(cur); cur = [nurseBookings[i]]; }
+      }
+      runs.push(cur);
+    }
+  }
+  return runs;
+}
+
+// Shallow-clone an absorption context so pending (uncommitted) modal
+// assignments can be applied without mutating the caller's context. Only the
+// mutable per-BN collections are cloned; the immutable scalars/sets that are
+// never mutated during recompute are shared by reference.
+function cloneAbsorptionContext(actx){
+  const clone = {
+    allShiftSlots: actx.allShiftSlots,
+    shiftLastSlot: actx.shiftLastSlot,
+    shift: actx.shift,
+    bnResponsibleUnits: actx.bnResponsibleUnits, // never mutated during recompute
+    bnBreakSets: actx.bnBreakSets,               // never mutated during recompute
+    bnBusySlotTimes: {},
+    bnClaimedByUnitSlot: {},
+    bnFreeSlots: {}
+  };
+  for(const k in actx.bnBusySlotTimes)   clone.bnBusySlotTimes[k]   = new Set(actx.bnBusySlotTimes[k]);
+  for(const k in actx.bnClaimedByUnitSlot) clone.bnClaimedByUnitSlot[k] = new Set(actx.bnClaimedByUnitSlot[k]);
+  for(const k in actx.bnFreeSlots)        clone.bnFreeSlots[k]        = [...actx.bnFreeSlots[k]];
+  return clone;
+}
+
+// Apply one pending assignment (a run → a BN) to a context IN PLACE, exactly
+// the way planAbsorption's commit loop mutates state: the BN's slots become
+// busy/claimed and leave their free list. Used to model the effect of other
+// runs' pending assignments when evaluating a given run's options.
+function applyPendingAssignment(actx, run, bnName){
+  if(!bnName || bnName === CHOICE_CANCEL) return; // cancelled runs consume nothing
+  for(const b of run){
+    if(actx.bnFreeSlots[bnName])      actx.bnFreeSlots[bnName] = actx.bnFreeSlots[bnName].filter(s => s !== b.SlotTime);
+    if(actx.bnBusySlotTimes[bnName])  actx.bnBusySlotTimes[bnName].add(b.SlotTime);
+    if(actx.bnClaimedByUnitSlot[bnName]) actx.bnClaimedByUnitSlot[bnName].add(`${b.Unit}|${b.SlotTime}`);
+  }
+}
+
+// THE LIVE-RECOMPUTE ENGINE. Given the base (sheet-derived) context, all runs,
+// the candidate BNs, and the CURRENT pending assignments (runIndex -> bnName |
+// CHOICE_CANCEL | null), return for EACH run the list of BN names eligible to
+// take that run RIGHT NOW — accounting for every OTHER run's pending assignment
+// (but not the run's own, so a run's current assignee isn't blocked by itself).
+//
+// eligibleByRun[i] = array of BN names that pass bnCanTakeRun for run i against
+// a context with all pending assignments EXCEPT run i's applied. CHOICE_CANCEL
+// is always appended by the UI layer, not here (this returns only real BNs).
+//
+// Verification oracle: with assignments all-null, eligibleByRun must let the
+// planAbsorption greedy result be reproduced (each absorbed run's assignee
+// appears in that run's eligible list; each flagged run's list is empty).
+function recomputeRunEligibility(baseCtx, runs, candidates, assignments){
+  const candNames = candidates.map(c => c.BreakNurseName);
+  const eligibleByRun = [];
+  for(let i = 0; i < runs.length; i++){
+    // Build a context with EVERY OTHER run's pending assignment applied.
+    const ctxForRun = cloneAbsorptionContext(baseCtx);
+    for(let j = 0; j < runs.length; j++){
+      if(j === i) continue;
+      applyPendingAssignment(ctxForRun, runs[j], assignments[j]);
+    }
+    eligibleByRun[i] = candNames.filter(bn => bnCanTakeRun(bn, runs[i], ctxForRun));
+  }
+  return eligibleByRun;
 }
 
 // Build 145 (2026-05-27): Pure absorption planner — extracted verbatim from
