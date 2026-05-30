@@ -1751,7 +1751,20 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-155';
+const APP_VERSION = '2026-05-29-156';
+// 156: Phase C-2 step 3 — WIRED the editable choice modal into the live flow.
+//      confirmMarkUnavailable's current-shift branch now computes uncovered +
+//      same-wing candidates (executor-matching filters) and returns
+//      promptAbsorptionChoice's {action,absorbed,flagged} instead of the old
+//      text modal; future-shift branch unchanged (simple confirm). Both wrappers
+//      (markBNUnavailable, toggleSelfAvailability) pass that plan to
+//      processBNUnavailability as a new prebuiltPlan arg; the executor commits
+//      the passed plan (skipping its own planning + cancel-all/no-absorber
+//      branches). With no prebuiltPlan (roster Remove cascade) the executor now
+//      plans via the no-split planWholeRunAbsorptionResult (decision B: no-split
+//      everywhere). planAbsorption (splitting) is now called by NOTHING — kept
+//      defined for the Phase D transfer decision. NOT yet behavior-verified —
+//      needs current-shift bookings to test all three paths.
 // 155: Choice modal — multi-slot run label now joins discrete slot times with
 //      " + " (e.g. "10:15 AM + 10:35 AM") instead of a dash range. A dash read
 //      as a single 10:15→10:35 break (a duration), but a run is separate breaks;
@@ -8260,24 +8273,27 @@ This is a future shift. Coverage on ${firstName(bnName)}'s units will be reduced
     return proceed ? 'give' : 'back';
   }
 
-  // ── Current shift: existing 3-button modal continues below ──
-  // Staff bookings on this BN's units that haven't yet passed
-  const affectedBookings = allBookings.filter(b =>
+  // ── Current shift: the editable CHOICE modal (Phase C-2 step 3) ──
+  // Replaces the former text-only 3-button modal. Computes the SAME uncovered
+  // set + same-wing candidates the executor uses, then hands them to
+  // promptAbsorptionChoice so the user sees and can adjust each run's coverage
+  // before anything is committed. Returns { action, absorbed, flagged }; the
+  // wrappers pass that plan to processBNUnavailability as prebuiltPlan. (Showing
+  // the modal HERE — before the executor runs — preserves the confirm-before-
+  // mutation guarantee: the executor's inactive-flip and break-deletes only run
+  // after a 'confirm'.)
+  //
+  // uncovered MUST match the executor's filter exactly (isStaffBooking + on
+  // BN's units + NOT already confirmed + this-shift-or-later + future slot) so
+  // the plan corresponds to what the executor will commit.
+  const uncovered = allBookings.filter(b =>
     isStaffBooking(b) && bnUnits.includes(b.Unit) &&
+    !isConfirmed(b) &&
     b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift)
   );
 
-  // Same-wing BNs available to absorb.
-  // MUST mirror the executor's candidate filter in processBNUnavailability
-  // (active, non-self, NON-supplemental, same-wing). Build 148 (2026-05-29):
-  // previously this preview omitted the supplemental filter and used getWing,
-  // while the executor filters `!s.IsSupplemental` and uses getUnitWing. A BN
-  // whose ONLY same-wing presence was a supplemental row was counted here but
-  // excluded by the executor → the preview promised an absorber the executor
-  // then cancelled. Added `String(s.IsSupplemental) !== '1'` and switched to
-  // getUnitWing (behaviorally identical to getWing for these inputs — both map
-  // WING_A + 3C/4C/C_PAIR → 'A', WING_D → 'D' — so the swap is purely for one
-  // consistent wing fn across the preview and executor).
+  // Same-wing, active, non-supplemental candidates — mirrors the executor's
+  // otherBNs filter (build 148 aligned the supp check + getUnitWing).
   const sameWingBNs = allScheds.filter(s =>
     s.BreakNurseName !== bnName &&
     s.Status !== 'inactive' &&
@@ -8287,72 +8303,15 @@ This is a future shift. Coverage on ${firstName(bnName)}'s units will be reduced
       return u.some(x => bnUnits.some(y => getUnitWing(x)!=='?' && getUnitWing(x)===getUnitWing(y)));
     } catch { return false; } })()
   );
-  const sameWingNames = [...new Set(sameWingBNs.map(s => firstName(s.BreakNurseName)))];
 
-  // Build modal message
-  let msg = `Mark ${firstName(bnName)} unavailable for ${shift} on ${date}?
-
-Covering: ${bnUnits.join(', ')}`;
-  if(affectedBookings.length){
-    const nurseBookingMap = {};
-    affectedBookings.forEach(b => {
-      const n = b.NurseName.split('(')[0].trim();
-      if(!nurseBookingMap[n]) nurseBookingMap[n] = [];
-      nurseBookingMap[n].push(fmt12(b.SlotTime));
-    });
-    const nurseLines = Object.entries(nurseBookingMap)
-      .map(([n, times]) => `• ${n} — ${times.join(', ')}`).join('\n');
-    msg += `
-
-⚠️ ${affectedBookings.length} staff booking${affectedBookings.length!==1?'s':''} will be affected:
-${nurseLines}`;
-  }
-  if(sameWingNames.length){
-    msg += `
-
-↺ ${sameWingNames.join(', ')} ${sameWingNames.length===1?'is':'are'} on the same wing and can absorb eligible slots.`;
-  } else {
-    msg += `
-
-⚠️ No other BNs are available on the same wing — all staff bookings will be cancelled.`;
+  // Nothing to cover -> no modal; signal a confirmed empty plan so the executor
+  // just flips the BN inactive (and clears their own breaks) with no supps.
+  if(!uncovered.length){
+    return { action: 'confirm', absorbed: [], flagged: [] };
   }
 
-  // Three-way or two-way modal depending on whether redistribution is possible
-  if(sameWingNames.length){
-    return new Promise(resolve => {
-      const modal = document.getElementById('customConfirmModal');
-      document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
-      const okBtn = document.getElementById('customConfirmOk');
-      const cancelBtn = document.getElementById('customConfirmCancel');
-      okBtn.textContent     = `Give eligible bookings to ${sameWingNames.join('/')}`;
-      cancelBtn.textContent = `Cancel all affected bookings`;
-      const goBackBtn = document.createElement('button');
-      goBackBtn.className = 'btn btn-ghost'; goBackBtn.style.width = '100%';
-      goBackBtn.textContent = 'Go back';
-      const btnWrap = cancelBtn.parentNode;
-      // Defensive: strip any leftover dynamic buttons from prior modal calls
-      // whose cleanup may have been skipped. Keeps only the static OK and Cancel.
-      [...btnWrap.children].forEach(child => {
-        if(child !== okBtn && child !== cancelBtn) child.remove();
-      });
-      btnWrap.appendChild(goBackBtn);
-      modal.style.display = 'flex';
-      const cleanup = (result) => {
-        modal.style.display = 'none';
-        goBackBtn.remove();
-        okBtn.onclick = null;
-        cancelBtn.onclick = null;
-        resolve(result);
-      };
-      okBtn.onclick     = () => cleanup('give');
-      cancelBtn.onclick = () => cleanup('cancel');
-      goBackBtn.onclick = () => cleanup('back');
-    });
-  } else {
-    // No redistribution path — single confirm with cancel/back
-    const ok = await customConfirm(msg, `Cancel all affected bookings`, 'Go back');
-    return ok ? 'cancel' : 'back';
-  }
+  // Show the editable choice modal and return its plan.
+  return await promptAbsorptionChoice(bnName, uncovered, sameWingBNs, { allBookings, allScheds, shift });
 }
 
 // Returns the number of staff bookings whose event-time fell within the
@@ -8430,9 +8389,17 @@ async function markBNUnavailable(schedId, bnName, date, shift){
   await new Promise(r => requestAnimationFrame(r)); // let button show 'Processing…' before modal
   try {
     const choice = await confirmMarkUnavailable(schedId, bnName, date, shift);
-    if(choice === 'back') return;
-    const redistribute = choice === 'give';
-    await processBNUnavailability(schedId, bnName, date, shift, redistribute);
+    // confirmMarkUnavailable returns EITHER a string (future shift: 'give'/'back')
+    // OR a plan object { action, absorbed, flagged } (current shift choice modal).
+    if(choice === 'back' || (choice && choice.action === 'back')) return;
+    if(choice && typeof choice === 'object'){
+      // Current shift — pass the user's chosen plan as prebuiltPlan.
+      await processBNUnavailability(schedId, bnName, date, shift, true, choice);
+    } else {
+      // Future shift — no plan; executor short-circuits to the inactive flip.
+      const redistribute = choice === 'give';
+      await processBNUnavailability(schedId, bnName, date, shift, redistribute);
+    }
   } catch(e){
     toast(e.message, true);
   } finally {
@@ -8777,14 +8744,19 @@ async function toggleSelfAvailability(){
         }
       } catch(e){ hideBusy(); toast(e.message, true); /* finalInactive stays true */ }
     } else if(active){
-      // Mark unavailable — shared modal with admin path (confirmMarkUnavailable).
-      // Same wording, same conditional buttons. Uses {firstname} so another BN
-      // can operate this on someone's behalf without UI shifting to first person.
+      // Mark unavailable — shared choice modal with admin path (confirmMarkUnavailable).
+      // Returns a string (future shift: 'give'/'back') OR a plan object
+      // { action, absorbed, flagged } (current shift). Uses {firstname} so another
+      // BN can operate this on someone's behalf without UI shifting to first person.
       const choice = await confirmMarkUnavailable(active.Id, BNS.name, dt, shift);
-      if(choice === 'back') return; // finalInactive stays false (no change)
-      const redistributeSelf = choice === 'give';
+      if(choice === 'back' || (choice && choice.action === 'back')) return; // finalInactive stays false (no change)
       try {
-        await processBNUnavailability(active.Id, BNS.name, dt, shift, redistributeSelf);
+        if(choice && typeof choice === 'object'){
+          await processBNUnavailability(active.Id, BNS.name, dt, shift, true, choice);
+        } else {
+          const redistributeSelf = choice === 'give';
+          await processBNUnavailability(active.Id, BNS.name, dt, shift, redistributeSelf);
+        }
         finalInactive = true; // flipped to inactive
       } catch(e){ hideBusy(); toast(e.message, true); /* finalInactive stays false */ }
     } else {
@@ -9079,6 +9051,24 @@ function planWholeRunAbsorption(uncovered, otherBNs, ctx){
     // else: stays CHOICE_CANCEL (no single BN can take the whole run)
   }
   return { runs, assignments, baseCtx };
+}
+
+// Phase C-2 step 3 (build 156, 2026-05-29): adapter that runs the no-split
+// planWholeRunAbsorption and returns the SAME { absorbed:[{booking,bnName}],
+// flagged:[booking] } shape planAbsorption returned — so callers that commit a
+// plan (the executor's supp-creation/flagged-deletion code, and the roster
+// Remove cascade) consume it identically. Each whole-run assignment expands to
+// per-slot absorbed entries; CHOICE_CANCEL runs expand to flagged bookings.
+// This is what makes "no split everywhere" (Tomas 2026-05-29) concrete: the
+// Remove cascade now plans with this instead of the splitting planAbsorption.
+function planWholeRunAbsorptionResult(uncovered, otherBNs, ctx){
+  const { runs, assignments } = planWholeRunAbsorption(uncovered, otherBNs, ctx);
+  const absorbed = [], flagged = [];
+  runs.forEach((run, i) => {
+    if(assignments[i] === CHOICE_CANCEL){ run.forEach(b => flagged.push(b)); }
+    else { run.forEach(b => absorbed.push({ booking: b, bnName: assignments[i] })); }
+  });
+  return { absorbed, flagged };
 }
 
 // Phase C-2 step 2b (build 154, 2026-05-29): the editable Mark-Unavailable
@@ -9409,7 +9399,13 @@ function planAbsorption(uncovered, otherBNs, ctx){
   return { absorbed, flagged: flaggedNurses };
 }
 
-async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true){
+async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true, prebuiltPlan=null){
+  // prebuiltPlan (Phase C-2 step 3): when the interactive choice modal already
+  // decided coverage, the caller passes { absorbed, flagged } here. The executor
+  // then commits THAT plan (skipping its own planning + the cancel-all/no-absorber
+  // early-exit branches, since the user already chose per-run). When prebuiltPlan
+  // is null (the roster Remove cascade), the executor plans here via the no-split
+  // planWholeRunAbsorptionResult.
   showBusy('Updating coverage…');
   try {
     // Get BN-A's units and mark record inactive
@@ -9533,59 +9529,51 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       return units.some(u => bnAWings.includes(getUnitWing(u)));
     });
 
-    // If cancel all chosen, skip redistribution entirely
-    if(!redistribute){
-      hideBusy();
-      const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      // Actually delete the staff bookings — previously they were flagged only,
-      // which left orphaned records that reappeared if BN was reactivated.
-      for(const b of uncovered){
-        await spDel(LISTS.bookings, b.Id).catch(()=>{});
+    // ── Determine the coverage plan ──────────────────────
+    // Two sources: (1) the interactive choice modal already built one and passed
+    // it as prebuiltPlan — use it as-is; the user chose per-run, so the
+    // cancel-all / no-absorber early-exits below don't apply (cancellations are
+    // already in prebuiltPlan.flagged). (2) No prebuiltPlan (roster Remove
+    // cascade) — plan here with the no-split planWholeRunAbsorptionResult, and
+    // keep the cancel-all / no-absorber early-exits.
+    let absorbed, flaggedNurses;
+    if(prebuiltPlan){
+      absorbed = prebuiltPlan.absorbed || [];
+      flaggedNurses = prebuiltPlan.flagged || [];
+    } else {
+      // If cancel all chosen, skip redistribution entirely
+      if(!redistribute){
+        hideBusy();
+        const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+        // Actually delete the staff bookings — previously they were flagged only,
+        // which left orphaned records that reappeared if BN was reactivated.
+        for(const b of uncovered){
+          await spDel(LISTS.bookings, b.Id).catch(()=>{});
+        }
+        await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
+        loadAssignments();
+        notifyProdLogChanged(bnName);
+        return;
       }
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
 
-    if(!otherBNs.length){
-      hideBusy();
-      // No other BNs available — delete all uncovered staff bookings and flag
-      const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-      for(const b of uncovered){
-        await spDel(LISTS.bookings, b.Id).catch(()=>{});
+      if(!otherBNs.length){
+        hideBusy();
+        // No other BNs available — delete all uncovered staff bookings and flag
+        const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+        for(const b of uncovered){
+          await spDel(LISTS.bookings, b.Id).catch(()=>{});
+        }
+        await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
+        loadAssignments();
+        notifyProdLogChanged(bnName);
+        return;
       }
-      await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
+
+      // No-split planner (Tomas 2026-05-29: one BN per whole run or cancel; no
+      // mid-run handoffs). Same { absorbed, flagged } shape the commit code below
+      // consumes. Replaces the prior splitting planAbsorption() for the cascade.
+      ({ absorbed, flagged: flaggedNurses } = planWholeRunAbsorptionResult(uncovered, otherBNs, { allBookings, allScheds, shift }));
     }
-
-    // ── v4 absorption rules — safe pass ─────────────────
-    //
-    // "Truly free at slot T" for BN X means:
-    //   - T is not past
-    //   - T is not X's own break
-    //   - T has no claimed staff booking on any of X's responsible units
-    //     (responsible = original assignment + any prior supplementals)
-    //
-    // Per-subrun rules (subrun = consecutive slots one BN absorbs):
-    //   - Multi-slot (2+): BN must be truly free at every slot in the subrun
-    //   - Single-slot: BN truly free at T AND (T+1 is X's own break OR
-    //     unclaimed on X's responsible units, OR T is shift's last slot)
-    //
-    // Selection: when multiple BNs qualify, prefer the one with the most
-    // free slot-times in the shift (responsible-units-aware, largest first).
-    //
-    // Run-splitting is allowed — different BNs can absorb different subruns
-    // of the same nurse/unit run. Each subrun evaluated independently.
-    // ─────────────────────────────────────────────────────
-
-    // Build 145 (2026-05-27): Phase A — absorption planning extracted to the
-    // pure planAbsorption() helper (behavior-preserving). The plan (absorbed +
-    // flagged) is computed here; all side effects (supp rows, deletes, wing
-    // history, rotation recompute) remain below, unchanged.
-    const { absorbed, flagged: flaggedNurses } = planAbsorption(uncovered, otherBNs, { allBookings, allScheds, shift });
 
     // Cleanup: delete the bookings that couldn't be absorbed. The run-rule
     // rollback above accumulated them into flaggedNurses but left the
