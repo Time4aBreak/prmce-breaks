@@ -1728,7 +1728,15 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-152';
+const APP_VERSION = '2026-05-29-153';
+// 153: Phase C-2 step 2a — planWholeRunAbsorption, the NO-SPLIT whole-run
+//      planner that seeds the choice modal's defaults (per Tomas's no-split
+//      decision: one BN per whole run or cancel; no mid-run handoffs). Built on
+//      the step-1 shared helpers, so per-slot eligibility matches planAbsorption;
+//      identical coverage in the single-absorber case, diverges only with
+//      complementary multi-absorbers (cancels what planAbsorption would split).
+//      planAbsorption (splitting) stays wired until step 3 swaps in the modal.
+//      Verified by harness vs planAbsorption oracle. No UI yet.
 // 152: Phase C-2 step 1 — pure helpers for the editable choice modal (no UI yet):
 //      CHOICE_CANCEL sentinel, groupBookingsIntoRuns (same grouping as
 //      planAbsorption), cloneAbsorptionContext, applyPendingAssignment, and
@@ -8984,6 +8992,56 @@ function recomputeRunEligibility(baseCtx, runs, candidates, assignments){
     eligibleByRun[i] = candNames.filter(bn => bnCanTakeRun(bn, runs[i], ctxForRun));
   }
   return eligibleByRun;
+}
+
+// Phase C-2 step 2a (build 153, 2026-05-29): NO-SPLIT whole-run absorption
+// planner. Seeds the choice modal's default selections. Unlike planAbsorption
+// — which can split one nurse's run across multiple BNs via its greedy subrun
+// loop — this assigns each natural run to a SINGLE whole-run-eligible BN, or
+// leaves it uncovered (CHOICE_CANCEL) when no one BN can take the entire run.
+// Per Tomas's 2026-05-29 product decision: one BN covers a whole run or it is
+// cancelled; no mid-run handoffs between break nurses.
+//
+// Built entirely on the shared step-1 helpers, so its per-slot eligibility
+// rules (free-at-slot + single-slot T+1 buffer) are identical to
+// planAbsorption's. In the single-absorber case it returns the SAME coverage as
+// planAbsorption (one BN cannot split either) — verified by harness. The two
+// diverge ONLY with multiple complementary absorbers, where this planner
+// deliberately cancels a run that planAbsorption would have split-covered.
+//
+// NOTE (dual-planner): planAbsorption (splitting) remains wired into
+// processBNUnavailability until Phase C-2 step 3 swaps in the choice modal, and
+// may still serve the Phase D transfer path. This is intentional — the shared
+// eligibility helpers are the common asset; the two planners differ only in
+// split policy. Step 3 resolves which planner the live absorption path uses.
+//
+// Returns { runs, assignments, baseCtx } where runs = groupBookingsIntoRuns,
+// assignments[i] = covering BN name or CHOICE_CANCEL, and baseCtx is the
+// unmutated base context (the modal reuses it for live recompute).
+function planWholeRunAbsorption(uncovered, otherBNs, ctx){
+  const baseCtx = buildAbsorptionContext(otherBNs, ctx);
+  const runs = groupBookingsIntoRuns(uncovered, ctx.shift);
+  const candNames = otherBNs.map(c => c.BreakNurseName);
+  const assignments = runs.map(() => CHOICE_CANCEL);
+
+  // Greedy in run order: assign each run to the most-free eligible BN, then
+  // consume that BN's slots so later runs see reduced availability. Eligibility
+  // for run i is computed against a context with runs 0..i-1's assignments
+  // applied (later runs are still CHOICE_CANCEL = no consumption), matching the
+  // forward greedy used by planAbsorption.
+  for(let i = 0; i < runs.length; i++){
+    const ctxForRun = cloneAbsorptionContext(baseCtx);
+    for(let j = 0; j < i; j++) applyPendingAssignment(ctxForRun, runs[j], assignments[j]);
+    const elig = candNames.filter(bn => bnCanTakeRun(bn, runs[i], ctxForRun));
+    if(elig.length){
+      // Tiebreak: most current free slots (consistent with planAbsorption's
+      // bestBN selection, which compares the live/mutated free-slot count).
+      elig.sort((a,b) => (ctxForRun.bnFreeSlots[b]?.length||0) - (ctxForRun.bnFreeSlots[a]?.length||0));
+      assignments[i] = elig[0];
+    }
+    // else: stays CHOICE_CANCEL (no single BN can take the whole run)
+  }
+  return { runs, assignments, baseCtx };
 }
 
 // Build 145 (2026-05-27): Pure absorption planner — extracted verbatim from
