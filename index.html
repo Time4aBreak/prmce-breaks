@@ -153,6 +153,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .empty{text-align:center;padding:30px 20px;color:var(--muted);font-size:.875rem;line-height:1.6}
 .spinner{display:inline-block;width:18px;height:18px;border:2px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .7s linear infinite}
 @keyframes spin{to{transform:rotate(360deg)}}
+@keyframes absorbFlash{0%{background:#fef3c7;border-color:#f59e0b}100%{background:white;border-color:var(--border)}}
 .info-bar{font-size:.75rem;color:var(--muted);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px}
 .divider{height:1px;background:var(--border);margin:14px 0}
 
@@ -945,6 +946,28 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   </div>
 </div>
 
+<!-- Phase C-2 (build 154): Mark-Unavailable coverage CHOICE modal. Dedicated
+     three-zone layout so the action bar stays reachable without scrolling past
+     a long plan: pinned header, scrollable run-row list, pinned footer. Rows +
+     dropdowns are injected by promptAbsorptionChoice(); styling reuses the same
+     --card/--border/--teal tokens and .btn classes as customConfirmModal. -->
+<div id="absorbChoiceModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:var(--card);border-radius:16px;width:94%;max-width:520px;max-height:88vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2);overflow:hidden">
+    <!-- pinned header -->
+    <div style="padding:20px 24px 12px;border-bottom:1px solid var(--border)">
+      <div id="absorbChoiceTitle" style="font-size:1.05rem;font-weight:700;color:var(--text);line-height:1.3"></div>
+      <div id="absorbChoiceSubtitle" style="font-size:.82rem;color:var(--muted);margin-top:4px;line-height:1.4"></div>
+    </div>
+    <!-- scrollable run-row list -->
+    <div id="absorbChoiceRows" style="padding:14px 24px;overflow-y:auto;flex:1 1 auto"></div>
+    <!-- pinned footer -->
+    <div style="padding:12px 24px 18px;border-top:1px solid var(--border);display:flex;flex-direction:column;gap:8px">
+      <button id="absorbChoiceConfirm" class="btn btn-primary" style="width:100%"></button>
+      <button id="absorbChoiceBack" class="btn btn-ghost" style="width:100%">Go back</button>
+    </div>
+  </div>
+</div>
+
 <!-- Restore cancelled breaks modal -->
 <div id="restoreModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
   <div style="background:var(--card);border-radius:16px;padding:22px;max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;display:flex;flex-direction:column">
@@ -1728,7 +1751,16 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-153';
+const APP_VERSION = '2026-05-29-154';
+// 154: Phase C-2 step 2b — the editable Mark-Unavailable CHOICE modal UI:
+//      dedicated three-zone modal (#absorbChoiceModal: pinned header, scrollable
+//      run-rows, pinned footer) + promptAbsorptionChoice() driver. Opens on
+//      planWholeRunAbsorption defaults; per-row dropdown of whole-run-eligible
+//      BNs + "Cancel — leave uncovered"; LIVE recompute on change with
+//      auto-revert (+ absorbFlash highlight) for conflicts. Returns the
+//      {absorbed,flagged,action} contract. NOT yet wired into the live flow
+//      (step 3); invoke via console harness to verify. Footer is Confirm/Go-back
+//      (no Auto button, per the no-split/simplest direction).
 // 153: Phase C-2 step 2a — planWholeRunAbsorption, the NO-SPLIT whole-run
 //      planner that seeds the choice modal's defaults (per Tomas's no-split
 //      decision: one BN per whole run or cancel; no mid-run handoffs). Built on
@@ -9042,6 +9074,163 @@ function planWholeRunAbsorption(uncovered, otherBNs, ctx){
     // else: stays CHOICE_CANCEL (no single BN can take the whole run)
   }
   return { runs, assignments, baseCtx };
+}
+
+// Phase C-2 step 2b (build 154, 2026-05-29): the editable Mark-Unavailable
+// CHOICE modal. Opens showing planWholeRunAbsorption's default (each natural run
+// → one BN, or Cancel), lets the user reassign any run via a per-row dropdown of
+// whole-run-eligible BNs (+ "Cancel — leave uncovered"), with LIVE recompute:
+// changing one row re-derives every other row's eligible BNs against the current
+// pending assignments (a BN consumed by one run drops out of time-overlapping
+// runs). If an edit makes another row's current BN ineligible, that row
+// AUTO-REVERTS to its most-free eligible BN (or Cancel) and is briefly flagged
+// so the change isn't silent (Tomas's 2026-05-29 decision).
+//
+// Returns a Promise resolving to { absorbed:[{booking,bnName}], flagged:[booking],
+// action:'confirm'|'back' } — the SAME shape planAbsorption returns (plus the
+// action), so the downstream supplemental-creation/commit code is unchanged.
+// On 'back' the absorbed/flagged reflect the on-screen state but the caller
+// should treat 'back' as "do nothing".
+function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
+  const { runs, assignments, baseCtx } = planWholeRunAbsorption(uncovered, otherBNs, ctx);
+  const shift = ctx.shift;
+
+  return new Promise(resolve => {
+    const modal    = document.getElementById('absorbChoiceModal');
+    const titleEl  = document.getElementById('absorbChoiceTitle');
+    const subEl    = document.getElementById('absorbChoiceSubtitle');
+    const rowsEl   = document.getElementById('absorbChoiceRows');
+    const okBtn    = document.getElementById('absorbChoiceConfirm');
+    const backBtn  = document.getElementById('absorbChoiceBack');
+
+    titleEl.textContent = `Cover ${firstName(bnName)}'s breaks`;
+
+    // Rows just auto-reverted (flagged for one render so the change is visible).
+    let revertedRows = new Set();
+
+    // Reconcile: after any change, revert any assignment that's become
+    // ineligible. Reverting to Cancel frees resources and can't invalidate
+    // another still-valid assignment, but reverting to another BN can — so loop
+    // until stable (bounded by run count; Cancel is always valid → terminates).
+    function reconcile(){
+      const newlyReverted = new Set();
+      for(let pass = 0; pass <= runs.length; pass++){
+        const elig = recomputeRunEligibility(baseCtx, runs, otherBNs, assignments);
+        let changed = false;
+        for(let i = 0; i < runs.length; i++){
+          const a = assignments[i];
+          if(a === CHOICE_CANCEL) continue;
+          if(!elig[i].includes(a)){
+            if(elig[i].length){
+              const sorted = [...elig[i]].sort((x,y)=>(baseCtx.bnFreeSlots[y]?.length||0)-(baseCtx.bnFreeSlots[x]?.length||0));
+              assignments[i] = sorted[0];
+            } else {
+              assignments[i] = CHOICE_CANCEL;
+            }
+            newlyReverted.add(i);
+            changed = true;
+          }
+        }
+        if(!changed) break;
+      }
+      return newlyReverted;
+    }
+
+    function runLabel(run){
+      const unit = run[0].Unit;
+      const nurse = run[0].NurseName.split('(')[0].trim();
+      const times = run.length === 1
+        ? fmt12(run[0].SlotTime)
+        : `${fmt12(run[0].SlotTime)}–${fmt12(run[run.length-1].SlotTime)}`;
+      return { unit, nurse, times, count: run.length };
+    }
+
+    function render(){
+      // Eligibility for the dropdowns reflects the current (reconciled) state.
+      const elig = recomputeRunEligibility(baseCtx, runs, otherBNs, assignments);
+      const coveredCount = assignments.filter(a => a !== CHOICE_CANCEL).length;
+      const cancelledCount = runs.length - coveredCount;
+      subEl.innerHTML = `${runs.length} break run${runs.length!==1?'s':''} need coverage — `
+        + `<span style="color:var(--teal);font-weight:600">${coveredCount} covered</span>`
+        + (cancelledCount ? `, <span style="color:#b45309;font-weight:600">${cancelledCount} left uncovered</span>` : '')
+        + `. Adjust any row below.`;
+
+      rowsEl.innerHTML = '';
+      runs.forEach((run, i) => {
+        const { unit, nurse, times, count } = runLabel(run);
+        const isCancel = assignments[i] === CHOICE_CANCEL;
+        const wasReverted = revertedRows.has(i);
+
+        const row = document.createElement('div');
+        row.style.cssText = `display:grid;grid-template-columns:1fr 150px;gap:10px;align-items:center;`
+          + `padding:10px 12px;border-radius:10px;margin-bottom:8px;`
+          + `border:1px solid ${isCancel ? '#f59e0b' : 'var(--border)'};`
+          + `background:${isCancel ? '#fffbeb' : 'white'};`
+          + (wasReverted ? 'animation:absorbFlash 1.2s ease-out;' : '');
+
+        // left: unit + times + nurse (+ reverted note)
+        const info = document.createElement('div');
+        info.innerHTML =
+          `<div style="font-weight:600;font-size:.9rem;color:var(--text)">${unit} · ${times}</div>`
+          + `<div style="font-size:.78rem;color:var(--muted);margin-top:2px">${nurse}${count>1?` · ${count} slots`:''}</div>`
+          + (wasReverted ? `<div style="font-size:.72rem;color:#b45309;margin-top:3px">↺ reassigned — prior choice no longer available</div>` : '');
+        row.appendChild(info);
+
+        // right: dropdown of eligible BNs + Cancel
+        const sel = document.createElement('select');
+        sel.dataset.idx = i;
+        sel.style.cssText = 'width:100%;padding:7px 8px;border:1px solid var(--border);border-radius:8px;'
+          + 'font-size:.85rem;background:var(--card);color:var(--text)';
+        const opts = [];
+        elig[i].forEach(bn => opts.push(`<option value="${bn.replace(/"/g,'&quot;')}"${bn===assignments[i]?' selected':''}>${firstName(bn)}</option>`));
+        // Cancel always available
+        opts.push(`<option value="${CHOICE_CANCEL}"${isCancel?' selected':''}>Cancel — leave uncovered</option>`);
+        sel.innerHTML = opts.join('');
+
+        sel.onchange = () => {
+          assignments[i] = sel.value;          // commit this row's pick
+          revertedRows = reconcile();          // fix any conflicts elsewhere
+          render();                            // redraw with updated eligibility
+        };
+        row.appendChild(sel);
+        rowsEl.appendChild(row);
+      });
+
+      okBtn.textContent = cancelledCount
+        ? `Confirm — cover ${coveredCount}, cancel ${cancelledCount}`
+        : `Confirm coverage`;
+    }
+
+    // Build the absorbed/flagged contract from the current on-screen state.
+    function buildResult(action){
+      const absorbed = [];
+      const flagged = [];
+      runs.forEach((run, i) => {
+        if(assignments[i] === CHOICE_CANCEL){
+          run.forEach(b => flagged.push(b));
+        } else {
+          run.forEach(b => absorbed.push({ booking: b, bnName: assignments[i] }));
+        }
+      });
+      return { absorbed, flagged, action };
+    }
+
+    const cleanup = (result) => {
+      modal.style.display = 'none';
+      okBtn.onclick = null;
+      backBtn.onclick = null;
+      rowsEl.innerHTML = '';
+      resolve(result);
+    };
+    okBtn.onclick   = () => cleanup(buildResult('confirm'));
+    backBtn.onclick = () => cleanup(buildResult('back'));
+
+    // Initial reconcile (defaults are already conflict-free from the greedy
+    // planner, but run it for safety), then first render + show.
+    revertedRows = new Set(); reconcile(); revertedRows = new Set();
+    render();
+    modal.style.display = 'flex';
+  });
 }
 
 // Build 145 (2026-05-27): Pure absorption planner — extracted verbatim from
