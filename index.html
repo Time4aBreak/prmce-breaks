@@ -1751,7 +1751,17 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-157';
+const APP_VERSION = '2026-05-29-158';
+// 158: Preferred-names cross-device propagation fix. warmPreferredNames() now
+//      pulls getState('bnPreferredNames') UNCONDITIONALLY on every init (was
+//      syncedLS.warm, which only pulled when the device had no local copy — so a
+//      device with a cached map never saw another device's add/remove). Matches
+//      the roster's loader pattern. Rebuilds reset-then-overlay (DEFAULTS, then
+//      server map) so a name REMOVED elsewhere disappears instead of lingering.
+//      getState's localStorage fallback keeps a transient/empty BNState read from
+//      wiping local custom names. Save path (setPreferredName → syncedLS.set →
+//      setState → BNState) already persists server-side, so the pull sees it.
+//      One function changed. Needs a 2-device test.
 // 157: Roster Remove → Redistribute now routes the removed BN's CURRENT (started)
 //      shift breaks through the CHOICE MODAL (user controls coverage), matching
 //      Mark Unavailable — previously removal did NO current-shift break absorption,
@@ -11345,11 +11355,26 @@ try {
 } catch {}
 
 async function warmPreferredNames(){
+  // Build 158 (2026-05-30): cross-device propagation fix. Previously this used
+  // syncedLS.warm(), which only pulls from BNState when the device has NO local
+  // copy — so any device that had already cached bnPreferredNames never saw
+  // additions/removals made on another device. The roster (bnImportedNames)
+  // already does this correctly by pulling getState() unconditionally on every
+  // load; preferred names now match that pattern.
+  //
+  // reset-then-overlay (NOT merge-into-existing): rebuild from DEFAULTS, then
+  // overlay the server map, so a custom name REMOVED on another device actually
+  // disappears here instead of lingering in a stale local map.
+  //
+  // getState (not refresh): its localStorage fallback means a transient/empty
+  // BNState read won't wipe this device's local custom names, and it mirrors the
+  // roster loader. Clear-All behaviour is unchanged (build 150 full-wipe).
   try {
-    await syncedLS.warm('bnPreferredNames');
-    const saved = syncedLS.get('bnPreferredNames');
+    const saved = await getState('bnPreferredNames');   // unconditional server-authoritative pull
+    PREFERRED_NAMES = {...PREFERRED_NAMES_DEFAULTS};
     if(saved && typeof saved === 'object'){
-      Object.assign(PREFERRED_NAMES, PREFERRED_NAMES_DEFAULTS, saved);
+      Object.assign(PREFERRED_NAMES, saved);
+      localStorage.setItem('bnPreferredNames', JSON.stringify(saved)); // keep syncedLS.get fresh, mirrors roster loader
     }
   } catch {}
 }
