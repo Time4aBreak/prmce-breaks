@@ -1751,7 +1751,12 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-154';
+const APP_VERSION = '2026-05-29-155';
+// 155: Choice modal — multi-slot run label now joins discrete slot times with
+//      " + " (e.g. "10:15 AM + 10:35 AM") instead of a dash range. A dash read
+//      as a single 10:15→10:35 break (a duration), but a run is separate breaks;
+//      listing every slot also prevents hiding middle slots on 3+ runs. Display
+//      only — no logic change.
 // 154: Phase C-2 step 2b — the editable Mark-Unavailable CHOICE modal UI:
 //      dedicated three-zone modal (#absorbChoiceModal: pinned header, scrollable
 //      run-rows, pinned footer) + promptAbsorptionChoice() driver. Opens on
@@ -9139,9 +9144,13 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
     function runLabel(run){
       const unit = run[0].Unit;
       const nurse = run[0].NurseName.split('(')[0].trim();
+      // Multi-slot runs are DISCRETE breaks (not a duration), so join every
+      // slot with " + " rather than a dash range — a dash read as "10:15 to
+      // 10:35" (one break), which is wrong. Listing all slots also avoids hiding
+      // middle slots on 3+ runs (e.g. "10:15 + 10:35 + 10:55").
       const times = run.length === 1
         ? fmt12(run[0].SlotTime)
-        : `${fmt12(run[0].SlotTime)}–${fmt12(run[run.length-1].SlotTime)}`;
+        : run.map(b => fmt12(b.SlotTime)).join(' + ');
       return { unit, nurse, times, count: run.length };
     }
 
