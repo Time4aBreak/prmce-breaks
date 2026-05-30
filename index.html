@@ -1751,7 +1751,17 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-156';
+const APP_VERSION = '2026-05-29-157';
+// 157: Roster Remove → Redistribute now routes the removed BN's CURRENT (started)
+//      shift breaks through the CHOICE MODAL (user controls coverage), matching
+//      Mark Unavailable — previously removal did NO current-shift break absorption,
+//      only a future-shift unit fairness recalc. Implemented in removeImportedName:
+//      before deletion, for each started-shift assignment call confirmMarkUnavailable
+//      → processBNUnavailability(prebuiltPlan); modal Go-back aborts the whole removal
+//      (nothing deleted yet); current shifts are excluded from the future fairness
+//      recalc (modalHandledKeys). Absorbers' supps survive (they belong to absorbers,
+//      not the removed BN). 'Just remove' unchanged (clean delete). Modal copy +
+//      success toast updated. NOT yet behavior-verified.
 // 156: Phase C-2 step 3 — WIRED the editable choice modal into the live flow.
 //      confirmMarkUnavailable's current-shift branch now computes uncovered +
 //      same-wing candidates (executor-matching filters) and returns
@@ -17590,7 +17600,7 @@ function _showRemoveBNModal(name, count){
         <div style="font-size:.88rem;color:var(--text);line-height:1.55;margin-bottom:18px">
           ${safeName} has ${count} upcoming assignment${count!==1?'s':''}. These will be permanently deleted. Choose what happens to ${safeName}'s units:
           <div style="margin-top:10px;font-size:.85rem;color:var(--muted)">
-            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — remaining BNs absorb ${safeName}'s units for fairness <em>(use when ${safeName} quit / left / transferred)</em></div>
+            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — you choose who covers ${safeName}'s current-shift breaks; remaining BNs absorb their units on future shifts <em>(use when ${safeName} quit / left / transferred)</em></div>
             <div><strong style="color:var(--text)">Just remove</strong> — ${safeName}'s units go uncovered for those shifts; other BNs unchanged <em>(use for typos / test entries)</em></div>
           </div>
         </div>
@@ -17647,19 +17657,49 @@ async function removeImportedName(name){
   const choice = await _showRemoveBNModal(name, upcoming.length);
   if(choice === 'cancel') return;
 
+  // Snapshot date+shift combos BEFORE any mutation so we know which shifts
+  // need redistribution later (in the 'redistribute' branch).
+  const dateShifts = new Set();
+  upcoming.forEach(s => {
+    dateShifts.add(`${s.ShiftDate.slice(0,10)}|${s.ShiftType}`);
+  });
+
+  // Option A (build 157, 2026-05-30): for Redistribute, the CURRENT (already-
+  // started) shift's booked breaks are routed through the CHOICE MODAL so the
+  // user controls who covers each — matching Mark Unavailable, rather than the
+  // old behaviour which did NO current-shift break absorption at all (only a
+  // future-shift unit fairness recalc). Future shifts (no bookings yet) keep the
+  // fairness recalc below. This runs BEFORE deletion (interactive → no busy
+  // overlay yet) so confirmMarkUnavailable/processBNUnavailability see the live
+  // current-shift assignment; the absorbers' new supplementals belong to the
+  // ABSORBERS (not the removed BN), so they survive the row deletion. Backing
+  // out of the coverage modal aborts the whole removal — nothing deleted yet.
+  // Only 'redistribute' gets the modal; 'remove_only' stays a clean delete
+  // (typo/test entries — units intentionally left uncovered).
+  const modalHandledKeys = new Set();
+  if(choice === 'redistribute'){
+    const currentAssignments = upcoming.filter(s =>
+      staffShiftHasStarted(s.ShiftDate.slice(0,10), s.ShiftType)
+    );
+    for(const s of currentAssignments){
+      const d = s.ShiftDate.slice(0,10), sh = s.ShiftType;
+      const plan = await confirmMarkUnavailable(s.Id, name, d, sh);
+      // Go back in the coverage modal → abort the entire removal (nothing
+      // deleted at this point, BN still on roster).
+      if(plan === 'back' || (plan && plan.action === 'back')) return;
+      if(plan && typeof plan === 'object'){
+        await processBNUnavailability(s.Id, name, d, sh, true, plan);
+      }
+      modalHandledKeys.add(`${d}|${sh}`);
+    }
+  }
+
   // Build 140 (2026-05-27): Busy overlay for the whole post-modal flow.
   // Deletes are irreversible, and the redistribute branch already had
   // showBusy but the just-remove path didn't — leaving a window where
   // taps during batchDelete + LS cleanup could trigger other actions
   // against partially-removed state.
   showBusy(`Removing ${firstName(name)}…`);
-
-  // Snapshot date+shift combos BEFORE deletion so we know which shifts
-  // need redistribution later (in the 'redistribute' branch).
-  const dateShifts = new Set();
-  upcoming.forEach(s => {
-    dateShifts.add(`${s.ShiftDate.slice(0,10)}|${s.ShiftType}`);
-  });
 
   // Delete the BN's upcoming BNSchedule rows in one batch.
   try {
@@ -17701,6 +17741,7 @@ async function removeImportedName(name){
     // Build 140: busy message updated; overlay already up from post-modal flow.
     showBusy(`Redistributing ${firstName(name)}'s units across remaining BNs…`);
     for(const ds of dateShifts){
+      if(modalHandledKeys.has(ds)) continue; // current shift already covered via the choice modal
       const [date, shift] = ds.split('|');
       try {
         await recalcFairnessForShift(date, shift);
@@ -17714,7 +17755,9 @@ async function removeImportedName(name){
 
   let msg = `${firstName(name)} removed · ${upcoming.length} assignment${upcoming.length!==1?'s':''} deleted`;
   if(choice === 'redistribute'){
-    msg += `; units redistributed across ${dateShifts.size} date/shift${dateShifts.size!==1?'s':''}`;
+    const futureCount = dateShifts.size - modalHandledKeys.size;
+    if(modalHandledKeys.size) msg += `; current-shift breaks covered per your choices`;
+    if(futureCount > 0) msg += `${modalHandledKeys.size ? ',' : ';'} units redistributed across ${futureCount} future date/shift${futureCount!==1?'s':''}`;
     if(recalcFailures.length){
       msg += ` (${recalcFailures.length} redistribution${recalcFailures.length!==1?'s':''} failed — see console)`;
     }
