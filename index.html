@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-31-161';
+const APP_VERSION = '2026-06-01-162';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17536,10 +17536,10 @@ function _showRemoveBNModal(name, count){
           <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Remove ${safeName} from roster</span>
         </div>
         <div style="font-size:.88rem;color:var(--text);line-height:1.55;margin-bottom:18px">
-          ${safeName} has ${count} upcoming assignment${count!==1?'s':''}. These will be permanently deleted. Choose what happens to ${safeName}'s units:
+          ${safeName} has ${count} upcoming assignment${count!==1?'s':''}, which will be deleted.
           <div style="margin-top:10px;font-size:.85rem;color:var(--muted)">
-            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — you choose who covers ${safeName}'s current-shift breaks; remaining BNs absorb their units on future shifts <em>(use when ${safeName} quit / left / transferred)</em></div>
-            <div><strong style="color:var(--text)">Just remove</strong> — ${safeName}'s units go uncovered for those shifts; other BNs unchanged <em>(use for typos / test entries)</em></div>
+            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — remaining BNs absorb the units <em>(quit / transferred)</em></div>
+            <div><strong style="color:var(--text)">Just remove</strong> — units left uncovered <em>(typo / test entry)</em></div>
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
