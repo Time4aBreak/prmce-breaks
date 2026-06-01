@@ -443,7 +443,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div id="bnConfirmList"></div>
           <!-- Productivity Log submit bar — matches Breaker's Breaks pattern, sits at
                the bottom of the slot list. Auto-appears when any action is staged. -->
-          <div id="prodLogSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--teal-mid);border-radius:10px;border:1.5px solid var(--teal);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+          <div id="prodLogSubmitBar" style="display:none;margin-top:12px;padding:12px 14px;background:var(--teal-lt);border-radius:10px;border:1.5px solid var(--teal);align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
             <span id="prodLogSubmitBarLabel" style="font-size:.875rem;font-weight:600;color:var(--teal-dk)"></span>
             <div style="display:flex;gap:8px">
               <button class="btn btn-ghost btn-sm" id="prodLogClear" onclick="const _b=this;_b.disabled=true;_b.textContent='Clearing…';Promise.resolve(clearStagedActions()).finally(()=>{_b.disabled=false;_b.textContent='Clear'})">Clear</button>
@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-01-162';
+const APP_VERSION = '2026-06-01-164';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15149,7 +15149,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
           const isRemoving = stagedOwn && stagedOwn.action === 'remove_break';
           rowClass = '';
           if(isRemoving){
-            extraStyle = 'border-left:4px solid var(--red)';
+            extraStyle = 'background:var(--red-lt);border:1.5px solid var(--red);opacity:.7';
             centerHtml = `<span style="color:var(--red);font-weight:600">queued · break will be removed</span>`;
             actionHtml = ownBreakKey
               ? `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="stageRemoveBreak('${ownBreakKey}','${slot}')">↺ Undo</button>`
@@ -15180,7 +15180,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             const stagedAdd = _prodLogStaged.get(`add_break:${slot}`);
             if(stagedAdd){
               actionHtml = `<button class="btn btn-ghost btn-sm" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')" style="color:var(--muted)">↺ Undo</button>`;
-              extraStyle = 'background:#eef0f2;border-left:4px solid var(--teal);';
+              extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal);';
             } else {
               actionHtml = `<button class="btn btn-sm" style="background:var(--day-lt);color:var(--day);font-weight:600" onclick="stageAddBreak('${slot}','${esc(rotationUnit || '')}')">+ My Break</button>`;
               extraStyle = 'background:#eef0f2;';
@@ -15212,9 +15212,9 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             const cancelCls  = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
             const notTakenStyle = stagedAction === 'not_taken' ? '' : 'color:var(--muted)';
             const cancelStyle   = stagedAction === 'cancelled' ? '' : 'color:var(--muted)';
-            if(stagedAction === 'confirmed')      extraStyle = 'border-left:4px solid var(--green)';
-            else if(stagedAction === 'not_taken') extraStyle = 'border-left:4px solid var(--muted)';
-            else if(stagedAction === 'cancelled') extraStyle = 'border-left:4px solid var(--red)';
+            if(stagedAction === 'confirmed')      extraStyle = 'background:var(--green-lt);border:1.5px solid var(--green)';
+            else if(stagedAction === 'not_taken') extraStyle = 'background:var(--bg);border:1.5px solid var(--muted)';
+            else if(stagedAction === 'cancelled') extraStyle = 'background:var(--red-lt);border:1.5px solid var(--red);opacity:.7';
 
             centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
             actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px">✓ Taken</button>
@@ -15229,8 +15229,8 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
 
           if(stagedClaim){
             // Staged walk-up claim — teal border, compact display, Unstage button
-            extraStyle = 'border-left:4px solid var(--teal)';
-            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ${stagedClaim.nurseName}${stagedClaim.ext ? ` (${stagedClaim.ext})` : ''}</span>
+            extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal)';
+            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ${stagedClaim.nurseName}${stagedClaim.ext ? ` ${stagedClaim.ext}` : ''}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">↺ Undo</button>`;
           } else if(_prodLogExpanded.has(slot)){
@@ -15266,7 +15266,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
               .join(' ');
 
             const copyLastBtn = _prodLogLastClaim
-              ? `<button type="button" class="btn btn-ghost btn-sm" onclick="applyCopyLast('${slot}')" style="font-size:.72rem;padding:3px 8px;color:var(--teal-dk);margin-bottom:6px">↑ Copy last: ${_prodLogLastClaim.name}${_prodLogLastClaim.ext ? ` (${_prodLogLastClaim.ext})` : ''}</button>`
+              ? `<button type="button" class="btn btn-ghost btn-sm" onclick="applyCopyLast('${slot}')" style="font-size:.72rem;padding:3px 8px;color:var(--teal-dk);margin-bottom:6px">↑ Copy last: ${_prodLogLastClaim.name}${_prodLogLastClaim.ext ? ` ${_prodLogLastClaim.ext}` : ''}</button>`
               : '';
 
             centerHtml = `<span style="color:var(--muted);font-size:.82rem">Unclaimed ${unitLabel}</span>
@@ -15292,7 +15292,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             // both "+ Claim" (manual claim form) and "+ My Break" (BN break).
             const stagedAdd = _prodLogStaged.get(`add_break:${slot}`);
             if(stagedAdd){
-              extraStyle = 'border-left:4px solid var(--teal)';
+              extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal)';
               rowClass = '';
               centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ☕ My break</span>
                 <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
