@@ -1751,7 +1751,12 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-05-29-158';
+const APP_VERSION = '2026-05-31-161';
+// 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
+//      a permanent single-shift assignment delete with AUTO-absorption via a text
+//      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
+//      comment left at its former location; two stale comment references updated.
+//      No behavior change (function was unreachable).
 // 158: Preferred-names cross-device propagation fix. warmPreferredNames() now
 //      pulls getState('bnPreferredNames') UNCONDITIONALLY on every init (was
 //      syncedLS.warm, which only pulled when the device had no local copy — so a
@@ -3636,7 +3641,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
 
     // Build preview HTML
     const bookingLines = affectedBookings.length
-      ? affectedBookings.map(b => `• ${b.NurseName} — ${fmt12(b.SlotTime)} on ${b.SlotDate.slice(5,10)}`).join('<br>')
+      ? affectedBookings.map(b => `• ${formatNurse(b.NurseName)} — ${fmt12(b.SlotTime)} on ${b.SlotDate.slice(5,10)}`).join('<br>')
       : '<span style="color:var(--muted)">None</span>';
     const bnLines = bnImpacts.length
       ? bnImpacts.map(i => {
@@ -4164,7 +4169,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         const t = String(r.booking.SlotTime).padStart(4,'0');
         return `
           <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
-            <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${r.booking.NurseName} · ${fmt12(t)}</div>
+            <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${formatNurse(r.booking.NurseName)} · ${fmt12(t)}</div>
             <select data-idx="${idx}" class="_bdSelect" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:.85rem">
               <option value="keep">Keep (I'll cover this slot)</option>
               <option value="cancel">Cancel booking</option>
@@ -6494,18 +6499,18 @@ async function loadSlots(silent=false){
       // Slot-name middle column content
       let nameCellHtml;
       if(isCancelStaged){
-        nameCellHtml = `<span style="color:var(--muted)">Will cancel · ${booking.NurseName}</span>`;
+        nameCellHtml = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
       } else if(isTransferStaged){
-        const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+        const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
         nameCellHtml = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
       } else if(isMine){
-        nameCellHtml = booking.NurseName;
+        nameCellHtml = formatNurse(booking.NurseName);
       } else if(isPending){
         nameCellHtml = '\u2713 Selected';
       } else if(isOtherShiftClaim){
-        nameCellHtml = `${booking.NurseName} ⚠`;
+        nameCellHtml = `${formatNurse(booking.NurseName)} ⚠`;
       } else if(booking){
-        nameCellHtml = booking.NurseName;
+        nameCellHtml = formatNurse(booking.NurseName);
       } else {
         nameCellHtml = canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason === openLabel ? (_slotBNMap[slot] || lockReason) : `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}`);
       }
@@ -6823,18 +6828,18 @@ function _renderSingleSlotRow(slot){
   // Slot-name middle column content
   let nameCell;
   if(isCancelStaged){
-    nameCell = `<span style="color:var(--muted)">Will cancel · ${booking.NurseName}</span>`;
+    nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
   } else if(isTransferStaged){
-    const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+    const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
     nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
   } else if(isMine){
-    nameCell = booking.NurseName;
+    nameCell = formatNurse(booking.NurseName);
   } else if(isPending){
     nameCell = '\u2713 Selected';
   } else if(isOtherShiftClaim){
-    nameCell = `${booking.NurseName} ⚠`;
+    nameCell = `${formatNurse(booking.NurseName)} ⚠`;
   } else if(booking){
-    nameCell = booking.NurseName;
+    nameCell = formatNurse(booking.NurseName);
   } else {
     nameCell = canClaim ? 'Available' : (lockReason || 'Available');
   }
@@ -7007,7 +7012,7 @@ function openTransferStagingModal(bookingId, slot, currentNurseName){
   }
   _transferStagingContext = { bookingId, slot, slotShift, currentNurseName };
   document.getElementById('transferStagingTitle').textContent = `Transfer your ${fmt12(slot)} break`;
-  document.getElementById('transferStagingInfo').textContent = `${S.unit} · ${currentNurseName}`;
+  document.getElementById('transferStagingInfo').textContent = `${S.unit} · ${currentNurseName.replace(/\s*\((\d{5})\)/, ' $1')}`;
   // Pre-fill if already staged for this booking
   const existing = S.pendingTransfers.get(bookingId);
   document.getElementById('transferStagingName').value = existing ? existing.newFirst : '';
@@ -7589,16 +7594,16 @@ function renderOtherSlotsFromCache(){
       if(isCancelStaged){
         rowStyle += 'background:#fff5f5;border:1.5px solid #f5c0c0;opacity:0.7';
         timeStyle = 'color:var(--muted);text-decoration:line-through';
-        nameCell = `<span style="color:var(--muted)">Will cancel · ${escHTML(curName)}</span>`;
+        nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(curName)}</span>`;
       } else if(isTransferStaged){
         rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
         timeStyle = 'color:#a06a00;font-weight:700';
-        const newDisplay = `${toTitleCase(transferData.newFirst)} (${transferData.newExt})`;
+        const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
         nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
       } else {
         rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
         timeStyle = 'font-weight:700;color:var(--teal-dk)';
-        nameCell = escHTML(curName);
+        nameCell = formatNurse(curName);
       }
       // Action cell
       let actionCell = '';
@@ -7736,7 +7741,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     );
     const taken = slotBookings.find(b => isStaffBooking(b));
     if(taken){
-      if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName}. Please choose another slot.`, true); loadSlots(); }
+      if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}. Please choose another slot.`, true); loadSlots(); }
       return `${fmt12(slotTime)} already taken`;
     }
 
@@ -9153,7 +9158,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
 
     function runLabel(run){
       const unit = run[0].Unit;
-      const nurse = run[0].NurseName.split('(')[0].trim();
+      const nurse = formatNurse(run[0].NurseName);
       // Multi-slot runs are DISCRETE breaks (not a duration), so join every
       // slot with " + " rather than a dash range — a dash read as "10:15 to
       // 10:35" (one break), which is wrong. Listing all slots also avoids hiding
@@ -9169,10 +9174,10 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
       const elig = recomputeRunEligibility(baseCtx, runs, otherBNs, assignments);
       const coveredCount = assignments.filter(a => a !== CHOICE_CANCEL).length;
       const cancelledCount = runs.length - coveredCount;
-      subEl.innerHTML = `${runs.length} break run${runs.length!==1?'s':''} need coverage — `
+      subEl.innerHTML = `${runs.length} break run${runs.length!==1?'s':''} need${runs.length!==1?'':'s'} coverage — `
         + `<span style="color:var(--teal);font-weight:600">${coveredCount} covered</span>`
         + (cancelledCount ? `, <span style="color:#b45309;font-weight:600">${cancelledCount} left uncovered</span>` : '')
-        + `. Adjust any row below.`;
+        + `. Select and confirm from the available options for each row.`;
 
       rowsEl.innerHTML = '';
       runs.forEach((run, i) => {
@@ -10792,106 +10797,13 @@ async function loadAssignments(){
   }
 }
 
-async function delAssign(id){
-  // Track the BN name for cross-tab refresh in the finally block. Hoisted
-  // to function scope because `s` (the schedule record) is declared inside
-  // try and would not be visible in finally — referencing it there throws
-  // ReferenceError, which silently broke notifyProdLogChanged.
-  let _delBnName = null;
-  try {
-    const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
-    if(!scheds.length){
-      if(!await customConfirm('Remove this assignment?','Remove','Cancel')) return;
-      await spDel(LISTS.schedule, id);
-      toast('Assignment removed.');
-      return;
-    }
-    const s = scheds[0];
-    _delBnName = s.BreakNurseName;
-    let units = []; try { units = [...new Set(JSON.parse(s.Units||'[]'))]; } catch{}
-
-    // Find future affected staff bookings
-    const now = nowMin();
-    const bookings = await spGet(LISTS.bookings, `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
-    const affected = bookings.filter(b => isStaffBooking(b) && units.includes(b.Unit) && b.SlotDate >= shiftDate(s.ShiftType) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
-
-    // Get same-wing active BNs
-    const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
-    const bnAWings = [...new Set(units.map(u => getUnitWing(u)))];
-    const sameWingBNs = allScheds.filter(s2 =>
-      String(s2.Id) !== String(id) &&
-      s2.Status !== 'inactive' &&
-      String(s2.IsSupplemental) !== '1'   // build 148: was `!s2.IsSupplemental`
-    ).filter(s2 => {
-      let u2 = []; try { u2 = JSON.parse(s2.Units||'[]'); } catch{}
-      return u2.some(u => bnAWings.includes(getUnitWing(u)));
-    });
-
-    const sameWingFirstNames = sameWingBNs.map(b => firstName(b.BreakNurseName)).join(', ');
-
-    if(!affected.length){
-      if(!await customConfirm(`Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment on ${s.ShiftDate}?`,'Remove','Cancel')) return;
-      await spDel(LISTS.schedule, id);
-      // Drop the wing-history entry for this BN/date so the fairness
-      // algorithm stops counting the now-removed coverage against them.
-      try { _clearWingHistoryForDate(s.BreakNurseName, s.ShiftType, s.ShiftDate.slice(0,10)); }
-      catch(e){ console.warn('Wing history clear failed (non-fatal):', e); }
-      toast(`${firstName(s.BreakNurseName)}'s assignment removed.`);
-      return;
-    }
-
-    // Build affected staff list by name and unit
-    const byNurse = {};
-    affected.forEach(b => {
-      if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
-      byNurse[b.NurseName].push(`${b.Unit} at ${fmt12(b.SlotTime)}`);
-    });
-    const affectedLines = Object.entries(byNurse)
-      .map(([n, slots]) => `• ${formatNurse(n)} — ${slots.join(', ')}`)
-      .join('\n');
-
-    const wingMsg = sameWingBNs.length
-      ? `\n\n${sameWingFirstNames} ${sameWingBNs.length === 1 ? 'is' : 'are'} on the same wing and will absorb what they can. Breaks that can't be covered will be cancelled.`
-      : '\n\nNo other BNs are available on the same wing — all breaks will be cancelled.';
-
-    const proceed = await customConfirm(
-      `Remove ${firstName(s.BreakNurseName)}'s ${s.ShiftType} assignment?\n\nThe following staff have breaks booked:\n${affectedLines}${wingMsg}\n\nPlease notify!`,
-      'Proceed & reassign',
-      'Keep assignment'
-    );
-    if(!proceed) return;
-
-    // Run redistribution algorithm
-    if(sameWingBNs.length){
-      await spPatch(LISTS.schedule, id, { Status: 'inactive' });
-      await processBNUnavailability(id, s.BreakNurseName, s.ShiftDate, s.ShiftType, true);
-    } else {
-      for(const b of affected) await spDel(LISTS.bookings, b.Id);
-    }
-
-    // Permanently delete the assignment and any supplementals
-    await spDel(LISTS.schedule, id);
-    // Drop the wing-history entry for this BN/date — same rationale as the
-    // no-bookings clean delete above. Note: any same-wing BNs absorbing
-    // this coverage have their BNSchedule.Units patched in
-    // processBNUnavailability, but their wing history is NOT updated there.
-    // That's a related gap to revisit if reassign-driven fairness drift
-    // becomes noticeable. For now this fix covers the direct delete case.
-    try { _clearWingHistoryForDate(s.BreakNurseName, s.ShiftType, s.ShiftDate.slice(0,10)); }
-    catch(e){ console.warn('Wing history clear failed (non-fatal):', e); }
-    const suppls = await spGet(LISTS.schedule,
-      `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`);
-    for(const sup of suppls.filter(x => x.IsSupplemental == 1)){
-      await spPatch(LISTS.schedule, sup.Id, { IsSupplemental: 0, CoveredFrom: '' });
-    }
-    toast(`${firstName(s.BreakNurseName)}'s assignment removed. Please notify!`);
-  } catch(e){
-    toast(e.message, true);
-  } finally {
-    loadAssignments();
-    notifyProdLogChanged(_delBnName);
-  }
-}
+// delAssign(id) REMOVED in build 159 (2026-05-30): it was defined but never
+// wired to any UI control (dead code). It did a PERMANENT single-shift assignment
+// delete with AUTO-absorption via a text confirm — inconsistent with the
+// choice-modal-everywhere direction (Mark Unavailable / roster Remove now all use
+// the editable coverage modal). If per-shift permanent removal is ever wanted,
+// rebuild it on confirmMarkUnavailable → processBNUnavailability(prebuiltPlan)
+// like the other paths, rather than reviving the old auto-only flow.
 
 async function closeUnit(schedId, unit, bnName, date, shift){
   showBusy('Loading…');
@@ -11012,7 +10924,7 @@ async function closeUnit(schedId, unit, bnName, date, shift){
 
     // Case 3 — Future-shift (not-yet-active) unit removal with bookings:
     // No takeover picker for non-active shifts — just confirm + cancel bookings
-    const lines = futureOnUnit.map(b => `• ${b.NurseName} at ${fmt12(b.SlotTime)}`).join('\n');
+    const lines = futureOnUnit.map(b => `• ${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')} at ${fmt12(b.SlotTime)}`).join('\n');
     const msg = `${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} on ${unit} will be cancelled:\n\n${lines}\n\nRemove ${unit} from ${firstName(bnName)}?`;
     if(!await customConfirm(msg, 'Remove & cancel bookings', 'Cancel')) return;
     showBusy(`Cancelling ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''}…`);
@@ -14338,7 +14250,7 @@ function stageClaimFromInputs(slotTime){
       // Sign Up conflicts, fall back to the staff nurse name as before.
       const blockerLabel = conflict.CreatedBy
         ? `${firstName(conflict.CreatedBy)} already logged a break here`
-        : `claimed by ${conflict.NurseName.split('(')[0].trim()}`;
+        : `claimed by ${conflict.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}`;
       toast(`${unit} at ${fmt12(slotTime)} — ${blockerLabel}`, true);
       return;
     }
@@ -14577,7 +14489,7 @@ function handleQueueConflicts(freshBookings){
       const slot = action === 'claim' ? key.slice('unclaimed:'.length) : key.slice('add_break:'.length);
       const conflictBooking = staffBySlot.get(normSlot(slot));
       if(conflictBooking){
-        const claimerFirst = firstName(conflictBooking.NurseName);
+        const claimerFirst = conflictBooking.NurseName.replace(/\s*\((\d{5})\)/, ' $1');
         const when = fmt12(slot);
         if(action === 'claim'){
           toasts.push(`${claimerFirst} claimed ${when} while ${info.nurseName} was in queue`);
@@ -15285,11 +15197,11 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
 
           if(bConfirmed){
             rowClass = 'confirmed';
-            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
             actionHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
               <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
           } else if(bNotTaken){
-            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
             actionHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
               <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
           } else {
@@ -15304,7 +15216,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             else if(stagedAction === 'not_taken') extraStyle = 'border-left:4px solid var(--muted)';
             else if(stagedAction === 'cancelled') extraStyle = 'border-left:4px solid var(--red)';
 
-            centerHtml = `<span class="filled">${b.NurseName}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
             actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px">✓ Taken</button>
               <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}">✗ Not Taken</button>
               <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`;
@@ -17271,8 +17183,9 @@ function _savePartialWingHistory(name, shift, date, slots){
   saveNurseWingHistory(name, shift, existing);
 }
 
-// Removes any wing-history entries for the given BN/shift/date. Called from
-// delAssign so the fairness algorithm stops counting a deleted assignment
+// Removes any wing-history entries for the given BN/shift/date. (Formerly also
+// called from delAssign, removed in build 159.) Keeps the fairness algorithm
+// from counting a deleted assignment
 // against the BN. Without this, a removed manual assignment would continue
 // to push future suggestions away from those units even though the BN no
 // longer covered them on that date.
@@ -17742,7 +17655,7 @@ async function removeImportedName(name){
 
   // Clear the BN's wing history — they're gone permanently, their history
   // shouldn't influence future fairness calcs for whoever takes their
-  // place. Same pattern used by delAssign for single-shift removals.
+  // place.
   ['Day','Noc'].forEach(sh => {
     const key = `bnWingHistory_${name}_${sh}`;
     try { localStorage.removeItem(key); } catch{}
