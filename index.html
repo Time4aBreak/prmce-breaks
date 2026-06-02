@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-01-167';
+const APP_VERSION = '2026-06-01-168';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8271,9 +8271,21 @@ async function bulkSubstituteRevert(entries){
 // actually possible, mirroring the admin flow.
 // ─────────────────────────────────────────────────────────
 async function confirmMarkUnavailable(schedId, bnName, date, shift){
-  // Fetch context — schedule entries, bookings on that day/shift
-  const allScheds   = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-  const allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+  // Fetch context — schedule entries, bookings on that day/shift.
+  // Guard the fetch with a busy overlay: there's a real gap between the
+  // caller's trigger (roster Remove → Redistribute, the Mark Unavailable
+  // button, or the self toggle) and this modal rendering, during which the
+  // screen would otherwise stay live and tappable. Everything after the fetch
+  // is synchronous until a modal shows, so hiding right after the awaits
+  // closes the gap without covering the modal itself.
+  showBusy('Loading coverage…');
+  let allScheds, allBookings;
+  try {
+    allScheds   = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    allBookings = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+  } finally {
+    hideBusy();
+  }
 
   // BN's covered units (from their schedule entry)
   const thisSched = allScheds.find(s => String(s.Id) === String(schedId));
@@ -17533,8 +17545,8 @@ function _showRemoveBNModal(name, count){
         <div style="font-size:.88rem;color:var(--text);line-height:1.55;margin-bottom:18px">
           ${safeName} has ${count} upcoming assignment${count!==1?'s':''}, which will be deleted.
           <div style="margin-top:10px;font-size:.85rem;color:var(--muted)">
-            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — remaining BNs absorb the units <em>(quit / transferred)</em></div>
-            <div><strong style="color:var(--text)">Just remove</strong> — units left uncovered <em>(typo / test entry)</em></div>
+            <div style="margin-bottom:4px"><strong style="color:var(--text)">Redistribute</strong> — All ${safeName}'s upcoming assigned units will be reshuffled among the other scheduled BNs</div>
+            <div><strong style="color:var(--text)">Just remove</strong> — units left uncovered</div>
           </div>
         </div>
         <div style="display:flex;justify-content:flex-end;gap:8px;flex-wrap:wrap">
