@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-01-166';
+const APP_VERSION = '2026-06-01-167';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9657,14 +9657,30 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
 
     // Show results
     hideBusy();
-    let msg = `${firstName(bnName)} marked unavailable.`;
-    if(absorbed.length) msg += `\n\n✓ ${absorbed.length} break${absorbed.length!==1?'s':''} redistributed.`;
-    if(flaggedNurses.length){
+    const nAbs = absorbed.length, nFlag = flaggedNurses.length;
+    if(nFlag && !prebuiltPlan){
+      // Planner path (cancel was NOT a user choice): these breaks genuinely
+      // couldn't be covered, so keep the loud, actionable alert. Current
+      // started-shift callers all pass a prebuiltPlan, so this is
+      // dormant-but-defensive for any future planner-on-started-shift use.
+      let msg = `${firstName(bnName)} marked unavailable.`;
+      if(nAbs) msg += `\n\n✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`;
       const flagList = flaggedNurses.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       msg += `\n\n⚠️ The following breaks could not be covered — Please notify!\n\n${flagList}`;
       await showAlert(msg);
+    } else if(nFlag){
+      // Choice-modal path with cancels: the user explicitly chose to leave these
+      // runs uncovered in the modal (the confirm button showed "cancel N"), so a
+      // blocking "could not be covered" alert is redundant + inaccurate. Use a
+      // non-blocking amber toast that still nudges the coordinator to notify the
+      // affected staff (those nurses won't get their break).
+      const parts = [];
+      if(nAbs) parts.push(`${nAbs} redistributed`);
+      parts.push(`${nFlag} left uncovered — notify affected staff`);
+      toast(`${firstName(bnName)} marked unavailable. ${parts.join(', ')}.`, true);
     } else {
-      toast(msg.replace(/\n/g, ' '));
+      // All runs absorbed — plain success toast.
+      toast(`${firstName(bnName)} marked unavailable. ✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`);
     }
 
     // Update assignment display immediately, background refresh for full state
