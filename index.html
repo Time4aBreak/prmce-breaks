@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-01-168';
+const APP_VERSION = '2026-06-03-169';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3748,6 +3748,17 @@ async function commitUnitChange(){
         // pick the substitute as of that future time.
         const _subAsOf = pending.effectiveAt;
 
+        // C (least-covered substitute): pre-fetch trailing per-shift coverage
+        // counts so findSubstituteUnit picks the least-covered open unit rather
+        // than alphabetical-first — the same fairness signal the deal uses.
+        // Fetched once per distinct shift in this batch (self-caching). _subOverlay
+        // tracks picks made in THIS close so successive substitutes spread across
+        // units instead of all landing on the current least-covered one.
+        const _shiftsInBatch = [...new Set(bnUpdates.map(b => b.shift))];
+        const _baseCounts = {};
+        for(const _sh of _shiftsInBatch){ _baseCounts[_sh] = await getUnitCoverageCounts(_sh).catch(() => ({})); }
+        const _subOverlay = {}; // `${unit}|${shift}` -> extra count from this batch
+
         const _substitutes = []; // {schedId, bn, date, shift, oldUnits, newUnits, substitute}
 
         // Sequentially compute substitutes per BN so the "already taken in this batch"
@@ -3778,7 +3789,14 @@ async function commitUnitChange(){
             return s;
           });
 
-          const substitute = findSubstituteUnit(i.bn, unit, i.date, i.shift, adjustedScheds, _subAsOf);
+          // Merge this shift's base coverage counts with the batch overlay so
+          // each successive pick sees the running tally and spreads.
+          const _mergedCounts = { ...(_baseCounts[i.shift] || {}) };
+          for(const _k in _subOverlay){
+            const _parts = _k.split('|');
+            if(_parts[1] === i.shift) _mergedCounts[_parts[0]] = (_mergedCounts[_parts[0]] || 0) + _subOverlay[_k];
+          }
+          const substitute = findSubstituteUnit(i.bn, unit, i.date, i.shift, adjustedScheds, _subAsOf, _mergedCounts);
 
           // Build new Units array: remove closed unit, add substitute (if any)
           let newUnits = units.filter(u => u !== unit);
@@ -3786,6 +3804,11 @@ async function commitUnitChange(){
             newUnits.push(substitute);
             if(!_picksThisBatch[batchKey]) _picksThisBatch[batchKey] = {};
             _picksThisBatch[batchKey][i.bn] = substitute;
+            // Bump the batch overlay so the next pick prefers a different unit
+            // (3C/4C count under the shared 'C_PAIR' key).
+            const _ovUnit = (substitute === '3C' || substitute === '4C') ? 'C_PAIR' : substitute;
+            const _ovKey = _ovUnit + '|' + i.shift;
+            _subOverlay[_ovKey] = (_subOverlay[_ovKey] || 0) + 1;
           }
           _substitutes.push({ schedId: i.schedId, bn: i.bn, date: i.date, shift: i.shift, oldUnits: units, newUnits, substitute });
         }
@@ -8031,7 +8054,7 @@ function getUnitWing(unit){
 //   asOf          — Date for status check; null = shift-start
 //
 // Returns: substitute unit name (e.g. '3A') or null.
-function findSubstituteUnit(bnName, closedUnit, date, shift, allScheds, asOf=null){
+function findSubstituteUnit(bnName, closedUnit, date, shift, allScheds, asOf=null, coverageCounts={}){
   // Build set of units already covered by OTHER active BNs on this shift
   const otherBNsUnits = new Set();
   allScheds.forEach(s => {
@@ -8084,26 +8107,19 @@ function findSubstituteUnit(bnName, closedUnit, date, shift, allScheds, asOf=nul
   }
   if(!candidates.length) return null;
 
-  // Fairness pick: prefer least-recently-covered by this BN.
-  // Wing history is stored per-BN per-date as a list of units (most recent first).
-  // Pull recent history for this BN across the last 30 days for context.
-  // Falls back to alphabetical if no history found.
-  const historyCounts = {}; // unit -> times covered in recent history
-  try {
-    const baseDate = new Date(date + 'T12:00:00');
-    for(let i = 0; i < 30; i++){
-      const d = new Date(baseDate); d.setDate(d.getDate() - i);
-      const dStr = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-      const hist = JSON.parse(localStorage.getItem(`bnWingHistory_${bnName}_${dStr}`) || '[]');
-      hist.forEach(u => { historyCounts[u] = (historyCounts[u] || 0) + 1; });
-    }
-  } catch{}
-
-  // Sort candidates: lowest history count first, then alphabetical
+  // Fairness pick: prefer the LEAST-COVERED open unit (same signal the deal
+  // uses via getUnitCoverageCounts), so substitutes spread across units instead
+  // of piling onto whatever sorts first alphabetically. coverageCounts is a
+  // unit->count map (trailing window) passed in by the caller; 3C/4C share the
+  // 'C_PAIR' count since coverage is tracked at the pair level. An empty map
+  // (no counts passed) degrades gracefully to pure alphabetical. Alphabetical
+  // is the final tiebreak so the pick stays deterministic across devices.
+  const covOf = (u) => (u === '3C' || u === '4C')
+    ? (coverageCounts['C_PAIR'] || 0)
+    : (coverageCounts[u] || 0);
   candidates.sort((a, b) => {
-    const aCount = historyCounts[a] || 0;
-    const bCount = historyCounts[b] || 0;
-    if(aCount !== bCount) return aCount - bCount;
+    const ca = covOf(a), cb = covOf(b);
+    if(ca !== cb) return ca - cb;
     return a.localeCompare(b);
   });
 
