@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-03-170';
+const APP_VERSION = '2026-06-03-171';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3950,13 +3950,15 @@ async function commitUnitChange(){
         }
       }
 
-      // ── Build 170: reopen coverage-gap detection (step 1 — report only) ──
+      // ── Build 170–171: reopen coverage-gap handling ──
       // After a reopen, find shifts where this unit is now OPEN but covered by
       // nobody, and classify each by the reopen's effective time vs the shift
-      // window (future / current-in-progress / past). Remediation comes later:
-      // future gaps → recalcFairnessForShift; current gaps → same-wing prompt.
-      // This build only surfaces the list so detection can be verified live
-      // across Apply Now and Scheduled reopens before anything writes.
+      // window (future / current-in-progress / past). Future gaps are re-dealt
+      // here (build 171, below) so the unit is folded back into a fair
+      // distribution; current-in-progress gaps are only reported for now and
+      // get the same-wing coverage prompt in a later step; past shifts are
+      // skipped. Works for both Apply Now and Scheduled reopens — reopenAt =
+      // pending.effectiveAt drives the classification.
       // Non-fatal: any failure here leaves the reopen itself intact.
       let _gapTail = '';
       try {
@@ -3995,16 +3997,39 @@ async function commitUnitChange(){
           (_reopenAt < _shiftStart ? _futureGaps : _currentGaps).push(`${_d} ${_sh}`);
         }
         const _fmtList = (a) => a.length <= 6 ? a.join(', ') : a.slice(0,6).join(', ') + ` +${a.length-6} more`;
+
+        // ── Build 171: future branch — re-deal each future gap shift so the
+        // now-open unit is folded back into a fair distribution. Sequential
+        // awaited recalcs (no parallel fan-out, so no Apps Script concurrency
+        // trip). Current-shift gaps are left for the same-wing prompt (next
+        // step) and only reported here. recalcFairnessForShift re-runs
+        // suggestAssignments for the shift's active BNs — its pool is gated by
+        // isUnitOpenForShift, so the reopened unit is now included — and
+        // patches Units (C_PAIR-expanded) + rotations.
+        let _redealt = 0, _redealFail = 0;
+        if(_futureGaps.length){
+          showBusy(`Re-dealing ${_futureGaps.length} future shift${_futureGaps.length!==1?'s':''} for ${unit}…`);
+          for(const _g of _futureGaps){
+            const _sp = _g.indexOf(' ');
+            const _gd = _g.slice(0, _sp), _gs = _g.slice(_sp + 1);
+            try {
+              const _res = await recalcFairnessForShift(_gd, _gs);
+              if(_res && _res.recalced && _res.recalced.length) _redealt++; else _redealFail++;
+            } catch(_re){ _redealFail++; console.warn('[reopen-gap] recalc failed', _g, _re && _re.message); }
+          }
+          hideBusy();
+        }
+
         const _seg = [];
-        if(_currentGaps.length) _seg.push(`current ${_fmtList(_currentGaps)}`);
-        if(_futureGaps.length)  _seg.push(`future ${_fmtList(_futureGaps)}`);
+        if(_redealt || _redealFail) _seg.push(`re-dealt ${_redealt} future${_redealFail ? `, ${_redealFail} failed` : ''}`);
+        if(_currentGaps.length) _seg.push(`current ${_fmtList(_currentGaps)} uncovered`);
         if(_seg.length){
-          _gapTail = ` · GAPS — ${_seg.join(' · ')}`;
-          console.warn(`[reopen-gap] ${unit}: ${_currentGaps.length} current, ${_futureGaps.length} future`, { current: _currentGaps, future: _futureGaps });
+          _gapTail = ` · ${_seg.join(' · ')}`;
+          console.warn(`[reopen-gap] ${unit}: re-dealt ${_redealt}/${_futureGaps.length} future, ${_currentGaps.length} current uncovered`, { future: _futureGaps, current: _currentGaps, redealt: _redealt, failed: _redealFail });
         } else {
           console.log(`[reopen-gap] ${unit}: no coverage gaps`);
         }
-      } catch(_e){ console.warn('[reopen-gap] scan failed (non-fatal):', _e && _e.message); }
+      } catch(_e){ try { hideBusy(); } catch {} console.warn('[reopen-gap] scan/redeal failed (non-fatal):', _e && _e.message); }
 
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
       const revertedCount = relevantSubs ? relevantSubs.length : 0;
@@ -5771,10 +5796,12 @@ async function recalculateRotation(bnName, date, shift, asOf=null){
 
 // Re-runs the fairness suggester for all active BNs on a date+shift, then
 // patches each BN's Units and refreshes their rotation. As of post-build-83
-// revert (Tomas decision 2026-05-22), this is ONLY called from the roster
-// Remove cascade — when a BN quits or is fired and their units need to be
-// permanently absorbed by the remaining BNs. Mark Unavailable / Available
-// no longer invoke this (those are temporary no-ops for other BNs).
+// revert (Tomas decision 2026-05-22), this is called from the roster Remove
+// cascade — when a BN quits or is fired and their units need to be permanently
+// absorbed by the remaining BNs — and, as of build 171, from the reopen
+// future-branch, folding a reopened unit back into future deals where it was
+// excluded while closed. Mark Unavailable / Available do NOT invoke this
+// (those are temporary no-ops for other BNs).
 //
 // options.excluding: name of a BN to exclude from the recalc pool (e.g., the
 //   BN being removed permanently). If omitted, all active rows are included.
