@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-03-171';
+const APP_VERSION = '2026-06-04-173';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3950,91 +3950,10 @@ async function commitUnitChange(){
         }
       }
 
-      // ── Build 170–171: reopen coverage-gap handling ──
-      // After a reopen, find shifts where this unit is now OPEN but covered by
-      // nobody, and classify each by the reopen's effective time vs the shift
-      // window (future / current-in-progress / past). Future gaps are re-dealt
-      // here (build 171, below) so the unit is folded back into a fair
-      // distribution; current-in-progress gaps are only reported for now and
-      // get the same-wing coverage prompt in a later step; past shifts are
-      // skipped. Works for both Apply Now and Scheduled reopens — reopenAt =
-      // pending.effectiveAt drives the classification.
-      // Non-fatal: any failure here leaves the reopen itself intact.
-      let _gapTail = '';
-      try {
-        const _reopenAt = pending.effectiveAt;
-        // Floor the fetch one day early so a current Noc shift (whose ShiftDate
-        // is the prior calendar day) is included; the past-shift filter below
-        // drops anything actually over.
-        const _fl = new Date(_reopenAt); _fl.setDate(_fl.getDate() - 1);
-        const _flStr = `${_fl.getFullYear()}-${String(_fl.getMonth()+1).padStart(2,'0')}-${String(_fl.getDate()).padStart(2,'0')}`;
-        const _rows = await spGet(LISTS.schedule, `ShiftDate ge '${_flStr}'`);
-        // Group active (non-inactive, non-supplemental) assignments by date+shift.
-        const _byShift = {};
-        for(const _s of _rows){
-          if(_s.Status === 'inactive') continue;
-          if(String(_s.IsSupplemental) === '1') continue;
-          const _k = _s.ShiftDate.slice(0,10) + '|' + _s.ShiftType;
-          (_byShift[_k] = _byShift[_k] || []).push(_s);
-        }
-        // C_PAIR-aware membership: is `unit` covered by this BN's Units string?
-        const _covers = (raw) => {
-          let _u = []; try { _u = JSON.parse(raw || '[]'); } catch {}
-          return _u.includes(unit) || ((unit === '3C' || unit === '4C') && _u.includes('C_PAIR'));
-        };
-        const _futureGaps = [], _currentGaps = [];
-        for(const _k in _byShift){
-          const _parts = _k.split('|'); const _d = _parts[0], _sh = _parts[1];
-          const _shiftStart = slotDateTime(_d, _sh === 'Day' ? '0800' : '2000', _sh);
-          const _shiftEnd   = slotDateTime(_d, _sh === 'Day' ? '2030' : '0830', _sh);
-          if(_reopenAt > _shiftEnd) continue;                       // past — can't fix
-          // Evaluate openness at the earliest in-shift moment the reopen is in
-          // effect: shift-start for a future shift, the effective time for the
-          // in-progress shift (shift-start would still read closed there).
-          const _evalAt = _reopenAt > _shiftStart ? _reopenAt : _shiftStart;
-          if(effectiveUnitStatusAt(unit, _evalAt) !== 'open') continue; // not open this shift (e.g. a later stacked close)
-          if(_byShift[_k].some(_s => _covers(_s.Units))) continue;  // already covered
-          (_reopenAt < _shiftStart ? _futureGaps : _currentGaps).push(`${_d} ${_sh}`);
-        }
-        const _fmtList = (a) => a.length <= 6 ? a.join(', ') : a.slice(0,6).join(', ') + ` +${a.length-6} more`;
-
-        // ── Build 171: future branch — re-deal each future gap shift so the
-        // now-open unit is folded back into a fair distribution. Sequential
-        // awaited recalcs (no parallel fan-out, so no Apps Script concurrency
-        // trip). Current-shift gaps are left for the same-wing prompt (next
-        // step) and only reported here. recalcFairnessForShift re-runs
-        // suggestAssignments for the shift's active BNs — its pool is gated by
-        // isUnitOpenForShift, so the reopened unit is now included — and
-        // patches Units (C_PAIR-expanded) + rotations.
-        let _redealt = 0, _redealFail = 0;
-        if(_futureGaps.length){
-          showBusy(`Re-dealing ${_futureGaps.length} future shift${_futureGaps.length!==1?'s':''} for ${unit}…`);
-          for(const _g of _futureGaps){
-            const _sp = _g.indexOf(' ');
-            const _gd = _g.slice(0, _sp), _gs = _g.slice(_sp + 1);
-            try {
-              const _res = await recalcFairnessForShift(_gd, _gs);
-              if(_res && _res.recalced && _res.recalced.length) _redealt++; else _redealFail++;
-            } catch(_re){ _redealFail++; console.warn('[reopen-gap] recalc failed', _g, _re && _re.message); }
-          }
-          hideBusy();
-        }
-
-        const _seg = [];
-        if(_redealt || _redealFail) _seg.push(`re-dealt ${_redealt} future${_redealFail ? `, ${_redealFail} failed` : ''}`);
-        if(_currentGaps.length) _seg.push(`current ${_fmtList(_currentGaps)} uncovered`);
-        if(_seg.length){
-          _gapTail = ` · ${_seg.join(' · ')}`;
-          console.warn(`[reopen-gap] ${unit}: re-dealt ${_redealt}/${_futureGaps.length} future, ${_currentGaps.length} current uncovered`, { future: _futureGaps, current: _currentGaps, redealt: _redealt, failed: _redealFail });
-        } else {
-          console.log(`[reopen-gap] ${unit}: no coverage gaps`);
-        }
-      } catch(_e){ try { hideBusy(); } catch {} console.warn('[reopen-gap] scan/redeal failed (non-fatal):', _e && _e.message); }
-
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
       const revertedCount = relevantSubs ? relevantSubs.length : 0;
       const revertTail = revertedCount ? ` · ${revertedCount} substitute${revertedCount!==1?'s':''} handled` : '';
-      toast(`${unit} opening ${when}${revertTail}${_gapTail}`);
+      toast(`${unit} opening ${when}${revertTail}`);
     }
 
     refreshUnitStatusGrid();
@@ -14470,6 +14389,14 @@ async function submitStagedActions(){
           unit = bnUnits[0] || '';
         }
         const nurseDisplay = info.ext ? `${info.nurseName} (${info.ext})` : info.nurseName;
+        // Only stamp the walk-up break taken if its slot start time has
+        // already passed. A break logged for a FUTURE slot stays PENDING
+        // (like a Sign-Up booking) so it (a) shows ✓Taken/✗Not-Taken/Cancel,
+        // (b) doesn't miscount as taken in analytics/Coverage before it
+        // happens, and (c) stays visible to Mark-Unavailable redistribution —
+        // confirmed breaks were being silently orphaned because isConfirmed()
+        // excludes them.
+        const startPassed = slotEventTime({ SlotTime: info.slotTime, SlotDate: slotDate, ShiftType: shift }) <= Date.now();
         const created = await spPost(LISTS.bookings, {
           Title: `${info.nurseName}-${slotDate}-${info.slotTime}-${unit}`,
           NurseName: nurseDisplay,
@@ -14477,8 +14404,8 @@ async function submitStagedActions(){
           SlotDate: slotDate,
           SlotTime: info.slotTime,
           ShiftType: shift,
-          IsCompleted: 1,
-          BreakStatus: 'confirmed',
+          IsCompleted: startPassed ? 1 : 0,
+          BreakStatus: startPassed ? 'confirmed' : '',
           IsBNBreak: 0,
           // Track creator so cross-unit manual breaks are visible to the
           // logging BN but NOT to other BNs covering the same shift. Legacy
