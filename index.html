@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-182';
+const APP_VERSION = '2026-06-05-183';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3923,7 +3923,11 @@ async function commitUnitChange(){
       // for entries with original === this unit, then per entry:
       //   - Future shifts → auto-revert (Units patch + recompute)
       //   - Past shifts   → drop log entry, no Units change
-      //   - Current mid-shift → choice modal (Keep substitute / Switch back)
+      //   - Current mid-shift → Apply-Now reopens fold this into the unified
+      //     reopen-coverage picker below (build 183); scheduled reopens keep
+      //     the per-BN Switch-back/Keep choice (confirmSubstituteRevert).
+      const isNow = (pending.effectiveAt.getTime() - Date.now()) < 60*1000;
+      let _reopenSubContext = [];
       const allLog = getUnitSubLog();
       const relevantSubs = allLog.filter(e => e.original === unit);
       if(relevantSubs.length){
@@ -3963,43 +3967,64 @@ async function commitUnitChange(){
           );
         }
 
-        // Mid-shift entries: show choice modal per BN (sequential)
+        // Mid-shift entries.
         if(midShiftSubs.length){
-          // Build 108: hide the "Applying X change…" overlay before showing
-          // the modal, otherwise the overlay covers the buttons and the user
-          // can't pick. Restore busy state between iterations if there are
-          // more BNs to process.
-          hideBusy();
-          for(const e of midShiftSubs){
-            const choice = await confirmSubstituteRevert(e);
-            if(choice === 'switch_back'){
-              showBusy(`Switching ${firstName(e.bn)} back to ${e.original}…`);
-              const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
-              if(sched.length){
-                let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
-                const newUnits = units.filter(u => u !== e.substitute);
-                if(!newUnits.includes(e.original)) newUnits.push(e.original);
-                if(JSON.stringify(newUnits) !== JSON.stringify(units)){
-                  await spPatch(LISTS.schedule, e.schedId, { Units: JSON.stringify(newUnits) }).catch(()=>{});
-                }
-                recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
-              }
-              hideBusy();
-            }
-            // Either way (keep or switch_back), remove from log — the
-            // substitution is no longer "pending revert"; the user has decided.
+          if(isNow){
+            // Build 183: Apply-Now live reopen — fold these into the unified
+            // reopen-coverage picker below. Capture as context (so the picker
+            // can show who's substituting in the reopened unit's place) and
+            // clear the log entries; the picker now owns coverage.
+            _reopenSubContext = midShiftSubs;
             await removeUnitSubLogEntries(le =>
-              le.schedId === e.schedId && le.original === e.original && le.substitute === e.substitute
+              midShiftSubs.some(m => m.schedId === le.schedId && m.original === le.original && m.substitute === le.substitute)
             );
+          } else {
+            // Scheduled reopen landing mid-shift: keep the per-BN choice (the
+            // picker is scoped to live reopens).
+            // Build 108: hide the "Applying X change…" overlay before showing
+            // the modal, otherwise the overlay covers the buttons.
+            hideBusy();
+            for(const e of midShiftSubs){
+              const choice = await confirmSubstituteRevert(e);
+              if(choice === 'switch_back'){
+                showBusy(`Switching ${firstName(e.bn)} back to ${e.original}…`);
+                const sched = await spGet(LISTS.schedule, `Id eq ${e.schedId}`).catch(()=>[]);
+                if(sched.length){
+                  let units = []; try { units = JSON.parse(sched[0].Units||'[]'); } catch{}
+                  const newUnits = units.filter(u => u !== e.substitute);
+                  if(!newUnits.includes(e.original)) newUnits.push(e.original);
+                  if(JSON.stringify(newUnits) !== JSON.stringify(units)){
+                    await spPatch(LISTS.schedule, e.schedId, { Units: JSON.stringify(newUnits) }).catch(()=>{});
+                  }
+                  recomputeBNWithPastPreserved(e.bn, e.date, e.shift).catch(()=>{});
+                }
+                hideBusy();
+              }
+              // Either way (keep or switch_back), remove from log — the
+              // substitution is no longer "pending revert"; the user has decided.
+              await removeUnitSubLogEntries(le =>
+                le.schedId === e.schedId && le.original === e.original && le.substitute === e.substitute
+              );
+            }
           }
         }
       }
 
+      // Build 183: Apply-Now (live) reopens → unified in-progress coverage
+      // picker. For each shift underway, ask who covers the reopened unit (or
+      // leave it uncovered). Replaces the per-BN Switch-back/Keep modal for live
+      // reopens and fills the case where the unit was closed before the shift
+      // was dealt (nobody held it → no swap). Scheduled reopens skip this.
+      if(isNow){
+        await promptReopenCoverage(unit, pending.effectiveAt, _reopenSubContext);
+      }
+
       // 2b: re-deal every fully-future shift so the reopened unit is folded
       // back into coverage. The in-progress / straddling shift is handled by the
-      // sub-log revert + mid-shift choice modal above; this owns the future,
-      // which the existing logic can't re-fold — those shifts were re-dealt
-      // without the unit on close, so there's no swap to revert.
+      // picker (live reopens) or the sub-log revert + Switch-back/Keep modal
+      // (scheduled reopens) above; this owns the future, which the existing
+      // logic can't re-fold — those shifts were re-dealt without the unit on
+      // close, so there's no swap to revert.
       showBusy('Re-dealing future shifts…');
       try {
         await redealFutureShifts(pending.effectiveAt, { commit: true });
@@ -4009,10 +4034,8 @@ async function commitUnitChange(){
       }
       hideBusy();
 
-      const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
-      const revertedCount = relevantSubs ? relevantSubs.length : 0;
-      const revertTail = revertedCount ? ` · ${revertedCount} substitute${revertedCount!==1?'s':''} handled` : '';
-      toast(`${unit} opening ${when}${revertTail}`);
+      const when = isNow ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
+      toast(`${unit} ${isNow ? 'reopened' : 'opening ' + when}`);
     }
 
     refreshUnitStatusGrid();
@@ -4119,6 +4142,119 @@ async function promptReassignBN(impact){
       } catch(e){ hideBusy(); toast(e.message, true); }
       resolve();
     };
+  });
+}
+
+// ── Reopen coverage picker (Build 183) ───────────────────────────────────
+// Unified in-progress reopen handler. When a unit reopens Apply-Now (live), it
+// comes back open but in nobody's Units on the shift(s) currently underway —
+// either because it was closed before the shift was dealt (no swap to revert)
+// or because a mid-shift substitute took its place. The engine can't re-deal a
+// shift in motion, so this asks the admin who should cover the reopened unit on
+// each live shift (or leave it uncovered). Replaces the old per-BN
+// Switch-back/Keep modal (confirmSubstituteRevert) for live reopens and fills
+// the no-substitute case. Scheduled reopens are not routed here — their future
+// shifts are re-dealt by redealFutureShifts.
+async function promptReopenCoverage(unit, reopenAt, subContext){
+  const floor = activeShiftFloor();
+  const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${floor}'`).catch(() => []);
+  const core = scheds.filter(s =>
+    s.Status !== 'inactive' && String(s.IsSupplemental) !== '1' &&
+    (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
+  const unitWing = getUnitWing(unit);
+  const atMs = +reopenAt;
+
+  // Group rows by the shift currently underway (reopenAt within [start, end]).
+  const groups = {};
+  core.forEach(s => {
+    const d = (s.ShiftDate || '').slice(0, 10);
+    const startMs = +slotDateTime(d, s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType);
+    const endMs   = +slotDateTime(d, s.ShiftType === 'Day' ? '2030' : '0830', s.ShiftType);
+    if(atMs >= startMs && atMs <= endMs){
+      (groups[d + '|' + s.ShiftType] = groups[d + '|' + s.ShiftType] || []).push(s);
+    }
+  });
+
+  for(const key of Object.keys(groups)){
+    const [date, shift] = key.split('|');
+    const rows = groups[key];
+    // Already covered on this shift? (shouldn't happen on reopen; guard anyway)
+    const covered = rows.some(s => {
+      let u = []; try { u = JSON.parse(s.Units || '[]'); } catch(e){}
+      return u.includes(unit);
+    });
+    if(covered) continue;
+
+    // Same-wing candidates on this shift, fewest-units-first (most spare on top).
+    const cands = rows.map(s => {
+      let u = []; try { u = JSON.parse(s.Units || '[]'); } catch(e){}
+      return { bnName: s.BreakNurseName, schedId: s.Id, bnUnits: u };
+    }).filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing))
+      .sort((a, b) => a.bnUnits.length - b.bnUnits.length);
+
+    const subHere = (subContext || []).filter(e => e.date === date && e.shift === shift);
+
+    hideBusy(); // don't let the busy overlay cover the picker buttons
+    const pick = await reopenCoveragePicker(unit, date, shift, cands, subHere);
+    if(pick){
+      showBusy(`Assigning ${unit} to ${firstName(pick.bnName)}…`);
+      const sched = await spGet(LISTS.schedule, `Id eq ${pick.schedId}`).catch(() => []);
+      if(sched.length){
+        let units = []; try { units = JSON.parse(sched[0].Units || '[]'); } catch(e){}
+        if(!units.includes(unit)){
+          units.push(unit);
+          await spPatch(LISTS.schedule, pick.schedId, { Units: JSON.stringify(units) }).catch(() => {});
+          recomputeBNWithPastPreserved(pick.bnName, date, shift).catch(() => {});
+        }
+      }
+      hideBusy();
+    }
+  }
+}
+
+// Modal for promptReopenCoverage. Lists same-wing break nurses on the live
+// shift as one-tap buttons (already ordered fewest-units-first), plus "Leave
+// uncovered". Returns {bnName, schedId} or null. If a mid-shift substitute is
+// in play, surfaces it as context — the substitute's own coverage is left
+// untouched; this only places the reopened unit.
+function reopenCoveragePicker(unit, date, shift, candidates, subContext){
+  return new Promise(resolve => {
+    const existing = document.getElementById('reopenCoverageModal');
+    if(existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'reopenCoverageModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+    const subLine = (subContext && subContext.length)
+      ? `<div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${
+          subContext.map(e => `${firstName(e.bn)} is currently covering <strong>${e.substitute}</strong> in ${unit}'s place.`).join('<br>')
+        }</div>`
+      : '';
+
+    const bnButtons = candidates.length
+      ? candidates.map(c =>
+          `<button type="button" class="btn btn-primary _rcPick" data-bn="${c.bnName}" data-sched="${c.schedId}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%">
+             <span>${firstName(c.bnName)}</span>
+             <span style="font-size:.78rem;opacity:.8;font-weight:400">${c.bnUnits.length} unit${c.bnUnits.length !== 1 ? 's' : ''}</span>
+           </button>`).join('')
+      : `<div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">No same-wing break nurses on this shift to cover ${unit}.</div>`;
+
+    modal.innerHTML = `
+      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${unit} reopened mid-shift</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
+        ${subLine}
+        <div style="font-size:.85rem;margin-bottom:10px">Who covers <strong>${unit}</strong> on this shift?</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${bnButtons}</div>
+        <button type="button" class="btn btn-ghost" id="_rcLeave">Leave ${unit} uncovered</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const cleanup = (result) => { modal.remove(); resolve(result); };
+    modal.querySelectorAll('._rcPick').forEach(btn => {
+      btn.onclick = () => cleanup({ bnName: btn.getAttribute('data-bn'), schedId: btn.getAttribute('data-sched') });
+    });
+    document.getElementById('_rcLeave').onclick = () => cleanup(null);
   });
 }
 
