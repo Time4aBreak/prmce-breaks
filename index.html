@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-04-177';
+const APP_VERSION = '2026-06-05-178';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5771,6 +5771,98 @@ async function recalcFairnessForShift(date, shift, options={}){
     }
   }
   return { recalced: succeeded, failed };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Unified future-shift re-deal engine (Part B — step 1: standalone core).
+//
+// Re-deals every scheduled shift whose nominal start is AFTER `fromTime`,
+// in ONE batched pass. The in-progress and past shifts are skipped — the
+// current shift is handled surgically elsewhere. Each shift is dealt against
+// the CURRENT unit statuses, so a closed unit drops out and a reopened one
+// folds back in automatically; that's why this single function serves close,
+// open, and cancel-scheduled-either alike (re-derive, no snapshot/undo).
+//
+// Cross-shift fairness: a `batchCountOverlay` (keyed `slot|shift`, the same
+// mechanism the import and the 169 substitute pick use) is threaded across
+// shifts so coverage spreads over the horizon instead of dogpiling the
+// lowest-count units on every shift. One bulk write via
+// bulkSaveUnitsAndRotations, which skips any row whose units didn't change
+// (no needless churn).
+//
+// STEP 1: NOT yet wired to any close/open/cancel trigger — call it from the
+// console to verify the plan on known shifts. Previews by default; pass
+// { commit:true } to persist.
+//
+// CAVEAT: suggestAssignments persists per-BN wing history as a side effect on
+// every call, so even a preview rewrites wing history for the dealt BNs/dates.
+// Pre-launch this is harmless (no real data; the next deal overwrites via the
+// date-keyed dedup), but a commit-test teardown should reset wing history too.
+//
+// Returns: { shifts:[{date,shift,bns,changed}], totalChanged, updateCount,
+//            committed, save, _updates }
+async function redealFutureShifts(fromTime, opts = {}){
+  fromTime = +fromTime || Date.now();
+  clearCoverageCountsCache(); // fresh baseline; the overlay layers deltas on top
+
+  // One read: schedule rows from a day before the cutoff date forward (the
+  // precise per-shift start filter below excludes anything not actually future).
+  const floorDate = new Date(fromTime - 86400000).toISOString().slice(0, 10);
+  const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${floorDate}'`);
+
+  // Group active core BNs by future shift. Exclude inactive + supplemental —
+  // suggestAssignments deals the core team; supplementals are additive and not
+  // re-dealt (the same exclusion recalcFairnessForShift uses).
+  const byKey = {};       // "date|shift" -> [BreakNurseName]
+  const schedByKey = {};  // "date|shift" -> [sched rows]
+  for(const s of allScheds){
+    if(s.Status === 'inactive') continue;
+    if(String(s.IsSupplemental) === '1') continue;
+    const shift = s.ShiftType;
+    if(shift !== 'Day' && shift !== 'Noc') continue;
+    const date = (s.ShiftDate || '').slice(0, 10);
+    // Future only: nominal shift start (8AM Day / 8PM Noc) strictly after fromTime.
+    const startMs = +slotDateTime(date, shift === 'Day' ? '0800' : '2000', shift);
+    if(!(startMs > fromTime)) continue;
+    const key = `${date}|${shift}`;
+    (byKey[key] = byKey[key] || []).push(s.BreakNurseName);
+    (schedByKey[key] = schedByKey[key] || []).push(s);
+  }
+
+  // Deal each future shift in chronological order, threading the overlay.
+  const batchCountOverlay = {};
+  const updates = [];
+  const summary = [];
+  for(const key of Object.keys(byKey).sort()){
+    const [date, shift] = key.split('|');
+    const nurses = byKey[key];
+    if(!nurses.length) continue;
+    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+    let changed = 0;
+    for(const s of schedByKey[key]){
+      const raw = suggestions[s.BreakNurseName] || [];
+      const newUnits = expandSuggestionUnits(raw);   // C_PAIR -> ['3C','4C']
+      let oldUnits = []; try { oldUnits = JSON.parse(s.Units || '[]'); } catch {}
+      updates.push({ schedId: s.Id, bn: s.BreakNurseName, date, shift, oldUnits, newUnits });
+      if(JSON.stringify(newUnits) !== JSON.stringify(oldUnits)) changed++;
+      // Increment overlay on RAW tokens (incl C_PAIR) to match the pool keys.
+      raw.forEach(slot => {
+        batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
+      });
+    }
+    summary.push({ date, shift, bns: nurses.length, changed });
+  }
+
+  const totalChanged = summary.reduce((a, x) => a + x.changed, 0);
+
+  // Preview by default — inspect the plan before persisting (observe-before-commit).
+  let save = null;
+  if(opts.commit){
+    save = await bulkSaveUnitsAndRotations(updates);
+    clearCoverageCountsCache(); // counts changed after the write
+  }
+
+  return { shifts: summary, totalChanged, updateCount: updates.length, committed: !!opts.commit, save, _updates: updates };
 }
 
 let _loadSlotsGen = 0; // generation counter to discard stale async results
