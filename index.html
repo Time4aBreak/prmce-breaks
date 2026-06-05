@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-178';
+const APP_VERSION = '2026-06-05-179';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5831,13 +5831,14 @@ async function redealFutureShifts(fromTime, opts = {}){
 
   // Deal each future shift in chronological order, threading the overlay.
   const batchCountOverlay = {};
+  const wingHistoryBatch = {};
   const updates = [];
   const summary = [];
   for(const key of Object.keys(byKey).sort()){
     const [date, shift] = key.split('|');
     const nurses = byKey[key];
     if(!nurses.length) continue;
-    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+    const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, wingHistoryBatch);
     let changed = 0;
     for(const s of schedByKey[key]){
       const raw = suggestions[s.BreakNurseName] || [];
@@ -5859,6 +5860,14 @@ async function redealFutureShifts(fromTime, opts = {}){
   let save = null;
   if(opts.commit){
     save = await bulkSaveUnitsAndRotations(updates);
+    // Flush wing history in ONE batched round trip (vs one syncedLS.set per
+    // BN per shift). Commit-gated: a preview makes zero backend writes and
+    // keeps wing history consistent with the units write.
+    const whEntries = Object.keys(wingHistoryBatch).map(k => ({ key: k, value: wingHistoryBatch[k] }));
+    if(whEntries.length){
+      try { await syncedLS.setMany(whEntries); }
+      catch(e){ console.warn('[redealFutureShifts] wing-history batch flush failed:', e.message); }
+    }
     clearCoverageCountsCache(); // counts changed after the write
   }
 
@@ -17335,7 +17344,7 @@ function _clearWingHistoryForDate(name, shift, date){
   saveNurseWingHistory(name, shift, existing);
 }
 
-async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
+async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null){
   if(!nurses.length) return {};
 
   // ── Step 1: Pre-warm cross-device cache ─────────────
@@ -17538,7 +17547,18 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}){
         units: nurseSlots.filter(s => s.wing === w).flatMap(s => s.units)
       });
     });
-    saveNurseWingHistory(r.bn, shift, existing);
+    if(wingHistoryBatch){
+      // Re-deal batching: update the local cache now (syncedLS.get reads
+      // localStorage, so the next shift's getNurseWingHistory accumulates
+      // this date) and queue the entry for ONE syncedLS.setMany flush by the
+      // caller — instead of one network write per BN per shift, which floods
+      // the backend at horizon scale.
+      const whKey = `bnWingHistory_${r.bn}_${shift}`;
+      try { localStorage.setItem(whKey, JSON.stringify(existing)); } catch {}
+      wingHistoryBatch[whKey] = existing;
+    } else {
+      saveNurseWingHistory(r.bn, shift, existing);
+    }
     assignments[r.bn] = nurseSlots.map(s => s.slot);
   });
 
