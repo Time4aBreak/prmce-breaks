@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-179';
+const APP_VERSION = '2026-06-05-180';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3720,9 +3720,21 @@ async function commitUnitChange(){
       // their rotation (which excludes the now-closed unit naturally via
       // filterClosedUnits / expandCPair). For each BN whose only coverage
       // was this unit: prompt for reassignment.
+      // 2a: split affected BNs by whether their shift has already started.
+      // In-progress / straddling shifts (nominal start <= effectiveAt) keep the
+      // surgical swap below — you can't re-deal a shift already underway.
+      // Fully-future shifts (start > effectiveAt) are dropped from the surgical
+      // path and handled by redealFutureShifts after, which re-deals the whole
+      // shift around the closure.
+      const _effMs = pending.effectiveAt.getTime();
+      const _inProgressImpacts = pending.bnImpacts.filter(i => {
+        const startMs = +slotDateTime(i.date, i.shift === 'Day' ? '0800' : '2000', i.shift);
+        return !(startMs > _effMs);
+      });
+
       const reassignNeeded = [];
       const bnUpdates = [];
-      for(const i of pending.bnImpacts){
+      for(const i of _inProgressImpacts){
         if(i.hasOtherUnits){
           bnUpdates.push(i);
         } else {
@@ -3840,6 +3852,19 @@ async function commitUnitChange(){
             appliedAt
           })));
         }
+      }
+
+      // 2a: re-deal every fully-future shift (nominal start after effectiveAt)
+      // in one batched pass so the closure is folded in — the in-progress /
+      // straddling shift was handled surgically above. redealFutureShifts reads
+      // the now-written unit status, so the closed unit drops from the future
+      // pool and its slots redistribute fairly across each shift.
+      showBusy('Re-dealing future shifts…');
+      try {
+        await redealFutureShifts(pending.effectiveAt, { commit: true });
+      } catch(e){
+        console.warn('[commitUnitChange] future re-deal failed:', e.message);
+        toast('Future-shift re-deal failed — future assignments may be stale.', true);
       }
 
       hideBusy();
