@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-181';
+const APP_VERSION = '2026-06-05-182';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3699,7 +3699,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:140px;overflow-y:auto;font-size:.82rem">${bnLines}</div>`;
       }
     } else {
-      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} will open ${effectiveLabel}. ${unit} slots will be added to the remaining rotation for affected break nurses — already-claimed bookings stay where they are.</div>`;
+      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} will open ${effectiveLabel}. All future shifts will be re-dealt to fold ${unit} back into coverage — break-nurse assignments may change.</div>`;
     }
 
     const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? 'Confirm & Notify Nurses' : 'Confirm';
@@ -3994,6 +3994,20 @@ async function commitUnitChange(){
           }
         }
       }
+
+      // 2b: re-deal every fully-future shift so the reopened unit is folded
+      // back into coverage. The in-progress / straddling shift is handled by the
+      // sub-log revert + mid-shift choice modal above; this owns the future,
+      // which the existing logic can't re-fold — those shifts were re-dealt
+      // without the unit on close, so there's no swap to revert.
+      showBusy('Re-dealing future shifts…');
+      try {
+        await redealFutureShifts(pending.effectiveAt, { commit: true });
+      } catch(e){
+        console.warn('[commitUnitChange] reopen future re-deal failed:', e.message);
+        toast('Future-shift re-deal failed — future assignments may be stale.', true);
+      }
+      hideBusy();
 
       const when = (pending.effectiveAt.getTime() - Date.now()) < 60*1000 ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
       const revertedCount = relevantSubs ? relevantSubs.length : 0;
