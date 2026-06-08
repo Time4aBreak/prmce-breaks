@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-183';
+const APP_VERSION = '2026-06-05-184';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4156,6 +4156,13 @@ async function promptReassignBN(impact){
 // the no-substitute case. Scheduled reopens are not routed here — their future
 // shifts are re-dealt by redealFutureShifts.
 async function promptReopenCoverage(unit, reopenAt, subContext){
+  // Build 184: 3C/4C/C_PAIR are dealt as a pair by the engine and stored whole
+  // in a nurse's Units, filtered to the open halves at render time. Reopening
+  // either half never strands coverage — whoever holds the pair already carries
+  // it, so the reopened half just starts counting again. There's nothing for
+  // the picker to place; placing a loose half would corrupt the pair. Skip them.
+  // (If a shift has no pair-holder, cover it by assigning the pair via Edit.)
+  if(unit === '3C' || unit === '4C' || unit === 'C_PAIR') return;
   const floor = activeShiftFloor();
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${floor}'`).catch(() => []);
   const core = scheds.filter(s =>
@@ -4239,6 +4246,12 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
            </button>`).join('')
       : `<div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">No same-wing break nurses on this shift to cover ${unit}.</div>`;
 
+    // Build 184: cross-wing escape hint. The picker only lists same-wing nurses
+    // (matching the absorption/transfer wing rule); to use anyone else, leave
+    // the unit uncovered and add it manually from that nurse's Edit.
+    const wing = getUnitWing(unit);
+    const wingHint = `<div style="font-size:.78rem;color:var(--muted);margin:2px 0 12px;line-height:1.4">Only Wing-${wing} nurses are shown. To use anyone else, leave ${unit} uncovered and add it from their Edit.</div>`;
+
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${unit} reopened mid-shift</div>
@@ -4246,6 +4259,7 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
         ${subLine}
         <div style="font-size:.85rem;margin-bottom:10px">Who covers <strong>${unit}</strong> on this shift?</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${bnButtons}</div>
+        ${wingHint}
         <button type="button" class="btn btn-ghost" id="_rcLeave">Leave ${unit} uncovered</button>
       </div>`;
     document.body.appendChild(modal);
