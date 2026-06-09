@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-09-185';
+const APP_VERSION = '2026-06-09-186';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3156,6 +3156,22 @@ async function cancelScheduledUnitChangeUI(unit, effectiveAt){
   } else {
     await cancelScheduledUnitChange(unit, effectiveAt);
   }
+  // 2c: the schedule write re-dealt the future when it was saved (commitUnitChange
+  // re-deals from effectiveAt for scheduled changes too), so cancelling must re-deal
+  // the future back to match the now-reverted status — fold the unit in or drop it
+  // again. Runs after the removal so effectiveUnitStatusAt reads the reverted status.
+  // One call covers 3C and non-3C (suggestAssignments handles 3C/C_PAIR). Mirrors the
+  // close/open branches of commitUnitChange. NOTE: effectiveAt is a local ISO string
+  // here — parse it; redealFutureShifts does +fromTime, and a raw ISO string would
+  // coerce to NaN and silently re-deal from now.
+  showBusy('Re-dealing future shifts…');
+  try {
+    await redealFutureShifts(parseLocalIso(effectiveAt), { commit: true });
+  } catch(e){
+    console.warn('[cancelScheduledUnitChangeUI] future re-deal failed:', e.message);
+    toast('Future-shift re-deal failed — future assignments may be stale.', true);
+  }
+  hideBusy();
   refreshUnitStatusGrid();
   toast('Scheduled change cancelled');
 }
