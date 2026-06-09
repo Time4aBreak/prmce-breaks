@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-05-184';
+const APP_VERSION = '2026-06-09-185';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15608,13 +15608,19 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             const _unitOpts = UNITS.filter(u => isUnitOpenForShiftEffective(u, dt, shift) || u === _myUnit)
               .map(u => `<option value="${u}"${u === _myUnit ? ' selected' : ''}>${u}</option>`).join('');
 
-            // Chip set = all non-hard-blocked slots in this shift minus
-            // any slot with an existing staff booking (anywhere) minus
-            // the primary slot. Unit-agnostic — same chip set regardless
-            // of which unit the user picks in the dropdown.
+            // Chip set = all non-hard-blocked slots in this shift minus any
+            // already-occupied slot minus the primary slot. Occupied = an existing
+            // staff booking (anywhere) OR one of THIS BN's own breaks this shift —
+            // both commit the BN at that time, so logging a staff break onto one
+            // would double-book the slot (the bug this guards against). The BN-break
+            // filter mirrors ownBreakBySlot's scope (NurseName === BNS.name and
+            // SlotDate === dt): allBookings is widened +1 day for Noc, so without the
+            // date check the next shift's pre-midnight breaks would ghost in.
+            // Unit-agnostic — same chip set regardless of which unit is picked.
             const _claimedAnywhere = new Set(
               (allBookings || [])
-                .filter(b => isStaffBooking(b))
+                .filter(b => isStaffBooking(b)
+                  || (isBNBreak(b) && b.NurseName === BNS.name && (b.SlotDate || '').slice(0,10) === dt))
                 .map(b => String(b.SlotTime).padStart(4,'0'))
             );
             const _allSlotsInShift = generateSlots(shift).filter(s => getSlotTier(s, shift) !== 'hardBlocked');
