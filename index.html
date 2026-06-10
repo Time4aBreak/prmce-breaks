@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-09-186';
+const APP_VERSION = '2026-06-10-187';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3600,7 +3600,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       const _scheFromDate = _scheFloor < todayStr ? _scheFloor : todayStr;
       const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFromDate}'`);
       const affectedScheds = allScheds.filter(s => {
-        if(s.Status === 'inactive') return false;
+        if(s.Status === 'inactive' || String(s.IsSupplemental) === '1') return false;
         let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
         // A schedule covers the changing unit if it lists that unit directly,
         // OR (for 3C/4C only) if it lists C_PAIR.
