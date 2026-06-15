@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-10-187';
+const APP_VERSION = '2026-06-14-188';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2987,9 +2987,12 @@ const SLOT_TIERS = {
     // capturing the slots that staff predictably claim. Late absorbed the
     // old Third tier: 1815, 1915, 1935, 1955 — the 1835/1855 hard-blocked
     // gap doesn't need its own tier on either side.
+    // 2026-06-14: 1755 moved Prime->Late so Prime is exactly 24 slots = six
+    // clean blocks of 4 (no trailing 1-slot stub). Day Late is now 5 slots:
+    // 1755,1815,1915,1935,1955. The boundary is deliberately 1755, not 1815.
     earlyLow:    s => { const m = toMin(s); return m >= toMin('0835') && m <= toMin('0935'); },
-    prime:       s => { const m = toMin(s); return m > toMin('0935') && m < toMin('1815'); },
-    lateLow:     s => { const m = toMin(s); return m >= toMin('1815') && m <= toMin('1955'); },
+    prime:       s => { const m = toMin(s); return m > toMin('0935') && m < toMin('1755'); },
+    lateLow:     s => { const m = toMin(s); return m >= toMin('1755') && m <= toMin('1955'); },
     thirdLow:    () => false  // tier retired; kept as no-op for code paths that still reference it
   }
 };
@@ -5740,10 +5743,11 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
     thirdLow: available.filter(s => getSlotTier(s, shift) === 'thirdLow')
   };
 
-  // Block size for low-desirability tiers:
-  // 3 or fewer slots → all one unit (no switching — not worth the move)
-  // 4 or more slots → BLOCK=2 (gentle rotation during low windows)
-  function lowTierBlock(slotCount){ return slotCount <= 3 ? slotCount : 2; }
+  // Tier block sizes:
+  //   Prime → PRIME_BLOCK (4): interleaved rotation through all units.
+  //   Early / Late → one block each (block size = tier length): a single unit
+  //     covers the whole edge tier (4 or 5 slots), no switching inside the tier.
+  //   thirdLow is retired (always empty) and is treated as one block too.
 
   // Assign slots to units in rotation blocks
   function assignPool(slots, unitOrder, blockSize){
@@ -5799,11 +5803,17 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
     return [...units.slice(startIdx), ...units.slice(0, startIdx)];
   }
 
-  // Assign each tier pool with appropriate block size
-  assignPool(tierPools.earlyLow, poolOrder(0), lowTierBlock(tierPools.earlyLow.length));
+  // Prime interleaves in 4-slot blocks; the edge tiers are each a single block.
+  // 2026-06-14 (Variant B): Late uses Prime's offset (1), NOT (2). That starts
+  // Late on the unit Prime OPENED with — always different from the unit Prime
+  // CLOSES on (a 6-block rotation over 2/3/4 units never opens and closes on the
+  // same unit). Prevents the Late block from chaining onto the final Prime block
+  // (the ~3h end-of-shift run that offset-2 produced on 2- and 4-unit shifts), and
+  // on 2-unit splits the two edge blocks across both units (one edge each).
+  assignPool(tierPools.earlyLow, poolOrder(0), tierPools.earlyLow.length || 1);
   assignPool(tierPools.prime,    poolOrder(1), PRIME_BLOCK);
-  assignPool(tierPools.lateLow,  poolOrder(2), lowTierBlock(tierPools.lateLow.length));
-  assignPool(tierPools.thirdLow, poolOrder(3), lowTierBlock(tierPools.thirdLow.length));
+  assignPool(tierPools.lateLow,  poolOrder(1), tierPools.lateLow.length || 1);
+  assignPool(tierPools.thirdLow, poolOrder(3), tierPools.thirdLow.length || 1);
 
   return rotation;
 }
