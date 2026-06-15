@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-14-188';
+const APP_VERSION = '2026-06-15-189';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6646,15 +6646,21 @@ async function loadSlots(silent=false){
         shift: c.ShiftType
       }))
     );
-    const bnStartMins = {};
-    [...covering, ...oppCovering].forEach(c => {
+    // Hide slots before the covering BN's start time. Same-shift covering BN
+    // only: the opposite-shift overlap BN is present throughout the overlap
+    // window they cover, so their start never needs to gate these slots
+    // (folding it in here mismatched frames and caused the post-midnight Noc
+    // bug). sortKey (Noc-wrap aware) keeps the threshold in the SAME space as
+    // the slot comparison below: sortKey(s, shift) < earliestBNStart.
+    const bnStartKeys = {};
+    covering.forEach(c => {
       // syncedLS.get handles both new JSON-encoded and legacy raw-string
       // values written before the migration.
       const val = syncedLS.get(`bnStart_${c.BreakNurseName}_${c.ShiftDate || dt}_${c.ShiftType}`);
-      if(val){ bnStartMins[c.BreakNurseName] = toMin(val); }
+      if(val){ bnStartKeys[c.BreakNurseName] = sortKey(val, shift); }
     });
-    const earliestBNStart = Object.values(bnStartMins).length
-      ? Math.min(...Object.values(bnStartMins)) : null;
+    const earliestBNStart = Object.values(bnStartKeys).length
+      ? Math.min(...Object.values(bnStartKeys)) : null;
 
     // shiftIsActive: viewed dt+shift is currently in progress (slot
     // time-of-day comparisons via isPast are meaningful).
