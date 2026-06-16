@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-16-195';
+const APP_VERSION = '2026-06-16-196';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14881,9 +14881,18 @@ function handleQueueConflicts(freshBookings){
   // same-time booking on a DIFFERENT unit (another BN's) must not cancel this
   // BN's staged claim/break. (Was keyed on time alone, which cross-collided
   // across units in multi-BN shifts.)
+  //
+  // Ownership (Build 196): also skip bookings a DIFFERENT BN covers — i.e. a
+  // frozen supplemental's bookings, stamped CreatedBy = the absorber. Those
+  // aren't this BN's to cover (after a let-keep the returning BN is free to
+  // break or cover someone else at that time), so they must not abort this BN's
+  // staged action. Mirrors bnOwns (~line 1667): CreatedBy set → only the creator
+  // owns it. Sign-Up claims (no CreatedBy) and this BN's own + Logs still index.
   const staffByUnitSlot = new Map();
   freshBookings.forEach(b => {
-    if(isStaffBooking(b)) staffByUnitSlot.set(`${b.Unit}|${normSlot(b.SlotTime)}`, b);
+    if(!isStaffBooking(b)) return;
+    if(b.CreatedBy && b.CreatedBy !== BNS.name) return;  // another BN's frozen coverage — not ours to cover
+    staffByUnitSlot.set(`${b.Unit}|${normSlot(b.SlotTime)}`, b);
   });
 
   const toRemove = [];
