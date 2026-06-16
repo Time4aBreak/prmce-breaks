@@ -437,7 +437,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
               <option value="">— full shift —</option>
             </select>
-            <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
+            <button id="bnStartClearBtn" class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
           </div>
 
           <div id="bnConfirmList"></div>
@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-15-191';
+const APP_VERSION = '2026-06-15-192';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8966,10 +8966,17 @@ function populateBNStartTimeSlots(){
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
 
+let _bnStartBusy = false; // guards overlapping start-time commits (dropdown + Clear)
 async function onBNStartTimeChange(){
-  const val = document.getElementById('bnStartTime').value;
+  if(_bnStartBusy) return;            // ignore re-entrant taps while a change commits
+  const sel = document.getElementById('bnStartTime');
+  const clrBtn = document.getElementById('bnStartClearBtn');
+  const val = sel ? sel.value : '';
   const key = getBNStartKey();
   const _sy1 = window.scrollY;
+  _bnStartBusy = true;
+  if(sel) sel.disabled = true;
+  if(clrBtn) clrBtn.disabled = true;
   try {
     if(val){
       // syncedLS.set updates LS immediately and mirrors to BNState; throws on
@@ -8984,21 +8991,34 @@ async function onBNStartTimeChange(){
     // syncedLS already surfaced the network-error toast. Don't paint over it.
     // Re-render so the dropdown reflects current (rolled-back) LS state.
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
+  } finally {
+    _bnStartBusy = false;
+    if(sel) sel.disabled = false;
+    if(clrBtn) clrBtn.disabled = false;
   }
 }
 async function clearBNStartTime(){
+  if(_bnStartBusy) return;            // shares the dropdown's in-flight guard
   const key = getBNStartKey();
   const _sy2 = window.scrollY;
+  const sel = document.getElementById('bnStartTime');
+  const clrBtn = document.getElementById('bnStartClearBtn');
+  _bnStartBusy = true;
+  if(sel) sel.disabled = true;
+  if(clrBtn){ clrBtn.disabled = true; clrBtn.textContent = 'Clearing…'; }
   try {
     await syncedLS.delete(key);
-    const el = document.getElementById('bnStartTime');
-    if(el) el.value = '';
+    if(sel) sel.value = '';
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
     toast('Start time cleared');
   } catch(e){
     // syncedLS already surfaced the error toast. Skip the success toast and
     // skip clearing the UI — local state stays in sync with BNState.
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
+  } finally {
+    _bnStartBusy = false;
+    if(sel) sel.disabled = false;
+    if(clrBtn){ clrBtn.disabled = false; clrBtn.textContent = 'Clear'; }
   }
 }
 function restoreBNStartTimeUI(){
