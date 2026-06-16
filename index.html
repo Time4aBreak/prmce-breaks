@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-15-189';
+const APP_VERSION = '2026-06-15-190';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8941,10 +8941,14 @@ function bnShiftStarted(dt, shift, bnName){
   // syncedLS.get handles both new-style (JSON-encoded) and legacy raw-string
   // values — direct localStorage.getItem would mishandle the JSON case.
   const custom = syncedLS.get(`bnStart_${bnName}_${dt}_${shift}`);
-  const startMin = custom ? toMin(custom) : (shift === 'Day' ? 480 : 1200); // 0800 / 2000
-  const start = new Date(dt + 'T00:00:00');
-  start.setMinutes(start.getMinutes() + startMin);
-  return Date.now() >= start.getTime();
+  // Same threshold + frame the "Before start time" banner uses (_startSortKey
+  // at the render site), so the gate and the banner can't drift apart. Working
+  // in sortKey space resolves a post-midnight Noc start correctly — the old raw
+  // Date math anchored it to the shift-start calendar date and read "started"
+  // ~24h early (bug B). nowKey is date-agnostic, i.e. current-shift-only, which
+  // is all the Prod Log ever renders.
+  const startKey = custom ? sortKey(custom, shift) : (shift === 'Day' ? 480 : 1200);
+  return nowKey(shift) >= startKey;
 }
 function populateBNStartTimeSlots(){
   const el = document.getElementById('bnStartTime');
