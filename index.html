@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-15-190';
+const APP_VERSION = '2026-06-15-191';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8955,13 +8955,13 @@ function populateBNStartTimeSlots(){
   if(!el) return;
   const shift = BNS.shift || detectShift();
   const saved = syncedLS.get(getBNStartKey()) || '';
-  // Only filter past slots if viewing today's shift — future dates show all slots
-  const isToday = (BNS.date || today()) === shiftDate(shift);
-  // Only filter past slots if the shift is currently active
-  const _bnStartShiftActive = staffWindowOpen(shift);
+  // Offer every slot of the shift, past included (Build 191, option B), so a
+  // late-arriving BN can record their ACTUAL start — picking the current or a
+  // just-passed slot opens +Log right away. A future pick still gates +Log
+  // until then (intended). hardBlocked slots stay excluded; the saved start
+  // always appears in the list now, even if the clock has moved past it.
   const slots = generateSlots(shift)
-    .filter(s => getSlotTier(s, shift) !== 'hardBlocked')
-    .filter(s => !isToday || !_bnStartShiftActive || sortKey(s, shift) > nowKey(shift));
+    .filter(s => getSlotTier(s, shift) !== 'hardBlocked');
   el.innerHTML = '<option value="">— full shift —</option>' +
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
