@@ -437,7 +437,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             <select id="bnStartTime" style="font-size:.85rem;padding:4px 8px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text)" onchange="onBNStartTimeChange()">
               <option value="">— full shift —</option>
             </select>
-            <button id="bnStartClearBtn" class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
+            <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear</button>
           </div>
 
           <div id="bnConfirmList"></div>
@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-15-192';
+const APP_VERSION = '2026-06-15-194';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8966,17 +8966,14 @@ function populateBNStartTimeSlots(){
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
 
-let _bnStartBusy = false; // guards overlapping start-time commits (dropdown + Clear)
 async function onBNStartTimeChange(){
-  if(_bnStartBusy) return;            // ignore re-entrant taps while a change commits
   const sel = document.getElementById('bnStartTime');
-  const clrBtn = document.getElementById('bnStartClearBtn');
   const val = sel ? sel.value : '';
   const key = getBNStartKey();
   const _sy1 = window.scrollY;
-  _bnStartBusy = true;
-  if(sel) sel.disabled = true;
-  if(clrBtn) clrBtn.disabled = true;
+  // Full-screen busy overlay blocks all taps (dropdown, +Log, everything)
+  // until the BNState write commits — same pattern as the rest of the app.
+  showBusy(val ? 'Setting start time…' : 'Clearing start time…');
   try {
     if(val){
       // syncedLS.set updates LS immediately and mirrors to BNState; throws on
@@ -8985,40 +8982,32 @@ async function onBNStartTimeChange(){
     } else {
       await syncedLS.delete(key);
     }
+    hideBusy();
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
     toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
   } catch(e){
+    hideBusy();
     // syncedLS already surfaced the network-error toast. Don't paint over it.
     // Re-render so the dropdown reflects current (rolled-back) LS state.
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
-  } finally {
-    _bnStartBusy = false;
-    if(sel) sel.disabled = false;
-    if(clrBtn) clrBtn.disabled = false;
   }
 }
 async function clearBNStartTime(){
-  if(_bnStartBusy) return;            // shares the dropdown's in-flight guard
   const key = getBNStartKey();
   const _sy2 = window.scrollY;
   const sel = document.getElementById('bnStartTime');
-  const clrBtn = document.getElementById('bnStartClearBtn');
-  _bnStartBusy = true;
-  if(sel) sel.disabled = true;
-  if(clrBtn){ clrBtn.disabled = true; clrBtn.textContent = 'Clearing…'; }
+  showBusy('Clearing start time…');
   try {
     await syncedLS.delete(key);
     if(sel) sel.value = '';
+    hideBusy();
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
     toast('Start time cleared');
   } catch(e){
+    hideBusy();
     // syncedLS already surfaced the error toast. Skip the success toast and
     // skip clearing the UI — local state stays in sync with BNState.
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy2, behavior: 'instant' })));
-  } finally {
-    _bnStartBusy = false;
-    if(sel) sel.disabled = false;
-    if(clrBtn){ clrBtn.disabled = false; clrBtn.textContent = 'Clear'; }
   }
 }
 function restoreBNStartTimeUI(){
@@ -14280,6 +14269,7 @@ const _prodLogInputs = new Map();
 const POLL_INTERVAL_MS = 10000;
 let _prodLogPollTmr = null;
 let _prodLogLastFingerprint = null;
+let _prodLogLastSlot = null;          // last slot the prod log rendered for; drives a seamless clock-only re-render at slot boundaries
 let _coverageTmr = null;
 let _coverageLastFingerprint = null;
 // Build 125 (2026-05-26): Schedule tab polling. Detects cross-device
@@ -15056,10 +15046,22 @@ async function silentRefreshProdLog(){
     // which should happen regardless of whether the fingerprint changed.
     const conflictsResolved = handleQueueConflicts(bookings);
 
+    // Current slot (the slot containing now). It changes only at slot
+    // boundaries — exactly when time-dependent rendering flips: the +Log gate
+    // opens at a slot-time start, and slots cross future→past. Tracked apart
+    // from the data fingerprint so a pure clock transition can refresh the view
+    // without being mistaken for a data change.
+    const _nowSlot = (function(){
+      const _nk = nowKey(shift);
+      return generateSlots(shift).filter(s => sortKey(s, shift) <= _nk).pop() || '';
+    })();
+    let _didFullReload = false;
+
     // Re-render only if fingerprint changed OR conflicts were resolved (which
     // modified the queue and needs a fresh render to reflect removed states).
     if(fp !== _prodLogLastFingerprint || conflictsResolved > 0){
       _prodLogLastFingerprint = fp;
+      _didFullReload = true;
       loadBNConfirm();
       // Build 123 (2026-05-26): If this BN's schedule.Ext changed (likely
       // a cross-device update from another phone/desktop), reflect it in
@@ -15101,6 +15103,19 @@ async function silentRefreshProdLog(){
         if(typeof show3CDefaultToggle === 'function') show3CDefaultToggle();
       }
     }
+    // Pure clock transition: data unchanged but the clock crossed a slot
+    // boundary. Re-render from the existing cache so the +Log gate and the
+    // past/future slot states update. Render-only path — no network fetch, no
+    // loader spinner, single atomic innerHTML swap, typed inputs captured first,
+    // scroll restored — so it's seamless (no jump, no flicker) even on a quiet
+    // screen. Skipped when a full reload already happened this tick.
+    if(!_didFullReload && _nowSlot !== _prodLogLastSlot){
+      _prodLogCaptureAllInputs();
+      const _sy = window.scrollY;
+      _renderBNConfirm();
+      requestAnimationFrame(() => window.scrollTo({ top: _sy, behavior: 'instant' }));
+    }
+    _prodLogLastSlot = _nowSlot;
   } catch(e){
     // Silent failure — next poll will retry
     console.warn('[prodLog poll] refresh failed:', e.message);
