@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-15-194';
+const APP_VERSION = '2026-06-16-195';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14876,22 +14876,28 @@ function handleQueueConflicts(freshBookings){
   const bookingById = new Map();
   freshBookings.forEach(b => bookingById.set(String(b.Id), b));
 
-  // Also index by slot for unclaimed:slot key lookups
-  const staffBySlot = new Map();
+  // Index staff bookings by unit+slot. A "slot" is unit+time everywhere else,
+  // and staff can only claim a slot that's in their unit's rotation — so a
+  // same-time booking on a DIFFERENT unit (another BN's) must not cancel this
+  // BN's staged claim/break. (Was keyed on time alone, which cross-collided
+  // across units in multi-BN shifts.)
+  const staffByUnitSlot = new Map();
   freshBookings.forEach(b => {
-    if(isStaffBooking(b)) staffBySlot.set(normSlot(b.SlotTime), b);
+    if(isStaffBooking(b)) staffByUnitSlot.set(`${b.Unit}|${normSlot(b.SlotTime)}`, b);
   });
 
   const toRemove = [];
   _prodLogStaged.forEach((info, key) => {
     const action = info.action;
 
-    // Staged manual claim or BN add_break: slot may have been claimed by
-    // staff while in queue. Both look up by slot, both abort if the slot
-    // is now taken.
+    // Staged manual claim or BN add_break: the SAME unit-slot may have been
+    // claimed by staff while in queue. Scope by the staged action's unit
+    // (info.unit = the rotation unit for that slot) so a different unit's
+    // booking at the same time doesn't falsely abort. add_break on a unit-less
+    // slot (shift-change/huddle) has no unit, so it can't collide — skip it.
     if(action === 'claim' || action === 'add_break'){
       const slot = action === 'claim' ? key.slice('unclaimed:'.length) : key.slice('add_break:'.length);
-      const conflictBooking = staffBySlot.get(normSlot(slot));
+      const conflictBooking = info.unit ? staffByUnitSlot.get(`${info.unit}|${normSlot(slot)}`) : null;
       if(conflictBooking){
         const claimerFirst = conflictBooking.NurseName.replace(/\s*\((\d{5})\)/, ' $1');
         const when = fmt12(slot);
