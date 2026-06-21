@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-16-196';
+const APP_VERSION = '2026-06-20-197';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -18189,14 +18189,21 @@ function namesSimilar(a, b){
   // Check if one contains the other (handles truncation)
   if(na.length >= 6 && nb.startsWith(na.slice(0,6))) return true;
   if(nb.length >= 6 && na.startsWith(nb.slice(0,6))) return true;
-  // Levenshtein distance <= 2 for names of similar length
+  // True Levenshtein distance <= 2 — catches substitutions AND mid-name
+  // inserts/drops/transposes that the old position-by-position compare
+  // missed (the Traijo/Traljo-class gap; build 197). The length guard is a
+  // valid short-circuit: edit distance is always >= the length difference.
   if(Math.abs(na.length - nb.length) <= 2){
-    let dist = 0, i = 0;
-    const shorter = na.length < nb.length ? na : nb;
-    const longer  = na.length < nb.length ? nb : na;
-    for(; i < shorter.length; i++) if(shorter[i] !== longer[i]) dist++;
-    dist += longer.length - shorter.length;
-    if(dist <= 2) return true;
+    const m = na.length, n = nb.length;
+    let prev = Array.from({length: n + 1}, (_, j) => j);
+    for(let i = 1; i <= m; i++){
+      const cur = [i];
+      for(let j = 1; j <= n; j++){
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (na[i - 1] === nb[j - 1] ? 0 : 1));
+      }
+      prev = cur;
+    }
+    if(prev[n] <= 2) return true;
   }
   return false;
 }
