@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-20-197';
+const APP_VERSION = '2026-06-22-198';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3847,9 +3847,26 @@ async function commitUnitChange(){
             const _parts = _k.split('|');
             if(_parts[1] === i.shift) _mergedCounts[_parts[0]] = (_mergedCounts[_parts[0]] || 0) + _subOverlay[_k];
           }
-          const substitute = findSubstituteUnit(i.bn, unit, i.date, i.shift, adjustedScheds, _subAsOf, _mergedCounts);
+          const suggested = findSubstituteUnit(i.bn, unit, i.date, i.shift, adjustedScheds, _subAsOf, _mergedCounts);
 
-          // Build new Units array: remove closed unit, add substitute (if any)
+          // Ask-on-close (Build 198): present a per-BN substitute picker instead of
+          // silently auto-assigning. Candidates = open same-wing units this BN doesn't
+          // already hold and that aren't taken earlier in this batch, fewest-covered
+          // first (same signal findSubstituteUnit uses); the auto-pick is badged
+          // "suggested". The admin actively chooses, or picks "No substitute" to drop
+          // the closed unit. Mirrors the reopen coverage picker.
+          const _closingWing = getUnitWing(unit);
+          const _takenThisBatch = new Set(Object.values(_picksThisBatch[batchKey] || {}));
+          let _cands = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S']
+            .filter(u => u !== unit && getUnitWing(u) === _closingWing && !units.includes(u)
+              && !_takenThisBatch.has(u) && isUnitOpenForShiftEffective(u, i.date, i.shift));
+          if(suggested && !_cands.includes(suggested)) _cands.push(suggested); // include any other-wing fallback the auto-picker chose
+          _cands.sort((a, b) => ((_mergedCounts[a] || 0) - (_mergedCounts[b] || 0)));
+          hideBusy(); // don't let the busy overlay cover the picker
+          const _choice = await promptSubstitutePicker(unit, i.bn, i.date, i.shift, _cands, suggested);
+          const substitute = _choice.unit;
+
+          // Build new Units array: remove closed unit, add the chosen substitute (if any)
           let newUnits = units.filter(u => u !== unit);
           if(substitute){
             newUnits.push(substitute);
@@ -3871,6 +3888,7 @@ async function commitUnitChange(){
         // CORS errors on background recomputes (silently dropping rotation
         // updates). New pattern: 1 batchUpsert for all Units changes + 1
         // setMany for all rotations, with all data pre-fetched in 1 round trip.
+        showBusy('Applying coverage…');
         await bulkSaveUnitsAndRotations(_substitutes);
 
         // Cache substitutes on pending so the toast can mention them
@@ -4288,6 +4306,53 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
       btn.onclick = () => cleanup({ bnName: btn.getAttribute('data-bn'), schedId: btn.getAttribute('data-sched') });
     });
     document.getElementById('_rcLeave').onclick = () => cleanup(null);
+  });
+}
+
+// ── Substitute picker on close (Build 198) ───────────────────────────────
+// Ask-on-close: when a unit closes and an affected BN still has other units,
+// present this picker instead of silently auto-assigning a substitute. Lists
+// eligible open same-wing units (fewest-covered first) as one-tap buttons with
+// the findSubstituteUnit auto-pick badged "suggested", plus "No substitute".
+// Mirrors reopenCoveragePicker. Returns { unit: <string> } for a pick or
+// { unit: null } for "no substitute". No backdrop dismiss — must be answered.
+function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, suggested){
+  return new Promise(resolve => {
+    const existing = document.getElementById('substitutePickerModal');
+    if(existing) existing.remove();
+    const modal = document.createElement('div');
+    modal.id = 'substitutePickerModal';
+    modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+
+    const wing = getUnitWing(closingUnit);
+    const unitButtons = candidates.length
+      ? candidates.map(u => {
+          const isSug = (u === suggested);
+          return `<button type="button" class="btn btn-primary _spPick" data-unit="${u}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%">
+             <span>${u}</span>
+             ${isSug ? '<span style="font-size:.72rem;font-weight:600;background:rgba(255,255,255,.22);padding:2px 8px;border-radius:10px">★ suggested</span>' : ''}
+           </button>`;
+        }).join('')
+      : `<div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">No open Wing-${wing} units are free for a substitute.</div>`;
+
+    const wingHint = `<div style="font-size:.78rem;color:var(--muted);margin:2px 0 12px;line-height:1.4">Only open Wing-${wing} units are shown. To assign a different unit, choose "No substitute" and add it from ${firstName(bnName)}'s Edit.</div>`;
+
+    modal.innerHTML = `
+      <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${closingUnit} is closing</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
+        <div style="font-size:.85rem;margin-bottom:10px">What should <strong>${firstName(bnName)}</strong> cover instead of <strong>${closingUnit}</strong>?</div>
+        <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${unitButtons}</div>
+        ${wingHint}
+        <button type="button" class="btn btn-ghost" id="_spNone">No substitute — just drop ${closingUnit}</button>
+      </div>`;
+    document.body.appendChild(modal);
+
+    const cleanup = (result) => { modal.remove(); resolve(result); };
+    modal.querySelectorAll('._spPick').forEach(btn => {
+      btn.onclick = () => cleanup({ unit: btn.getAttribute('data-unit') });
+    });
+    document.getElementById('_spNone').onclick = () => cleanup({ unit: null });
   });
 }
 
