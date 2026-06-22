@@ -1751,7 +1751,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-22-198';
+const APP_VERSION = '2026-06-22-199';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3856,10 +3856,21 @@ async function commitUnitChange(){
           // "suggested". The admin actively chooses, or picks "No substitute" to drop
           // the closed unit. Mirrors the reopen coverage picker.
           const _closingWing = getUnitWing(unit);
-          const _takenThisBatch = new Set(Object.values(_picksThisBatch[batchKey] || {}));
+          // Units already covered by another active BN on this date+shift — excluded,
+          // matching findSubstituteUnit rule #3 (adjustedScheds already folds in
+          // earlier batch picks, so this also excludes units taken so far this batch).
+          const _coveredByOthers = new Set();
+          adjustedScheds.forEach(s => {
+            if(s.BreakNurseName === i.bn) return;
+            if((s.Status || '') === 'inactive') return;
+            if(String(s.IsSupplemental) === '1') return;
+            if((s.ShiftDate || '').slice(0,10) !== i.date) return;
+            if(s.ShiftType !== i.shift) return;
+            try { JSON.parse(s.Units || '[]').forEach(u => { if(u === 'C_PAIR'){ _coveredByOthers.add('3C'); _coveredByOthers.add('4C'); } else _coveredByOthers.add(u); }); } catch {}
+          });
           let _cands = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S']
             .filter(u => u !== unit && getUnitWing(u) === _closingWing && !units.includes(u)
-              && !_takenThisBatch.has(u) && isUnitOpenForShiftEffective(u, i.date, i.shift));
+              && !_coveredByOthers.has(u) && isUnitOpenForShiftEffective(u, i.date, i.shift));
           if(suggested && !_cands.includes(suggested)) _cands.push(suggested); // include any other-wing fallback the auto-picker chose
           _cands.sort((a, b) => ((_mergedCounts[a] || 0) - (_mergedCounts[b] || 0)));
           hideBusy(); // don't let the busy overlay cover the picker
