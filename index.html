@@ -86,7 +86,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .slot-row{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:10px;padding:11px 14px;border-radius:10px;border:1.5px solid var(--border);background:white;margin-bottom:7px;transition:all .15s}
 .slot-row.open:hover{border-color:var(--teal);box-shadow:0 2px 10px rgba(11,112,112,.1);transform:translateY(-1px)}
 .slot-row.mine{background:var(--teal-lt);border-color:var(--teal)}
-.slot-row.taken{background:var(--red-lt);border-color:#e8b0b0}.slot-row.taken.past{background:var(--bg-alt);border-color:var(--border);opacity:.7}
+.slot-row.taken{background:var(--bg);border-color:var(--border)}.slot-row.taken.past{background:var(--bg-alt);border-color:var(--border);opacity:.7}
 .slot-row.past{opacity:.38;pointer-events:none}
 .slot-row.locked{opacity:.5;cursor:not-allowed;background:#f8f8f8}
 .slot-row.bn-break{background:#fef9ec;border-color:#f0c040;cursor:not-allowed}
@@ -120,7 +120,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .bn-pill.active{background:var(--teal);border-color:var(--teal);color:white}
 .slot-row.bn-break .slot-time{color:#b07800}
 .slot-time{font-family:'DM Mono',monospace;font-size:.95rem;font-weight:500;color:var(--teal-dk)}
-.slot-row.taken .slot-time{color:var(--red)}.slot-row.taken.past .slot-time{color:var(--muted)}
+.slot-row.taken .slot-time{color:var(--muted)}.slot-row.taken.past .slot-time{color:var(--muted)}
 .slot-name{font-size:.875rem;color:var(--muted)}
 .slot-name.filled{color:var(--text);font-weight:500}
 
@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-23-201';
+const APP_VERSION = '2026-06-23-202';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
