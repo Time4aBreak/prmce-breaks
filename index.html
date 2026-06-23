@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-23-202';
+const APP_VERSION = '2026-06-23-203';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6655,7 +6655,28 @@ async function loadSlots(silent=false){
     }
 
     const bMap    = {};
-    bookings.forEach(b => { if (isStaffBooking(b)) bMap[String(b.SlotTime).padStart(4,'0')] = b; });
+    // Build 203: first-claimed wins. A slot can legitimately hold only one
+    // staff booking; if two ever collide (legacy double-book / race), keep the
+    // EARLIEST Id — the nurse who claimed first owns the slot.
+    const _bMapPut = b => {
+      if(!isStaffBooking(b)) return;
+      const k = String(b.SlotTime).padStart(4,'0');
+      const cur = bMap[k];
+      if(!cur || Number(b.Id) < Number(cur.Id)) bMap[k] = b;
+    };
+    bookings.forEach(_bMapPut);
+    // Overlap slots are shared across the date boundary: during this shift's
+    // overlap window the OPPOSITE shift's BN covers this unit, so a break
+    // claimed on the opposite date (e.g. a 7:35 Other claim stored Noc-date)
+    // occupies the same physical slot. Fold those in so the slot shows as taken
+    // here too (no Select), and the owner keeps Manage on name+ext match.
+    // (Noc tab's evening overlap shares today's date, so those rows are already
+    // in `bookings` above; oppBookingsRaw is empty there and this is a no-op.)
+    oppBookingsRaw.forEach(b => {
+      if(b.Unit !== S.unit) return;
+      if(!isOverlapSlot(String(b.SlotTime).padStart(4,'0'), shift)) return;
+      _bMapPut(b);
+    });
 
     // Block slots where ANY BN covering this unit has marked their own break
     const allBNNames = [
