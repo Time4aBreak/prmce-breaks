@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-23-203';
+const APP_VERSION = '2026-06-23-204';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8235,6 +8235,34 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     if(bnBreakConflict){
       if(!silent){ toast(`${fmt12(slotTime)} is blocked — break nurse is on break at this time.`, true); loadSlots(); }
       return `BN on break`;
+    }
+
+    // Build 204: overlap-slot cross-date lock — the hard guarantee behind the
+    // build-203 visible fold. An overlap slot (6:30–8:00 AM / 6:30–8:00 PM) is
+    // ONE physical slot covered by the opposite shift's BN, but can be stored
+    // under either date/shift depending on the claiming tab (a 7:35 Other claim
+    // lands Noc-date; a 7:35 Day claim lands Day-date). The same-shift "taken"
+    // check above can't see the opposite-date form, so a Day claim could double-
+    // book the BN who already holds a Noc-date claim at this time — and vice
+    // versa. Re-fetch both overlap dates and reject if the slot is already taken
+    // by anyone. First claim wins; this blocks the second. Runs only for overlap
+    // times, so non-overlap claims pay no extra fetch.
+    if(isOverlapSlot(slotTime, 'Day') || isOverlapSlot(slotTime, 'Noc')){
+      const _dNoc = staffShiftDate('Noc'), _dDay = staffShiftDate('Day');
+      const _floor = _dNoc < _dDay ? _dNoc : _dDay;
+      const _ceil  = _dNoc > _dDay ? _dNoc : _dDay;
+      const _crossPool = reconcileBookings(await spGet(LISTS.bookings,
+        `Unit eq '${_unit}' and SlotDate ge '${_floor}' and SlotDate le '${_ceil}T23'`));
+      const _pad = String(slotTime).padStart(4,'0');
+      const _crossTaken = _crossPool.find(b => isStaffBooking(b) && String(b.SlotTime).padStart(4,'0') === _pad);
+      if(_crossTaken){
+        if(!silent){
+          const _by = String(_crossTaken.NurseName||'').replace(/\s*\((\d{5})\)/, ' $1');
+          toast(`${fmt12(slotTime)} is already taken by ${_by}. Please choose another slot.`, true);
+          loadSlots();
+        }
+        return `${fmt12(slotTime)} already taken (overlap)`;
+      }
     }
 
     // Bug #8: in-flight guard. Block this exact (unit, slot, shift, ext)
