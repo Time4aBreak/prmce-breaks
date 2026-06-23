@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-22-200';
+const APP_VERSION = '2026-06-23-201';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8071,9 +8071,14 @@ function renderOtherSlotsFromCache(){
       </div>`;
     }
     if(booking){
-      return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg);opacity:.6">
+      // Build 201: match Day/Noc (_renderSingleSlotRow line ~7286) — show the
+      // claimant's name, not a bare "Taken". Hiding the name made the slot look
+      // unmanageable on Other; with the name visible, the owning staff nurse can
+      // recognize their slot, and entering their name+ext flips this row to the
+      // mine/Manage path above (cancel/transfer/keep), same as Day/Noc.
+      return `<div class="slot-row taken" data-slot-key="${time}|${slotShift}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
-        <div class="slot-name" style="color:var(--muted)">Taken</div>
+        <div class="slot-name filled">${formatNurse(booking.NurseName)}</div>
       </div>`;
     }
     if(!canClaimMore && !isPending){
