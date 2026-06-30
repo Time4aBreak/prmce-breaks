@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-30-206';
+const APP_VERSION = '2026-06-30-207';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13494,7 +13494,14 @@ async function acceptAllAndSave(){
     const lo = ds[0], hi = ds[ds.length - 1];
     let have;
     try {
-      const rows = await spGet(LISTS.schedule, `ShiftDate ge '${lo}' and ShiftDate le '${hi}T23:59'`);
+      // Build 207: cap the read-back so a cold/busy backend can't stack gasCall's
+      // 30s-timeout retries into a 60-90s "Verifying…" hang. One attempt's worth clears a
+      // cold start (~20s); past that we report "couldn't verify" rather than blocking. The
+      // underlying read finishes harmlessly in the background.
+      const rows = await Promise.race([
+        spGet(LISTS.schedule, `ShiftDate ge '${lo}' and ShiftDate le '${hi}T23:59'`),
+        new Promise((_, rej) => setTimeout(() => rej(new Error('verify timed out')), 30000))
+      ]);
       have = new Set(rows.map(s => `${s.BreakNurseName}|${(s.ShiftDate || '').slice(0,10)}|${s.ShiftType}`));
     } catch(e) {
       return { verifyFailed: e.message, missing: [] };
@@ -13577,10 +13584,12 @@ async function acceptAllAndSave(){
       await syncedLS.setMany(rotationEntries);
     }
 
-    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-    // Build 206: prove the batch landed via read-back (GET), not the POST response.
+    // Build 206/207: prove the batch landed via read-back (GET), not the POST response.
+    // Keep the SAVE ALL buttons DISABLED through verification (tap guard) — re-enabling them
+    // before the read-back left them clickable while it showed "Verifying…". Re-enable after.
     setPhase('Verifying saved shifts...', 'Verifying...');
     const { verifyFailed, missing } = await reconcileWrite();
+    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     const savedN = records.length - missing.length;
     const fullySaved = !verifyFailed && missing.length === 0;
     if(verifyFailed){
@@ -13662,7 +13671,6 @@ async function acceptAllAndSave(){
       el.dataset.schedCount = upcoming.length;
     }
   } catch(e) {
-    btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     // Re-enable the ghost + extract buttons so user can try again or clear and retry.
     document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
       b.disabled = false;
@@ -13672,9 +13680,11 @@ async function acceptAllAndSave(){
     console.error('acceptAllAndSave batch error:', e);
     // Build 206: a thrown error here is often the Apps Script echo-redirect CORS issue,
     // where the POST actually SAVED but the browser couldn't read the reply. Don't trust
-    // the throw — read back and report what truly landed.
+    // the throw — read back and report what truly landed. Build 207: keep SAVE ALL disabled
+    // through the read-back (tap guard); re-enable only after it resolves.
     try {
       const { verifyFailed, missing } = await reconcileWrite();
+      btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
       if(verifyFailed){
         if(status) status.textContent = `⚠ Save could not be confirmed (${e.message}). Reload to check, or re-run SAVE ALL.`;
       } else if(missing.length === 0){
@@ -13686,6 +13696,7 @@ async function acceptAllAndSave(){
         if(status) status.textContent = `⚠ Save failed: ${e.message}. Re-run SAVE ALL to retry.`;
       }
     } catch(reErr){
+      btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
       if(status) status.textContent = `⚠ Batch failed: ${e.message}. Re-run SAVE ALL to retry.`;
     }
   }
