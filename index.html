@@ -1752,7 +1752,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-23-205';
+const APP_VERSION = '2026-06-30-206';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13483,6 +13483,35 @@ async function acceptAllAndSave(){
     return;
   }
 
+  // Build 206: read-back reconcile helpers. The schedule write below is a POST batch
+  // (spBatchUpsert) whose response is unreliable under the Apps Script echo-redirect CORS
+  // issue, so we PROVE the result with a GET read-back (Clear-All build-149 philosophy)
+  // rather than trusting the POST or the intended `records` array. reconcileWrite reads
+  // back only the imported date range and returns the intended rows that did NOT land;
+  // fmtMissing renders them for the user.
+  const reconcileWrite = async () => {
+    const ds = records.map(r => r.data.ShiftDate).filter(Boolean).sort();
+    const lo = ds[0], hi = ds[ds.length - 1];
+    let have;
+    try {
+      const rows = await spGet(LISTS.schedule, `ShiftDate ge '${lo}' and ShiftDate le '${hi}T23:59'`);
+      have = new Set(rows.map(s => `${s.BreakNurseName}|${(s.ShiftDate || '').slice(0,10)}|${s.ShiftType}`));
+    } catch(e) {
+      return { verifyFailed: e.message, missing: [] };
+    }
+    const missing = records.map(r => r.data)
+      .filter(d => !have.has(`${d.BreakNurseName}|${d.ShiftDate}|${d.ShiftType}`));
+    return { verifyFailed: null, missing };
+  };
+  const fmtMissing = miss => {
+    const days = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    return miss.map(d => {
+      const dt = new Date(d.ShiftDate + 'T12:00:00');
+      return `${firstName(d.BreakNurseName)} ${days[dt.getDay()]} ${months[dt.getMonth()]} ${dt.getDate()} ${d.ShiftType}`;
+    }).join(', ');
+  };
+
   try {
     setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
@@ -13549,12 +13578,24 @@ async function acceptAllAndSave(){
     }
 
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-    if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+    // Build 206: prove the batch landed via read-back (GET), not the POST response.
+    setPhase('Verifying saved shifts...', 'Verifying...');
+    const { verifyFailed, missing } = await reconcileWrite();
+    const savedN = records.length - missing.length;
+    const fullySaved = !verifyFailed && missing.length === 0;
+    if(verifyFailed){
+      if(status) status.textContent = `✓ ${records.length} sent — could not verify (${verifyFailed}). Reload to confirm.`;
+    } else if(missing.length){
+      if(status) status.textContent = `⚠ ${savedN} of ${records.length} saved — ${missing.length} did NOT save${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+      toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
+    } else {
+      if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+    }
     // Save All success: hide the entire Extracted card. The batch is committed;
     // showing stale rows invites confusion and a tap of Save All on nothing.
     // Card returns on next extraction (renderImportRows shows it) or restore.
     const importResults = document.getElementById('importResults');
-    if(importResults) importResults.style.display = 'none';
+    if(fullySaved && importResults) importResults.style.display = 'none';
     // Re-enable the Extract Schedule button (currently hidden in importPreview)
     // so the next upload's extraction works without staying greyed out.
     document.querySelectorAll('.extract-action-btn').forEach(b => {
@@ -13563,11 +13604,16 @@ async function acceptAllAndSave(){
       b.style.cursor = '';
     });
     // Clear in-memory batch + DOM rows so a manual re-show would be empty.
-    _currentImportEntries.length = 0;
-    Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
-    const rowsEl = document.getElementById('importRows');
-    if(rowsEl) rowsEl.innerHTML = '';
-    setImportActionsActive(false);
+    // Build 206: only on a fully-verified save — on a partial/unverified result we KEEP
+    // the batch + card so the user can re-tap SAVE ALL to retry the dropped shifts (the
+    // upsert is idempotent, so re-running is safe for the rows that already landed).
+    if(fullySaved){
+      _currentImportEntries.length = 0;
+      Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+      const rowsEl = document.getElementById('importRows');
+      if(rowsEl) rowsEl.innerHTML = '';
+      setImportActionsActive(false);
+    }
 
     // Build assignment list immediately from saved data (no Sheets delay)
     const savedScheds = records.map((r, idx) => ({
@@ -13623,8 +13669,25 @@ async function acceptAllAndSave(){
       b.style.opacity = '';
       b.style.cursor = '';
     });
-    status.textContent = `⚠ Batch failed: ${e.message}. Try saving individually.`;
     console.error('acceptAllAndSave batch error:', e);
+    // Build 206: a thrown error here is often the Apps Script echo-redirect CORS issue,
+    // where the POST actually SAVED but the browser couldn't read the reply. Don't trust
+    // the throw — read back and report what truly landed.
+    try {
+      const { verifyFailed, missing } = await reconcileWrite();
+      if(verifyFailed){
+        if(status) status.textContent = `⚠ Save could not be confirmed (${e.message}). Reload to check, or re-run SAVE ALL.`;
+      } else if(missing.length === 0){
+        if(status) status.textContent = `✓ ${records.length} saved (recovered after a transport hiccup)`;
+      } else if(missing.length < records.length){
+        if(status) status.textContent = `⚠ ${records.length - missing.length} of ${records.length} saved — ${missing.length} did NOT save`;
+        toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
+      } else {
+        if(status) status.textContent = `⚠ Save failed: ${e.message}. Re-run SAVE ALL to retry.`;
+      }
+    } catch(reErr){
+      if(status) status.textContent = `⚠ Batch failed: ${e.message}. Re-run SAVE ALL to retry.`;
+    }
   }
   // Reload full assignment list with buttons after save
   loadAssignments();
