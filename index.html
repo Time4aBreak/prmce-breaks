@@ -189,6 +189,23 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .bn-apply-all{font-size:.75rem !important;padding:7px 10px !important;white-space:normal !important;text-align:center}
   .bn-default-slot{font-size:.72rem !important;padding:5px 2px !important}
 }
+  /* ── Coverage calendar (Sign Up tab, build 208) ── */
+  #coverageCalCard{--cal-accent:#d97706;--cal-accent-lt:#fef3e2}
+  .cal-hd{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:6px}
+  .cal-title{font-size:.9rem;font-weight:800;color:var(--text);text-align:center;flex:1;line-height:1.2}
+  .cal-title .cal-sub{display:block;font-size:.72rem;font-weight:600;color:var(--muted);margin-top:1px}
+  .cal-nav{width:30px;height:30px;flex:0 0 auto;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--muted);font-size:1rem;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+  .cal-nav:active{background:var(--teal-lt)}
+  .cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+  .cal-dh{font-size:.62rem;font-weight:700;color:var(--muted);text-align:center;padding:2px 0 5px}
+  .cal-cell{aspect-ratio:1/1;display:flex;align-items:center;justify-content:center;border-radius:8px;font-size:.82rem;color:var(--text);position:relative;user-select:none}
+  .cal-cell.out{color:transparent}
+  .cal-cell.past{color:#b9cccc}
+  .cal-cell.cov{background:var(--cal-accent-lt);border:1.5px solid var(--cal-accent);color:var(--cal-accent);font-weight:800;cursor:pointer}
+  .cal-cell.cov .cal-dot{width:4px;height:4px;border-radius:50%;background:var(--cal-accent);position:absolute;bottom:5px}
+  .cal-cell.today{box-shadow:0 0 0 2px var(--teal)}
+  .cal-cell.sel{outline:2px solid var(--cal-accent);outline-offset:1px}
+  .cal-caption{font-size:.74rem;color:var(--muted);margin-top:11px;line-height:1.5;min-height:1.2em}
 </style>
 </head>
 <body>
@@ -242,6 +259,17 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <option value="">— select end time —</option>
       </select>
     </div>
+  </div>
+
+  <!-- Coverage calendar — upcoming coverage for the selected unit + shift (build 208) -->
+  <div class="card" id="coverageCalCard" style="display:none">
+    <div class="cal-hd">
+      <button type="button" class="cal-nav" onclick="calNav(-1)" aria-label="Previous month">&#8249;</button>
+      <div class="cal-title" id="calTitle"></div>
+      <button type="button" class="cal-nav" onclick="calNav(1)" aria-label="Next month">&#8250;</button>
+    </div>
+    <div class="cal-grid" id="calGrid"></div>
+    <div class="cal-caption" id="calCaption"></div>
   </div>
 
   <!-- Coverage banner — shown when unit selected -->
@@ -1752,7 +1780,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-30-207';
+const APP_VERSION = '2026-06-30-208';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5274,6 +5302,7 @@ function populateOtherEndTimes(){
 
 function selectStaffShift(sh){
   S.shift = sh;
+  renderCoverageCalendar(); // build 208: instant re-filter from cached schedule; hides on 'Other'
   // Clear both render caches when shift mode changes — data from the prior
   // shift mode isn't valid for the new one.
   _slotRenderCache = null;
@@ -6188,6 +6217,100 @@ async function redealFutureShifts(fromTime, opts = {}){
 
 let _loadSlotsGen = 0; // generation counter to discard stale async results
 
+// ── Coverage calendar (Sign Up tab, build 208) ──────────────────────────
+// Shows which upcoming dates the selected unit+shift has BN coverage, as a
+// month grid. Rides loadSlots' existing schedule fetch (no extra network):
+// loadSlots stashes the full upcoming schedule here, and this filters it
+// in memory — so switching unit/shift is an instant re-filter, not a fetch.
+let _coverageScheds = [];    // full upcoming schedule, stashed by loadSlots
+let _calViewYM = null;       // {y, m} (m 0-11) currently-viewed month
+let _calLastKey = '';        // unit|shift — detects a context change
+let _calSelectedDate = null; // tapped covered date, for the caption
+
+function calNav(delta){
+  if(!_calViewYM) return;
+  let { y, m } = _calViewYM;
+  m += delta;
+  if(m < 0){ m = 11; y--; } else if(m > 11){ m = 0; y++; }
+  _calViewYM = { y, m };
+  _calSelectedDate = null;
+  renderCoverageCalendar();
+}
+
+function calPickDate(ds){
+  _calSelectedDate = (_calSelectedDate === ds) ? null : ds;
+  renderCoverageCalendar();
+}
+
+function renderCoverageCalendar(){
+  const card = document.getElementById('coverageCalCard');
+  if(!card) return;
+  // Only for Day/Noc with a unit chosen ('Other' has no schedule mapping)
+  if(!S.unit || (S.shift !== 'Day' && S.shift !== 'Noc')){ card.style.display = 'none'; return; }
+  card.style.display = '';
+
+  // Context change → reset to current month + clear any tapped day
+  const key = S.unit + '|' + S.shift;
+  if(key !== _calLastKey){ _calViewYM = null; _calSelectedDate = null; _calLastKey = key; }
+
+  // Shift-aware accent (Day = amber, Noc = blue)
+  const noc = S.shift === 'Noc';
+  card.style.setProperty('--cal-accent', noc ? '#3b6cb7' : '#d97706');
+  card.style.setProperty('--cal-accent-lt', noc ? '#eaf0fb' : '#fef3e2');
+
+  // Covered date -> Set(first names) for this unit+shift
+  const cov = {};
+  _coverageScheds.forEach(s => {
+    if(s.ShiftType !== S.shift) return;
+    if(s.Status === 'inactive') return;
+    let units; try { units = JSON.parse(s.Units || '[]'); } catch { return; }
+    if(!units.includes(S.unit)) return;
+    const d = (s.ShiftDate || '').slice(0,10);
+    if(!d) return;
+    (cov[d] = cov[d] || new Set()).add(firstName(s.BreakNurseName));
+  });
+
+  const todayStr = today();
+  if(!_calViewYM){ const n = new Date(todayStr + 'T12:00:00'); _calViewYM = { y: n.getFullYear(), m: n.getMonth() }; }
+  const { y, m } = _calViewYM;
+  const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+  const monPrefix = `${y}-${String(m+1).padStart(2,'0')}`;
+  const startDow = new Date(y, m, 1).getDay();
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+
+  const title = document.getElementById('calTitle');
+  if(title) title.innerHTML = `${months[m]} ${y}<span class="cal-sub">${escHTML(S.unit)} · ${S.shift}</span>`;
+
+  let html = ['S','M','T','W','T','F','S'].map(d => `<div class="cal-dh">${d}</div>`).join('');
+  for(let i = 0; i < startDow; i++) html += `<div class="cal-cell out"></div>`;
+  for(let day = 1; day <= daysInMonth; day++){
+    const ds = `${monPrefix}-${String(day).padStart(2,'0')}`;
+    const covered = cov[ds];
+    const cls = ['cal-cell'];
+    if(covered) cls.push('cov');
+    else if(ds < todayStr) cls.push('past');
+    if(ds === todayStr) cls.push('today');
+    if(_calSelectedDate === ds) cls.push('sel');
+    html += `<div class="${cls.join(' ')}"${covered ? ` onclick="calPickDate('${ds}')"` : ''}>${day}${covered ? '<span class="cal-dot"></span>' : ''}</div>`;
+  }
+  const grid = document.getElementById('calGrid');
+  if(grid) grid.innerHTML = html;
+
+  const cap = document.getElementById('calCaption');
+  if(cap){
+    const monthCov = Object.keys(cov).filter(d => d.startsWith(monPrefix)).length;
+    if(_calSelectedDate && cov[_calSelectedDate]){
+      const dt = new Date(_calSelectedDate + 'T12:00:00');
+      const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()];
+      cap.innerHTML = `<strong>${dow} ${months[m].slice(0,3)} ${dt.getDate()}</strong> · covered by ${escHTML([...cov[_calSelectedDate]].sort().join(', '))}`;
+    } else if(monthCov){
+      cap.textContent = `${monthCov} covered day${monthCov === 1 ? '' : 's'} this month · tap a highlighted day to see who's covering.`;
+    } else {
+      cap.textContent = `No ${S.unit} · ${S.shift} coverage scheduled this month.`;
+    }
+  }
+}
+
 async function loadSlots(silent=false){
   if(!S.unit) return;
   // Route Other shift to its own handler
@@ -6215,6 +6338,8 @@ async function loadSlots(silent=false){
     // ── Sequential spGet: schedule first, then bookings (both dates for overlap BN breaks) ──
     const schedFloor = oppDt < dt ? oppDt : dt;
     const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`);
+    _coverageScheds = allSchedsRaw;        // build 208: feed the coverage calendar (no extra fetch)
+    if(!silent) renderCoverageCalendar();  // repaint only on real loads; 10s refresh just updates data
     const allBookingsRaw = reconcileBookings(await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`));
     // Also fetch opposite date bookings — needed for overlap BN breaks (e.g. Noc BN break at 7:55 AM
     // is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
