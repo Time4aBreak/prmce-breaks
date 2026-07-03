@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-220';
+const APP_VERSION = '2026-07-03-221';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12956,8 +12956,14 @@ async function runImport(){
     // declared count — accumulating across multiple screenshots in one
     // staged batch, resetting when the batch starts empty.
     window._impRosterBefore = new Set(importedNames || []);
-    const _stagedNow = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]').length;
-    _impExpectedSet(_stagedNow ? _impExpectedGet() + _expVal : _expVal);
+    // Build 221: key the set-vs-accumulate decision on the CURRENT review
+    // batch, not bnImportedEntries — that's the PERMANENT record and is never
+    // empty after the first-ever import, so 218's test made every future
+    // import inherit the previous week's expected count (false gate, found
+    // by desk-check before it fired live). Accumulate only while a review
+    // session already has a batch on screen (multi-screenshot week).
+    const _batchNow = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length) ? _currentImportEntries.length : 0;
+    _impExpectedSet(_batchNow ? _impExpectedGet() + _expVal : _expVal);
     _impGateAcks = new Set();
 
     renderImportRows(entries);
@@ -14220,6 +14226,9 @@ async function acceptAllAndSave(){
       const rowsEl = document.getElementById('importRows');
       if(rowsEl) rowsEl.innerHTML = '';
       setImportActionsActive(false);
+      // Build 221: a fully-verified save closes the review session — the
+      // expected-count checksum and any acknowledgments die with it.
+      _impExpectedSet(0); _impGateAcks = new Set(); window._impRosterBefore = null;
     }
 
     // Build assignment list immediately from saved data (no Sheets delay)
