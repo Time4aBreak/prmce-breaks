@@ -1783,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-213';
+const APP_VERSION = '2026-07-03-214';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6422,7 +6422,8 @@ function renderCoverageCalendar(){
       const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()];
       cap.innerHTML = `<strong>${dow} ${months[m].slice(0,3)} ${dt.getDate()}</strong> · covered by ${escHTML([...cov[_calSelectedDate]].sort().join(', '))}`;
     } else if(monthCov){
-      cap.textContent = `${monthCov} covered day${monthCov === 1 ? '' : 's'} this month · tap a highlighted day to see who's covering.`;
+      // Build 214 (queued at 211, Tomas): count reads as shifts, not days.
+      cap.textContent = `${monthCov} ${S.shift} shift${monthCov === 1 ? '' : 's'} currently scheduled for coverage · tap a highlighted day to see who's covering.`;
     } else {
       cap.textContent = `No ${S.unit} · ${S.shift} coverage scheduled this month.`;
     }
