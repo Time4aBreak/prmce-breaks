@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1784,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-215';
+const APP_VERSION = '2026-07-03-216';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15650,7 +15649,15 @@ async function silentRefreshProdLog(){
       }
       // If a watched bnDefault_* changed, repaint the normal-breaks grid too
       // — it lives outside the Prod Log proper and isn't refreshed by loadBNConfirm.
-      if(stateChanged.some(k => k.startsWith('bnDefault_'))){
+      // Build 216: honor the dirty flag. This was the SECOND watcher on
+      // bnDefault_* (the 15s tick is the other) and the only unguarded one —
+      // whichever poller consumed a cross-device change first won the race,
+      // so unsaved stars survived or got clobbered by coin flip (live-caught
+      // 2026-07-03: "worked the first time, failed on repeat"). Policy:
+      // polls NEVER repaint a dirty editor; deliberate repaints (shift tabs,
+      // BN select, Clear) still discard drafts by design.
+      if(stateChanged.some(k => k.startsWith('bnDefault_'))
+         && !(typeof BNS !== 'undefined' && BNS._defaultDirty)){
         loadDefaultGrid(BNS.defaultShift || BNS.shift);
         updateApplyAllBtn();
       }
