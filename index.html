@@ -203,9 +203,12 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .cal-cell.past{color:#b9cccc}
   .cal-cell.cov{background:var(--cal-accent-lt);border:1.5px solid var(--cal-accent);color:var(--cal-accent);font-weight:800;cursor:pointer}
   .cal-cell.cov .cal-dot{width:4px;height:4px;border-radius:50%;background:var(--cal-accent);position:absolute;bottom:5px}
-  .cal-cell.today{box-shadow:0 0 0 2px var(--teal)}
   .cal-cell.sel{outline:2px solid var(--cal-accent);outline-offset:1px}
   .cal-caption{font-size:.74rem;color:var(--muted);margin-top:11px;line-height:1.5;min-height:1.2em}
+  /* Build 211: cap the calendar's width so 1fr cells don't balloon on
+     laptop/desktop; no-op on phones (card is narrower than the cap). The
+     header shares the cap so the ‹ › arrows align with the grid edges. */
+  .cal-hd,.cal-grid,.cal-caption{max-width:420px;margin-left:auto;margin-right:auto}
 </style>
 </head>
 <body>
@@ -1780,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-210';
+const APP_VERSION = '2026-07-03-211';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6323,7 +6326,8 @@ function renderCoverageCalendar(){
     const cls = ['cal-cell'];
     if(covered) cls.push('cov');
     else if(ds < todayStr) cls.push('past');
-    if(ds === todayStr) cls.push('today');
+    // Build 211: no 'today' ring — next to the coverage fills it read as a
+    // selection/highlight state (Tomas). todayStr still drives 'past' above.
     if(_calSelectedDate === ds) cls.push('sel');
     html += `<div class="${cls.join(' ')}"${covered ? ` onclick="calPickDate('${ds}')"` : ''}>${day}${covered ? '<span class="cal-dot"></span>' : ''}</div>`;
   }
