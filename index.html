@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1781,7 +1780,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-06-30-208';
+const APP_VERSION = '2026-07-03-209';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4448,7 +4447,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
   // filter handles candidate selection per unit, and conflict messaging
   // was unused. If conflict info is needed later, surface inline.)
 
-  // Build per-row data: { unit, booking, defaultAction, candidatesForUnit }
+  // Build per-row data: { unit, booking, defaultAction, candidatesForSlot }
   const rows = [];
   removedUnitsWithBookings.forEach(({ unit, bookings }) => {
     const unitWing = getUnitWing(unit);
@@ -4509,21 +4508,30 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     // Build the modal HTML
     const renderUnitSection = (unit, unitRows, startIdx) => {
       const cover = unitRows[0].coverBN;
-      const candidatesList = unitRows[0].candidatesForUnit;
-      // Build 143: Show disabled transfer note when no same-wing candidates.
-      const transferOptions = candidatesList.length
-        ? candidatesList.map(c =>
-            `<option value="transfer:${c.bnName}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
-          ).join('')
-        : `<option value="" disabled>No other Break Nurse on same wing for transfer</option>`;
+      const anySameWing = unitRows[0].anySameWing;
       const headerNote = cover
         ? `<span style="color:var(--muted);font-size:.78rem">· ${firstName(cover)} already covers</span>`
-        : (candidatesList.length
+        : (anySameWing
             ? `<span style="color:var(--muted);font-size:.78rem">· no other BN covers</span>`
             : `<span style="color:var(--muted);font-size:.78rem">· no same-wing BN available</span>`);
       const rowsHtml = unitRows.map((r, j) => {
         const idx = startIdx + j;
         const t = String(r.booking.SlotTime).padStart(4,'0');
+        // Build 209 (D0 fix): the old unit-level list read r.candidatesForUnit,
+        // a property build 145 renamed to candidatesForSlot in the row builder —
+        // undefined here, so `.length` threw before the modal painted (live
+        // repro 2026-07-03 via Save Assignment). Options are now PER-SLOT and
+        // ELIGIBLE-ONLY, consistent with promptAbsorptionChoice / the
+        // substitute pickers (ineligible candidates are excluded, not shown
+        // disabled). Eligibility rules unchanged (own-break / covering-another-
+        // unit only); T+1 and cross-row consumption stay open product
+        // questions (test plan D3/D5).
+        const elig = (r.candidatesForSlot || []).filter(c => c.eligible);
+        const transferOptions = elig.length
+          ? elig.map(c =>
+              `<option value="transfer:${c.bnName.replace(/"/g,'&quot;')}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
+            ).join('')
+          : `<option value="" disabled>No eligible Break Nurse for this slot</option>`;
         return `
           <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
             <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${formatNurse(r.booking.NurseName)} · ${fmt12(t)}</div>
@@ -4532,6 +4540,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
               <option value="cancel">Cancel booking</option>
               ${transferOptions}
             </select>
+            <div class="_bdNote" data-noteidx="${idx}" style="display:none;font-size:.72rem;color:#b45309;margin-top:4px"></div>
           </div>`;
       }).join('');
       return `
@@ -4576,6 +4585,28 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
       sel.value = state[idx];
     });
 
+    // Build 209: setRowAction is the ONE programmatic setter (propagation +
+    // bulk buttons). Options are per-slot now, so a transfer target may not
+    // exist on a given row (candidate ineligible at that slot) — in that case
+    // the row falls back to Keep with a visible ↺ note instead of a blank
+    // select or a silent change, mirroring the absorption modal's not-silent
+    // auto-revert (Tomas 2026-05-29). Manual user changes clear the note.
+    const noteEl = idx => modal.querySelector(`._bdNote[data-noteidx="${idx}"]`);
+    const clearNote = idx => { const n = noteEl(idx); if(n){ n.style.display = 'none'; n.textContent = ''; } };
+    const setRowAction = (idx, action) => {
+      const sel = modal.querySelector(`._bdSelect[data-idx="${idx}"]`);
+      if(!sel) return;
+      clearNote(idx);
+      if(action.startsWith('transfer:') && ![...sel.options].some(o => o.value === action)){
+        sel.value = 'keep'; state[idx] = 'keep';
+        const n = noteEl(idx);
+        if(n){ n.textContent = `↺ set to Keep — ${firstName(action.slice('transfer:'.length))} isn't available at this slot`; n.style.display = 'block'; }
+        return;
+      }
+      sel.value = action;
+      state[idx] = action;
+    };
+
     // Enforce per-unit single transfer target: if a row picks
     // Transfer-to-X, all OTHER rows of the same unit that also picked
     // Transfer must pick the same target. We solve this by, on every
@@ -4592,8 +4623,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         if(oIdx === changedIdx) return;
         if(rows[oIdx].unit !== changedUnit) return;
         if(otherSel.value.startsWith('transfer:') && otherSel.value !== newVal){
-          otherSel.value = newVal;
-          state[oIdx] = newVal;
+          setRowAction(oIdx, newVal);
         }
       });
     };
@@ -4601,6 +4631,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     modal.querySelectorAll('._bdSelect').forEach(sel => {
       sel.addEventListener('change', () => {
         const idx = parseInt(sel.getAttribute('data-idx'), 10);
+        clearNote(idx);
         state[idx] = sel.value;
         propagateTransferTarget(idx);
       });
@@ -4613,8 +4644,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         modal.querySelectorAll('._bdSelect').forEach(sel => {
           const idx = parseInt(sel.getAttribute('data-idx'), 10);
           if(rows[idx].unit === unit){
-            sel.value = action;
-            state[idx] = action;
+            setRowAction(idx, action);
           }
         });
       });
