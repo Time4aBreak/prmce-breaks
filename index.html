@@ -1783,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-211';
+const APP_VERSION = '2026-07-03-212';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3617,9 +3617,18 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       // For 3C/4C: also catch legacy C_PAIR bookings (current writes canonicalize
       // to '3C' or '4C', but old rows may still carry 'C_PAIR').
       const todayStr = `${effectiveAt.getFullYear()}-${String(effectiveAt.getMonth()+1).padStart(2,'0')}-${String(effectiveAt.getDate()).padStart(2,'0')}`;
+      // Build 212: floor the BOOKING fetch to activeShiftFloor(), same as the
+      // schedule fetch below. Noc post-midnight bookings carry SlotDate =
+      // shift-START date (yesterday relative to effectiveAt's calendar date),
+      // so `SlotDate ge todayStr` silently missed a still-running Noc shift's
+      // bookings — a morning-tail close showed "Cancel 0 bookings" and would
+      // have ORPHANED them on the closed unit, nobody notified. Live-caught
+      // 2026-07-03 05:11 during C3c (two 9S fixtures invisible to the modal).
+      // The slotDt >= effectiveAt filter below still drops past slots.
+      const _bkFloor = activeShiftFloor() < todayStr ? activeShiftFloor() : todayStr;
       const bookingFilter = (unit === '3C' || unit === '4C')
-        ? `(Unit eq '${unit}' or Unit eq 'C_PAIR') and SlotDate ge '${todayStr}'`
-        : `Unit eq '${unit}' and SlotDate ge '${todayStr}'`;
+        ? `(Unit eq '${unit}' or Unit eq 'C_PAIR') and SlotDate ge '${_bkFloor}'`
+        : `Unit eq '${unit}' and SlotDate ge '${_bkFloor}'`;
       const allBookings = await spGet(LISTS.bookings, bookingFilter);
       affectedBookings = allBookings.filter(b => {
         if(isBNBreak(b)) return false;
