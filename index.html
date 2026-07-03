@@ -1783,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-216';
+const APP_VERSION = '2026-07-03-217';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2368,6 +2368,13 @@ const syncedLS = {
   // delete (BNState empty + LS stale → getState returns stale value → refresh
   // thinks "no change"). Querying spGet directly: empty result === remote miss.
   async refresh(key){
+    // Build 217 (census 2026-07-03): a pull racing an IN-FLIGHT write on the
+    // same key would momentarily revert local truth to the stale remote —
+    // user saves, poll repaints the old value for one cycle, then heals.
+    // _stateWriteLock holds a pending promise exactly while setState is in
+    // flight; skip the pull (report "no change") and let the next cycle
+    // catch up after the write lands.
+    if(_stateWriteLock[key]) return false;
     try {
       const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
       const remote = items.length ? JSON.parse(items[0].Value || 'null') : null;
@@ -2388,7 +2395,9 @@ const syncedLS = {
   // changed. Used by polling to detect cross-device updates without spamming
   // round trips when nothing's changed.
   async refreshMany(keys){
-    const valid = [...new Set(keys.filter(Boolean))];
+    // Build 217: same in-flight-write skip as refresh() — the batched path
+    // does its own compare/store, so it needs its own intake filter.
+    const valid = [...new Set(keys.filter(Boolean))].filter(k => !_stateWriteLock[k]);
     if(!valid.length) return [];
     // Build 215: ONE batched round trip instead of N parallel spGet calls.
     // Sign Up's watched set alone is 10–16 keys every 10s; the tick adds
