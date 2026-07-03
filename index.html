@@ -1783,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-212';
+const APP_VERSION = '2026-07-03-213';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3610,6 +3610,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
   try {
     let affectedBookings = [];
     let bnImpacts = []; // {schedId, bn, date, shift, unit, hasOtherUnits, otherUnits}
+    let suppStrips = []; // Build 213: active supplementals covering the closing unit
     let hasFutureRedeal = false; // whether the commit will re-deal fully-future shifts
 
     if(targetStatus === 'closed'){
@@ -3697,6 +3698,42 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
         };
       });
 
+      // Build 213 (Option 1, Tomas 2026-07-03 — resolves the C3c residue at
+      // the root): closing a unit also ENDS any active absorbed coverage of
+      // it. Collect live-shift supplemental rows whose Units include the
+      // closing unit; the commit stamps attribution for breaks the absorber
+      // ALREADY covered on this unit (the same stampOutageAttribution the
+      // Mark Available paths use — Tomas's condition: the record must show
+      // who actually covered them), then strips the unit from the supp,
+      // deleting the row if emptied. Reopen then needs no special case — the
+      // covered-check is honestly false, the picker asks once, and the
+      // main+supp double-listing can't occur. outageStart is resolved HERE
+      // from the already-fetched allScheds (the CoveredFrom BN's inactive-row
+      // EndedAt), falling back to the supp Id's Date.now() birth stamp, so
+      // the commit needs no extra schedule fetch.
+      suppStrips = allScheds.filter(s => {
+        if(String(s.IsSupplemental) !== '1') return false;
+        if(s.Status === 'inactive') return false;
+        let u = []; try { u = JSON.parse(s.Units||'[]'); } catch{}
+        if(!u.includes(unit)) return false;
+        const shiftEnd = slotDateTime(s.ShiftDate.slice(0,10), s.ShiftType === 'Noc' ? '0830' : '2030', s.ShiftType);
+        return shiftEnd >= effectiveAt;
+      }).map(s => {
+        let u = []; try { u = JSON.parse(s.Units||'[]'); } catch{}
+        const inactiveRow = allScheds.find(x =>
+          String(x.IsSupplemental) !== '1' && x.Status === 'inactive' &&
+          x.BreakNurseName === s.CoveredFrom &&
+          (x.ShiftDate||'').slice(0,10) === (s.ShiftDate||'').slice(0,10) &&
+          x.ShiftType === s.ShiftType && x.EndedAt);
+        let outageStartMs = inactiveRow ? new Date(inactiveRow.EndedAt).getTime() : NaN;
+        if(!outageStartMs || isNaN(outageStartMs)){
+          const idMs = Number(s.Id);
+          outageStartMs = (isFinite(idMs) && idMs > 1e12) ? idMs : 0;
+        }
+        return { suppId: s.Id, absorber: s.BreakNurseName, coveredFrom: s.CoveredFrom || '',
+                 units: u, date: (s.ShiftDate||'').slice(0,10), shift: s.ShiftType, outageStartMs };
+      });
+
       // Whether the commit will trigger a future re-deal: any active core shift
       // (Day/Noc, not supplemental) starting after effectiveAt. Drives the
       // modal's future-shift summary line below.
@@ -3727,20 +3764,24 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       i.hasOtherUnits
         ? `• ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): ${unit} removed, still covers ${i.otherUnits.join(', ')}`
         : `⚠️ ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): <strong>only covers ${unit} — needs reassignment</strong>`);
+    // Build 213: absorbed-coverage strips are itemized with the in-progress
+    // impacts — closing a supp-held unit must not silently edit the absorber.
+    const _stripLines = suppStrips.map(st =>
+      `• ${firstName(st.absorber)} — absorbed coverage of ${unit} (for ${firstName(st.coveredFrom || '?')}) ends; breaks already covered stay credited to ${firstName(st.absorber)}`);
     const _futureLine = hasFutureRedeal
-      ? `<div style="margin-top:${_ipLines.length ? '8px' : '0'}"><strong>Future shifts:</strong> all shifts from ${effectiveLabel} will be re-dealt to rebalance coverage — break-nurse assignments may change, including on units other than ${unit}.</div>`
+      ? `<div style="margin-top:${(_ipLines.length || _stripLines.length) ? '8px' : '0'}"><strong>Future shifts:</strong> all shifts from ${effectiveLabel} will be re-dealt to rebalance coverage — break-nurse assignments may change, including on units other than ${unit}.</div>`
       : '';
-    const bnLines = (_ipLines.length || _futureLine)
-      ? _ipLines.join('<br>') + _futureLine
+    const bnLines = (_ipLines.length || _stripLines.length || _futureLine)
+      ? [..._ipLines, ..._stripLines].join('<br>') + _futureLine
       : '<span style="color:var(--muted)">None</span>';
 
     const headerText = targetStatus === 'closed'
       ? `Closing ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`} will:`
       : `Opening ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`}`;
-    const nothingAffected = targetStatus === 'closed' && !affectedBookings.length && !_inProgImpacts.length && !hasFutureRedeal;
+    const nothingAffected = targetStatus === 'closed' && !affectedBookings.length && !_inProgImpacts.length && !suppStrips.length && !hasFutureRedeal;
 
     // Store for confirm handler
-    window._pendingUnitChange = { unit, effectiveAt, effectiveIso, targetStatus, affectedBookings, bnImpacts };
+    window._pendingUnitChange = { unit, effectiveAt, effectiveIso, targetStatus, affectedBookings, bnImpacts, suppStrips };
 
     _closeUnitStatusModal();
     const modal = document.createElement('div');
@@ -3794,6 +3835,32 @@ async function commitUnitChange(){
       if(pending.affectedBookings.length){
         showBusy(`Cancelling ${pending.affectedBookings.length} booking${pending.affectedBookings.length!==1?'s':''}…`);
         await Promise.all(pending.affectedBookings.map(b => spDel(LISTS.bookings, b.Id)));
+      }
+
+      // Build 213 (Option 1): end absorbed coverage of the closing unit.
+      // Order matters — stamp attribution FIRST (breaks the absorber already
+      // covered on THIS unit get CreatedBy = absorber, exactly what the Mark
+      // Available paths write, so the record survives the supp's removal),
+      // THEN strip the unit, deleting the supp if emptied. Scoped to the
+      // closing unit only — other absorbed units keep normal Mark-Available
+      // semantics. Failures are non-fatal per supp (warn + continue).
+      for(const st of (pending.suppStrips || [])){
+        try {
+          if(st.outageStartMs && !isNaN(st.outageStartMs) && st.outageStartMs < pending.effectiveAt.getTime()){
+            await stampOutageAttribution(
+              [{ Id: st.suppId, BreakNurseName: st.absorber, Units: JSON.stringify([unit]) }],
+              st.outageStartMs, pending.effectiveAt.getTime(), st.date, st.shift
+            );
+          } else {
+            console.warn(`[close ${unit}] no outage start for supp ${st.suppId} — attribution stamp skipped`);
+          }
+          const remaining = st.units.filter(u => u !== unit);
+          if(remaining.length){
+            await spPatch(LISTS.schedule, st.suppId, { Units: JSON.stringify(remaining) });
+          } else {
+            await spDel(LISTS.schedule, st.suppId);
+          }
+        } catch(e){ console.warn(`[close ${unit}] supp strip failed for ${st.suppId}:`, e.message); }
       }
 
       // For each BN with other open units: keep them assigned, recompute
@@ -3997,7 +4064,11 @@ async function commitUnitChange(){
       if(subsUnavail.length){
         subTail += ` · ⚠ ${subsUnavail.length} BN${subsUnavail.length!==1?'s':''} without replacement`;
       }
-      toast(`${unit} closing ${when}${cancelTail}${subTail}`);
+      // Build 213: surface absorbed-coverage strips too.
+      const stripTail = (pending.suppStrips || []).length
+        ? ` · ${pending.suppStrips.length} absorbed coverage ended`
+        : '';
+      toast(`${unit} closing ${when}${cancelTail}${subTail}${stripTail}`);
     } else {
       // Opening — recompute affected rotations in background. Dispatch:
       // 3C uses recompute3CAffectedRotations (covers 3C and C_PAIR BNs);
