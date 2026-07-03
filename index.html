@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1790,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-218';
+const APP_VERSION = '2026-07-03-219';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13929,10 +13928,16 @@ async function _impGateAddCommit(){
   if(!name || !date || !(shift === 'Day' || shift === 'Noc')){ toast('Name, date, and shift are all required.', true); return; }
   const m = document.getElementById('importGateModal');
   if(m) m.remove();
-  // Ride the full existing pipeline: merge + dedupe + rename prompt + unit
-  // suggestions + render. forceReplace=true = "merge without the week-replace
-  // prompt" (same call the unit-status re-render path uses).
-  await renderImportRows([{ name, date, shift, manual: true }], true);
+  // Build 219: pass the WHOLE current batch + the new entry — NOT the entry
+  // alone. renderImportRows adopts whatever array it's given as the current
+  // batch (_currentImportEntries / the review / save-scope); a single-entry
+  // call on 218 orphaned the other staged entries out of Save All — caught
+  // LIVE by the gate's own checksum ("expected 8 · staged 1", 2026-07-03).
+  // This is the same full-batch shape the unit-status re-render call uses;
+  // matching side effect: suggestions recompute across the batch.
+  const _batch = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length)
+    ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  await renderImportRows([..._batch, { name, date, shift, manual: true }], true);
   toast(`✓ Added ${firstName(name)} · ${date} ${shift} — tap Save All to re-check.`);
 }
 
