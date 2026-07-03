@@ -1783,7 +1783,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-214';
+const APP_VERSION = '2026-07-03-215';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2388,10 +2388,39 @@ const syncedLS = {
   // changed. Used by polling to detect cross-device updates without spamming
   // round trips when nothing's changed.
   async refreshMany(keys){
-    const valid = keys.filter(Boolean);
+    const valid = [...new Set(keys.filter(Boolean))];
     if(!valid.length) return [];
-    const results = await Promise.all(valid.map(k => syncedLS.refresh(k).then(ch => [k, ch])));
-    return results.filter(([, ch]) => ch).map(([k]) => k);
+    // Build 215: ONE batched round trip instead of N parallel spGet calls.
+    // Sign Up's watched set alone is 10–16 keys every 10s; the tick adds
+    // more every 15s — batching collapses the app's dominant execution
+    // cost. Each query is the exact per-key filter refresh() used, so
+    // server-side behavior is unchanged, and the per-key delete/change
+    // semantics below mirror refresh() exactly (incl. parse-error → skip,
+    // never delete). Falls back to the old parallel-singles path if the
+    // batch call itself fails.
+    try {
+      const resultSets = await spBatchGet(valid.map(k => ({ sheet: LISTS.state, filter: `Key eq '${esc(k)}'` })));
+      const changed = [];
+      valid.forEach((k, i) => {
+        const items = resultSets[i] || [];
+        let remote = null, parsed = false;
+        try { remote = items.length ? JSON.parse(items[0].Value || 'null') : null; parsed = true; } catch{}
+        if(!parsed) return; // corrupt value — no change, matches refresh()'s error path
+        const before = localStorage.getItem(k);
+        if(remote == null){
+          // Missing in BNState (deleted on another device). Clear local too.
+          if(before != null){ localStorage.removeItem(k); changed.push(k); }
+          return;
+        }
+        const next = JSON.stringify(remote);
+        if(before !== next){ localStorage.setItem(k, next); changed.push(k); }
+      });
+      return changed;
+    } catch(e){
+      console.warn('[syncedLS.refreshMany] batch failed, falling back to singles:', e.message);
+      const results = await Promise.all(valid.map(k => syncedLS.refresh(k).then(ch => [k, ch])));
+      return results.filter(([, ch]) => ch).map(([k]) => k);
+    }
   },
 
   async set(key, value){
@@ -3223,11 +3252,48 @@ async function cancelScheduled3CChange(effectiveAt){
 // the flip.
 let _3CTickLastStatus = null;
 async function _3CTick(){
+  // Build 215: gate all polling on tab visibility — a hidden/locked tab does
+  // zero network. The visibilitychange kicker (registered with the tick)
+  // fires an immediate pass on return, so nobody waits a full interval
+  // after waking the phone.
+  if(document.hidden) return;
   // Pull latest 3C state + app version from BNState before reading. Without
   // this, the tick paints whatever localStorage already has — meaning a
   // schedule change or app-update push made on another device never surfaces
   // here unless the user opens the admin panel.
-  try { await syncedLS.refreshMany(['unit3CDefault', 'unit3CSchedule', 'unitStatuses', 'unitSchedules', 'appVersion']); } catch{}
+  // Build 215 (C2b): roster + the signed-in BN's break templates join the
+  // watched set, so roster adds/removes and template edits propagate
+  // cross-device within one tick — no hard refresh. The whole list is now
+  // ONE backend call (batched refreshMany), fewer executions than the old
+  // five-key version.
+  let _changedKeys = [];
+  try {
+    const _bn = (typeof BNS !== 'undefined' && BNS.name) ? BNS.name : '';
+    _changedKeys = await syncedLS.refreshMany([
+      'unit3CDefault', 'unit3CSchedule', 'unitStatuses', 'unitSchedules', 'appVersion',
+      'bnImportedNames', 'bnImportedEntries',
+      _bn ? `bnDefault_${_bn}_Day` : '', _bn ? `bnDefault_${_bn}_Noc` : ''
+    ]);
+  } catch{}
+  // Build 215: targeted re-renders on cross-device deltas — same pattern as
+  // the 3C flip handling below: repaint only what changed, never mid-edit.
+  try {
+    if(_changedKeys.includes('bnImportedNames') || _changedKeys.includes('bnImportedEntries')){
+      let n = syncedLS.get('bnImportedNames');
+      if(typeof n === 'string'){ try { n = JSON.parse(n); } catch{} }
+      if(Array.isArray(n)) importedNames = n;
+      if(typeof renderImportedNamesList === 'function') renderImportedNamesList();
+      if(typeof populateBNDropdown === 'function') populateBNDropdown();
+      if(typeof populateNurseDropdown === 'function') populateNurseDropdown();
+    }
+    const _bn2 = (typeof BNS !== 'undefined' && BNS.name) ? BNS.name : '';
+    const _gShift = ((typeof BNS !== 'undefined' && BNS.defaultShift) || 'Day');
+    if(_bn2 && _changedKeys.includes(`bnDefault_${_bn2}_${_gShift}`)
+       && document.getElementById('bnDefaultGrid')
+       && !(typeof BNS !== 'undefined' && BNS._defaultDirty)){
+      loadDefaultGrid(_gShift); // repaint the ⭐ grid only when clean of unsaved stars
+    }
+  } catch{}
   // Show update banner if BNState appVersion differs from this device's
   // loaded APP_VERSION. Server's value is empty until admin first pushes —
   // missing/empty values match anything, so banner only appears after admin
@@ -3465,7 +3531,19 @@ async function recomputeUnitsAffectedRotations(units){
 // Start ticking every 15 seconds so status transitions feel responsive
 if(typeof window !== 'undefined' && !window._3CTickStarted){
   window._3CTickStarted = true;
-  setInterval(_3CTick, 15 * 1000);
+  // Build 215: jittered period so a fleet of devices waking at shift change
+  // doesn't poll in lockstep; visibilitychange kicker gives an immediate
+  // refresh pass when the tab returns (pairs with the document.hidden gates
+  // at the top of every poller).
+  setInterval(_3CTick, 15 * 1000 + Math.floor(Math.random() * 3000));
+  document.addEventListener('visibilitychange', () => {
+    if(document.hidden) return;
+    _3CTick().catch(()=>{});
+    // Slots only: the Sign Up poller had no visibility handling before 215.
+    // The portal pollers (Prod Log/Coverage/Schedule) self-manage via their
+    // own visibilitychange listener (builds 123/125) — do not double-kick.
+    try { if(typeof S !== 'undefined' && S.refreshTmr) silentRefreshSlots(); } catch{}
+  });
 }
 
 // ── Unit Status Change Modal chain ──────────────────────
@@ -5568,6 +5646,7 @@ function saveDefaultTemplate(){
   const selected = [...document.querySelectorAll('.bn-default-slot.on')]
     .map(el => el.dataset.slot);
   syncedLS.set(`bnDefault_${name}_${shift}`, selected).catch(()=>{});
+  BNS._defaultDirty = false; // Build 215
   updateApplyAllBtn();
 }
 
@@ -5632,10 +5711,12 @@ function loadDefaultGrid(shift){
       onclick="toggleDefaultSlot(this,'${s}')" style="font-size:.78rem;padding:6px 4px;text-align:center">
       ${fmt12(s)}
     </div>`).join('');
+  BNS._defaultDirty = false; // Build 215: grid now reflects saved state
 }
 
 function toggleDefaultSlot(el, slot){
   el.classList.toggle('on');
+  BNS._defaultDirty = true; // Build 215: unsaved stars — tick must not repaint the grid
 }
 
 // clearAndResuggest removed — bulk re-suggest flow replaced by applyDefaultToAll
@@ -7271,7 +7352,7 @@ async function loadSlots(silent=false){
 
     // Start silent background refresh timer
     clearInterval(S.refreshTmr);
-    S.refreshTmr = setInterval(silentRefreshSlots, 10000);
+    S.refreshTmr = setInterval(silentRefreshSlots, 10000 + Math.floor(Math.random() * 3000)); // Build 215: jitter
 
   } catch(e){
     if(silent){
@@ -7295,6 +7376,7 @@ async function loadSlots(silent=false){
 
 // Silent background refresh — fetches data and only updates DOM if something changed
 async function silentRefreshSlots(){
+  if(document.hidden) return; // Build 215: no polling while hidden
   if(!S.unit) return;
   const list = document.getElementById('slotsList');
   if(!list) return;
@@ -7843,7 +7925,7 @@ async function submitClaims(){
     S.submitting = false;
     if(btn){ btn.disabled = false; btn.textContent = 'Submit'; }
     hideBusy();
-    if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000);
+    if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000 + Math.floor(Math.random() * 3000)); // Build 215: jitter
   };
 
   // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) ──
@@ -18514,6 +18596,18 @@ async function removeImportedName(name){
     saveImportedNames();
     renderImportedNamesList();
     populateNurseDropdown();
+    // Build 215 (C2 finding): the zero-row branch cleaned nothing, so a
+    // removed-then-re-added name resurrected stale break templates (live-
+    // observed: Ashley's bnDefault_..._Day survived removal). Same blind
+    // idempotent pattern as the has-rows branch.
+    ['Day','Noc'].forEach(sh => {
+      for(const key of [`bnWingHistory_${name}_${sh}`, `bnDefault_${name}_${sh}`]){
+        try { localStorage.removeItem(key); } catch{}
+        if(typeof syncedLS !== 'undefined' && syncedLS.delete){
+          syncedLS.delete(key).catch(()=>{});
+        }
+      }
+    });
     toast(`${fn} removed from roster.`);
     return;
   }
@@ -18583,11 +18677,16 @@ async function removeImportedName(name){
   // Clear the BN's wing history — they're gone permanently, their history
   // shouldn't influence future fairness calcs for whoever takes their
   // place.
+  // Build 215 (C2 finding): also clear their saved break templates —
+  // bnDefault_* was never on this list, so re-adding the same name later
+  // silently resurrected stale preferences. deleteState is idempotent on
+  // missing keys, so the blind delete-with-catch pattern is safe.
   ['Day','Noc'].forEach(sh => {
-    const key = `bnWingHistory_${name}_${sh}`;
-    try { localStorage.removeItem(key); } catch{}
-    if(typeof syncedLS !== 'undefined' && syncedLS.delete){
-      syncedLS.delete(key).catch(()=>{});
+    for(const key of [`bnWingHistory_${name}_${sh}`, `bnDefault_${name}_${sh}`]){
+      try { localStorage.removeItem(key); } catch{}
+      if(typeof syncedLS !== 'undefined' && syncedLS.delete){
+        syncedLS.delete(key).catch(()=>{});
+      }
     }
   });
 
