@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-219';
+const APP_VERSION = '2026-07-03-220';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12959,7 +12959,6 @@ async function runImport(){
     const _stagedNow = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]').length;
     _impExpectedSet(_stagedNow ? _impExpectedGet() + _expVal : _expVal);
     _impGateAcks = new Set();
-    _impNamesConfirmed = false;
 
     renderImportRows(entries);
 
@@ -13671,7 +13670,7 @@ async function clearAllImportedEntries(){
   importEntries = [];
   localStorage.removeItem('bnImportedEntries'); deleteState('bnImportedEntries').catch(()=>{});
   // Build 218: the gate's state dies with the batch.
-  _impExpectedSet(0); _impGateAcks = new Set(); _impNamesConfirmed = false; window._impRosterBefore = null;
+  _impExpectedSet(0); _impGateAcks = new Set(); window._impRosterBefore = null;
   renderImportedEntriesSummary();
   populateNurseDropdown();
   toast('All imported entries cleared.');
@@ -13798,8 +13797,13 @@ async function resuggestAll(){
 // restoreLastImport the snapshot is gone and that check silently skips.
 
 const _IMP_EXP_KEY = 'bnImportExpectedCount';
+const _impFmtD = ds => { try { const d = new Date(ds + 'T12:00:00');
+  return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate(); } catch { return ds; } };
 let _impGateAcks = new Set();
-let _impNamesConfirmed = false;
+// Build 220: new-names is informational only — the roster add already
+// happened at stage time (addNamesToRoster runs in renderImportRows), so a
+// blocking confirm guarded a fait accompli. Checksum catches fabricated
+// extras; the rename prompt catches typo-variants.
 
 function _impExpectedGet(){
   const v = parseInt(localStorage.getItem(_IMP_EXP_KEY) || '0', 10);
@@ -13822,8 +13826,7 @@ function _runImportGateChecks(){
   const expected = _impExpectedGet();
   const errors = [];
   if(expected > 0 && staged !== expected){
-    errors.push({ key:'count', kind:'count',
-      text:`Expected ${expected} shift${expected!==1?'s':''} · ${staged} staged` });
+    errors.push({ key:'count', kind:'count', text:'' }); // rendered inline on the summary row
   }
   if(active.length){
     const dates = active.map(e => e.date).sort();
@@ -13836,10 +13839,10 @@ function _runImportGateChecks(){
         const n = active.filter(e => e.date === ds && e.shift === sh).length;
         if(n === 0){
           errors.push({ key:`missing|${ds}|${sh}`, kind:'add', date:ds, shift:sh,
-            text:`${ds} ${sh}: no BNs staged` });
+            text:`${_impFmtD(ds)} ${sh} — no BNs` });
         } else if(n === 1){
           errors.push({ key:`thin|${ds}|${sh}`, kind:'add', date:ds, shift:sh,
-            text:`${ds} ${sh}: only 1 BN staged` });
+            text:`${_impFmtD(ds)} ${sh} — only 1 BN` });
         }
       }
       cur.setDate(cur.getDate() + 1);
@@ -13853,8 +13856,7 @@ function _runImportGateChecks(){
 }
 
 function _impGatePasses(res){
-  const openErrors = res.errors.filter(a => !_impGateAcks.has(a.key));
-  return openErrors.length === 0 && (res.newNames.length === 0 || _impNamesConfirmed);
+  return res.errors.every(a => _impGateAcks.has(a.key));
 }
 
 function _impGateLog(res, saved){
@@ -13945,30 +13947,36 @@ function _impGateRender(){
   const res = _runImportGateChecks();
   const body = document.getElementById('impGateBody');
   if(!body) return;
-  const open = res.errors.filter(a => !_impGateAcks.has(a.key));
-  const acked = res.errors.filter(a => _impGateAcks.has(a.key));
+  // Build 220: copy diet (Tomas). One count row (summary + its controls merged),
+  // no subtitle, no narration line, short labels, new-names informational only.
+  const countAnom = res.errors.find(a => a.kind === 'count');
+  const open = res.errors.filter(a => a.kind !== 'count' && !_impGateAcks.has(a.key));
+  const acked = res.errors.filter(a => a.kind !== 'count' && _impGateAcks.has(a.key));
   const line = a => `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid ${_impGateAcks.has(a.key)?'var(--border)':'#fb8c00'};border-radius:8px;margin-bottom:6px;${_impGateAcks.has(a.key)?'opacity:.55':''}">
       <span style="flex:1;font-size:.85rem">${escHTML(a.text)}</span>
-      ${a.kind==='count' ? `<input id="impGateExpInput" type="number" min="1" value="${res.expected||''}" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:.85rem"/><button class="btn btn-ghost btn-sm" onclick="_impGateAdjust()" style="font-size:.75rem">Update expected</button>` : ''}
-      ${a.kind==='add' ? `<button class="btn btn-ghost btn-sm" onclick="_impGateJump('${a.date}','${a.shift}')" style="font-size:.75rem">Jump</button><button class="btn btn-ghost btn-sm" onclick="_impGateAddOpen('${a.date}','${a.shift}')" style="font-size:.75rem">+ Add entry</button>` : ''}
-      <button class="btn btn-ghost btn-sm" onclick="_impGateAck('${a.key}')" style="font-size:.75rem">${_impGateAcks.has(a.key)?'↺ Un-acknowledge':'Acknowledge'}</button>
+      <button class="btn btn-ghost btn-sm" onclick="_impGateJump('${a.date}','${a.shift}')" style="font-size:.75rem">Jump</button>
+      <button class="btn btn-ghost btn-sm" onclick="_impGateAddOpen('${a.date}','${a.shift}')" style="font-size:.75rem">+ Add</button>
+      <button class="btn btn-ghost btn-sm" onclick="_impGateAck('${a.key}')" style="font-size:.75rem">${_impGateAcks.has(a.key)?'Undo':'Accept'}</button>
     </div>`;
-  const namesBlock = res.newNames.length ? `
-    <div style="margin-top:12px;font-size:.82rem;font-weight:600">New names this batch (will join the roster):</div>
-    <div style="font-size:.85rem;margin:6px 0 8px">${res.newNames.map(escHTML).join(' · ')}</div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:.82rem;cursor:pointer">
-      <input type="checkbox" ${_impNamesConfirmed?'checked':''} onchange="_impNamesConfirmed=this.checked;_impGateRender()"/> These are real nurses — confirmed
-    </label>` : '';
+  const countAcked = countAnom && _impGateAcks.has('count');
+  const countRow = `
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.9rem;margin-bottom:12px;${countAcked?'opacity:.55':''}">
+      <span>Expected <strong>${res.expected||'—'}</strong> · staged <strong>${res.staged}</strong> ${(!countAnom)?'✓':'✗'}</span>
+      ${countAnom ? `<input id="impGateExpInput" type="number" min="1" value="${res.expected||''}" style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:.85rem"/><button class="btn btn-ghost btn-sm" onclick="_impGateAdjust()" style="font-size:.75rem">Update</button><button class="btn btn-ghost btn-sm" onclick="_impGateAck('count')" style="font-size:.75rem">${countAcked?'Undo':'Accept'}</button>` : ''}
+    </div>`;
+  const namesBlock = res.newNames.length
+    ? `<div style="font-size:.8rem;color:var(--muted);margin-top:10px">New this batch: ${res.newNames.map(escHTML).join(' · ')}</div>`
+    : '';
   const passes = _impGatePasses(res);
   body.innerHTML = `
-    <div style="font-size:.85rem;margin-bottom:10px">${res.expected>0 ? `Expected <strong>${res.expected}</strong> · staged <strong>${res.staged}</strong> ${res.expected===res.staged?'✓':'✗'}` : `Staged <strong>${res.staged}</strong> (no expected count on record)`}</div>
-    ${open.length ? open.map(line).join('') : '<div style="font-size:.85rem;color:var(--green);padding:6px 0">✓ No open anomalies.</div>'}
-    ${acked.length ? `<div style="font-size:.75rem;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.05em">Acknowledged</div>${acked.map(line).join('')}` : ''}
+    ${countRow}
+    ${open.map(line).join('')}
+    ${acked.length ? `<div style="font-size:.72rem;color:var(--muted);margin-top:8px;text-transform:uppercase;letter-spacing:.05em">Accepted</div>${acked.map(line).join('')}` : ''}
     ${namesBlock}
     <div id="impGateAddWrap"></div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
-      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importGateModal').remove()">Go back to review</button>
+      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importGateModal').remove()">Go back</button>
       <button class="btn btn-primary btn-sm" ${passes?'':'disabled style="opacity:.5"'} onclick="document.getElementById('importGateModal').remove();acceptAllAndSave();">Save All →</button>
     </div>`;
 }
@@ -13981,8 +13989,7 @@ function _showImportGate(){
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:22px 24px;max-width:520px;width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 12px 40px rgba(0,0,0,.25)">
-      <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Reconcile before saving</div>
-      <div style="font-size:.8rem;color:var(--muted);margin-bottom:14px">The staged batch doesn’t match what you told me to expect. Fix, or acknowledge each item to proceed.</div>
+      <div style="font-weight:700;font-size:1rem;margin-bottom:12px">Reconcile before saving</div>
       <div id="impGateBody"></div>
     </div>`;
   wrap.addEventListener('click', e => { if(e.target === wrap) wrap.remove(); });
