@@ -1780,7 +1780,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-209';
+const APP_VERSION = '2026-07-03-210';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4527,6 +4527,9 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         // unit only); T+1 and cross-row consumption stay open product
         // questions (test plan D3/D5).
         const elig = (r.candidatesForSlot || []).filter(c => c.eligible);
+        // Build 210: the Keep option names the outgoing BN. "I'll cover this
+        // slot" assumed the outgoing BN is operating the modal — a manager/
+        // coordinator may be. Keep = the booking stays with the OUTGOING BN.
         const transferOptions = elig.length
           ? elig.map(c =>
               `<option value="transfer:${c.bnName.replace(/"/g,'&quot;')}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
@@ -4536,7 +4539,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
           <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
             <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${formatNurse(r.booking.NurseName)} · ${fmt12(t)}</div>
             <select data-idx="${idx}" class="_bdSelect" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:.85rem">
-              <option value="keep">Keep (I'll cover this slot)</option>
+              <option value="keep">Keep (${firstName(outgoingBN)} will cover this slot)</option>
               <option value="cancel">Cancel booking</option>
               ${transferOptions}
             </select>
