@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1790,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-03-221';
+const APP_VERSION = '2026-07-07-222';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13843,13 +13842,17 @@ function _runImportGateChecks(){
     while(cur <= end){
       const ds = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
       for(const sh of ['Day','Noc']){
-        const n = active.filter(e => e.date === ds && e.shift === sh).length;
-        if(n === 0){
+        const here = active.filter(e => e.date === ds && e.shift === sh);
+        if(here.length === 0){
           errors.push({ key:`missing|${ds}|${sh}`, kind:'add', date:ds, shift:sh,
             text:`${_impFmtD(ds)} ${sh} — no BNs` });
-        } else if(n === 1){
+        } else if(here.length === 1){
+          // Build 222 (Tomas): name the lone BN — the review sorts name-first,
+          // so a Jump landed amid that nurse's OTHER shifts, not this shift's
+          // roster. The name in the line IS the diagnosis: compare it to the
+          // source and you know add-vs-swap without navigating anywhere.
           errors.push({ key:`thin|${ds}|${sh}`, kind:'add', date:ds, shift:sh,
-            text:`${_impFmtD(ds)} ${sh} — only 1 BN` });
+            text:`${_impFmtD(ds)} ${sh} — only ${firstName(here[0].name)}` });
         }
       }
       cur.setDate(cur.getDate() + 1);
@@ -13874,20 +13877,6 @@ function _impGateLog(res, saved){
     while(log.length > 50) log.shift();
     localStorage.setItem('bnImportGateLog', JSON.stringify(log));
   } catch{}
-}
-
-function _impGateJump(date, shift){
-  const m = document.getElementById('importGateModal');
-  if(m) m.remove();
-  const card = document.querySelector(`[data-impdate="${date}"][data-impshift="${shift}"]`);
-  if(card){
-    card.scrollIntoView({ behavior:'smooth', block:'center' });
-    const prev = card.style.boxShadow;
-    card.style.boxShadow = '0 0 0 3px var(--day)';
-    setTimeout(() => { card.style.boxShadow = prev; }, 2200);
-  } else {
-    toast('No card exists for that shift yet — use + Add entry.', true);
-  }
 }
 
 function _impGateAck(key){
@@ -13962,7 +13951,6 @@ function _impGateRender(){
   const line = a => `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;padding:8px 10px;border:1px solid ${_impGateAcks.has(a.key)?'var(--border)':'#fb8c00'};border-radius:8px;margin-bottom:6px;${_impGateAcks.has(a.key)?'opacity:.55':''}">
       <span style="flex:1;font-size:.85rem">${escHTML(a.text)}</span>
-      <button class="btn btn-ghost btn-sm" onclick="_impGateJump('${a.date}','${a.shift}')" style="font-size:.75rem">Jump</button>
       <button class="btn btn-ghost btn-sm" onclick="_impGateAddOpen('${a.date}','${a.shift}')" style="font-size:.75rem">+ Add</button>
       <button class="btn btn-ghost btn-sm" onclick="_impGateAck('${a.key}')" style="font-size:.75rem">${_impGateAcks.has(a.key)?'Undo':'Accept'}</button>
     </div>`;
