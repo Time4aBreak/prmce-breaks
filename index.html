@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-07-225';
+const APP_VERSION = '2026-07-07-226';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6206,6 +6206,22 @@ async function recalculateRotation(bnName, date, shift, asOf=null){
     bnName.charCodeAt(0);
 
   const rotation = calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift);
+  // Build 226: re-overlay PIN-BACKED slots after every recompute — kept or
+  // transferred bookings (CreatedBy = this BN, unit deliberately outside
+  // Units) must survive any repair/redeal/recompute, or the Keep/Transfer
+  // mechanism silently reverts (live-caught D1 2026-07-07). Staff bookings
+  // only; cancelled excluded; saveRotation's past-preservation still wins
+  // for elapsed slots. Residual (documented): applyDefaultToShift's
+  // seed-branch writes its own rotation and stays exposed — reachable only
+  // if a pin-holder applies a ⭐ template mid-shift.
+  try {
+    const pinned = await spGet(LISTS.bookings,
+      `CreatedBy eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+    pinned.forEach(b => {
+      if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+      rotation[String(b.SlotTime).padStart(4,'0')] = b.Unit;
+    });
+  } catch(e){ console.warn('pin overlay failed (non-fatal):', e.message); }
   // Build 135 (2026-05-26): await so callers can rely on rotation having
   // been persisted to BNState before they proceed (e.g., saveAssign's
   // overlay write must land AFTER this one to win the race).
@@ -16024,12 +16040,27 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       let rotation = loadRotation(BNS.name, dt, shift) || {};
       const _expandedResp = new Set(filterClosedUnits(expandCPair([...responsibleUnits], dt, shift), dt, shift));
       const _nowMs = Date.now();
+      // Build 226 (D1 live-caught, predicted by the May delta's open thread):
+      // PIN-BACKED entries are legitimate foreign-unit rotation slots — Keep
+      // (141/143) and Transfer (224) deliberately pin a slot to a unit
+      // OUTSIDE the BN's Units, backed by a live CreatedBy staff booking.
+      // This validator read that exact signature as corruption and its
+      // background repair clobbered Tess's transfer pins the first time her
+      // My Shift opened. A future foreign-unit entry is valid iff a live
+      // staff booking at (slot, unit) is pinned to this BN. SlotDate === dt
+      // is ghost-safe: Noc post-midnight bookings carry the shift-START date.
+      const _pinBacked = new Set(
+        allBookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1'
+          && b.CreatedBy === BNS.name && (b.SlotDate || '').slice(0,10) === dt)
+          .map(b => `${normSlot(b.SlotTime)}|${b.Unit}`)
+      );
       const _hasStaleUnit = Object.entries(rotation).some(([slot, unit]) => {
         if(!unit) return false;
         // Past slots: historical, not subject to staleness check.
         try {
           if(slotDateTime(dt, slot, shift).getTime() < _nowMs) return false;
         } catch { return false; /* malformed slot key — ignore */ }
+        if(_pinBacked.has(`${normSlot(slot)}|${unit}`)) return false; // Build 226
         return !_expandedResp.has(unit);
       });
       if(_hasStaleUnit){
