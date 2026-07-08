@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-07-224';
+const APP_VERSION = '2026-07-07-225';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6925,6 +6925,18 @@ async function loadSlots(silent=false){
         bookings.filter(b => String(b.IsCancelled) !== '1').map(b => normSlot(b.SlotTime))
       );
       allSlots = allSlots.filter(s => _absorbedOnUnit.has(normSlot(s)));
+      // Build 225 (D1 live find): a pinned-only unit has NO covering BN, so
+      // the upstream slot assembly — built from covering rotations — is
+      // EMPTY and the filter yields nothing: the transferred claims became
+      // unmanageable on Sign Up ("No break slots available"). The booked
+      // times themselves must seed the list; claimed rows then render from
+      // the bookings as usual (cancel/manage), and unclaimed times stay
+      // hidden exactly as the banner promises.
+      if(!isAbsorbed && _limitedPinned.length){
+        const _have = new Set(allSlots.map(s => normSlot(s)));
+        [..._absorbedOnUnit].forEach(t => { if(!_have.has(t)) allSlots.push(t); });
+        allSlots.sort((a, b) => sortKey(a, shift) - sortKey(b, shift));
+      }
     }
 
     // Build N+3 (2026-05-24): when viewing a covering BN's MAIN unit (not an
