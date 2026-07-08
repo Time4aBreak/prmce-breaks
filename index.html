@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-07-223';
+const APP_VERSION = '2026-07-07-224';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4591,145 +4591,118 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
 // Returns: {
 //   keepOverrides: [{slot, unit}],  // rotation overrides for outgoing BN
 //   bookingsToCancel: [bookingObj], // batch delete these
-//   transfers: [{unit, targetBN, targetSchedId, targetUnits, bookings}]
+//   transfers: [{booking, targetBN}] — bookings-only since 224 (D8)
 // }
 // Returns null if admin aborts.
 async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, date, shift, allScheds, allBookings }){
-  // Build candidate map per unit. A candidate is any active non-outgoing
-  // BN on this shift. For each candidate, also note if they already cover
-  // the unit (implicit-transfer default).
+  // Build 224 (Phase-D spec, Tomas 2026-07-07) — full rewrite to the eight
+  // decisions. RUN rows via groupBookingsIntoRuns (D1: runs move whole);
+  // eligibility = the shared bnCanTakeRun incl. the single-slot T+1 buffer
+  // (D2: one truth, no fork); LIVE reconcile — every change re-derives every
+  // other row's dropdown, with the visible ↺ auto-revert when a pick makes a
+  // set row ineligible (D3, mirrors promptAbsorptionChoice). Default action
+  // is KEEP: unlike absorption's outgoing BN, this one is still on shift.
+  // The return feeds saveAssign's BOOKINGS-ONLY commit (D8): transfers pin
+  // CreatedBy + a rotation-slot override on the target — the exact Keep
+  // mechanism pointed at a different BN. No Units join, no target recompute.
+  // Wing filtering lives HERE at the list layer (the engine is wing-
+  // agnostic) because one Edit can remove units from BOTH wings.
+  // Shell conventions preserved from 209/210: eligible-only options,
+  // setRowAction as the single programmatic setter, ._bdNote ↺ reverts,
+  // Keep names the outgoing BN, Cancel-edit resolves null.
   const activeBNs = allScheds.filter(s =>
     s.BreakNurseName !== outgoingBN &&
     s.Status !== 'inactive' &&
-    String(s.IsSupplemental) !== '1'   // build 148: was `!s.IsSupplemental` (misread "0" as supp)
+    String(s.IsSupplemental) !== '1'
   );
-  // Pre-compute each candidate's Units, break times, and busy slot times
-  // for conflict detection (used as informational only — not blocking,
-  // since admin can pick Keep/Cancel to resolve conflicts manually).
-  const candidates = activeBNs.map(s => {
-    const bnName = s.BreakNurseName;
-    let bnUnits = []; try { bnUnits = JSON.parse(s.Units||'[]'); } catch{}
-    const bnBreakTimes = new Set(
-      allBookings.filter(b => isBNBreak(b) && b.NurseName === bnName)
-                 .map(b => String(b.SlotTime).padStart(4,'0'))
-    );
-    const bnBusySlots = new Set(
-      allBookings.filter(b => isStaffBooking(b) && bnUnits.includes(b.Unit))
-                 .map(b => String(b.SlotTime).padStart(4,'0'))
-    );
-    return { bnName, schedId: s.Id, bnUnits, bnBreakTimes, bnBusySlots };
-  });
-  // (Build 143: coverOf and conflictReason helpers removed — same-wing
-  // filter handles candidate selection per unit, and conflict messaging
-  // was unused. If conflict info is needed later, surface inline.)
+  const baseCtx = buildAbsorptionContext(activeBNs, { allBookings, allScheds, shift });
 
-  // Build per-row data: { unit, booking, defaultAction, candidatesForSlot }
-  const rows = [];
-  removedUnitsWithBookings.forEach(({ unit, bookings }) => {
+  const flat = [];
+  removedUnitsWithBookings.forEach(({ bookings }) => bookings.forEach(b => flat.push(b)));
+  const runs = groupBookingsIntoRuns(flat, shift);
+  const runUnit = r => r[0].Unit;
+  const runNurse = r => r[0].NurseName;
+
+  // Per-unit wing candidates + implicit-cover BN (badge only — a BN whose
+  // MAIN units already include the removed unit, i.e. double-covered today).
+  const unitMeta = {};
+  removedUnitsWithBookings.forEach(({ unit }) => {
     const unitWing = getUnitWing(unit);
-    // Build 143 (2026-05-27): Same-wing filter. Candidates must share at
-    // least one unit's wing with the removed unit. Cross-wing BNs excluded.
-    const sameWing = candidates.filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing));
-    const coverCand = sameWing.find(c => c.bnUnits.includes(unit)) || null;
-    bookings.forEach(b => {
-      const slot = String(b.SlotTime).padStart(4,'0');
-      // Build 145 (2026-05-27): PER-SLOT transfer eligibility (restores the
-      // original promptUnitTakeover behavior, 2026-04-24 design). A candidate
-      // is eligible to take THIS specific booking only if they're free at
-      // THIS slot — not on their own break, and not already covering a staff
-      // booking on another of their units at this time (a BN can only relieve
-      // one nurse at a time). Eligibility is computed per booking, so a BN
-      // busy at one slot can still take the unit's OTHER slots. Ineligible
-      // candidates render as disabled options with the reason, so the admin
-      // sees why they can't take that specific slot.
-      const candForSlot = sameWing.map(c => {
-        let conflictReason = null;
-        if(c.bnBreakTimes.has(slot)) conflictReason = 'on own break';
-        else if(c.bnBusySlots.has(slot)) conflictReason = 'covering another unit';
-        return { ...c, eligible: !conflictReason, conflictReason };
-      });
-      // Sort: eligible first, implicit-cover within eligible first, blocked last
-      const ranked = candForSlot.sort((a,b) => {
-        if(a.eligible !== b.eligible) return a.eligible ? -1 : 1;
-        const aCover = a.bnName === (coverCand && coverCand.bnName) ? 0 : 1;
-        const bCover = b.bnName === (coverCand && coverCand.bnName) ? 0 : 1;
-        return aCover - bCover;
-      });
-      // Default Transfer only if the implicit-cover BN is eligible at THIS slot
-      const coverEligibleHere = coverCand && candForSlot.find(c => c.bnName === coverCand.bnName)?.eligible;
-      rows.push({
-        unit,
-        booking: b,
-        slot,
-        defaultAction: coverEligibleHere ? `transfer:${coverCand.bnName}` : 'keep',
-        candidatesForSlot: ranked,
-        coverBN: coverCand ? coverCand.bnName : null,
-        anySameWing: sameWing.length > 0
-      });
-    });
+    const bnUnitsOf = s => { try { return JSON.parse(s.Units||'[]'); } catch { return []; } };
+    const sameWing = activeBNs.filter(s => bnUnitsOf(s).some(u => getUnitWing(u) === unitWing));
+    const coverRow = sameWing.find(s => bnUnitsOf(s).includes(unit)) || null;
+    unitMeta[unit] = {
+      wingNames: new Set(sameWing.map(s => s.BreakNurseName)),
+      cover: coverRow ? coverRow.BreakNurseName : null,
+      anySameWing: sameWing.length > 0
+    };
   });
+
+  // state[i]: 'keep' | 'cancel' | targetBNName
+  const state = runs.map(() => 'keep');
+  const engineAssignments = () => state.map(a =>
+    a === 'keep' ? CHOICE_KEEP : a === 'cancel' ? CHOICE_CANCEL : a);
+  const allowedFor = (eligByRun, i) => {
+    const meta = unitMeta[runUnit(runs[i])] || { wingNames: new Set() };
+    return (eligByRun[i] || []).filter(n => meta.wingNames.has(n));
+  };
 
   return new Promise(resolve => {
     const existing = document.getElementById('bookingDecisionsModal');
     if(existing) existing.remove();
 
-    // Group rows by unit for display
     const byUnit = {};
-    rows.forEach(r => { (byUnit[r.unit] = byUnit[r.unit] || []).push(r); });
+    runs.forEach((r, i) => { (byUnit[runUnit(r)] ||= []).push(i); });
 
-    // Initial action state: row index → action string
-    // Action format: 'keep' | 'cancel' | 'transfer:BNName'
-    const state = rows.map(r => r.defaultAction);
+    const runLabel = r => {
+      const first = String(r[0].SlotTime).padStart(4,'0');
+      const last  = String(r[r.length-1].SlotTime).padStart(4,'0');
+      return r.length === 1
+        ? `${formatNurse(runNurse(r))} · ${fmt12(first)}`
+        : `${formatNurse(runNurse(r))} · ${fmt12(first)}–${fmt12(last)} · ${r.length} slots`;
+    };
 
-    // Build the modal HTML
-    const renderUnitSection = (unit, unitRows, startIdx) => {
-      const cover = unitRows[0].coverBN;
-      const anySameWing = unitRows[0].anySameWing;
-      const headerNote = cover
-        ? `<span style="color:var(--muted);font-size:.78rem">· ${firstName(cover)} already covers</span>`
-        : (anySameWing
+    const eligByRun0 = recomputeRunEligibility(baseCtx, runs, activeBNs, engineAssignments());
+
+    const optionsHtml = (i, allowed) => {
+      const unit = runUnit(runs[i]);
+      const cover = (unitMeta[unit] || {}).cover;
+      const n = runs[i].length;
+      const transferOptions = allowed.length
+        ? allowed.map(nm =>
+            `<option value="transfer:${nm.replace(/"/g,'&quot;')}"${state[i] === nm ? ' selected' : ''}>Transfer to ${firstName(nm)}${nm === cover ? ' (already covers)' : ''}</option>`
+          ).join('')
+        : `<option value="" disabled>No eligible Break Nurse for this run</option>`;
+      return `
+        <option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>
+        <option value="cancel"${state[i]==='cancel' ? ' selected' : ''}>Cancel booking${n!==1?'s':''}</option>
+        ${transferOptions}`;
+    };
+
+    const renderUnitSection = (unit, runIdxs) => {
+      const meta = unitMeta[unit] || {};
+      const headerNote = meta.cover
+        ? `<span style="color:var(--muted);font-size:.78rem">· ${firstName(meta.cover)} already covers</span>`
+        : (meta.anySameWing
             ? `<span style="color:var(--muted);font-size:.78rem">· no other BN covers</span>`
             : `<span style="color:var(--muted);font-size:.78rem">· no same-wing BN available</span>`);
-      const rowsHtml = unitRows.map((r, j) => {
-        const idx = startIdx + j;
-        const t = String(r.booking.SlotTime).padStart(4,'0');
-        // Build 209 (D0 fix): the old unit-level list read r.candidatesForUnit,
-        // a property build 145 renamed to candidatesForSlot in the row builder —
-        // undefined here, so `.length` threw before the modal painted (live
-        // repro 2026-07-03 via Save Assignment). Options are now PER-SLOT and
-        // ELIGIBLE-ONLY, consistent with promptAbsorptionChoice / the
-        // substitute pickers (ineligible candidates are excluded, not shown
-        // disabled). Eligibility rules unchanged (own-break / covering-another-
-        // unit only); T+1 and cross-row consumption stay open product
-        // questions (test plan D3/D5).
-        const elig = (r.candidatesForSlot || []).filter(c => c.eligible);
-        // Build 210: the Keep option names the outgoing BN. "I'll cover this
-        // slot" assumed the outgoing BN is operating the modal — a manager/
-        // coordinator may be. Keep = the booking stays with the OUTGOING BN.
-        const transferOptions = elig.length
-          ? elig.map(c =>
-              `<option value="transfer:${c.bnName.replace(/"/g,'&quot;')}">Transfer to ${firstName(c.bnName)}${c.bnName === cover ? ' (already covers)' : ''}</option>`
-            ).join('')
-          : `<option value="" disabled>No eligible Break Nurse for this slot</option>`;
-        return `
+      const rowsHtml = runIdxs.map(i => `
           <div style="padding:10px;border:1px solid var(--border);border-radius:8px;margin-bottom:6px">
-            <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${formatNurse(r.booking.NurseName)} · ${fmt12(t)}</div>
-            <select data-idx="${idx}" class="_bdSelect" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:.85rem">
-              <option value="keep">Keep (${firstName(outgoingBN)} will cover this slot)</option>
-              <option value="cancel">Cancel booking</option>
-              ${transferOptions}
+            <div style="font-weight:600;font-size:.88rem;margin-bottom:6px">${runLabel(runs[i])}</div>
+            <select data-idx="${i}" class="_bdSelect" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:.85rem">
+              ${optionsHtml(i, allowedFor(eligByRun0, i))}
             </select>
-            <div class="_bdNote" data-noteidx="${idx}" style="display:none;font-size:.72rem;color:#b45309;margin-top:4px"></div>
-          </div>`;
-      }).join('');
+            <div class="_bdNote" data-noteidx="${i}" style="display:none;font-size:.72rem;color:#b45309;margin-top:4px"></div>
+          </div>`).join('');
+      const nRuns = runIdxs.length;
       return `
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap">
-            <div style="font-weight:700;font-size:.95rem">${unit} — ${unitRows.length} booking${unitRows.length!==1?'s':''} ${headerNote}</div>
+            <div style="font-weight:700;font-size:.95rem">${unit} — ${nRuns} break run${nRuns!==1?'s':''} ${headerNote}</div>
             <div style="display:flex;gap:4px">
               <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>
               <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="cancel" style="font-size:.72rem;padding:3px 8px">All Cancel</button>
-              ${cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="transfer:${cover}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(cover)}</button>` : ''}
+              ${meta.cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="transfer:${meta.cover}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(meta.cover)}</button>` : ''}
             </div>
           </div>
           ${rowsHtml}
@@ -4737,11 +4710,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     };
 
     let html = '';
-    let runningIdx = 0;
-    Object.keys(byUnit).forEach(unit => {
-      html += renderUnitSection(unit, byUnit[unit], runningIdx);
-      runningIdx += byUnit[unit].length;
-    });
+    Object.keys(byUnit).forEach(unit => { html += renderUnitSection(unit, byUnit[unit]); });
 
     const modal = document.createElement('div');
     modal.id = 'bookingDecisionsModal';
@@ -4749,7 +4718,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:22px;max-width:480px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Bookings on removed units</div>
-        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}. Choose what happens to each booking.</div>
+        <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}. Each row is one break run — it moves whole.</div>
         <div style="overflow-y:auto;flex:1;margin-bottom:14px">${html}</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <button type="button" class="btn btn-primary" id="_bdSaveBtn">Save changes</button>
@@ -4758,117 +4727,94 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
       </div>`;
     document.body.appendChild(modal);
 
-    // Set initial select values
-    modal.querySelectorAll('._bdSelect').forEach(sel => {
-      const idx = parseInt(sel.getAttribute('data-idx'), 10);
-      sel.value = state[idx];
-    });
+    const noteEl  = i => modal.querySelector(`._bdNote[data-noteidx="${i}"]`);
+    const selEl   = i => modal.querySelector(`._bdSelect[data-idx="${i}"]`);
+    const clearNote = i => { const n = noteEl(i); if(n){ n.style.display = 'none'; n.textContent = ''; } };
 
-    // Build 209: setRowAction is the ONE programmatic setter (propagation +
-    // bulk buttons). Options are per-slot now, so a transfer target may not
-    // exist on a given row (candidate ineligible at that slot) — in that case
-    // the row falls back to Keep with a visible ↺ note instead of a blank
-    // select or a silent change, mirroring the absorption modal's not-silent
-    // auto-revert (Tomas 2026-05-29). Manual user changes clear the note.
-    const noteEl = idx => modal.querySelector(`._bdNote[data-noteidx="${idx}"]`);
-    const clearNote = idx => { const n = noteEl(idx); if(n){ n.style.display = 'none'; n.textContent = ''; } };
-    const setRowAction = (idx, action) => {
-      const sel = modal.querySelector(`._bdSelect[data-idx="${idx}"]`);
-      if(!sel) return;
-      clearNote(idx);
-      if(action.startsWith('transfer:') && ![...sel.options].some(o => o.value === action)){
-        sel.value = 'keep'; state[idx] = 'keep';
-        const n = noteEl(idx);
-        if(n){ n.textContent = `↺ set to Keep — ${firstName(action.slice('transfer:'.length))} isn't available at this slot`; n.style.display = 'block'; }
-        return;
-      }
-      sel.value = action;
-      state[idx] = action;
+    // The single programmatic setter (209 convention): updates state + the
+    // select + the note. Never triggers change events — reconcile() is
+    // called explicitly by the interaction handlers.
+    const setRowAction = (i, action, noteText) => {
+      state[i] = action;
+      const sel = selEl(i);
+      if(sel) sel.value = action === 'keep' || action === 'cancel' ? action : `transfer:${action}`;
+      if(noteText){ const n = noteEl(i); if(n){ n.textContent = noteText; n.style.display = 'block'; } }
+      else clearNote(i);
     };
 
-    // Enforce per-unit single transfer target: if a row picks
-    // Transfer-to-X, all OTHER rows of the same unit that also picked
-    // Transfer must pick the same target. We solve this by, on every
-    // change to a Transfer option, propagating to all other Transfer-
-    // selected rows of the same unit. (Keep/Cancel rows untouched.)
-    const propagateTransferTarget = (changedIdx) => {
-      const sel = modal.querySelector(`._bdSelect[data-idx="${changedIdx}"]`);
-      if(!sel) return;
-      const newVal = sel.value;
-      if(!newVal.startsWith('transfer:')) return;
-      const changedUnit = rows[changedIdx].unit;
-      modal.querySelectorAll('._bdSelect').forEach(otherSel => {
-        const oIdx = parseInt(otherSel.getAttribute('data-idx'), 10);
-        if(oIdx === changedIdx) return;
-        if(rows[oIdx].unit !== changedUnit) return;
-        if(otherSel.value.startsWith('transfer:') && otherSel.value !== newVal){
-          setRowAction(oIdx, newVal);
+    // D3 LIVE RECONCILE: re-derive every row's eligibility against the
+    // current pending picks; auto-revert (visibly) any row whose set target
+    // is no longer eligible; rebuild every dropdown so it tells the truth.
+    const reconcile = () => {
+      const elig = recomputeRunEligibility(baseCtx, runs, activeBNs, engineAssignments());
+      // Pass 1: reverts (may change assignments → recompute once after)
+      let reverted = false;
+      runs.forEach((r, i) => {
+        const a = state[i];
+        if(a !== 'keep' && a !== 'cancel' && !allowedFor(elig, i).includes(a)){
+          setRowAction(i, 'keep', `↺ set to Keep — ${firstName(a)} isn't available for this run anymore`);
+          reverted = true;
         }
+      });
+      const finalElig = reverted
+        ? recomputeRunEligibility(baseCtx, runs, activeBNs, engineAssignments())
+        : elig;
+      // Pass 2: rebuild options everywhere (selection preserved via state)
+      runs.forEach((r, i) => {
+        const sel = selEl(i);
+        if(sel) sel.innerHTML = optionsHtml(i, allowedFor(finalElig, i));
       });
     };
 
     modal.querySelectorAll('._bdSelect').forEach(sel => {
       sel.addEventListener('change', () => {
-        const idx = parseInt(sel.getAttribute('data-idx'), 10);
-        clearNote(idx);
-        state[idx] = sel.value;
-        propagateTransferTarget(idx);
+        const i = parseInt(sel.dataset.idx, 10);
+        const v = sel.value;
+        state[i] = v === 'keep' || v === 'cancel' ? v : v.replace(/^transfer:/, '');
+        clearNote(i);
+        reconcile();
       });
     });
 
     modal.querySelectorAll('._bdBulk').forEach(btn => {
       btn.addEventListener('click', () => {
-        const unit = btn.getAttribute('data-unit');
-        const action = btn.getAttribute('data-action');
-        modal.querySelectorAll('._bdSelect').forEach(sel => {
-          const idx = parseInt(sel.getAttribute('data-idx'), 10);
-          if(rows[idx].unit === unit){
-            setRowAction(idx, action);
-          }
+        const unit = btn.dataset.unit;
+        const action = btn.dataset.action;
+        const idxs = byUnit[unit] || [];
+        if(action === 'keep' || action === 'cancel'){
+          idxs.forEach(i => setRowAction(i, action));
+          reconcile();
+          return;
+        }
+        const target = action.replace(/^transfer:/, '');
+        // Sequential with reconcile between picks so each run sees the
+        // previous runs' consumption — ineligible runs revert with the note.
+        idxs.forEach(i => {
+          const elig = recomputeRunEligibility(baseCtx, runs, activeBNs, engineAssignments());
+          if(allowedFor(elig, i).includes(target)) setRowAction(i, target);
+          else setRowAction(i, 'keep', `↺ set to Keep — ${firstName(target)} isn't available for this run`);
         });
+        reconcile();
       });
     });
 
-    document.getElementById('_bdCancelBtn').onclick = () => {
-      modal.remove();
-      resolve(null);
-    };
-
-    document.getElementById('_bdSaveBtn').onclick = () => {
-      // Assemble result from state
-      const keepOverrides = [];
+    const finish = result => { modal.remove(); resolve(result); };
+    modal.querySelector('#_bdCancelBtn').addEventListener('click', () => finish(null));
+    modal.querySelector('#_bdSaveBtn').addEventListener('click', () => {
       const bookingsToCancel = [];
-      const transfersByUnit = {}; // unit → { targetBN, bookings: [] }
-      rows.forEach((r, i) => {
-        const action = state[i];
-        const slot = String(r.booking.SlotTime).padStart(4,'0');
-        if(action === 'keep'){
-          // Build 143: include the booking so saveAssign can patch CreatedBy.
-          // Without CreatedBy = outgoing BN, removing the unit from Units
-          // strips bnOwns attribution and the booking orphans.
-          keepOverrides.push({ slot, unit: r.unit, booking: r.booking });
-        } else if(action === 'cancel'){
-          bookingsToCancel.push(r.booking);
-        } else if(action.startsWith('transfer:')){
-          const targetBN = action.slice('transfer:'.length);
-          if(!transfersByUnit[r.unit]) transfersByUnit[r.unit] = { targetBN, bookings: [] };
-          transfersByUnit[r.unit].bookings.push(r.booking);
+      const transfers = [];       // [{ booking, targetBN }] — bookings-only (D8)
+      const keepOverrides = [];   // [{ slot, unit, booking }] — unchanged contract
+      runs.forEach((r, i) => {
+        const a = state[i];
+        if(a === 'cancel'){ r.forEach(b => bookingsToCancel.push(b)); }
+        else if(a === 'keep'){
+          r.forEach(b => keepOverrides.push({ slot: String(b.SlotTime).padStart(4,'0'), unit: b.Unit, booking: b }));
+        } else {
+          r.forEach(b => transfers.push({ booking: b, targetBN: a }));
         }
       });
-      // Build transfers list with targetSchedId + targetUnits for downstream
-      const transfers = Object.entries(transfersByUnit).map(([unit, info]) => {
-        const cand = candidates.find(c => c.bnName === info.targetBN);
-        return {
-          unit,
-          targetBN: info.targetBN,
-          targetSchedId: cand ? cand.schedId : null,
-          targetUnits: cand ? cand.bnUnits : [],
-          bookings: info.bookings
-        };
-      });
-      modal.remove();
-      resolve({ keepOverrides, bookingsToCancel, transfers });
-    };
+      finish({ bookingsToCancel, transfers, keepOverrides });
+    });
   });
 }
 
@@ -6607,6 +6553,15 @@ async function loadSlots(silent=false){
     // is limited: red banner + only the absorbed slots rendered.
     const suppCovering = covering.filter(s => String(s.IsSupplemental) === '1');
     const isAbsorbed = covering.length > 0 && covering.every(s => String(s.IsSupplemental) === '1');
+    // Build 224 (D8): CreatedBy-pinned staff bookings on a unit with NO
+    // active assignment = the bookings-only-transfer state. Those breaks are
+    // covered by the pinned BN; nothing else is. Drives the limited-coverage
+    // banner + the same slot restriction the absorbed branch uses.
+    const _limitedPinned = covering.length === 0
+      ? bookings.filter(b => isStaffBooking(b) && b.CreatedBy
+          && String(b.IsCancelled) !== '1'
+          && sortKey(normSlot(b.SlotTime), shift) > nowKey(shift))
+      : [];
     // hasInactiveMain: separately detects the case where a main (non-supplemental)
     // BN row exists for this unit today BUT is marked inactive. Distinct from
     // isAbsorbed because the inactive BN may have no absorber for THIS unit
@@ -6822,6 +6777,21 @@ async function loadSlots(silent=false){
           banner.style.color = '#7a5500';
           banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> only has Break Relief until ${_lastSlot ? fmt12(_lastSlot) : (shift==='Noc'?'8:00 PM':'8:00 AM')}${_upcoming}`;
         }
+      } else if(_limitedPinned.length && !staffWindowClosed){
+        // Build 224 (D8): limited coverage — transferred/kept breaks are
+        // pinned to a BN via CreatedBy, but the unit has no assigned Break
+        // Nurse. Existing claims stay manageable (name card enabled, slot
+        // list restricted to the pinned times upstream); new sign-ups are
+        // impossible by construction. House "limited" register.
+        setNameCardEnabled(true);
+        banner.style.display = 'block';
+        banner.style.background = '#fff8e6';
+        banner.style.borderColor = '#e6a817';
+        banner.style.color = '#7a5500';
+        const _pinT = [..._limitedPinned].sort((a,b) => sortKey(normSlot(a.SlotTime), shift) - sortKey(normSlot(b.SlotTime), shift))
+          .map(b => fmt12(normSlot(b.SlotTime)));
+        banner.innerHTML = `&#x26a0;&#xfe0f; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> — limited coverage: booked break${_pinT.length!==1?'s':''} at ${escHTML([...new Set(_pinT)].join(' & '))} covered · no break nurse for new sign-ups.${_upcomingNote2}`;
+
       } else if(!hasAnyCoverage){
         // No coverage at all
         setNameCardEnabled(false);
@@ -6950,7 +6920,7 @@ async function loadSlots(silent=false){
     // rather than getAbsorbedSlots(), because getAbsorbedSlots returns the
     // union across all the absorber's absorbed units — which over-includes
     // slots booked on OTHER absorbed units. We need the per-unit slice here.
-    if(isAbsorbed){
+    if(isAbsorbed || _limitedPinned.length){ // Build 224: pinned-only units restrict identically
       const _absorbedOnUnit = new Set(
         bookings.filter(b => String(b.IsCancelled) !== '1').map(b => normSlot(b.SlotTime))
       );
@@ -9732,9 +9702,14 @@ function buildAbsorptionContext(candidates, ctx){
     const claimedSet = new Set();
     allBookings.forEach(b => {
       if(isBNBreak(b)) return;
-      if(!respUnits.has(b.Unit)) return;
+      // Build 224: CreatedBy-pinned bookings on FOREIGN units count as busy
+      // too — a previously kept/transferred break commits this BN at that
+      // slot even though the unit isn't theirs. Applies to absorption and
+      // transfer eligibility alike (strictly more conservative).
+      const pinnedToMe = b.CreatedBy === bnName2;
+      if(!respUnits.has(b.Unit) && !pinnedToMe) return;
       busy.add(b.SlotTime);
-      claimedSet.add(`${b.Unit}|${b.SlotTime}`);
+      if(respUnits.has(b.Unit)) claimedSet.add(`${b.Unit}|${b.SlotTime}`);
     });
     bnBusySlotTimes[bnName2] = busy;
     bnClaimedByUnitSlot[bnName2] = claimedSet;
@@ -9791,6 +9766,9 @@ function bnCanTakeRun(bnName, run, actx){
 // assigned to this returns in flagged[] (same downstream handling as a run no
 // BN could take).
 const CHOICE_CANCEL = '__CANCEL__';
+// Build 224: KEEP sentinel for the transfer modal — the run stays with the
+// outgoing BN, consuming NOTHING from any candidate (guarded below).
+const CHOICE_KEEP = '__KEEP__';
 
 // Group a flat booking list into runs the SAME way planAbsorption does: by
 // unit, then by nurse, then split into consecutive SLOT_IV-interval runs.
@@ -9847,7 +9825,7 @@ function cloneAbsorptionContext(actx){
 // busy/claimed and leave their free list. Used to model the effect of other
 // runs' pending assignments when evaluating a given run's options.
 function applyPendingAssignment(actx, run, bnName){
-  if(!bnName || bnName === CHOICE_CANCEL) return; // cancelled runs consume nothing
+  if(!bnName || bnName === CHOICE_CANCEL || bnName === CHOICE_KEEP) return; // cancelled/kept runs consume nothing
   for(const b of run){
     if(actx.bnFreeSlots[bnName])      actx.bnFreeSlots[bnName] = actx.bnFreeSlots[bnName].filter(s => s !== b.SlotTime);
     if(actx.bnBusySlotTimes[bnName])  actx.bnBusySlotTimes[bnName].add(b.SlotTime);
@@ -11036,7 +11014,7 @@ async function saveAssign(){
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
 
     let bookingsToCancel = [];
-    let transfers = [];     // [{unit, targetBN, targetSchedId, targetUnits, bookings}]
+    let transfers = [];     // [{booking, targetBN}] — bookings-only since 224 (D8)
     let keepOverrides = []; // [{slot, unit}] — written to outgoing BN's rotation after recompute
 
     if(existing.length > 0){
@@ -11097,39 +11075,29 @@ async function saveAssign(){
       for(const b of bookingsToCancel) await spDel(LISTS.bookings, b.Id);
     }
 
-    // Apply transfer unit additions — for each BN that's taking over a unit,
-    // patch their assignment to include the new unit, recompute their
-    // rotation, then move booking ownership via CreatedBy and override
-    // their rotation at the booking's slot so the booking is visible
-    // under the new BN at the original slot time.
-    // Build 143 (2026-05-27): Added CreatedBy patch + target slot override.
-    // Without these, bnOwns attribution stays with outgoing BN (if booking
-    // had CreatedBy = outgoing), or display falls back to unit-based
-    // visibility which only works if target's rotation at the booking's
-    // slot is the unit (rotation algorithm distribution can put a different
-    // unit there). Patch + override guarantee the booking moves cleanly.
-    for(const r of transfers){
-      if(!r.targetBN || !r.targetSchedId) continue;
-      const targetHasUnit = (r.targetUnits || []).includes(r.unit);
-      if(!targetHasUnit){
-        const newTargetUnits = [...new Set([...(r.targetUnits || []), r.unit])];
-        await spPatch(LISTS.schedule, r.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
+    // Build 224 (D8, Tomas 2026-07-07): BOOKINGS-ONLY transfer — the exact
+    // mirror of Keep, pointed at the target. Per booking: CreatedBy → target
+    // (ownership/visibility/attribution via bnOwns) + the target's rotation
+    // pinned to the unit at that slot (Prod-Log row truth). NO Units join,
+    // NO target recompute — receiving breaks ≠ owning the unit; owning it is
+    // an Edit on the target's own card (Decision 4: Edit is the verb). The
+    // unit reads limited-coverage on Sign Up afterward (loadSlots' pinned-
+    // bookings branch) — honestly uncovered for NEW sign-ups. Rotation
+    // writes batched per target; saveRotation's past-preservation applies.
+    if(transfers.length){
+      const _byTarget = {};
+      transfers.forEach(t => { if(t.targetBN) (_byTarget[t.targetBN] ||= []).push(t); });
+      for(const [tbn, list] of Object.entries(_byTarget)){
+        for(const t of list){
+          try { await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: tbn }); }
+          catch(e){ console.warn(`CreatedBy patch failed for booking ${t.booking.Id}:`, e.message); }
+        }
+        try {
+          const targetRot = loadRotation(tbn, dt, shift) || {};
+          list.forEach(t => { targetRot[String(t.booking.SlotTime).padStart(4,'0')] = t.booking.Unit; });
+          await saveRotation(tbn, dt, shift, targetRot);
+        } catch(e){ console.warn(`transfer rotation pin failed for ${tbn}:`, e.message); }
       }
-      const targetDef = getDefaultTemplate(r.targetBN, shift);
-      if(targetDef && targetDef.length > 0){
-        await applyDefaultToShift(r.targetBN, dt, shift, targetDef).catch(()=>{});
-      } else {
-        await recalculateRotation(r.targetBN, dt, shift).catch(()=>{});
-      }
-      // Move booking ownership to target + override target's rotation at slot
-      const targetRot = loadRotation(r.targetBN, dt, shift) || {};
-      for(const b of r.bookings){
-        try { await spPatch(LISTS.bookings, b.Id, { CreatedBy: r.targetBN }); }
-        catch(e){ console.warn(`CreatedBy patch failed for booking ${b.Id}:`, e.message); }
-        const slot = String(b.SlotTime).padStart(4,'0');
-        targetRot[slot] = r.unit;
-      }
-      await saveRotation(r.targetBN, dt, shift, targetRot);
     }
 
     await spPost(LISTS.schedule,{
