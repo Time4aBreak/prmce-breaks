@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-07-222';
+const APP_VERSION = '2026-07-07-223';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9689,10 +9689,8 @@ function markCardUnavailableInDOM(bnName){
 // Build 147 (2026-05-28): Phase B — reusable absorption-eligibility primitives.
 // Extracted from planAbsorption's inline logic (verbatim) so the Mark
 // Unavailable choice modal (Phase C) and Transfer modal (Phase D) compute
-// IDENTICAL eligibility. NOTE: planAbsorption still carries its own inline
-// copy for now — Phase C will dedup it to call buildAbsorptionContext +
-// passesT1Buffer and re-verify, deferred tonight to keep the live-verified
-// planAbsorption untouched. These helpers are pure (no side effects).
+// IDENTICAL eligibility. (planAbsorption itself was retired build 223 —
+// these helpers are the living asset it validated.) Pure, no side effects.
 // ═══════════════════════════════════════════════════════
 
 // buildAbsorptionContext: precompute per-candidate occupancy for eligibility.
@@ -9900,9 +9898,9 @@ function recomputeRunEligibility(baseCtx, runs, candidates, assignments){
 // diverge ONLY with multiple complementary absorbers, where this planner
 // deliberately cancels a run that planAbsorption would have split-covered.
 //
-// NOTE (dual-planner): planAbsorption (splitting) remains wired into
-// processBNUnavailability until Phase C-2 step 3 swaps in the choice modal, and
-// may still serve the Phase D transfer path. This is intentional — the shared
+// NOTE (historical, dual-planner era): planAbsorption (splitting) stayed wired
+// until Phase C-2 step 3 swapped in the choice modal; it was RETIRED build 223
+// with zero callers. This note is kept as history — the shared
 // eligibility helpers are the common asset; the two planners differ only in
 // split policy. Step 3 resolves which planner the live absorption path uses.
 //
@@ -10126,160 +10124,11 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
 //   otherBNs   — same-wing active candidate schedule records (sorted in place)
 //   ctx        — { allBookings, allScheds, shift }
 // Returns { absorbed: [{booking, bnName}], flagged: [bookings] }
-function planAbsorption(uncovered, otherBNs, ctx){
-  const { shift } = ctx;
-
-    // Build 151 (2026-05-29): Phase C-1 — the inline pre-compute (responsible
-    // units, break sets, busy/claimed maps, free slots) and the inline
-    // passesT1BufferCheck are now delegated to the Phase B helpers
-    // buildAbsorptionContext() and passesT1Buffer(), which carry byte-identical
-    // logic. This is a behaviour-preserving dedup (verified by before/after
-    // snapshot diff on the d-wing Deepi→Leo fixture), so the absorption shared
-    // with the transfer path stays in one place.
-    //
-    // IMPORTANT: the greedy commit/rollback loop below MUTATES the context's
-    // bnFreeSlots / bnBusySlotTimes / bnClaimedByUnitSlot in place (so a slot
-    // claimed by one subrun isn't reused by a later one, and a failed run is
-    // rolled back). Those sets/arrays now live on `actx`, so all mutations go
-    // through actx.* — same objects, mutated in place, exactly as before.
-    // bnCanTakeRun() is intentionally NOT used here: this loop greedily finds
-    // the LONGEST absorbable subrun rather than testing a fixed run, so the
-    // length scan stays inline and only its single-slot T+1 gate routes through
-    // passesT1Buffer(). (bnCanTakeRun fits Phase D's fixed-run check.)
-    const actx = buildAbsorptionContext(otherBNs, ctx);
-    const { allShiftSlots, shiftLastSlot, bnResponsibleUnits, bnBreakSets,
-            bnBusySlotTimes, bnClaimedByUnitSlot, bnFreeSlots } = actx;
-
-    // Sort BNs by free-slot-times count descending (most free first).
-    // This matches "most coverage capacity" — BN with the most slack to absorb.
-    // (In-place sort of the caller's otherBNs array, as before — selection order
-    // depends on it.)
-    otherBNs.sort((a,b) => (bnFreeSlots[b.BreakNurseName]?.length||0) - (bnFreeSlots[a.BreakNurseName]?.length||0));
-
-    // Group uncovered by unit
-    const byUnit = {};
-    uncovered.forEach(b => {
-      if(!byUnit[b.Unit]) byUnit[b.Unit] = [];
-      byUnit[b.Unit].push(b);
-    });
-
-    const absorbed = []; // {booking, bnName}
-    const flaggedNurses = []; // bookings that couldn't be covered
-
-    // Single-slot buffer rule, via the Phase B helper. T+1 must be: shift's-last
-    // slot (so no T+1 exists), BN's own break, or unclaimed on BN's responsible
-    // units. (Local alias keeps the call sites below unchanged.)
-    const passesT1BufferCheck = (bnName2, slotTime) => passesT1Buffer(bnName2, slotTime, actx);
-
-    for(const [unit, bookings] of Object.entries(byUnit)){
-      bookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
-
-      // Group bookings by nurse
-      const byNurse = {};
-      bookings.forEach(b => {
-        if(!byNurse[b.NurseName]) byNurse[b.NurseName] = [];
-        byNurse[b.NurseName].push(b);
-      });
-
-      for(const [nurseName2, nurseBookings] of Object.entries(byNurse)){
-        nurseBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
-
-        // Split into consecutive runs (SLOT_IV-min intervals)
-        const runs = [];
-        let currentRun = [nurseBookings[0]];
-        for(let i = 1; i < nurseBookings.length; i++){
-          const prev = sortKey(nurseBookings[i-1].SlotTime, shift);
-          const curr = sortKey(nurseBookings[i].SlotTime, shift);
-          if(curr - prev === SLOT_IV){
-            currentRun.push(nurseBookings[i]);
-          } else {
-            runs.push(currentRun);
-            currentRun = [nurseBookings[i]];
-          }
-        }
-        runs.push(currentRun);
-
-        // Evaluate each run independently (run-splitting allowed)
-        for(const run of runs){
-          // Greedy left-to-right: for each unabsorbed slot, find the longest
-          // consecutive subrun starting here that some BN can absorb.
-          // Then commit that subrun to the best BN. Repeat until run is consumed.
-          let cursor = 0;
-          const runAssignments = []; // {booking, bnName}
-          let runFailed = false;
-
-          while(cursor < run.length){
-            // Find best (BN, subrunLen) starting at cursor.
-            // Prefer longer subruns (fewer single-slot absorptions = fewer
-            // T+1 buffer constraints) and, among ties, the BN with more free slots.
-            let bestBN = null, bestLen = 0, bestBNFree = -1;
-
-            for(const bn of otherBNs){
-              const bnName2 = bn.BreakNurseName;
-              const freeSet = new Set(bnFreeSlots[bnName2]);
-
-              // How many consecutive slots from cursor can this BN take?
-              let len = 0;
-              for(let i = cursor; i < run.length; i++){
-                if(freeSet.has(run[i].SlotTime)) len++;
-                else break;
-              }
-              if(len === 0) continue;
-
-              // For single-slot subruns, T+1 buffer check must pass
-              if(len === 1){
-                const t = run[cursor].SlotTime;
-                if(!passesT1BufferCheck(bnName2, t)) continue;
-              }
-
-              // This BN can absorb `len` consecutive slots from cursor.
-              // Greedy: prefer longer subrun, then more-free BN
-              const bnFreeCount = bnFreeSlots[bnName2].length;
-              if(len > bestLen || (len === bestLen && bnFreeCount > bestBNFree)){
-                bestBN = bnName2;
-                bestLen = len;
-                bestBNFree = bnFreeCount;
-              }
-            }
-
-            if(!bestBN){
-              // No BN can absorb the slot at cursor — whole run fails
-              runFailed = true;
-              break;
-            }
-
-            // Commit subrun
-            for(let i = cursor; i < cursor + bestLen; i++){
-              runAssignments.push({ booking: run[i], bnName: bestBN });
-              // Remove from free slots so subsequent iterations don't reuse
-              bnFreeSlots[bestBN] = bnFreeSlots[bestBN].filter(s => s !== run[i].SlotTime);
-              // Also update the busy set — this slot is now claimed on the absorbed unit
-              bnBusySlotTimes[bestBN].add(run[i].SlotTime);
-              bnClaimedByUnitSlot[bestBN].add(`${run[i].Unit}|${run[i].SlotTime}`);
-            }
-            cursor += bestLen;
-          }
-
-          if(!runFailed && runAssignments.length === run.length){
-            // Commit run to absorbed list
-            runAssignments.forEach(({ booking, bnName: assignedBN }) => {
-              absorbed.push({ booking, bnName: assignedBN });
-            });
-          } else {
-            // Roll back any partial commits for this run
-            runAssignments.forEach(({ booking, bnName: assignedBN }) => {
-              bnFreeSlots[assignedBN].push(booking.SlotTime);
-              bnBusySlotTimes[assignedBN].delete(booking.SlotTime);
-              bnClaimedByUnitSlot[assignedBN].delete(`${booking.Unit}|${booking.SlotTime}`);
-            });
-            run.forEach(b => flaggedNurses.push(b));
-          }
-        }
-      }
-    }
-
-  return { absorbed, flagged: flaggedNurses };
-}
+// Build 223 (Decision 5, Tomas 2026-07-07): planAbsorption — the original
+// SPLITTING absorption planner — retired. Zero callers (grep-proven; the
+// changelog's own line 1828 said "called by NOTHING"). planWholeRunAbsorption
+// is the sole planner; the shared eligibility helpers above are the living
+// asset it validated. ~154 lines removed.
 
 async function processBNUnavailability(schedId, bnName, date, shift, redistribute=true, prebuiltPlan=null){
   // prebuiltPlan (Phase C-2 step 3): when the interactive choice modal already
@@ -11588,7 +11437,11 @@ async function loadAssignments(){
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
-                ${!isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
+                <!-- Build 223 (Decision 7): supplementals have NO Edit — saveAssign's
+                     delete-all-and-consolidate would fold the supp into a plain row,
+                     destroying CoveredFrom and blinding Mark Available's take-back and
+                     213's strip-on-close. Supp lifecycle belongs to the coverage verbs. -->
                 ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
@@ -11678,154 +11531,15 @@ async function loadAssignments(){
 // rebuild it on confirmMarkUnavailable → processBNUnavailability(prebuiltPlan)
 // like the other paths, rather than reviving the old auto-only flow.
 
-async function closeUnit(schedId, unit, bnName, date, shift){
-  showBusy('Loading…');
-  try {
-    // Get this BN's current units
-    const scheds = await spGet(LISTS.schedule, `Id eq ${schedId}`);
-    if(!scheds.length){ hideBusy(); toast('Assignment not found', true); return; }
-    let units = []; try { units = JSON.parse(scheds[0].Units||'[]'); } catch{}
-    const newUnits = units.filter(u => u !== unit);
+// Build 223 (Decision 6): closeUnit retired — the per-unit ✕ it served was
+// superseded by the Unit Status open/close system (Tomas, 2026-07-07). It was
+// unreachable (zero call sites, proven 2026-07-03) and carried a frozen
+// duplicate of the transfer commit — the archaeology trap. saveAssign is the
+// sole road to promptBookingDecisions; Unit Status owns facility state.
 
-    // Get all future bookings on this unit (for this date/shift)
-    const allBookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
-    const futureOnUnit = allBookings.filter(b =>
-      isStaffBooking(b) && b.Unit === unit && sortKey(b.SlotTime, shift) > nowKey(shift)
-    );
+// Build 223: _recomputeAfterCloseUnit retired with closeUnit (its only caller).
 
-    // Is this shift active right now?
-    const isActiveShift = date === shiftDate(shift) && staffWindowOpen(shift);
-
-    // Fetch active schedules for takeover picker candidates
-    const allScheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
-    hideBusy();
-
-    // Case 1 — No future bookings: simple confirm, just remove the unit
-    if(!futureOnUnit.length){
-      if(!await customConfirm(`Remove ${unit} from ${firstName(bnName)}?`, 'Remove', 'Cancel')) return;
-      showBusy(`Removing ${unit} from ${firstName(bnName)}…`);
-      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
-      await _recomputeAfterCloseUnit(bnName, date, shift);
-      hideBusy();
-      toast(`${unit} removed from ${firstName(bnName)}`);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      return;
-    }
-
-    // Case 2 — Future bookings exist on active shift: use takeover picker.
-    // Candidate BNs already covering the same unit surface at the top ("can cover all"),
-    // but admin always picks explicitly — no silent auto-transfers.
-    if(isActiveShift){
-      // Build 141 (2026-05-27): Use unified promptBookingDecisions modal.
-      // closeUnit removes a single unit, so removedUnitsWithBookings has
-      // one entry. Returns keepOverrides + bookingsToCancel + transfers.
-      const result = await promptBookingDecisions({
-        removedUnitsWithBookings: [{ unit, bookings: futureOnUnit }],
-        outgoingBN: bnName,
-        date,
-        shift,
-        allScheds,
-        allBookings
-      });
-      if(result === null) return; // admin dismissed
-
-      const transferTarget = result.transfers[0] ? result.transfers[0].targetBN : null;
-      const busyMsg = transferTarget
-        ? `Transferring ${unit} to ${firstName(transferTarget)}…`
-        : (result.bookingsToCancel.length
-            ? `Cancelling ${result.bookingsToCancel.length} booking${result.bookingsToCancel.length!==1?'s':''}…`
-            : `Removing ${unit} from ${firstName(bnName)}…`);
-      showBusy(busyMsg);
-      // Cancel decisions
-      for(const b of result.bookingsToCancel) await spDel(LISTS.bookings, b.Id);
-      // Transfer decisions (closeUnit only has one unit, so 0 or 1 transfer).
-      // Build 143: patch CreatedBy + apply target rotation override at slot.
-      for(const t of result.transfers){
-        if(!t.targetBN || !t.targetSchedId) continue;
-        const targetHasUnit = (t.targetUnits || []).includes(t.unit);
-        if(!targetHasUnit){
-          const newTargetUnits = [...new Set([...(t.targetUnits || []), t.unit])];
-          await spPatch(LISTS.schedule, t.targetSchedId, { Units: JSON.stringify(newTargetUnits) });
-        }
-        const targetDef = getDefaultTemplate(t.targetBN, shift);
-        if(targetDef && targetDef.length > 0){
-          await applyDefaultToShift(t.targetBN, date, shift, targetDef).catch(()=>{});
-        } else {
-          await recalculateRotation(t.targetBN, date, shift).catch(()=>{});
-        }
-        const targetRot = loadRotation(t.targetBN, date, shift) || {};
-        for(const b of t.bookings){
-          try { await spPatch(LISTS.bookings, b.Id, { CreatedBy: t.targetBN }); }
-          catch(e){ console.warn(`CreatedBy patch failed for booking ${b.Id}:`, e.message); }
-          const slot = String(b.SlotTime).padStart(4,'0');
-          targetRot[slot] = t.unit;
-        }
-        await saveRotation(t.targetBN, date, shift, targetRot);
-      }
-      // Remove unit from outgoing BN, then recompute their rotation
-      await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
-      await _recomputeAfterCloseUnit(bnName, date, shift);
-      // Apply Keep overrides to outgoing BN's rotation + patch CreatedBy
-      if(result.keepOverrides.length){
-        const rot = loadRotation(bnName, date, shift) || {};
-        for(const ko of result.keepOverrides){
-          rot[ko.slot] = ko.unit;
-          if(ko.booking && ko.booking.Id && ko.booking.CreatedBy !== bnName){
-            try { await spPatch(LISTS.bookings, ko.booking.Id, { CreatedBy: bnName }); }
-            catch(e){ console.warn(`CreatedBy patch failed for kept booking ${ko.booking.Id}:`, e.message); }
-          }
-        }
-        await saveRotation(bnName, date, shift, rot);
-      }
-      hideBusy();
-      const keepCount = result.keepOverrides.length;
-      const transferCount = result.transfers.reduce((sum, t) => sum + t.bookings.length, 0);
-      const cancelCount = result.bookingsToCancel.length;
-      let msg = `${unit} removed`;
-      if(transferTarget) msg += ` · ${transferCount} → ${firstName(transferTarget)}`;
-      if(keepCount) msg += ` · ${keepCount} kept by ${firstName(bnName)}`;
-      if(cancelCount) msg += ` · ${cancelCount} cancelled`;
-      toast(msg);
-      loadAssignments();
-      notifyProdLogChanged(bnName);
-      if(transferTarget) notifyProdLogChanged(transferTarget);
-      return;
-    }
-
-    // Case 3 — Future-shift (not-yet-active) unit removal with bookings:
-    // No takeover picker for non-active shifts — just confirm + cancel bookings
-    const lines = futureOnUnit.map(b => `• ${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')} at ${fmt12(b.SlotTime)}`).join('\n');
-    const msg = `${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} on ${unit} will be cancelled:\n\n${lines}\n\nRemove ${unit} from ${firstName(bnName)}?`;
-    if(!await customConfirm(msg, 'Remove & cancel bookings', 'Cancel')) return;
-    showBusy(`Cancelling ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''}…`);
-    for(const b of futureOnUnit) await spDel(LISTS.bookings, b.Id);
-    await spPatch(LISTS.schedule, schedId, { Units: JSON.stringify(newUnits) });
-    await _recomputeAfterCloseUnit(bnName, date, shift);
-    hideBusy();
-    toast(`${unit} removed · ${futureOnUnit.length} booking${futureOnUnit.length!==1?'s':''} cancelled`);
-    loadAssignments();
-    notifyProdLogChanged(bnName);
-  } catch(e){ hideBusy(); toast(e.message, true); }
-}
-
-async function _recomputeAfterCloseUnit(bnName, date, shift){
-  const bnDef = getDefaultTemplate(bnName, shift);
-  if(bnDef && bnDef.length > 0){
-    await applyDefaultToShift(bnName, date, shift, bnDef).catch(()=>{});
-  } else {
-    await recalculateRotation(bnName, date, shift).catch(()=>{});
-  }
-}
-
-// Deprecated — the old Close Unit modal with redirect checkboxes. New closeUnit
-// flow handles everything inline or via promptUnitTakeover.
-async function confirmCloseUnit(schedId, unit, date, shift){
-  const modal = document.getElementById('closeUnitModal');
-  if(modal) modal.remove();
-}
+// Build 223: deprecated confirmCloseUnit stub retired with the closeUnit family.
 async function recalculateAllRotations(opts = {}){
   const skipConfirm = !!opts.skipConfirm;
   if(!skipConfirm && !await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
