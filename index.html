@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-07-226';
+const APP_VERSION = '2026-07-09-227';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10965,7 +10965,17 @@ async function suggestUnitsForManualAssign(btn){
   }
 }
 
+// Build 227: saveAssign re-entrancy flag (tap guard).
+let _saveAssignInFlight = false;
 async function saveAssign(){
+  // Build 227 (Tomas 2026-07-09): re-entrancy tap guard. saveAssign is a
+  // long async chain (deletes → posts → recomputes → modal commit); on a
+  // slow backend a second tap mid-flight would interleave two commits —
+  // the user-triggered edition of the double-run race that produced the
+  // D1/D2 duplicate rows. try/finally so every early return clears it.
+  if(_saveAssignInFlight){ toast('Still saving — one moment.'); return; }
+  _saveAssignInFlight = true;
+  try {
   const typedRaw = document.getElementById('aNurseText').value.trim();
   const dropdownVal = document.getElementById('aNurse').value;
   // Resolve the typed/selected name to the canonical "Last, First" format.
@@ -11205,6 +11215,7 @@ async function saveAssign(){
     // refresh and the moved bookings appear under their view.
     transfers.forEach(t => { if(t.targetBN && t.targetBN !== nurse) notifyProdLogChanged(t.targetBN); });
   }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); notifyProdLogChanged(nurse); }
+  } finally { _saveAssignInFlight = false; }
 }
 
 let _viewRange = 'all';
