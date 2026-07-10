@@ -1789,7 +1789,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-09-227';
+const APP_VERSION = '2026-07-09-228';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10976,6 +10976,16 @@ async function saveAssign(){
   if(_saveAssignInFlight){ toast('Still saving — one moment.'); return; }
   _saveAssignInFlight = true;
   try {
+  // Build 228 (Tomas 2026-07-09): the overlay IS the global mutex — raise it
+  // at entry, not mid-function. The 227 flag stops a second SAVE, but during
+  // the pre-overlay fetch window every OTHER write verb (Mark Unavailable,
+  // unit-status apply, another Edit) was still tappable — cross-verb
+  // interleave by fast thumbs. The decisions modal appends after this
+  // overlay at equal z-index, so it paints above and stays interactive;
+  // the overlay persists underneath, closing the modal-exit gap too. The
+  // later showBusy call just swaps the message. finally() hides it so
+  // early-validation returns can't strand a locked screen.
+  showBusy('Checking assignment…');
   const typedRaw = document.getElementById('aNurseText').value.trim();
   const dropdownVal = document.getElementById('aNurse').value;
   // Resolve the typed/selected name to the canonical "Last, First" format.
@@ -11215,7 +11225,7 @@ async function saveAssign(){
     // refresh and the moved bookings appear under their view.
     transfers.forEach(t => { if(t.targetBN && t.targetBN !== nurse) notifyProdLogChanged(t.targetBN); });
   }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); notifyProdLogChanged(nurse); }
-  } finally { _saveAssignInFlight = false; }
+  } finally { _saveAssignInFlight = false; hideBusy(); }
 }
 
 let _viewRange = 'all';
