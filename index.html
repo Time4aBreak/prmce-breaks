@@ -1128,6 +1128,9 @@ function set3CSchedule(entries){
 async function add3CScheduleEntry(effectiveAt, status){
   // Compaction (drop consecutive same-status entries) happens inside
   // set3CSchedule, so callers don't need to deduplicate.
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge (3C timeline + the
+  // default seed set3CSchedule's compaction reads).
+  await syncedLS.refreshMany(['unit3CSchedule', 'unit3CDefault']);
   const list = get3CSchedule();
   list.push({ effectiveAt, status });
   await set3CSchedule(list);
@@ -1319,12 +1322,18 @@ function getUnitSubLog(){
 
 async function appendUnitSubLog(entries){
   if(!entries || !entries.length) return;
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge — the sub log is
+  // cross-device by design; a stale-mirror append drops another device's
+  // entries and breaks reopen reversal.
+  await syncedLS.refresh('unitSubLog');
   const existing = getUnitSubLog();
   const merged = [...existing, ...entries];
   await syncedLS.set('unitSubLog', merged);
 }
 
 async function removeUnitSubLogEntries(filterFn){
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge (same shape as append).
+  await syncedLS.refresh('unitSubLog');
   const existing = getUnitSubLog();
   const remaining = existing.filter(e => !filterFn(e));
   if(remaining.length !== existing.length){
@@ -1333,12 +1342,17 @@ async function removeUnitSubLogEntries(filterFn){
 }
 
 // ── Write helpers ─────────────────────────────────────
-function setUnitStatus(unit, val){
+async function setUnitStatus(unit, val){
   // Throws and toasts on remote failure — caller should catch if it cares.
   // Mirrors 3C convention: setting to default ('open') still writes to keep
   // the explicit record. Migration drift (unit was open by default, then
   // explicitly set to open) doesn't matter because both paths produce 'open'
   // when read.
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge — pull the whole map fresh
+  // so this device's single-unit write can't revert another device's change
+  // to a DIFFERENT unit (whole-map RMW; a stale write could silently reopen
+  // a closed unit).
+  await syncedLS.refresh('unitStatuses');
   const all = getUnitStatuses();
   all[unit] = val;
   return syncedLS.set('unitStatuses', all);
@@ -1363,12 +1377,17 @@ function setUnitSchedule(unit, entries){
 }
 
 async function addUnitScheduleEntry(unit, effectiveAt, status){
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge (timeline map + the
+  // status seed setUnitSchedule's compaction reads — one batched trip).
+  await syncedLS.refreshMany(['unitSchedules', 'unitStatuses']);
   const list = getUnitSchedule(unit);
   list.push({ effectiveAt, status });
   await setUnitSchedule(unit, list);
 }
 
 async function cancelScheduledUnitChange(unit, effectiveAt){
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge (same shape as addUnitScheduleEntry).
+  await syncedLS.refreshMany(['unitSchedules', 'unitStatuses']);
   const list = getUnitSchedule(unit).filter(e => e.effectiveAt !== effectiveAt);
   await setUnitSchedule(unit, list);
 }
@@ -1789,7 +1808,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-10-230';
+const APP_VERSION = '2026-07-11-231';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2383,6 +2402,12 @@ const syncedLS = {
     if(_stateWriteLock[key]) return false;
     try {
       const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
+      // Build 231 (Finding 3, E1 2026-07-11): the 217 fence above is intake-only.
+      // A write that STARTED while this pull was in flight would be clobbered by
+      // applying the (now-stale) result — LS reverts for a cycle and any memory
+      // copies reassigned off the change report go stale until reload (the A6
+      // roster ghost). Re-check at apply time; the in-flight write wins.
+      if(_stateWriteLock[key]) return false;
       const remote = items.length ? JSON.parse(items[0].Value || 'null') : null;
       const before = localStorage.getItem(key);
       if(remote == null){
@@ -2417,6 +2442,10 @@ const syncedLS = {
       const resultSets = await spBatchGet(valid.map(k => ({ sheet: LISTS.state, filter: `Key eq '${esc(k)}'` })));
       const changed = [];
       valid.forEach((k, i) => {
+        // Build 231 (Finding 3): apply-time re-check — a setState that began
+        // while the batch was in flight must win; skip applying stale results
+        // for its key (mirrors the single-key refresh() guard).
+        if(_stateWriteLock[k]) return;
         const items = resultSets[i] || [];
         let remote = null, parsed = false;
         try { remote = items.length ? JSON.parse(items[0].Value || 'null') : null; parsed = true; } catch{}
@@ -3831,6 +3860,21 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       // (Day/Noc, not supplemental) starting after effectiveAt. Drives the
       // modal's future-shift summary line below.
       hasFutureRedeal = allScheds.some(s => {
+        if(s.Status === 'inactive' || String(s.IsSupplemental) === '1') return false;
+        if(s.ShiftType !== 'Day' && s.ShiftType !== 'Noc') return false;
+        const st = +slotDateTime((s.ShiftDate||'').slice(0,10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType);
+        return st > effectiveAt.getTime();
+      });
+    } else {
+      // Build 231 (Finding 5, E1 2026-07-11): the open commit fires the SAME
+      // redealFutureShifts as close, but this flag was computed only in the
+      // closed branch — so the reopen preview showed no future-shifts line
+      // while its commit re-dealt the whole future board (live-caught in
+      // E1's C3c: a 4-minute 3A close/open re-dealt the Aug week twice,
+      // disclosed once). Same predicate as the redeal's own selector.
+      const _floor = activeShiftFloor();
+      const _futScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_floor}'`);
+      hasFutureRedeal = _futScheds.some(s => {
         if(s.Status === 'inactive' || String(s.IsSupplemental) === '1') return false;
         if(s.ShiftType !== 'Day' && s.ShiftType !== 'Noc') return false;
         const st = +slotDateTime((s.ShiftDate||'').slice(0,10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType);
@@ -10390,7 +10434,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
           try { JSON.parse(s.Units||'[]').forEach(u => unitsBefore.add(u)); } catch{}
         });
         const allCoveredUnits = [...new Set([...unitsBefore, ...suppUnits])];
-        _savePartialWingHistory(assignedBN, shift, date, allCoveredUnits);
+        await _savePartialWingHistory(assignedBN, shift, date, allCoveredUnits);
       } catch(e){
         console.warn('Wing history write for absorber failed (non-fatal):', e);
       }
@@ -11190,7 +11234,7 @@ async function saveAssign(){
     // because as far as it knows, they haven't covered them recently.
     // The helper dedupes by dropping any existing entry for this date first,
     // matching the pattern used by suggestAssignments and partial saves.
-    try { _savePartialWingHistory(nurse, shift, dt, units); }
+    try { await _savePartialWingHistory(nurse, shift, dt, units); }
     catch(e){ console.warn('Wing history write failed (non-fatal):', e); }
     S.aUnits=[];
     S.editingAssignId = null;
@@ -11926,7 +11970,11 @@ async function warmPreferredNames(){
   } catch {}
 }
 
-function setPreferredName(fullName, preferred){
+async function setPreferredName(fullName, preferred){
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge — the 158 fix made the
+  // INIT pull unconditional; this closes the write-time half (a mid-session
+  // edit on another device was still dropped by the next blur here).
+  await syncedLS.refresh('bnPreferredNames');
   const saved = syncedLS.get('bnPreferredNames') || {};
   const trimmed = (preferred || '').trim();
   if(trimmed){
@@ -12906,7 +12954,7 @@ async function restoreLastImport(){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13091,7 +13139,7 @@ async function suggestFlaggedRow(i){
   const slots = await _pickPartialSlots(e.shift, e.date, count, overlay);
   importUnitSel[i] = expandSuggestionUnits(slots);
   // Persist for fairness feedback (same as partial path).
-  _savePartialWingHistory(e.name, e.shift, e.date, slots);
+  await _savePartialWingHistory(e.name, e.shift, e.date, slots);
   // Re-render — flagged status visually persists but Save button now appears.
   const wrap = document.getElementById('importRows');
   if(wrap){
@@ -13263,7 +13311,7 @@ async function renderImportRows(entries, forceReplace = false){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13512,7 +13560,7 @@ async function resuggestAll(){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -18220,8 +18268,14 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
 // the same persistence for partials so future fairness calculations see the
 // partial's coverage in their per-BN history. Without this, the partial's
 // past assignments would never feed back into "who's been on which wing".
-function _savePartialWingHistory(name, shift, date, slots){
+async function _savePartialWingHistory(name, shift, date, slots){
   if(!slots || !slots.length) return;
+  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge — pull this
+  // key fresh from BNState before the read-merge-write below, so a stale
+  // device mirror can't silently drop entries written elsewhere since the
+  // last sync (the A5b resurrection / fleet-scale drop class; same
+  // philosophy as the build-158 preferred-names fix, applied at write time).
+  await syncedLS.refresh(`bnWingHistory_${name}_${shift}`);
   // Remove any existing entry for this date first so a re-suggest replaces
   // rather than duplicates — matches the pattern in suggestAssignments.
   const existing = getNurseWingHistory(name, shift).filter(e => e.date !== date);
