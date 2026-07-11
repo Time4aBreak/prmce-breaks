@@ -1808,7 +1808,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-11-231';
+const APP_VERSION = '2026-07-11-232';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3865,22 +3865,11 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
         const st = +slotDateTime((s.ShiftDate||'').slice(0,10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType);
         return st > effectiveAt.getTime();
       });
-    } else {
-      // Build 231 (Finding 5, E1 2026-07-11): the open commit fires the SAME
-      // redealFutureShifts as close, but this flag was computed only in the
-      // closed branch — so the reopen preview showed no future-shifts line
-      // while its commit re-dealt the whole future board (live-caught in
-      // E1's C3c: a 4-minute 3A close/open re-dealt the Aug week twice,
-      // disclosed once). Same predicate as the redeal's own selector.
-      const _floor = activeShiftFloor();
-      const _futScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_floor}'`);
-      hasFutureRedeal = _futScheds.some(s => {
-        if(s.Status === 'inactive' || String(s.IsSupplemental) === '1') return false;
-        if(s.ShiftType !== 'Day' && s.ShiftType !== 'Noc') return false;
-        const st = +slotDateTime((s.ShiftDate||'').slice(0,10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType);
-        return st > effectiveAt.getTime();
-      });
     }
+    // (No open-branch flag needed: the open modal body renders its own
+    // unconditional future-redeal sentence — see the `${unit} will open`
+    // composition below. Verified live + by source, E1 2026-07-11; an
+    // open-branch flag added earlier in build 231 was dead code and removed.)
 
     hideBusy();
 
