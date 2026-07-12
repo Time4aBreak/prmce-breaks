@@ -798,6 +798,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div id="acceptBarTop" style="margin-bottom:12px;display:none;justify-content:flex-end">
             <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
           </div>
+          <div id="importCountChips" style="display:none;flex-wrap:wrap;gap:6px;align-items:center;margin:0 0 10px"></div>
           <div id="importRows"></div>
           <div id="acceptBarBottom" style="margin-top:12px;display:none;justify-content:flex-end">
             <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
@@ -1808,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-11-232';
+const APP_VERSION = '2026-07-11-233';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12475,6 +12476,54 @@ function loadImportFile(file){
   reader.readAsDataURL(file);
 }
 
+// Build 233 (Finding 6, extraction consensus): one extraction pass through
+// the GAS proxy. scanMode 'byRow' = the original prompt; 'byColumn' asks the
+// backend for the transposed column-major variant. Old backends ignore
+// scanMode and answer row-major — both passes then trivially agree (import
+// works, just without consensus protection) — so either deploy order is safe.
+// Throws on any failure; the caller treats a thrown pass as unavailable.
+async function _extractPass(scanMode){
+  const response = await fetch(GAS_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      action: 'extractSchedule',
+      imageData: importImageB64,
+      mediaType: importImageType,
+      scanMode: scanMode,
+      token: REQUEST_TOKEN
+    }).toString()
+  });
+  const responseText = await response.text();
+  let data;
+  try { data = JSON.parse(responseText); }
+  catch(e){ throw new Error('Apps Script returned non-JSON: ' + responseText.slice(0, 100)); }
+  if(data.error) throw new Error(data.error.message || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
+  const raw = data.result || (data.content || []).map(c => c.text || '').join('');
+  if(!raw.trim()) throw new Error('AI returned an empty response. Check your API key and try again.');
+  const clean = raw.replace(/```json|```/g, '').trim();
+  let entries = null, warnings = [];
+  try {
+    const objMatch = clean.match(/\{[\s\S]*\}/);
+    if(objMatch){
+      const parsed = JSON.parse(objMatch[0]);
+      if(parsed && Array.isArray(parsed.entries)){
+        entries = parsed.entries;
+        warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
+      }
+    }
+  } catch(e){ /* fall through to array attempt */ }
+  if(entries == null){
+    const arrMatch = clean.match(/\[[\s\S]*?\]/s);
+    if(!arrMatch){
+      console.error('[extraction] no JSON in response (' + scanMode + '):', clean.slice(0, 300));
+      throw new Error('AI responded but returned no JSON. Try a screenshot showing only the schedule grid.');
+    }
+    entries = JSON.parse(arrMatch[0]);
+  }
+  return { entries, warnings };
+}
+
 async function runImport(){
   if (!importImageB64) return;
 
@@ -12511,91 +12560,50 @@ async function runImport(){
   btn.style.display = 'none'; spin.style.display = 'inline-block';
 
   try {
-    // Route through Apps Script proxy
-    const response = await fetch(GAS_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({
-        action: 'extractSchedule',
-        imageData: importImageB64,
-        mediaType: importImageType,
-        token: REQUEST_TOKEN
-      }).toString()
-    });
+    // Build 233 (Finding 6): dual-pass consensus. Two independent reads of
+    // the same image — the original row-major prompt and a transposed
+    // column-major variant — fired in parallel (wall-clock ~= the slower
+    // pass, not the sum). A row-attribution slip (the Traljo 2026-07-25
+    // phantom, real import 2026-07-11) almost never reproduces under a
+    // transposed scan, so it surfaces as a flagged disagreement instead of
+    // a silent extra card. If one pass fails, degrade to single-pass with a
+    // loud banner — reliability is never worse than the pre-233 behavior.
+    const settled = await Promise.allSettled([_extractPass('byRow'), _extractPass('byColumn')]);
+    const passA = settled[0].status === 'fulfilled' ? settled[0].value : null;
+    const passB = settled[1].status === 'fulfilled' ? settled[1].value : null;
 
-    const responseText = await response.text();
-
-    let data;
-    try { data = JSON.parse(responseText); }
-    catch(e) {
-      toast('Extraction error: Apps Script returned non-JSON: ' + responseText.slice(0,100), true);
+    if(!passA && !passB){
+      const msg = (settled[0].reason && settled[0].reason.message) || 'both extraction passes failed';
+      toast('Extraction error: ' + msg, true);
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
 
-    // Check for proxy or API-level errors first
-    if (data.error) {
-      toast('Extraction error: ' + (data.error.message || data.error || JSON.stringify(data.error)), true);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
-    }
-
-    // Proxy returns { result: "raw json string" }
-    const raw = data.result || (data.content || []).map(c => c.text || '').join('');
-
-
-    if (!raw.trim()) {
-      toast('AI returned an empty response. Check your API key and try again.', true);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
-    }
-
-    // Strip markdown fences
-    const clean = raw.replace(/```json|```/g, '').trim();
-
-    // Parse response. The AI is expected to return either:
-    //   Old shape: a raw JSON array [{name, date, shift}, ...]
-    //   New shape: a JSON object {entries: [...], warnings: [...]}
-    // We accept both so a prompt update doesn't break the client.
-    let entries = null;
-    let warnings = [];
-
-    // Try parsing the whole thing as an object first
-    try {
-      const objMatch = clean.match(/\{[\s\S]*\}/);
-      if(objMatch){
-        const parsed = JSON.parse(objMatch[0]);
-        if(parsed && Array.isArray(parsed.entries)){
-          entries = parsed.entries;
-          warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
-        }
-      }
-    } catch(e){ /* fall through to array attempt */ }
-
-    // Fallback: legacy raw-array response
-    if(entries == null){
-      const arrMatch = clean.match(/\[[\s\S]*?\]/s);
-      if(!arrMatch){
-        const preview = clean.length > 200 ? clean.slice(0,200) + '...' : clean;
-        document.getElementById('importRows').innerHTML =
-          '<div style="background:#fff3cd;border:1px solid #ffc107;border-radius:8px;padding:12px;font-size:.8rem;word-break:break-word">' +
-          '<strong>AI responded but returned no JSON.</strong><br><br>' +
-          'Raw response:<br><pre style="white-space:pre-wrap;margin-top:6px">' + preview + '</pre>' +
-          '<br>Try uploading a screenshot that shows only the schedule grid with names and dates visible.' +
-          '</div>';
-        document.getElementById('importResults').style.display = 'block';
-        updateAcceptBars();
-        btn.style.display = 'inline'; spin.style.display = 'none';
-        return;
-      }
-      try {
-        entries = JSON.parse(arrMatch[0]);
-      } catch(parseErr) {
-        toast('Could not parse AI response. Check browser console for details.', true);
-        console.error('Parse error:', parseErr, 'Raw:', clean);
-        btn.style.display = 'inline'; spin.style.display = 'none';
-        return;
-      }
+    let entries, warnings;
+    if(passA && passB){
+      const keyOf = e => `${String(e.name || '').trim().replace(/\s+/g, ' ').toLowerCase()}|${e.date}|${e.shift}`;
+      const keysA = new Set(passA.entries.map(keyOf));
+      const mapB = new Map(passB.entries.map(e => [keyOf(e), e]));
+      entries = passA.entries.map(e => {
+        const b = mapB.get(keyOf(e));
+        if(!b){ e._consensus = 'row-read only'; return e; }
+        const dStart = String(e.startTime || '') !== String(b.startTime || '');
+        const dHours = String(e.hours) !== String(b.hours);
+        if(dStart || dHours) e._consensus = 'reads disagree on ' + [dStart ? 'start' : '', dHours ? 'hours' : ''].filter(Boolean).join(' + ');
+        return e;
+      });
+      passB.entries.forEach(e => {
+        if(!keysA.has(keyOf(e))){ e._consensus = 'column-read only'; entries.push(e); }
+      });
+      warnings = [...new Set([...passA.warnings, ...passB.warnings])];
+      const _cFlagged = entries.filter(e => e._consensus).length;
+      console.log('[extraction] consensus:', entries.length - _cFlagged, 'agreed ·', _cFlagged, 'disagreement(s)');
+    } else {
+      const only = passA || passB;
+      entries = only.entries;
+      warnings = only.warnings;
+      toast('⚠ One extraction pass failed — consensus check unavailable for this import. Review the cards extra carefully against the source.', true);
+      console.warn('[extraction] consensus unavailable:', ((settled[0].reason || settled[1].reason) || {}).message);
     }
 
     // Stash warnings globally so renderImportRows can display them in context.
@@ -12633,6 +12641,22 @@ async function runImport(){
     const _filterReasons = [];
     let _partialCount = 0;
     let _flagCount = 0;
+    // Build 233 (Finding 6): consensus disagreements arrive as e._consensus.
+    // Flag them for forced review — flagged cards can't Save until resolved
+    // (assign units to confirm a real shift, or ✕ Discard a phantom). Entries
+    // the hours filter rejects below drop out naturally, so disagreements on
+    // non-Break cells (regular shifts, off-days) never surface as noise.
+    entries.forEach(e => {
+      if(e._consensus && !e.isFlagged){
+        e.isFlagged = true;
+        e.flagReason = e._consensus === 'row-read only'
+          ? 'seen by row-read only — verify against source'
+          : e._consensus === 'column-read only'
+            ? 'seen by column-read only — verify against source'
+            : e._consensus;
+        _flagCount++;
+      }
+    });
     entries.forEach(e => {
       // Hours-only classification with startTime as a flag-trigger for staff
       // pickups. transferIcon proved unreliable in both directions (over-
@@ -12836,7 +12860,37 @@ function clearLastBatch(){
 }
 
 // Called on admin load — check if there's a restorable batch
+// Build 233 (Finding 6, review layer): per-nurse staged-count chips + a total
+// vs the expected checksum. Makes a count mismatch instantly localizable
+// (whose row is off) instead of a needle-in-N-cards hunt. Runs from
+// updateAcceptBars so every render/discard/save refreshes it.
+function _renderImportCountChips(){
+  const box = document.getElementById('importCountChips');
+  if(!box) return;
+  const live = (_currentImportEntries || []).filter(e => e && !e.isDiscarded);
+  if(!live.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  const byName = {};
+  live.forEach(e => {
+    const last = String(e.name || '?').split(',')[0].trim() || '?';
+    byName[last] = (byName[last] || 0) + 1;
+  });
+  let expected = null;
+  try { expected = _impExpectedGet(); } catch(_e){ /* field absent */ }
+  const total = live.length;
+  const hasExp = expected != null && expected !== '' && !isNaN(Number(expected));
+  const totalOk = hasExp && Number(expected) === total;
+  const chip = (txt, bg, bd, fg) => `<span style="padding:2px 9px;border-radius:99px;background:${bg};border:1px solid ${bd};color:${fg};font-size:.7rem;font-weight:600;line-height:1.5;white-space:nowrap">${txt}</span>`;
+  box.innerHTML =
+    chip(`Σ ${total}${hasExp ? ' / ' + Number(expected) : ''}`,
+         totalOk ? '#e8f5e9' : (hasExp ? '#fff3e0' : 'var(--bg)'),
+         totalOk ? '#43a047' : (hasExp ? '#fb8c00' : 'var(--border)'),
+         totalOk ? '#1b5e20' : (hasExp ? '#bf360c' : 'var(--muted)')) +
+    Object.keys(byName).sort().map(n => chip(`${escHTML(n)} ${byName[n]}`, 'var(--bg)', 'var(--border)', 'var(--muted)')).join('');
+  box.style.display = 'flex';
+}
+
 function updateAcceptBars(){
+  _renderImportCountChips();
   const rows = document.getElementById('importRows');
   const show = rows && rows.children.length > 0;
   const top = document.getElementById('acceptBarTop');
@@ -13060,7 +13114,7 @@ function _buildImportRowsHTML(batch){
       : `<button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
          <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
          <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
-         ${e.isFlagged ? `<button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>` : ''}`;
+         <button class="btn btn-ghost btn-sm" id="discardbtn-${i}" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>`;
 
     return `
     <div data-row="${i}" data-impdate="${e.date}" data-impshift="${e.shift}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${borderColor}">
@@ -13144,12 +13198,22 @@ async function suggestFlaggedRow(i){
   toast(`✨ ${count} unit${count!==1?'s':''} suggested for ${firstName(e.name)} ${e.date}`);
 }
 
-// User-action: discard a flagged entry. Marks isDiscarded; renderer skips it.
-// We don't splice out of _currentImportEntries because indices feed
-// importUnitSel and DOM ids; mutating the array breaks downstream references.
+// User-action: discard a staged entry (Build 233, Finding 7: renders on every
+// card now, not just flagged — a hallucination with internally consistent data
+// never gets flagged, so the exact failure that needs discarding had no path).
+// Marks isDiscarded; renderer skips it. We don't splice out of
+// _currentImportEntries because indices feed importUnitSel and DOM ids;
+// mutating the array breaks downstream references.
 function discardFlaggedRow(i){
   const e = _currentImportEntries[i];
   if(!e) return;
+  // Refuse on rows already saved to the sheet — discarding only hides the
+  // card; the schedule row would survive and desync. Edit instead.
+  const savedMark = document.getElementById(`saved-${i}`);
+  if(savedMark && savedMark.style.display !== 'none'){
+    toast('This row is already saved — use ✏️ Edit to change it.', true);
+    return;
+  }
   e.isDiscarded = true;
   importUnitSel[i] = [];
   const wrap = document.getElementById('importRows');
