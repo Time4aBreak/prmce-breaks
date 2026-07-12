@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-234';
+const APP_VERSION = '2026-07-12-235';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12598,6 +12598,8 @@ async function runImport(){
       warnings = [...new Set([...passA.warnings, ...passB.warnings])];
       const _cFlagged = entries.filter(e => e._consensus).length;
       console.log('[extraction] consensus:', entries.length - _cFlagged, 'agreed ·', _cFlagged, 'disagreement(s)');
+      entries.filter(e => e._consensus).forEach(e =>
+        console.log('[extraction] disagreement:', e.name, e.date, e.shift, '·', e._consensus));
     } else {
       const only = passA || passB;
       entries = only.entries;
@@ -12649,11 +12651,10 @@ async function runImport(){
     entries.forEach(e => {
       if(e._consensus && !e.isFlagged){
         e.isFlagged = true;
-        e.flagReason = e._consensus === 'row-read only'
-          ? 'seen by row-read only — verify against source'
-          : e._consensus === 'column-read only'
-            ? 'seen by column-read only — verify against source'
-            : e._consensus;
+        // Build 235 (Tomas): plain language on the card — nurses don't know
+        // what a transposed scan is. The row/column direction stays in the
+        // console (logged below) for diagnostics.
+        e.flagReason = 'needs verification — check the source screenshot';
         _flagCount++;
       }
     });
@@ -13943,7 +13944,7 @@ async function acceptAllAndSave(){
     e.isFlagged && !e.isDiscarded && (importUnitSel[i] || []).length === 0
   );
   if(unresolvedFlagged.length){
-    toast(`🔍 ${unresolvedFlagged.length} flagged entr${unresolvedFlagged.length === 1 ? 'y needs' : 'ies need'} review — assign units or discard before saving.`, true);
+    toast(`🔍 ${unresolvedFlagged.length} shift${unresolvedFlagged.length === 1 ? ' needs' : 's need'} verification before saving.`, true);
     return;
   }
 
