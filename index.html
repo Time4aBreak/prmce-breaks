@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-11-233';
+const APP_VERSION = '2026-07-12-234';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12975,6 +12975,24 @@ async function restoreLastImport(){
   if(_importWrap) renderProgressBar(_importWrap, '✨ Restoring suggestions', _totalDateShifts);
   document.getElementById('importResults').style.display = 'block';
 
+  // Build 234 (Finding 8): open the staging batch + refresh every WH key
+  // this batch will touch — ONE batched round trip. Gives suggestions a
+  // fresh fairness base AND purges any device-local tentative entries left
+  // by a previously abandoned staging session (warmMany is fill-absent-only
+  // and would otherwise read them as history).
+  _stagingWHBatch = {};
+  {
+    const _whKeys = new Set();
+    Object.keys(byDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (byDateShift[k] || []).forEach(n => _whKeys.add(`bnWingHistory_${n}_${sh}`));
+    });
+    Object.keys(partialsByDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (partialsByDateShift[k] || []).forEach(pe => _whKeys.add(`bnWingHistory_${pe.name}_${sh}`));
+    });
+    if(_whKeys.size) await syncedLS.refreshMany([..._whKeys]);
+  }
   const allSuggestions = {};
   const batchCountOverlay = {};
   const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
@@ -12984,7 +13002,7 @@ async function restoreLastImport(){
     const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
     if(nurses.length){
-      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch);
       for(const [name, slots] of Object.entries(suggestions)){
         allSuggestions[`${name}|${date}|${shift}`] = slots;
         slots.forEach(slot => {
@@ -12997,7 +13015,7 @@ async function restoreLastImport(){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      await _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots, _stagingWHBatch);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13182,7 +13200,8 @@ async function suggestFlaggedRow(i){
   const slots = await _pickPartialSlots(e.shift, e.date, count, overlay);
   importUnitSel[i] = expandSuggestionUnits(slots);
   // Persist for fairness feedback (same as partial path).
-  await _savePartialWingHistory(e.name, e.shift, e.date, slots);
+  if(!_stagingWHBatch) _stagingWHBatch = {}; // Build 234: flagged re-pick joins the staging batch
+      await _savePartialWingHistory(e.name, e.shift, e.date, slots, _stagingWHBatch);
   // Re-render — flagged status visually persists but Save button now appears.
   const wrap = document.getElementById('importRows');
   if(wrap){
@@ -13335,6 +13354,24 @@ async function renderImportRows(entries, forceReplace = false){
   expandExtractedRows();
   await Promise.allSettled(shiftsNeeded.map(sh => getUnitCoverageCounts(sh)));
 
+  // Build 234 (Finding 8): open the staging batch + refresh every WH key
+  // this batch will touch — ONE batched round trip. Gives suggestions a
+  // fresh fairness base AND purges any device-local tentative entries left
+  // by a previously abandoned staging session (warmMany is fill-absent-only
+  // and would otherwise read them as history).
+  _stagingWHBatch = {};
+  {
+    const _whKeys = new Set();
+    Object.keys(byDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (byDateShift[k] || []).forEach(n => _whKeys.add(`bnWingHistory_${n}_${sh}`));
+    });
+    Object.keys(partialsByDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (partialsByDateShift[k] || []).forEach(pe => _whKeys.add(`bnWingHistory_${pe.name}_${sh}`));
+    });
+    if(_whKeys.size) await syncedLS.refreshMany([..._whKeys]);
+  }
   const allSuggestions = {};
   // Process dates in chronological order so wing history and counts accumulate correctly
   // Union both maps' keys so date+shifts with only partials still get processed
@@ -13350,7 +13387,7 @@ async function renderImportRows(entries, forceReplace = false){
     const [date, shift] = key.split('|');
     // Full nurses through normal suggester
     if(nurses.length){
-      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch);
       for(const [name, slots] of Object.entries(suggestions)){
         allSuggestions[`${name}|${date}|${shift}`] = slots;
         slots.forEach(slot => {
@@ -13364,7 +13401,7 @@ async function renderImportRows(entries, forceReplace = false){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      await _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots, _stagingWHBatch);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -13438,6 +13475,14 @@ function setImportShift(i, sh){
 }
 
 const importUnitSel = {}; // { rowIndex: [units] }
+// Build 234 (Finding 8): staging wing-history buffer. Non-null while an
+// import staging batch is live; its presence routes all suggest-time WH
+// writes to the LS-only batch branch (network-silent). Wing history reaches
+// the SHEET only via the Save All flush, which derives entries from the
+// records actually saved — so discarded/cancelled/abandoned cards leave no
+// sheet residue by construction. Device-local LS tentative entries from an
+// abandoned batch are purged by the refreshMany at the next staging start.
+let _stagingWHBatch = null;
 let _currentImportEntries = []; // authoritative list matching current DOM rows
 
 async function toggleIU(i, u, el){
@@ -13591,6 +13636,24 @@ async function resuggestAll(){
   const _totalDateShifts = new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)]).size;
   if(_importWrap) renderProgressBar(_importWrap, '✨ Re-suggesting', _totalDateShifts);
 
+  // Build 234 (Finding 8): open the staging batch + refresh every WH key
+  // this batch will touch — ONE batched round trip. Gives suggestions a
+  // fresh fairness base AND purges any device-local tentative entries left
+  // by a previously abandoned staging session (warmMany is fill-absent-only
+  // and would otherwise read them as history).
+  _stagingWHBatch = {};
+  {
+    const _whKeys = new Set();
+    Object.keys(byDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (byDateShift[k] || []).forEach(n => _whKeys.add(`bnWingHistory_${n}_${sh}`));
+    });
+    Object.keys(partialsByDateShift).forEach(k => {
+      const sh = k.split('|')[1];
+      (partialsByDateShift[k] || []).forEach(pe => _whKeys.add(`bnWingHistory_${pe.name}_${sh}`));
+    });
+    if(_whKeys.size) await syncedLS.refreshMany([..._whKeys]);
+  }
   const allSuggestions = {};
   const batchCountOverlay = {};
   const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
@@ -13600,7 +13663,7 @@ async function resuggestAll(){
     const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
     if(nurses.length){
-      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay);
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch);
       for(const [name, slots] of Object.entries(suggestions)){
         allSuggestions[`${name}|${date}|${shift}`] = slots;
         slots.forEach(slot => {
@@ -13613,7 +13676,7 @@ async function resuggestAll(){
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
-      await _savePartialWingHistory(pe.name, shift, date, slots);
+      await _savePartialWingHistory(pe.name, shift, date, slots, _stagingWHBatch);
       slots.forEach(slot => {
         batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
       });
@@ -14046,6 +14109,37 @@ async function acceptAllAndSave(){
       await syncedLS.setMany(rotationEntries);
     }
 
+    // Build 234 (Finding 8): flush wing history — DERIVED from the records
+    // actually saved above, not from the staging buffer, so cards that were
+    // discarded (or never assigned units) contribute nothing by construction.
+    // One refresh per key (server truth as base; also purges this device's
+    // tentative staging entries), strip-then-append per saved row (matches
+    // both existing writers' replace-not-duplicate semantics), one setMany.
+    setPhase('Saving wing history...', 'Wing history...');
+    const _whByKey = {};
+    for(const rec of records){
+      const d = rec.data;
+      const k = `bnWingHistory_${d.BreakNurseName}_${d.ShiftType}`;
+      (_whByKey[k] = _whByKey[k] || { name: d.BreakNurseName, shift: d.ShiftType, rows: [] })
+        .rows.push({ date: d.ShiftDate, units: JSON.parse(d.Units) });
+    }
+    const _whFlush = [];
+    for(const k of Object.keys(_whByKey)){
+      const g = _whByKey[k];
+      await syncedLS.refresh(k);
+      let hist = getNurseWingHistory(g.name, g.shift);
+      for(const row of g.rows){
+        hist = hist.filter(e => e.date !== row.date);
+        const byWing = {};
+        row.units.forEach(u => { const w = getWing(u); (byWing[w] = byWing[w] || []).push(u); });
+        Object.keys(byWing).forEach(w => hist.push({ date: row.date, wing: w, slots: byWing[w], units: byWing[w] }));
+      }
+      try { localStorage.setItem(k, JSON.stringify(hist)); } catch {}
+      _whFlush.push({ key: k, value: hist });
+    }
+    if(_whFlush.length) await syncedLS.setMany(_whFlush);
+    _stagingWHBatch = null;
+
     // Build 206/207: prove the batch landed via read-back (GET), not the POST response.
     // Keep the SAVE ALL buttons DISABLED through verification (tap guard) — re-enabling them
     // before the read-back left them clickable while it showed "Verifying…". Re-enable after.
@@ -14207,7 +14301,8 @@ async function rerunSuggest(i, name, date, shift){
     }
   });
 
-  const suggestions = await suggestAssignments(nurses, shift, date, batchOverlay);
+  if(!_stagingWHBatch) _stagingWHBatch = {}; // Build 234: per-card re-suggest joins the live staging batch
+  const suggestions = await suggestAssignments(nurses, shift, date, batchOverlay, _stagingWHBatch);
 
   // Apply suggestions to correct DOM rows
   entriesToProcess.forEach((e, idx) => {
@@ -18321,14 +18416,16 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
 // the same persistence for partials so future fairness calculations see the
 // partial's coverage in their per-BN history. Without this, the partial's
 // past assignments would never feed back into "who's been on which wing".
-async function _savePartialWingHistory(name, shift, date, slots){
+async function _savePartialWingHistory(name, shift, date, slots, batch = null){
   if(!slots || !slots.length) return;
-  // Build 231 (Finding 2, E1 2026-07-11): refresh-before-merge — pull this
-  // key fresh from BNState before the read-merge-write below, so a stale
-  // device mirror can't silently drop entries written elsewhere since the
-  // last sync (the A5b resurrection / fleet-scale drop class; same
-  // philosophy as the build-158 preferred-names fix, applied at write time).
-  await syncedLS.refresh(`bnWingHistory_${name}_${shift}`);
+  const _whKey = `bnWingHistory_${name}_${shift}`;
+  // Build 231 (Finding 2): refresh-before-merge — pull the key fresh so a
+  // stale mirror can't drop entries written elsewhere.
+  // Build 234 (Finding 8): in staging-batch mode, refresh only on FIRST
+  // touch — the batch's later touches must merge against THIS run's LS
+  // accumulation (a mid-run refresh would clobber the run's own tentative
+  // entries with server truth).
+  if(!batch || !(_whKey in batch)) await syncedLS.refresh(_whKey);
   // Remove any existing entry for this date first so a re-suggest replaces
   // rather than duplicates — matches the pattern in suggestAssignments.
   const existing = getNurseWingHistory(name, shift).filter(e => e.date !== date);
@@ -18346,7 +18443,15 @@ async function _savePartialWingHistory(name, shift, date, slots){
       units: slotsWithWing.filter(s => s.wing === w).flatMap(s => s.units)
     });
   });
-  saveNurseWingHistory(name, shift, existing);
+  if(batch){
+    // Build 234 (Finding 8): staging — LS only (fairness accumulation for
+    // later cards); the sheet write happens at Save All, derived from saved
+    // records. Never hits the network here.
+    try { localStorage.setItem(_whKey, JSON.stringify(existing)); } catch {}
+    batch[_whKey] = existing;
+  } else {
+    saveNurseWingHistory(name, shift, existing);
+  }
 }
 
 // Removes any wing-history entries for the given BN/shift/date. (Formerly also
