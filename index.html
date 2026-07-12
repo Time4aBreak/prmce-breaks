@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-235';
+const APP_VERSION = '2026-07-12-238';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12794,6 +12794,16 @@ async function runImport(){
     // session already has a batch on screen (multi-screenshot week).
     const _batchNow = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length) ? _currentImportEntries.length : 0;
     _impExpectedSet(_batchNow ? _impExpectedGet() + _expVal : _expVal);
+    // Build 237 (Tomas): clear the expected-count FIELD only — the STORED
+    // value (line above) persists for this batch's chips + Save All
+    // checksum. The empty field re-arms the build-218 pre-extraction gate,
+    // so the next Extract demands a freshly counted number: a stale count
+    // from a prior import can't leak forward (the 05:34 Σ33/31 incident).
+    // Failed extractions never reach this line, so a retry keeps the typed
+    // count. Multi-screenshot batches improve too: each screenshot now
+    // forces its own count, and the store accumulates them.
+    const _expFld = document.getElementById('impExpectedCount');
+    if(_expFld) _expFld.value = '';
     _impGateAcks = new Set();
 
     renderImportRows(entries);
@@ -12868,26 +12878,54 @@ function clearLastBatch(){
 function _renderImportCountChips(){
   const box = document.getElementById('importCountChips');
   if(!box) return;
-  const live = (_currentImportEntries || []).filter(e => e && !e.isDiscarded);
-  if(!live.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
+  const src = _currentImportEntries || [];
+  // Build 236 (Tomas): chips are now a navigator — group with first-card
+  // index for tap-to-jump, and mark names carrying UNRESOLVED flags (same
+  // predicate as the Save All guard: flagged + not discarded + no units)
+  // with the flag palette + 🔍 so the hunt starts at the right cards.
   const byName = {};
-  live.forEach(e => {
+  src.forEach((e, i) => {
+    if(!e || e.isDiscarded) return;
     const last = String(e.name || '?').split(',')[0].trim() || '?';
-    byName[last] = (byName[last] || 0) + 1;
+    if(!byName[last]) byName[last] = { n: 0, firstIdx: i, unresolved: 0 };
+    byName[last].n++;
+    if(e.isFlagged && (importUnitSel[i] || []).length === 0) byName[last].unresolved++;
   });
+  const names = Object.keys(byName).sort();
+  if(!names.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
   let expected = null;
   try { expected = _impExpectedGet(); } catch(_e){ /* field absent */ }
-  const total = live.length;
+  const total = names.reduce((s, n) => s + byName[n].n, 0);
   const hasExp = expected != null && expected !== '' && !isNaN(Number(expected));
   const totalOk = hasExp && Number(expected) === total;
-  const chip = (txt, bg, bd, fg) => `<span style="padding:2px 9px;border-radius:99px;background:${bg};border:1px solid ${bd};color:${fg};font-size:.7rem;font-weight:600;line-height:1.5;white-space:nowrap">${txt}</span>`;
+  const chip = (txt, bg, bd, fg, extra) => `<span ${extra || ''} style="padding:2px 9px;border-radius:99px;background:${bg};border:1px solid ${bd};color:${fg};font-size:.7rem;font-weight:600;line-height:1.5;white-space:nowrap${extra ? ';cursor:pointer' : ''}">${txt}</span>`;
   box.innerHTML =
     chip(`Σ ${total}${hasExp ? ' / ' + Number(expected) : ''}`,
          totalOk ? '#e8f5e9' : (hasExp ? '#fff3e0' : 'var(--bg)'),
          totalOk ? '#43a047' : (hasExp ? '#fb8c00' : 'var(--border)'),
          totalOk ? '#1b5e20' : (hasExp ? '#bf360c' : 'var(--muted)')) +
-    Object.keys(byName).sort().map(n => chip(`${escHTML(n)} ${byName[n]}`, 'var(--bg)', 'var(--border)', 'var(--muted)')).join('');
+    names.map(n => {
+      const g = byName[n];
+      const flagged = g.unresolved > 0;
+      return chip(`${flagged ? '🔍 ' : ''}${escHTML(n)} ${g.n}`,
+        flagged ? '#fff3e0' : 'var(--bg)',
+        flagged ? '#fb8c00' : 'var(--border)',
+        flagged ? '#bf360c' : 'var(--muted)',
+        `data-jump-row="${g.firstIdx}" title="Jump to ${escHTML(n)}\u2019s first card"`);
+    }).join('');
   box.style.display = 'flex';
+  // Delegated tap-to-jump (assigned each render — idempotent).
+  box.onclick = ev => {
+    const t = ev.target.closest('[data-jump-row]');
+    if(!t) return;
+    const el = document.querySelector(`[data-row="${t.getAttribute('data-jump-row')}"]`);
+    if(!el) return;
+    el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const prev = el.style.boxShadow;
+    el.style.transition = 'box-shadow .25s';
+    el.style.boxShadow = '0 0 0 3px var(--teal)';
+    setTimeout(() => { el.style.boxShadow = prev; }, 1400);
+  };
 }
 
 function updateAcceptBars(){
@@ -13891,7 +13929,7 @@ function _impGateRender(){
   const countRow = `
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.9rem;margin-bottom:12px;${countAcked?'opacity:.55':''}">
       <span>Expected <strong>${res.expected||'—'}</strong> · staged <strong>${res.staged}</strong> ${(!countAnom)?'✓':'✗'}</span>
-      ${countAnom ? `<input id="impGateExpInput" type="number" min="1" value="${res.expected||''}" style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:.85rem"/><button class="btn btn-ghost btn-sm" onclick="_impGateAdjust()" style="font-size:.75rem">Update</button><button class="btn btn-ghost btn-sm" onclick="_impGateAck('count')" style="font-size:.75rem">${countAcked?'Undo':'Accept'}</button>` : ''}
+      ${countAnom ? `<input id="impGateExpInput" type="number" min="1" value="${res.expected||''}" style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:.85rem"/><button class="btn btn-ghost btn-sm" onclick="_impGateAdjust()" style="font-size:.75rem">Update Miscount</button><button class="btn btn-ghost btn-sm" onclick="_impGateAck('count')" style="font-size:.75rem">${countAcked?'Undo':'Accept Mismatch'}</button>` : ''}
     </div>`;
   const namesBlock = res.newNames.length
     ? `<div style="font-size:.8rem;color:var(--muted);margin-top:10px">New this batch: ${res.newNames.map(escHTML).join(' · ')}</div>`
