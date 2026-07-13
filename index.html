@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-249';
+const APP_VERSION = '2026-07-13-250';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6304,10 +6304,17 @@ async function warmRotationCache(bnName, date, shift){
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
-async function recalculateRotation(bnName, date, shift, asOf=null){
+async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null){
+  // Build 250 (249b): optional preloads {scheds, bookings} — SHIFT-WIDE lists
+  // a caller already holds (saveAssign's post-write truth). Each is filtered
+  // HERE with the exact semantics of the server query it replaces, so the
+  // derivation logic has one home. Absent → fetch as before; all other
+  // callers are untouched (optional trailing param).
   // Get BN's covered units
-  const scheds = await spGet(LISTS.schedule,
-    `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
+  const scheds = (preloads && preloads.scheds)
+    ? preloads.scheds.filter(r => r.BreakNurseName === bnName)
+    : await spGet(LISTS.schedule,
+        `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
   // Build the BN's effective unit set from their active main row only.
   // Supplemental rows are EXCLUDED here (Option B build N+1, 2026-05-24): a
   // BN absorbing for an inactive peer shouldn't have their main-unit rotation
@@ -6332,8 +6339,10 @@ async function recalculateRotation(bnName, date, shift, asOf=null){
     : filterClosedUnits(expanded, date, shift);
 
   // Get BN's own break slots
-  const breaks = await spGet(LISTS.bookings,
-    `NurseName eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+  const breaks = (preloads && preloads.bookings)
+    ? preloads.bookings.filter(b => b.NurseName === bnName && isBNBreak(b))
+    : await spGet(LISTS.bookings,
+        `NurseName eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   const bnBreakSlots = new Set([...new Set(breaks.map(b => b.SlotTime))]);
 
   // Date seed for fair starting unit rotation
@@ -6355,8 +6364,10 @@ async function recalculateRotation(bnName, date, shift, asOf=null){
   // seed-branch writes its own rotation and stays exposed — reachable only
   // if a pin-holder applies a ⭐ template mid-shift.
   try {
-    const pinned = await spGet(LISTS.bookings,
-      `CreatedBy eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const pinned = (preloads && preloads.bookings)
+      ? preloads.bookings.filter(b => b.CreatedBy === bnName)
+      : await spGet(LISTS.bookings,
+          `CreatedBy eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
     pinned.forEach(b => {
       if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
       rotation[String(b.SlotTime).padStart(4,'0')] = b.Unit;
@@ -11258,8 +11269,15 @@ async function saveAssign(){
   // Rotation excludes them via filterClosedUnits until the unit reopens.
   try{
     // Check if any selected units are already assigned to a different BN on this date/shift
-    const allScheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    // Build 250 (249b): the shift's bookings ride the SAME parallel round
+    // trip as the schedule read — zero wall cost — so post-write truth for
+    // the recalc preload is ALWAYS constructible, not just on removal-edits.
+    const [allScheds, shiftBookings] = await Promise.all([
+      spGet(LISTS.schedule,
+        `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`),
+      spGet(LISTS.bookings,
+        `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`)
+    ]);
     const conflicts = [];
     allScheds
       .filter(s => s.BreakNurseName !== nurse && s.Status !== 'inactive')
@@ -11300,7 +11318,7 @@ async function saveAssign(){
       let staffBookings = [];
       let removedUnitsWithBookings = [];
       if(removedUnits.length){
-        staffBookings = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
+        staffBookings = shiftBookings; // Build 250: already in hand from Act 1
         removedUnits.forEach(unit => {
           const unitFutureBookings = staffBookings.filter(b =>
             isStaffBooking(b) &&
@@ -11376,7 +11394,7 @@ async function saveAssign(){
       }
     }
 
-    await spPost(LISTS.schedule,{
+    const _createdRow = await spPost(LISTS.schedule,{
       Title:`${nurse}-${dt}-${shift}`,
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
       Units:JSON.stringify(units)
@@ -11412,7 +11430,23 @@ async function saveAssign(){
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(nurse, dt, shift, bnDef);
       } else {
-        await recalculateRotation(nurse, dt, shift);
+        // Build 250 (249b): feed the recalc POST-WRITE truth constructed from
+        // exactly what this save just did — allScheds minus the deleted rows
+        // plus the created row (server-returned, Id included); bookings minus
+        // cancels with transfers re-attributed. The recalc's own name-scoped
+        // filters run INSIDE recalculateRotation on these lists, identical to
+        // its server queries — zero fetches on this branch. The template
+        // branch above (applyDefaultToShift) is deliberately NOT preloaded:
+        // its seed chain is separate surgery (249c if ever).
+        const _delIds = new Set(existing.map(r => String(r.Id)));
+        const _cxIds = new Set(bookingsToCancel.map(b => String(b.Id)));
+        const _xfer = {};
+        transfers.forEach(t => { if(t.targetBN) _xfer[String(t.booking.Id)] = t.targetBN; });
+        const _postScheds = allScheds.filter(r => !_delIds.has(String(r.Id))).concat(_createdRow ? [_createdRow] : []);
+        const _postBookings = shiftBookings
+          .filter(b => !_cxIds.has(String(b.Id)))
+          .map(b => _xfer[String(b.Id)] ? Object.assign({}, b, { CreatedBy: _xfer[String(b.Id)] }) : b);
+        await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds, bookings: _postBookings });
       }
       // Build 141 (2026-05-27): Apply Keep overrides after recompute.
       // The user chose to keep specific slots on units that are NO LONGER
