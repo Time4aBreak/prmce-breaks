@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-241';
+const APP_VERSION = '2026-07-12-242';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6133,9 +6133,9 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
 //            booking's slot is stamped back to its unit — the transfer-flow
 //            idiom — so no recalc/redeal/reopen/re-import can strand a
 //            commitment. BN breaks stay dealer INPUT (bnBreakSet), not pins.
-//            A booking on a unit the row no longer covers is conflict-modal
-//            territory (saveAssign/reopen adjudicate) — log + skip, never
-//            invent a resolution here.
+//            Pins apply even on units OUTSIDE the row's Units — that is an
+//            adjudicated Keep (Build 226 / the D1 2026-07-07 lesson) and
+//            must survive every recompute; skipping would silently revert it.
 function constrainedRotation(units, bnBreakSet, shift, dateSeed, opts = {}){
   let slots = opts.allSlots || getAvailableSlots(shift);
   const hrs = Number(opts.hours || 0);
@@ -6146,13 +6146,16 @@ function constrainedRotation(units, bnBreakSet, shift, dateSeed, opts = {}){
     slots = slots.filter(s => { const k = sortKey(normSlot(s), shift); return k >= startK && k < endK; });
   }
   const rot = calculateBlockRotation(units, bnBreakSet || new Set(), slots, dateSeed, shift);
-  const skipped = [];
+  // Build 242: pin semantics aligned to Build 226 — ALL non-cancelled staff
+  // bookings pin, including units outside current coverage (adjudicated
+  // Keeps). Over-honoring is visible and benign; stranding is silent harm.
+  const outside = [];
   (opts.bookings || []).forEach(b => {
-    if(!isStaffBooking(b)) return;
-    if(!units.includes(b.Unit)){ skipped.push(b); return; }
+    if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+    if(!units.includes(b.Unit)) outside.push(b);
     rot[normSlot(b.SlotTime)] = b.Unit;
   });
-  if(skipped.length) console.warn('[constrainedRotation] not pinning', skipped.length, 'booking(s) on units no longer covered:', skipped.map(b => `${b.Unit}@${b.SlotTime}`).join(', '));
+  if(outside.length) console.info('[constrainedRotation] honoring', outside.length, 'keep-style pin(s) outside current coverage:', outside.map(b => `${b.Unit}@${b.SlotTime}`).join(', '));
   return rot;
 }
 
@@ -6271,14 +6274,16 @@ async function recalculateRotation(bnName, date, shift, asOf=null){
     `NurseName eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
   const bnBreakSlots = new Set([...new Set(breaks.map(b => b.SlotTime))]);
 
-  // Generate all available shift slots (excludes hard-blocked huddle window)
-  const allSlots = getAvailableSlots(shift);
-
   // Date seed for fair starting unit rotation
   const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) +
     bnName.charCodeAt(0);
 
-  const rotation = calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift);
+  // Build 242 (Finding 9): thread the partial window from the main
+  // (non-supp, active) row — '' = full shift. Pins stay with the Build-226
+  // overlay below, unchanged.
+  const _mainRow = scheds.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
+  const rotation = constrainedRotation(units, bnBreakSlots, shift, dateSeed,
+    { startTime: _mainRow.StartTime, hours: _mainRow.Hours });
   // Build 226: re-overlay PIN-BACKED slots after every recompute — kept or
   // transferred bookings (CreatedBy = this BN, unit deliberately outside
   // Units) must survive any repair/redeal/recompute, or the Keep/Transfer
@@ -11719,6 +11724,23 @@ async function recalculateAllRotations(opts = {}){
   let failed = 0;
   const nowMs = Date.now();
 
+  // Build 242 (Finding 4): ONE batched staff-bookings fetch across the recalc
+  // range — covered-unit bookings were the gap here (Build 142's keep-override
+  // heuristic already preserved dropped-unit Keeps from cache). Grouped by
+  // covering BN|date|shift; failure degrades to pre-242 behavior.
+  let _pinsByKey = {};
+  try {
+    const _dates = active.map(s => (s.ShiftDate || '').slice(0,10)).sort();
+    if(_dates.length){
+      const _bk = await spGet(LISTS.bookings, `SlotDate ge '${_dates[0]}' and SlotDate le '${_dates[_dates.length - 1]}T23'`);
+      _bk.forEach(b => {
+        if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+        const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
+        (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
+      });
+    }
+  } catch(e){ console.warn('[recalcAll] pins pre-fetch failed:', e.message); }
+
   for(const s of active){
     try {
       const rawUnits = [];
@@ -11729,7 +11751,10 @@ async function recalculateAllRotations(opts = {}){
       // Use existing BN default breaks if available
       const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
       const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
-      const rotation = calculateBlockRotation(units, bnBreakSet, getAvailableSlots(s.ShiftType), dateSeed, s.ShiftType);
+      const rotation = constrainedRotation(units, bnBreakSet, s.ShiftType, dateSeed, {
+        startTime: s.StartTime, hours: s.Hours,
+        bookings: _pinsByKey[`${s.BreakNurseName}|${(s.ShiftDate || '').slice(0,10)}|${s.ShiftType}`] || []
+      }); // Build 242: window (F9) + pins (F4)
       // Normalize slot keys to 4 digits — matches saveRotation's contract.
       const normalized = {};
       Object.entries(rotation).forEach(([slot, unit]) => {
