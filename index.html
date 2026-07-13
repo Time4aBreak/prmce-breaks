@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-248';
+const APP_VERSION = '2026-07-13-249';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11274,8 +11274,12 @@ async function saveAssign(){
     }
 
     // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
-    const existing = await spGet(LISTS.schedule,
-      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(nurse)}'`);
+    // Build 249a (save-chain diet): derived from allScheds client-side — the
+    // server query was date+shift+name with no other clauses, and allScheds
+    // is that exact date+shift fetch. Name equality replicates it verbatim
+    // (incl. supplementals — the consolidation contract deletes ALL the BN's
+    // rows). One ~2s round trip removed from every save.
+    const existing = allScheds.filter(r => r.BreakNurseName === nurse);
 
     let bookingsToCancel = [];
     let transfers = [];     // [{booking, targetBN}] — bookings-only since 224 (D8)
@@ -11331,13 +11335,19 @@ async function saveAssign(){
 
     showBusy(existing.length > 0 ? `Updating ${firstName(nurse)}'s assignment…` : `Saving assignment for ${firstName(nurse)}…`);
 
-    if(existing.length > 0){
-      for(const rec of existing) await spDel(LISTS.schedule, rec.Id);
-    }
-    // Cancel staff bookings on removed units (from takeovers + no-transfer cases)
-    if(bookingsToCancel.length){
-      for(const b of bookingsToCancel) await spDel(LISTS.bookings, b.Id);
-    }
+    // Build 249a: the sequential per-row delete loops (N+M ~2s round trips)
+    // become ONE batchDelete per sheet, fired in parallel — different sheets,
+    // no ordering between them. The ordering that MUST hold is deletes-
+    // before-post (the D1/D2 duplicate-row lesson): the Promise.all below
+    // completes both before the consolidated post fires.
+    await Promise.all([
+      existing.length
+        ? gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(existing.map(r => r.Id))) })
+        : Promise.resolve(),
+      bookingsToCancel.length
+        ? gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(bookingsToCancel.map(b => b.Id))) })
+        : Promise.resolve()
+    ]);
 
     // Build 224 (D8, Tomas 2026-07-07): BOOKINGS-ONLY transfer — the exact
     // mirror of Keep, pointed at the target. Per booking: CreatedBy → target
@@ -11352,10 +11362,12 @@ async function saveAssign(){
       const _byTarget = {};
       transfers.forEach(t => { if(t.targetBN) (_byTarget[t.targetBN] ||= []).push(t); });
       for(const [tbn, list] of Object.entries(_byTarget)){
-        for(const t of list){
-          try { await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: tbn }); }
-          catch(e){ console.warn(`CreatedBy patch failed for booking ${t.booking.Id}:`, e.message); }
-        }
+        // Build 249a: per-booking patches → one batchUpsert per target. The
+        // backend's upsert writes only the provided keys (partial update by
+        // Id, verified in the .gs), so this is the loop's exact semantics
+        // in one round trip.
+        try { await spBatchUpsert(LISTS.bookings, list.map(t => ({ Id: t.booking.Id, CreatedBy: tbn }))); }
+        catch(e){ console.warn(`CreatedBy batch patch failed for target ${tbn}:`, e.message); }
         try {
           const targetRot = loadRotation(tbn, dt, shift) || {};
           list.forEach(t => { targetRot[String(t.booking.SlotTime).padStart(4,'0')] = t.booking.Unit; });
