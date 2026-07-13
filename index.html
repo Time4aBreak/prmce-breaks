@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-240';
+const APP_VERSION = '2026-07-12-241';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6122,6 +6122,38 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
   assignPool(tierPools.thirdLow, poolOrder(3), tierPools.thirdLow.length || 1);
 
   return rotation;
+}
+
+// Build 241 (Findings 4+9): the constraint-aware deal — ONE seam for the two
+// inputs every deal must respect:
+//   window — a partial shift's StartTime/Hours (F9): slots outside
+//            [start, start+hours) are never dealt; the BN isn't there.
+//            Empty/absent window = full shift (the schema sentinel).
+//   pins   — existing STAFF bookings (F4): after dealing, each surviving
+//            booking's slot is stamped back to its unit — the transfer-flow
+//            idiom — so no recalc/redeal/reopen/re-import can strand a
+//            commitment. BN breaks stay dealer INPUT (bnBreakSet), not pins.
+//            A booking on a unit the row no longer covers is conflict-modal
+//            territory (saveAssign/reopen adjudicate) — log + skip, never
+//            invent a resolution here.
+function constrainedRotation(units, bnBreakSet, shift, dateSeed, opts = {}){
+  let slots = opts.allSlots || getAvailableSlots(shift);
+  const hrs = Number(opts.hours || 0);
+  if(opts.startTime && hrs > 0 && hrs < 12){
+    const st = String(opts.startTime).replace(/[:.]/g, '').padStart(4, '0');
+    const startK = sortKey(st, shift);
+    const endK = startK + Math.round(hrs * 60);
+    slots = slots.filter(s => { const k = sortKey(normSlot(s), shift); return k >= startK && k < endK; });
+  }
+  const rot = calculateBlockRotation(units, bnBreakSet || new Set(), slots, dateSeed, shift);
+  const skipped = [];
+  (opts.bookings || []).forEach(b => {
+    if(!isStaffBooking(b)) return;
+    if(!units.includes(b.Unit)){ skipped.push(b); return; }
+    rot[normSlot(b.SlotTime)] = b.Unit;
+  });
+  if(skipped.length) console.warn('[constrainedRotation] not pinning', skipped.length, 'booking(s) on units no longer covered:', skipped.map(b => `${b.Unit}@${b.SlotTime}`).join(', '));
+  return rot;
 }
 
 // Store rotation — writes to localStorage immediately and syncs to backend async
@@ -14068,7 +14100,10 @@ async function acceptAllAndSave(){
     const { name, date, shift } = entriesToProcess[i];
     records.push({
       matchFields: { BreakNurseName: name, ShiftDate: date, ShiftType: shift },
-      data: { Title: `${name}-${date}-${shift}`, BreakNurseName: name, ShiftDate: date, ShiftType: shift, Units: JSON.stringify(units) }
+      data: { Title: `${name}-${date}-${shift}`, BreakNurseName: name, ShiftDate: date, ShiftType: shift, Units: JSON.stringify(units),
+        // Build 241 (Finding 9): persist the partial window — '' = full shift.
+        StartTime: (() => { const h = Number(entriesToProcess[i].hours); return (h > 0 && h < 12) ? String(entriesToProcess[i].startTime || '').replace(/[:.]/g, '').padStart(4, '0') : ''; })(),
+        Hours: (() => { const h = Number(entriesToProcess[i].hours); return (h > 0 && h < 12) ? String(entriesToProcess[i].hours) : ''; })() }
     });
     indices.push(i);
   }
@@ -14155,10 +14190,26 @@ async function acceptAllAndSave(){
 
     // Recalculate all rotations — apply default breaks if BN has them set
     setPhase('Recalculating rotations...', 'Recalculating...');
+    // Build 241 (Finding 4): ONE batched staff-bookings fetch over the import
+    // range — a re-imported current week can carry live bookings and the deal
+    // must pin them (a fresh week fetches ~nothing). Grouped by covering
+    // BN|date|shift. Failure degrades to pin-less (pre-241 behavior), never
+    // blocks the save.
+    let _pinsByKey = {};
+    try {
+      const _impDates = indices.map(ix => entriesToProcess[ix].date).sort();
+      if(_impDates.length){
+        const _bk = await spGet(LISTS.bookings, `SlotDate ge '${_impDates[0]}' and SlotDate le '${_impDates[_impDates.length - 1]}T23'`);
+        _bk.filter(isStaffBooking).forEach(b => {
+          const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
+          (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
+        });
+      }
+    } catch(e){ console.warn('[Save All] bookings pre-fetch for pins failed:', e.message); }
     const rotationEntries = [];
     const defaultApplyPromises = [];
     for(const i of indices){
-      const { name, date, shift } = entriesToProcess[i];
+      const { name, date, shift, startTime, hours } = entriesToProcess[i];
       const rawUnits = importUnitSel[i] || [];
       const units = filterClosedUnits(expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift), date, shift);
       if(!units.length) continue;
@@ -14169,7 +14220,8 @@ async function acceptAllAndSave(){
       } else {
         // No default — calculate rotation with empty break set
         const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
-        const rotation = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
+        const rotation = constrainedRotation(units, new Set(), shift, dateSeed,
+          { startTime, hours, bookings: _pinsByKey[`${name}|${date}|${shift}`] || [] }); // Build 241: window + pins
         const key = `bnRotation_${name}_${date}_${shift}`;
         // LS write is below in syncedLS.setMany. Just collect entries here so
         // the batch flushes in one round trip (vs N parallel set calls).
