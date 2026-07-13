@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-243';
+const APP_VERSION = '2026-07-13-244';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5746,10 +5746,18 @@ async function applyDefaultToAll(){
 
   try {
     // ── ONE round trip: fetch all schedules + all existing BN breaks ──
-    const [schedRaw, existingBreaks] = await Promise.all([
+    const [schedRaw, existingBreaks, _pinsRawADA] = await Promise.all([
       spGet(LISTS.schedule, `BreakNurseName eq '${esc(name)}'`),
-      spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and IsBNBreak eq 1`)
+      spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and IsBNBreak eq 1`),
+      // Build 244 (F4): this BN's staff bookings, for pinning the bulk seeds.
+      spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}'`).catch(() => [])
     ]);
+    const _pinsADA = {};
+    _pinsRawADA.forEach(b => {
+      if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+      const k = `${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`;
+      (_pinsADA[k] = _pinsADA[k] || []).push(b);
+    });
 
     const upcoming = schedRaw.filter(s => s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType));
     if(!upcoming.length){
@@ -5789,7 +5797,10 @@ async function applyDefaultToAll(){
       const expandedUnits = filterClosedUnits(expandCPair(units, sched.ShiftDate, sched.ShiftType), sched.ShiftDate, sched.ShiftType);
       const bnBreakSet = new Set(def);
       const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
-      const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
+      const rotation = constrainedRotation(expandedUnits, bnBreakSet, sched.ShiftType, dateSeed, {
+        startTime: sched.StartTime, hours: sched.Hours,
+        bookings: _pinsADA[`${sched.ShiftDate.slice(0,10)}|${sched.ShiftType}`] || []
+      }); // Build 244: window (F9) + pins (F4)
       // Fill rotation includes break slots — used only to attribute a sensible
       // Unit on BN-break records so they interleave with rotation pattern.
       // Without this every break slot gets expandedUnits[0] (since `rotation`
@@ -5806,6 +5817,17 @@ async function applyDefaultToAll(){
       }
 
       const key = `bnRotation_${name}_${sched.ShiftDate}_${sched.ShiftType}`;
+      // Build 244: PAST preservation — same 136-bypass class as bulkSave
+      // (batched setMany skips saveRotation). Keeps live pins, no cache
+      // heuristic, for the reasons documented at bulkSave.
+      try {
+        const _exADA = JSON.parse(localStorage.getItem(key) || '{}');
+        const _nowADA = Date.now();
+        Object.entries(_exADA).forEach(([slot, unit]) => {
+          if(!unit) return;
+          try { if(slotDateTime(sched.ShiftDate.slice(0,10), slot, sched.ShiftType).getTime() < _nowADA) rotation[slot] = unit; } catch{}
+        });
+      } catch{}
       // LS is written below by syncedLS.setMany. We keep this push so the
       // batch flushes in one round trip (vs N parallel set calls).
       rotationEntries.push({ key, value: rotation });
@@ -5918,7 +5940,17 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     const bnBreakSet = new Set(defaultSlots);
     const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
     const allSlots = getAvailableSlots(shift);
-    const rotation = calculateBlockRotation(expandedUnits, bnBreakSet, allSlots, dateSeed, shift);
+    // Build 244 (closes 226's documented residual): the SEED rotation goes
+    // through the constraint-aware deal — window from the row, pins from
+    // this BN's live staff bookings. saveRotation below still guards past.
+    let _seedRow = {}, _seedPins = [];
+    try {
+      const _rs = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+      _seedRow = _rs.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
+      _seedPins = await spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+    } catch(e){ /* degrade to unconstrained (pre-244) */ }
+    const rotation = constrainedRotation(expandedUnits, bnBreakSet, shift, dateSeed,
+      { startTime: _seedRow.StartTime, hours: _seedRow.Hours, bookings: _seedPins });
     // Build 135: await so saveAssign's overlay-write that follows can
     // guarantee its BNState write lands after this one (else polling
     // refreshMany would clobber the overlay).
@@ -9046,14 +9078,26 @@ async function bulkSaveUnitsAndRotations(updates){
 
   // Pre-fetch bookings + warm BN defaults in parallel.
   const pairs = updates.map(u => ({ name: u.bn, shift: u.shift }));
-  const [allBookings] = await Promise.all([
-    spGet(LISTS.bookings, `SlotDate ge '${minDate}' and SlotDate le '${maxDate}T23' and IsBNBreak eq 1`).catch(() => []),
+  // Build 244 (F4/F9): fetch ALL bookings (breaks AND staff pins) plus the
+  // schedule rows (window source) in the same parallel round trip.
+  const [allBookings, allSchedRows] = await Promise.all([
+    spGet(LISTS.bookings, `SlotDate ge '${minDate}' and SlotDate le '${maxDate}T23'`).catch(() => []),
+    spGet(LISTS.schedule, `ShiftDate ge '${minDate}' and ShiftDate le '${maxDate}T23'`).catch(() => []),
     warmAllBNDefaults(pairs).catch(() => {})
   ]);
+  const _schedByIdBS = {};
+  allSchedRows.forEach(s => { _schedByIdBS[String(s.Id)] = s; });
+  const _pinsByKeyBS = {};
+  allBookings.forEach(b => {
+    if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+    const k = `${b.CreatedBy}|${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`;
+    (_pinsByKeyBS[k] = _pinsByKeyBS[k] || []).push(b);
+  });
 
   // Partition bookings by BN+date+shift for fast per-BN lookup
   const bookingsByKey = {};
   allBookings.forEach(b => {
+    if(!isBNBreak(b)) return; // Build 244: the fetch is no longer pre-filtered
     const key = `${b.NurseName}|${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`;
     if(!bookingsByKey[key]) bookingsByKey[key] = [];
     bookingsByKey[key].push(b);
@@ -9093,7 +9137,11 @@ async function bulkSaveUnitsAndRotations(updates){
       }
 
       const dateSeed = u.date.split('-').reduce((a,b) => a + parseInt(b), 0) + u.bn.charCodeAt(0);
-      const rotation = calculateBlockRotation(filteredUnits, bnBreakSet, getAvailableSlots(u.shift), dateSeed, u.shift);
+      const _rowBS = _schedByIdBS[String(u.schedId)] || {};
+      const rotation = constrainedRotation(filteredUnits, bnBreakSet, u.shift, dateSeed, {
+        startTime: _rowBS.StartTime, hours: _rowBS.Hours,
+        bookings: _pinsByKeyBS[`${u.bn}|${u.date}|${u.shift}`] || []
+      }); // Build 244: window (F9) + pins (F4)
 
       // Normalize slot keys to 4 digits (saveRotation's contract)
       const normalized = {};
@@ -9102,6 +9150,21 @@ async function bulkSaveUnitsAndRotations(updates){
       });
 
       const rotKey = `bnRotation_${u.bn}_${u.date}_${u.shift}`;
+      // Build 244: PAST preservation — this path bypasses saveRotation
+      // (batched setMany), so Build 136's elapsed-slot guarantee is
+      // replicated inline, as recalcAll does. Pre-existing bug: a mid-shift
+      // reopen was rewriting history. Deliberately NO 142 keep-override
+      // cache heuristic here: substitute-revert removes a unit from
+      // coverage, and the heuristic would "preserve" the old substitute's
+      // slots and undo the revert. Live pins (above) supersede it.
+      try {
+        const _existingBS = JSON.parse(localStorage.getItem(rotKey) || '{}');
+        const _nowMsBS = Date.now();
+        Object.entries(_existingBS).forEach(([slot, unit]) => {
+          if(!unit) return;
+          try { if(slotDateTime(u.date, slot, u.shift).getTime() < _nowMsBS) normalized[slot] = unit; } catch{}
+        });
+      } catch{}
       localStorage.setItem(rotKey, JSON.stringify(normalized));
       rotationEntries.push({ key: rotKey, value: normalized });
     } catch(err){
