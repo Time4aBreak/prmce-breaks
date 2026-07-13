@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-242';
+const APP_VERSION = '2026-07-13-243';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6231,7 +6231,11 @@ function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
   const expandedUnits = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
   if(!expandedUnits.length) return null;
   const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + (bnName||'').charCodeAt(0);
-  return calculateBlockRotation(expandedUnits, bnBreakSet || new Set(), getAvailableSlots(shift), dateSeed, shift);
+  // Build 243 (Finding 9, display arm): the fallback deal honors the row's
+  // window — without this, a windowed BN whose saved rotation is missing
+  // would render (and OFFER, on Sign Up) full-shift coverage.
+  return constrainedRotation(expandedUnits, bnBreakSet || new Set(), shift, dateSeed,
+    { startTime: schedRow.StartTime, hours: schedRow.Hours });
 }
 
 // Warm rotation cache from backend for a BN — call once at shift start.
@@ -16508,6 +16512,15 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         ? sortKey(_customStart, shift)
         : (shift === 'Day' ? 480 : 1200);
 
+      // Build 243 (Finding 9): the partial window from the main row — same
+      // family as the pre-start dim, but with an END bound too. Null when
+      // the row is full-shift ('' sentinel).
+      const _winRow = scheds.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
+      const _winHrs = Number(_winRow.Hours || 0);
+      const _hasWindow = !!(_winRow.StartTime && _winHrs > 0 && _winHrs < 12);
+      const _winStartK = _hasWindow ? sortKey(String(_winRow.StartTime).padStart(4, '0'), shift) : null;
+      const _winEndK = _hasWindow ? _winStartK + Math.round(_winHrs * 60) : null;
+
       // Display-only fallback rotation, computed without bnBreakSet
       // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
       // their own break mid-shift, the saved rotation still excludes that
@@ -16522,7 +16535,12 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       if(_rawUnitsForFallback.length){
         const _expandedUnits = filterClosedUnits(expandCPair(_rawUnitsForFallback, dt, shift), dt, shift);
         const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
-        _fallbackRotation = calculateBlockRotation(_expandedUnits, new Set(), getAvailableSlots(shift), _dateSeed, shift);
+        // Build 243 (Finding 9, display arm): the gap-filler honors the row's
+        // window — this was the "entire day of 5A" caught live on the S1
+        // 4-hour fixture (2026-07-13). Off-window slots now render without a
+        // unit chip and take the window dim below.
+        _fallbackRotation = constrainedRotation(_expandedUnits, new Set(), shift, _dateSeed,
+          { startTime: _winRow.StartTime, hours: _winRow.Hours });
       }
 
       // Hard-blocked slots for this shift on this specific date.
@@ -16740,11 +16758,15 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         // cool grey background as hard-blocked ("system constraints, take note")
         // and a "🕐 Before start time" label. Skipped when whole list is dimmed
         // for unavailable BN.
-        const _isPreShift = !_isUnavailable && sortKey(slot, shift) < _startSortKey;
-        const _preShiftStyle = _isPreShift ? 'background:#eef0f2;' : '';
-        const _centerHtmlFinal = _isPreShift
-          ? `<span style="color:var(--muted);font-size:.82rem">🕐 Before start time<span style="margin-left:8px">${unitLabel}</span></span>`
-          : centerHtml;
+        const _slotK = sortKey(slot, shift);
+        const _isOffWindow = !_isUnavailable && _hasWindow && (_slotK < _winStartK || _slotK >= _winEndK);
+        const _isPreShift = !_isUnavailable && !_isOffWindow && _slotK < _startSortKey;
+        const _preShiftStyle = (_isPreShift || _isOffWindow) ? 'background:#eef0f2;' : '';
+        const _centerHtmlFinal = _isOffWindow
+          ? `<span style="color:var(--muted);font-size:.82rem">🕐 Outside scheduled hours</span>`
+          : _isPreShift
+            ? `<span style="color:var(--muted);font-size:.82rem">🕐 Before start time<span style="margin-left:8px">${unitLabel}</span></span>`
+            : centerHtml;
 
         return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
           <div class="slot-time">${fmt12(slot)}</div>
