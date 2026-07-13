@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-238';
+const APP_VERSION = '2026-07-12-239';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7247,7 +7247,7 @@ async function loadSlots(silent=false){
     }
 
     // Build slot→BN map from rotations for per-slot BN display
-    const _getBNFirst = n => { if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n]; const m=(n||'').match(/,\s*(\S+)/); return m?m[1]:n.split(' ')[0]; };
+    const _getBNFirst = bnDisplayName; // Build 239: single source of truth
     const _slotBNMap = {};
     for(const sched of covering){
       const rot = loadRotationWithFallback(sched.BreakNurseName, dt, shift, sched);
@@ -11930,6 +11930,15 @@ const PREFERRED_NAMES_DEFAULTS = {
   'Yago, Leonel':         'Leo',
 };
 let PREFERRED_NAMES = {...PREFERRED_NAMES_DEFAULTS};
+// Build 239 (Tomas): single source of truth for a BN's DISPLAY name —
+// preferred name if mapped, else the first-name token from "Last, First".
+// Storage/identity everywhere stays the full "Last, First" string; only
+// what the eye sees changes. Full name remains on hover + in diagnostics.
+function bnDisplayName(n){
+  if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n];
+  const m = (n || '').match(/,\s*(\S+)/);
+  return m ? m[1] : String(n || '').split(' ')[0];
+}
 try {
   const saved = syncedLS.get('bnPreferredNames');
   if(saved && typeof saved === 'object') Object.assign(PREFERRED_NAMES, saved);
@@ -12886,12 +12895,12 @@ function _renderImportCountChips(){
   const byName = {};
   src.forEach((e, i) => {
     if(!e || e.isDiscarded) return;
-    const last = String(e.name || '?').split(',')[0].trim() || '?';
-    if(!byName[last]) byName[last] = { n: 0, firstIdx: i, unresolved: 0 };
-    byName[last].n++;
-    if(e.isFlagged && (importUnitSel[i] || []).length === 0) byName[last].unresolved++;
+    const full = String(e.name || '?');
+    if(!byName[full]) byName[full] = { n: 0, firstIdx: i, unresolved: 0, disp: bnDisplayName(full) };
+    byName[full].n++;
+    if(e.isFlagged && (importUnitSel[i] || []).length === 0) byName[full].unresolved++;
   });
-  const names = Object.keys(byName).sort();
+  const names = Object.keys(byName).sort((a,b) => byName[a].disp.localeCompare(byName[b].disp));
   if(!names.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
   let expected = null;
   try { expected = _impExpectedGet(); } catch(_e){ /* field absent */ }
@@ -12907,7 +12916,7 @@ function _renderImportCountChips(){
     names.map(n => {
       const g = byName[n];
       const flagged = g.unresolved > 0;
-      return chip(`${flagged ? '🔍 ' : ''}${escHTML(n)} ${g.n}`,
+      return chip(`${flagged ? '🔍 ' : ''}${escHTML(g.disp)} ${g.n}`,
         flagged ? '#fff3e0' : 'var(--bg)',
         flagged ? '#fb8c00' : 'var(--border)',
         flagged ? '#bf360c' : 'var(--muted)',
@@ -13078,7 +13087,7 @@ async function restoreLastImport(){
     return `
     <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-        <span style="font-weight:600;font-size:.9rem">${e.name}</span>
+        <span style="font-weight:600;font-size:.9rem" title="${escHTML(e.name)}">${escHTML(bnDisplayName(e.name))}</span>
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
@@ -13176,7 +13185,7 @@ function _buildImportRowsHTML(batch){
     return `
     <div data-row="${i}" data-impdate="${e.date}" data-impshift="${e.shift}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${borderColor}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-        <span style="font-weight:600;font-size:.9rem">${e.name}</span>
+        <span style="font-weight:600;font-size:.9rem" title="${escHTML(e.name)}">${escHTML(bnDisplayName(e.name))}</span>
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
         ${flaggedBadge}
         ${partialBadge}
