@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-247';
+const APP_VERSION = '2026-07-13-248';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8920,8 +8920,18 @@ async function editAssign(id){
     // Check for confirmed breaks
     const units = [];
     try { JSON.parse(s.Units||'[]').forEach(u => units.push(u)); } catch{}
-    const bookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`);
+    // Build 248 (edit-open diet): the bookings read and the schedule read are
+    // both keyed off the row and independent of each other — fire in parallel
+    // (was: three sequential ~2s round trips). The schedule read is widened
+    // to the WHOLE shift: the BN's own rows (consolidation) fall out of it
+    // client-side, and the full set feeds populateNurseDropdown's preload —
+    // which used to be two more fetches of this exact same data.
+    const [bookings, shiftScheds] = await Promise.all([
+      spGet(LISTS.bookings,
+        `SlotDate ge '${s.ShiftDate}' and SlotDate le '${s.ShiftDate}T23' and ShiftType eq '${s.ShiftType}'`),
+      spGet(LISTS.schedule,
+        `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}'`)
+    ]);
     const confirmed = bookings.filter(b =>
       isStaffBooking(b) && units.includes(b.Unit) && isConfirmed(b)
     );
@@ -8931,19 +8941,23 @@ async function editAssign(id){
     }
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
-    const allBNScheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${s.ShiftDate.slice(0,10)}' and ShiftDate le '${s.ShiftDate.slice(0,10)}T23' and ShiftType eq '${s.ShiftType}' and BreakNurseName eq '${esc(s.BreakNurseName)}'`);
+    const allBNScheds = shiftScheds.filter(r => r.BreakNurseName === s.BreakNurseName);
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
     }))];
 
+    // Build 248: stash BEFORE the field-set — setAShift fires a trigger call
+    // to populateNurseDropdown synchronously, and the stash must already be
+    // there for that first call to consume (the awaited call below then
+    // coalesces onto it). Either path: zero fetches.
+    _pndPreload = { key: `${s.ShiftDate}|${s.ShiftType}`, scheds: shiftScheds, ts: Date.now() };
     document.getElementById('aDate').value = s.ShiftDate;
     setAShift(s.ShiftType);
 
     // Populate dropdown for this date+shift (now includes manually-assigned BNs),
     // then pre-select this BN. Leave the manual text field blank — the dropdown
     // shows the preferred name, which is friendlier than the UKG full name.
-    await populateNurseDropdown();
+    await populateNurseDropdown(shiftScheds);
     const sel = document.getElementById('aNurse');
     if(sel){
       const hasOption = [...sel.options].some(o => o.value === s.BreakNurseName);
@@ -19015,7 +19029,25 @@ function saveImportedNames(){
   localStorage.setItem('bnImportedNames', JSON.stringify(importedNames)); setState('bnImportedNames', importedNames).catch(()=>{});
 }
 
-async function populateNurseDropdown(){
+// Build 248 (edit-open diet): coalescing wrapper + preload stash. The F10
+// probes showed editAssign firing pnd TWICE in the same tick (a field-set
+// trigger + its own await) — two identical ~2-3s fetches in parallel. The
+// wrapper coalesces same-key calls onto one in-flight promise (the 240
+// loadAssignments idiom), and a short-lived preload stash lets editAssign
+// feed the shift's schedule rows in so pnd costs ZERO fetches on that path.
+let _pndInFlight = null, _pndInFlightKey = null;
+let _pndPreload = null; // {key, scheds, ts}
+async function populateNurseDropdown(preloadedScheds){
+  const date  = (document.getElementById('aDate') || {}).value || '';
+  const shift = document.getElementById('aDay') && document.getElementById('aDay').classList.contains('active') ? 'Day' : 'Noc';
+  const key = `${date}|${shift}`;
+  if(preloadedScheds) _pndPreload = { key, scheds: preloadedScheds, ts: Date.now() };
+  if(_pndInFlight && _pndInFlightKey === key) return _pndInFlight;
+  _pndInFlightKey = key;
+  _pndInFlight = _populateNurseDropdownCore().finally(() => { _pndInFlight = null; _pndInFlightKey = null; });
+  return _pndInFlight;
+}
+async function _populateNurseDropdownCore(){
   const sel = document.getElementById('aNurse');
   if (!sel) return;
   const prev = sel.value;
@@ -19040,8 +19072,16 @@ async function populateNurseDropdown(){
   let fromScheds = [];
   if (date) {
     try {
-      const scheds = await spGet(LISTS.schedule,
-        `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+      // Build 248: consume the preload stash when fresh and key-matched —
+      // editAssign already holds this exact shift's rows; zero fetch here.
+      let scheds;
+      const _pl = _pndPreload;
+      if(_pl && _pl.key === `${date}|${shift}` && Date.now() - _pl.ts < 10000){
+        scheds = _pl.scheds; _pndPreload = null;
+      } else {
+        scheds = await spGet(LISTS.schedule,
+          `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+      }
       fromScheds = [...new Set(scheds
         .filter(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1')
         .map(s => s.BreakNurseName)
