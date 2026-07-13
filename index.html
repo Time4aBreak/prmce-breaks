@@ -1396,6 +1396,9 @@ async function cancelScheduledUnitChange(unit, effectiveAt){
 // ── Core resolver: unit status at a specific moment ───
 // Walk the unit's schedule timeline, find most recent entry ≤ datetime.
 // Fallback to that unit's default. Mirrors effective3CStatusAt exactly.
+// AFFIRMED BY DESIGN (Tomas, 05:10 Jul 13): persist-forward last-entry-wins
+// is intentional — a close has no end time because nobody knows the duration;
+// the unit stays closed until an explicit reopen entry.
 function effectiveUnitStatusAt(unit, datetime){
   // 3C delegates to its existing path so closures via the legacy admin UI
   // continue working until cleanup. Other units use the new generic path.
@@ -1811,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-246';
+const APP_VERSION = '2026-07-13-247';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5286,6 +5289,7 @@ function showSubTab(name, btn){
       // tab reflects cross-device changes (Mark Unavailable, manual
       // adds, Remove cascades) within ~10s without manual refresh.
       _scheduleLastFingerprint = null;
+      _lastSchedRev = null; // Build 247: force the next poll to fetch, not skip
       startSchedulePolling();
     }
   }
@@ -6453,6 +6457,11 @@ async function recalcFairnessForShift(date, shift, options={}){
 //
 // Returns: { shifts:[{date,shift,bns,changed}], totalChanged, updateCount,
 //            committed, save, _updates }
+// AFFIRMED BY DESIGN (Tomas, 05:10 Jul 13 — do not "fix" without a new
+// ruling): the FULL-HORIZON global re-deal at every unit close AND reopen is
+// intentional. Closure duration is unknowable at close time, so fairness
+// re-folds across all future shifts at each transition; assignments always
+// reflect current unit reality and self-correct at the next transition.
 async function redealFutureShifts(fromTime, opts = {}){
   fromTime = +fromTime || Date.now();
   clearCoverageCountsCache(); // fresh baseline; the overlay layers deltas on top
@@ -15294,6 +15303,10 @@ let _coverageLastFingerprint = null;
 // assignments, Remove cascades) without requiring a manual refresh.
 let _schedulePollTmr = null;
 let _scheduleLastFingerprint = null;
+// Build 247 (Finding 10, client half): last-seen backend revision for
+// BNSchedule (riders deploy 02:50 Jul 13) + observable poll stats.
+let _lastSchedRev = null;
+window._schedPollStats = { skipped: 0, fetched: 0 };
 let _schedulePollHoldUntil = 0; // Build 240 (Finding 10): editAssign/saveAssign quiet window
 
 function startProdLogPolling(){
@@ -16245,6 +16258,21 @@ async function silentRefreshSchedule(){
   const activeSub = document.querySelector('.subtab.active');
   if(!activeSub || activeSub.id !== 'subtab-admin') return;
   try {
+    // Build 247 (Finding 10, client half): ask the backend's revision counter
+    // before fetching. Unchanged revision = skip the full-table read; the 10s
+    // poll costs bytes. FAIL-OPEN: any error or missing counter falls through
+    // to the fetch (pre-247 behavior) — this gate can only save work, never
+    // block updates. The fingerprint diff below stays: a revision can bump on
+    // writes that don't change this view; layered gates keep renders exact.
+    let _revNow = null;
+    try {
+      const _r = await gasCallPost({ action: 'getRevision' });
+      _revNow = _r && _r.BNSchedule ? String(_r.BNSchedule) : null;
+      if(_revNow && _lastSchedRev && _revNow === _lastSchedRev){
+        window._schedPollStats.skipped++;
+        return;
+      }
+    } catch(e){ /* fail-open */ }
     let filter;
     if(_viewRange !== 'all'){
       const from = document.getElementById('viewDateFrom').value;
@@ -16257,6 +16285,10 @@ async function silentRefreshSchedule(){
       filter = `ShiftDate ge '${activeShiftFloor()}'`;
     }
     const scheds = await spGet(LISTS.schedule, filter);
+    // Build 247: the revision marker advances ONLY here, after a successful
+    // fetch — a failed fetch can't strand a stale view behind a current marker.
+    if(_revNow) _lastSchedRev = _revNow;
+    window._schedPollStats.fetched++;
     // Fingerprint covers the fields that affect display: BN identity,
     // date/shift, units, status, ext. Order-independent via sort.
     const fp = scheds.map(s =>
