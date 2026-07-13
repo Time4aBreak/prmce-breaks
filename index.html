@@ -1809,7 +1809,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-12-239';
+const APP_VERSION = '2026-07-12-240';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8807,6 +8807,7 @@ async function manageSlotAction(action){
 // EDIT ASSIGNMENT
 // ═══════════════════════════════════════════════════════
 async function editAssign(id){
+  _schedulePollHoldUntil = Date.now() + 90000; // Build 240: quiet the poller while editing
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
     if(!scheds.length){ toast('Assignment not found', true); return; }
@@ -11040,6 +11041,7 @@ async function saveAssign(){
   // D1/D2 duplicate rows. try/finally so every early return clears it.
   if(_saveAssignInFlight){ toast('Still saving — one moment.'); return; }
   _saveAssignInFlight = true;
+  _schedulePollHoldUntil = Date.now() + 60000; // Build 240: cover the write window
   try {
   // Build 228 (Tomas 2026-07-09): the overlay IS the global mutex — raise it
   // at entry, not mid-function. The 227 flag stops a second SAVE, but during
@@ -11284,13 +11286,14 @@ async function saveAssign(){
     } catch(e){ toast('Rotation error: ' + e.message, true); }
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
+    _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
     loadAssignments();
     notifyProdLogChanged(nurse);
     // Build 143: notify target BNs of transfers so their Prod Log + My Shift
     // refresh and the moved bookings appear under their view.
     transfers.forEach(t => { if(t.targetBN && t.targetBN !== nurse) notifyProdLogChanged(t.targetBN); });
   }catch(e){ hideBusy(); toast(e.message,true); loadAssignments(); notifyProdLogChanged(nurse); }
-  } finally { _saveAssignInFlight = false; hideBusy(); }
+  } finally { _saveAssignInFlight = false; _schedulePollHoldUntil = 0; hideBusy(); }
 }
 
 let _viewRange = 'all';
@@ -11446,7 +11449,26 @@ function toggleWeekExpansion(weekStart){
   }
 }
 
-async function loadAssignments(){
+// Build 240 (Finding 10): loadAssignments coalescing + one-shot save pulse.
+let _loadAssignInFlight = false;
+let _loadAssignQueued = false;
+let _pulseAssignKey = null; // {name,date,shift,until} — set by saveAssign, consumed by the next successful render
+
+async function loadAssignments(preloadedScheds){
+  // Build 240 (Finding 10): coalesce — one load in flight; extra calls
+  // collapse into a single trailing rerun (fresh fetch, never a stale
+  // preload), so poller/save/tap collisions cost one render, not a stack.
+  if(_loadAssignInFlight){ _loadAssignQueued = true; return; }
+  _loadAssignInFlight = true;
+  try {
+    await _loadAssignmentsCore(preloadedScheds);
+  } finally {
+    _loadAssignInFlight = false;
+    if(_loadAssignQueued){ _loadAssignQueued = false; loadAssignments(); }
+  }
+}
+
+async function _loadAssignmentsCore(preloadedScheds){
   clearSchedCache();
   clearCoverageCountsCache();
   const el = document.getElementById('assignList');
@@ -11471,7 +11493,9 @@ async function loadAssignments(){
   }
 
   try{
-    let scheds = await spGet(LISTS.schedule, filter);
+    // Build 240 (Finding 10): the poller passes the rows it already fetched
+    // (its filter mirrors ours by documented design) — kills the double-fetch.
+    let scheds = preloadedScheds || await spGet(LISTS.schedule, filter);
 
     // BN multi-select filter (client-side). Empty set = show all.
     // Server-side OData would need OR-chains; small datasets make this trivial.
@@ -11513,7 +11537,7 @@ async function loadAssignments(){
             ? `<span style="font-size:.7rem;font-weight:700;color:var(--red);background:var(--red-lt);padding:2px 6px;border-radius:4px;margin-left:6px">UNAVAILABLE</span>`
             : (s.IsSupplemental ? `<span style="font-size:.7rem;font-weight:700;color:var(--teal-dk);background:var(--teal-lt);padding:2px 6px;border-radius:4px;margin-left:6px">SUPPLEMENTAL</span>` : '');
           const _displayName = firstName(s.BreakNurseName);
-          return `<div class="sched-card${isInactive?' sched-inactive':''}">
+          return `<div class="sched-card${isInactive?' sched-inactive':''}" data-sname="${escHTML(s.BreakNurseName)}" data-sdate="${s.ShiftDate.slice(0,10)}" data-sshift="${s.ShiftType}">
             <div class="sched-card-hd">
               <span><strong>${_displayName}</strong>${statusBadge}&nbsp;
                 <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
@@ -11598,6 +11622,20 @@ async function loadAssignments(){
           <div class="week-content" style="${isExpanded ? '' : 'display:none'}">${contentHTML}</div>
         </div>`;
       }).join('');
+    }
+    // Build 240 (Finding 10): one-shot pulse on the just-saved card so a
+    // successful save is VISIBLE (the "nothing happens" perception fix).
+    if(_pulseAssignKey && Date.now() < _pulseAssignKey.until){
+      const k = _pulseAssignKey; _pulseAssignKey = null;
+      const esc = (window.CSS && CSS.escape) ? CSS.escape : (x => x);
+      const card = document.querySelector(`.sched-card[data-sname="${esc(k.name)}"][data-sdate="${k.date}"][data-sshift="${k.shift}"]`);
+      if(card){
+        card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        const prev = card.style.boxShadow;
+        card.style.transition = 'box-shadow .25s';
+        card.style.boxShadow = '0 0 0 3px var(--teal)';
+        setTimeout(() => { card.style.boxShadow = prev; }, 1400);
+      }
     }
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(e.message)}<br><br>
@@ -15090,6 +15128,7 @@ let _coverageLastFingerprint = null;
 // assignments, Remove cascades) without requiring a manual refresh.
 let _schedulePollTmr = null;
 let _scheduleLastFingerprint = null;
+let _schedulePollHoldUntil = 0; // Build 240 (Finding 10): editAssign/saveAssign quiet window
 
 function startProdLogPolling(){
   stopProdLogPolling();
@@ -16029,6 +16068,12 @@ async function silentRefreshCoverage(){
 // so the unfiltered fetch still detects changes the user cares about.
 async function silentRefreshSchedule(){
   if(document.hidden) return;
+  // Build 240 (Finding 10): hold window — editAssign/saveAssign suppress the
+  // poller so it stops photographing mid-save intermediate states (the
+  // delete→post window) and stops contending with the interactive flow.
+  // Timestamp-based: self-heals if an edit is abandoned (no cancel hooks).
+  // saveAssign's tail refresh restores truth at the end.
+  if(Date.now() < _schedulePollHoldUntil) return;
   const el = document.getElementById('assignList');
   if(!el) return;
   const activeSub = document.querySelector('.subtab.active');
@@ -16053,7 +16098,7 @@ async function silentRefreshSchedule(){
     ).sort().join('|');
     if(fp !== _scheduleLastFingerprint){
       _scheduleLastFingerprint = fp;
-      loadAssignments();
+      loadAssignments(scheds); // Build 240: reuse this fetch — no double-read
     }
   } catch(e){
     console.warn('[schedule poll] refresh failed:', e.message);
