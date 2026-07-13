@@ -1811,7 +1811,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-245';
+const APP_VERSION = '2026-07-13-246';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4503,6 +4503,26 @@ async function promptReopenCoverage(unit, reopenAt, subContext){
       if(sched.length){
         let units = []; try { units = JSON.parse(sched[0].Units || '[]'); } catch(e){}
         if(!units.includes(unit)){
+          // Build 246 (product decision, 2026-07-13): when the picked BN is
+          // the one holding a substitute for THIS unit, offer the choice the
+          // context line implies — switch back (drop the substitute) or keep
+          // both. Everyone else keeps the one-tap add. Dismissing the confirm
+          // = "cover both" (the conservative pre-246 behavior: a reopen never
+          // silently reduces coverage). Busy is hidden around the confirm
+          // (Build-108 lesson) and re-raised after — the confirm's own
+          // backdrop blocks taps, preserving the 230 no-leak invariant.
+          const _subEntry = (subHere || []).find(e => e.bn === pick.bnName && units.includes(e.substitute));
+          let _dropSub = false;
+          if(_subEntry){
+            hideBusy();
+            _dropSub = await customConfirm(
+              `${firstName(pick.bnName)} is covering ${_subEntry.substitute} in ${unit}'s place. Switch back to ${unit}, or keep both?`,
+              `Switch back — drop ${_subEntry.substitute}`,
+              `Cover both`
+            );
+            showBusy(`Assigning ${unit} to ${firstName(pick.bnName)}…`);
+          }
+          if(_dropSub) units = units.filter(u => u !== _subEntry.substitute);
           units.push(unit);
           await spPatch(LISTS.schedule, pick.schedId, { Units: JSON.stringify(units) }).catch(() => {});
           recomputeBNWithPastPreserved(pick.bnName, date, shift).catch(() => {});
