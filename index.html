@@ -1740,6 +1740,8 @@ function isManualBreak(b, responsibleUnits, bnName){
 // comes back as `15` or `"15"`. Every lookup must pad to ensure "0015"
 // matches "15", "0015", 15, and 0015.
 function normSlot(s){ return String(s).padStart(4, '0'); }
+// Build 245: HHMM + minutes, wrapping midnight (companion to the existing fmt12).
+function addMinHHMM(hhmm, min){ const s = String(hhmm).padStart(4,'0'); const t = (((+s.slice(0,2)) * 60 + (+s.slice(2)) + min) % 1440 + 1440) % 1440; return String(Math.floor(t/60)).padStart(2,'0') + String(t%60).padStart(2,'0'); }
 
 // Slot constants
 // Day:  first slot 08:35, last 20:15 (ends 20:30). 36 slots × 20 min = 700 min span.
@@ -1809,7 +1811,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-244';
+const APP_VERSION = '2026-07-13-245';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11644,7 +11646,7 @@ async function _loadAssignmentsCore(preloadedScheds){
           return `<div class="sched-card${isInactive?' sched-inactive':''}" data-sname="${escHTML(s.BreakNurseName)}" data-sdate="${s.ShiftDate.slice(0,10)}" data-sshift="${s.ShiftType}">
             <div class="sched-card-hd">
               <span><strong>${_displayName}</strong>${statusBadge}&nbsp;
-                <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>
+                <span style="color:var(--muted);font-size:.85rem">${icon} ${s.ShiftType}</span>${(() => { const h = Number(s.Hours || 0); if(!(s.StartTime && h > 0 && h < 12)) return ''; const st = String(s.StartTime).padStart(4,'0'); return ` <span style="background:#fff3e0;border:1px solid #ffb74d;color:#bf360c;border-radius:99px;padding:1px 8px;font-size:.72rem;font-weight:600;white-space:nowrap">⏱ ${fmt12(st)}–${fmt12(addMinHHMM(st, Math.round(h*60)))} · ${h}h</span>`; })()}
               </span>
               <div style="display:flex;gap:4px;flex-wrap:wrap">
                 ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Loading…';editAssign(${s.Id})">✏️ Edit</button>` : ''}
@@ -13250,7 +13252,7 @@ async function restoreLastImport(){
     <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
         <span style="font-weight:600;font-size:.9rem" title="${escHTML(e.name)}">${escHTML(bnDisplayName(e.name))}</span>
-        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>${(() => { const h = Number(e.hours || 0); if(!(e.startTime && h > 0 && h < 12)) return ''; const st = String(e.startTime).replace(/[:.]/g,'').padStart(4,'0'); return `<span style="background:#fff3e0;border:1px solid #ffb74d;color:#bf360c;border-radius:99px;padding:1px 8px;font-size:.72rem;font-weight:600;white-space:nowrap">⏱ ${fmt12(st)} · ${h}h</span>`; })()}
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
           <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
@@ -13348,7 +13350,7 @@ function _buildImportRowsHTML(batch){
     <div data-row="${i}" data-impdate="${e.date}" data-impshift="${e.shift}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px${borderColor}">
       <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
         <span style="font-weight:600;font-size:.9rem" title="${escHTML(e.name)}">${escHTML(bnDisplayName(e.name))}</span>
-        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>
+        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>${(() => { const h = Number(e.hours || 0); if(!(e.startTime && h > 0 && h < 12)) return ''; const st = String(e.startTime).replace(/[:.]/g,'').padStart(4,'0'); return `<span style="background:#fff3e0;border:1px solid #ffb74d;color:#bf360c;border-radius:99px;padding:1px 8px;font-size:.72rem;font-weight:600;white-space:nowrap">⏱ ${fmt12(st)} · ${h}h</span>`; })()}
         ${flaggedBadge}
         ${partialBadge}
         <div style="display:flex;gap:5px;margin-left:auto">
@@ -16834,7 +16836,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
           <div class="slot-time">${fmt12(slot)}</div>
           <div>${_centerHtmlFinal}</div>
-          <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${actionHtml}</div>
+          <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${_isOffWindow ? '' : actionHtml}</div> <!-- Build 245: no claims outside scheduled hours -->
         </div>`;
       }).join('');
     })();
