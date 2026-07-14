@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-254';
+const APP_VERSION = '2026-07-13-255';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6298,9 +6298,12 @@ function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
 
 // Warm rotation cache from backend for a BN — call once at shift start.
 // Thin wrapper over syncedLS.warm so the key derivation lives in one place.
+// Build 255: the rotation-key derivation, one-sourced for warmRotationCache
+// and the warm-cluster batching below.
+function rotationKey(bnName, date, shift){ return `bnRotation_${bnName}_${date}_${shift}`; }
 async function warmRotationCache(bnName, date, shift){
   if(!bnName || !date || !shift) return;
-  return syncedLS.warm(`bnRotation_${bnName}_${date}_${shift}`);
+  return syncedLS.warm(rotationKey(bnName, date, shift));
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
@@ -7063,11 +7066,15 @@ async function _loadSlotsCore(silent=false){
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
 
-    // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load
-    await Promise.all([
-      ...covering.map(sched => warmRotationCache(sched.BreakNurseName, dt, shift).catch(()=>{})),
-      ...oppCovering.map(sched => warmRotationCache(sched.BreakNurseName, oppSchedDt, oppShift).catch(()=>{}))
-    ]);
+    // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load.
+    // Build 255: routed through warmMany — N individual warms queued serverside
+    // (Apps Script serializes per-script execution; P253 caught 8 concurrent
+    // warms inflating each other to 4-5s). warmMany parallels small N and
+    // bulk-fetches past 5 in ONE trip (the Build-111 machinery, unchanged).
+    await syncedLS.warmMany([
+      ...covering.map(sched => rotationKey(sched.BreakNurseName, dt, shift)),
+      ...oppCovering.map(sched => rotationKey(sched.BreakNurseName, oppSchedDt, oppShift))
+    ]).catch(()=>{});
     warm3CStatus(dt, shift).catch(()=>{});
 
     // Load block rotation for each BN covering this unit. Uses
@@ -8363,10 +8370,11 @@ async function loadOtherSlots(silent=false){
     const dayCovering = dayScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Day'));
     const nocCovering = nocScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Noc'));
     // Warm rotation caches so rotation filter has data
-    Promise.all([
-      ...dayCovering.map(s => warmRotationCache(s.BreakNurseName, dt, 'Day').catch(()=>{})),
-      ...nocCovering.map(s => warmRotationCache(s.BreakNurseName, nocDt, 'Noc').catch(()=>{}))
-    ]);
+    // Build 255: routed through warmMany (fire-and-forget preserved).
+    syncedLS.warmMany([
+      ...dayCovering.map(s => rotationKey(s.BreakNurseName, dt, 'Day')),
+      ...nocCovering.map(s => rotationKey(s.BreakNurseName, nocDt, 'Noc'))
+    ]).catch(()=>{});
     warm3CStatus(dt, 'Day').catch(()=>{});
 
     // ── Update coverage banner from loadOtherSlots data ──
@@ -10868,12 +10876,13 @@ async function _loadSummaryInner(mySeq){
     const oppBookings = reconcileBookings(oppBookingsRaw);
 
     // Warm rotation cache for all active BNs so slot-level attribution works
-    await Promise.all([
+    // Build 255: routed through warmMany — one bulk trip past 5 cold keys.
+    await syncedLS.warmMany([
       ...scheds.filter(s => s.Status !== 'inactive')
-        .map(s => warmRotationCache(s.BreakNurseName, dt, shift).catch(()=>{})),
+        .map(s => rotationKey(s.BreakNurseName, dt, shift)),
       ...oppScheds.filter(s => s.Status !== 'inactive')
-        .map(s => warmRotationCache(s.BreakNurseName, oppDt, oppShift).catch(()=>{}))
-    ]);
+        .map(s => rotationKey(s.BreakNurseName, oppDt, oppShift))
+    ]).catch(()=>{});
 
     // For Noc shift view: evening overlap bookings are stored as ShiftType='Noc'
     // so they're already in the main bookings query — no oppBookings needed for Noc
