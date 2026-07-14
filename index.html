@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-253';
+const APP_VERSION = '2026-07-13-254';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6644,7 +6644,34 @@ function renderCoverageCalendar(){
   }
 }
 
+// Build 254 (Sign Up coalescing): rapid taps used to fire concurrent full
+// loads — P253 caught three in four seconds (~10 round trips). The render
+// was already generation-guarded; the NETWORK wasn't. Same-key calls now
+// join the in-flight promise (the 240/248 idiom); a different key (a real
+// new view) proceeds and supersedes. The finally clears the slot only if
+// still its own — a superseded load must not null the newer in-flight —
+// and the orphaned chain swallows its rejection copy so failed loads
+// don't add unhandled-rejection noise (callers keep the original promise).
+let _lsInFlight = null, _lsInFlightKey = null, _lsInFlightSilent = false;
 async function loadSlots(silent=false){
+  if(!S.unit) return;
+  const key = S.shift === 'Other'
+    ? `${S.unit}|Other`
+    : `${S.unit}|${S.shift}|${staffShiftDate(S.shift)}`;
+  if(_lsInFlight && _lsInFlightKey === key){
+    if(!silent && _lsInFlightSilent){
+      // A visible load joined a silent refresh: repaint the coverage
+      // calendar once the shared load lands (silent loads skip it).
+      _lsInFlight.then(() => { try { renderCoverageCalendar(); } catch(e){} });
+    }
+    return _lsInFlight;
+  }
+  const p = _loadSlotsCore(silent);
+  _lsInFlight = p; _lsInFlightKey = key; _lsInFlightSilent = !!silent;
+  p.finally(() => { if(_lsInFlight === p){ _lsInFlight = null; _lsInFlightKey = null; } }).catch(() => {});
+  return p;
+}
+async function _loadSlotsCore(silent=false){
   if(!S.unit) return;
   // Route Other shift to its own handler
   if(S.shift === 'Other'){
