@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-250';
+const APP_VERSION = '2026-07-13-251';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -16460,6 +16460,15 @@ async function loadBNConfirm(){
     _bnConfirmCache = { scheds, allBookings, notifyState, dt, shift, nextDt };
 
     _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt);
+    // Build 251: scroll to the in-progress slot on VIEW ENTRY only — the
+    // cached re-render path above never scrolls, so silent refreshes can't
+    // fight the user's thumb mid-scroll.
+    setTimeout(() => {
+      try {
+        const _nowEl = list.querySelector('[data-nowslot="1"]');
+        if(_nowEl) _nowEl.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      } catch(e){}
+    }, 150);
   } catch(e) {
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
     wrap.style.display = 'block';
@@ -16697,6 +16706,22 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       const _hasWindow = !!(_winRow.StartTime && _winHrs > 0 && _winHrs < 12);
       const _winStartK = _hasWindow ? sortKey(String(_winRow.StartTime).padStart(4, '0'), shift) : null;
       const _winEndK = _hasWindow ? _winStartK + Math.round(_winHrs * 60) : null;
+
+      // Build 251 (UX: current-slot focus): the in-progress slot, marked on
+      // every render and auto-scrolled to on view entry only. Live-shift
+      // guard: the rendered date must be the active shift-date for this
+      // shift type AND "now" must fall inside the slot span — future and
+      // past shifts keep opening at the top.
+      let _nowSlotStr = null;
+      try {
+        if(dt === shiftDate(shift)){
+          const _nk = nowKey(shift);
+          const _sorted = allSlots.slice().sort((a,b) => sortKey(a,shift) - sortKey(b,shift));
+          if(_sorted.length && _nk >= sortKey(_sorted[0],shift) && _nk < sortKey(_sorted[_sorted.length-1],shift) + 20){
+            for(const _s of _sorted){ if(sortKey(_s,shift) <= _nk) _nowSlotStr = _s; else break; }
+          }
+        }
+      } catch(e){}
 
       // Display-only fallback rotation, computed without bnBreakSet
       // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
@@ -16945,8 +16970,10 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             ? `<span style="color:var(--muted);font-size:.82rem">🕐 Before start time<span style="margin-left:8px">${unitLabel}</span></span>`
             : centerHtml;
 
-        return `<div class="slot-row bn-confirm-row ${rowClass}" style="${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
-          <div class="slot-time">${fmt12(slot)}</div>
+        const _isNowSlot = _nowSlotStr && slot === _nowSlotStr;
+        const _nowStyle = _isNowSlot ? 'border-left:4px solid #00897b;background:#e0f2f1;' : '';
+        return `<div class="slot-row bn-confirm-row ${rowClass}"${_isNowSlot ? ' data-nowslot="1"' : ''} style="${_nowStyle}${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
+          <div class="slot-time">${fmt12(slot)}${_isNowSlot ? ' <span style="background:#00897b;color:#fff;border-radius:99px;padding:0 6px;font-size:.62rem;font-weight:700;vertical-align:middle">NOW</span>' : ''}</div>
           <div>${_centerHtmlFinal}</div>
           <div class="bn-confirm-actions" style="display:flex;align-items:center;flex-wrap:wrap;gap:4px">${_isOffWindow ? '' : actionHtml}</div> <!-- Build 245: no claims outside scheduled hours -->
         </div>`;
