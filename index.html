@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-257';
+const APP_VERSION = '2026-07-14-258';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5903,8 +5903,14 @@ async function applyDefaultToAll(){
   }
 }
 
-async function applyDefaultToShift(name, date, shift, defaultSlots, force=false, asOf=null){
-  const units = await getBNUnits(name, date, shift);
+// Build 258 (the import-train diet, completing 250's deferred 249c): optional
+// trailing preloads {scheds, bookings} — shift-wide lists a caller already
+// holds. Each internal read derives from them with the exact semantics of
+// the server query it replaces; absent → fetch as before. The measured cost
+// of NOT having this: ~28s per import (P258, Jul 14) — 4 reads per template
+// apply, serialized server-side.
+async function applyDefaultToShift(name, date, shift, defaultSlots, force=false, asOf=null, preloads=null){
+  const units = await getBNUnits(name, date, shift, preloads && preloads.scheds);
   if(!units.length) return;
 
   // Has the sign-up window already opened for this shift's date?
@@ -5920,15 +5926,17 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
   //
   // `force=true` overrides this preservation (used by explicit user-initiated
   // "Reset this shift to default" / "Reset ALL upcoming shifts" actions).
-  const existing = await spGet(LISTS.bookings,
-    `NurseName eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
+  const existing = (preloads && preloads.bookings)
+    ? preloads.bookings.filter(b => b.NurseName === name && isBNBreak(b))
+    : await spGet(LISTS.bookings,
+        `NurseName eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
 
   if(existing.length && !force){
     // Preserve existing breaks. Just recalculate rotation so unit assignments
     // match the (possibly updated) unit set, using the BN's current break
     // times as fixed exclusions. No writes to bookings.
     // Build 104: pass asOf so mid-shift recompute uses effective-now status
-    await recalculateRotation(name, date, shift, asOf).catch(()=>{});
+    await recalculateRotation(name, date, shift, asOf, preloads).catch(()=>{}); // Build 258: preloads ride through
     return;
   }
 
@@ -5980,9 +5988,15 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     // this BN's live staff bookings. saveRotation below still guards past.
     let _seedRow = {}, _seedPins = [];
     try {
-      const _rs = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+      // Build 258: both seeds derivable from preloads (name filter = the
+      // exact server query; CreatedBy filter = the exact pins query).
+      const _rs = (preloads && preloads.scheds)
+        ? preloads.scheds.filter(r => r.BreakNurseName === name)
+        : await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
       _seedRow = _rs.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
-      _seedPins = await spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+      _seedPins = (preloads && preloads.bookings)
+        ? preloads.bookings.filter(b => b.CreatedBy === name)
+        : await spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
     } catch(e){ /* degrade to unconstrained (pre-244) */ }
     const rotation = constrainedRotation(expandedUnits, bnBreakSet, shift, dateSeed,
       { startTime: _seedRow.StartTime, hours: _seedRow.Hours, bookings: _seedPins });
@@ -11488,7 +11502,7 @@ async function saveAssign(){
     // No explicit overlay code needed here.
     try {
       if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(nurse, dt, shift, bnDef);
+        await applyDefaultToShift(nurse, dt, shift, bnDef, false, null, { scheds: _postScheds, bookings: _postBookings }); // Build 258: 249c completed
       } else {
         // Build 250 (249b): feed the recalc POST-WRITE truth constructed from
         // exactly what this save just did — allScheds minus the deleted rows
@@ -14440,6 +14454,7 @@ async function acceptAllAndSave(){
     // BN|date|shift. Failure degrades to pin-less (pre-241 behavior), never
     // blocks the save.
     let _pinsByKey = {};
+    let _bkByDS = {}, _bkOk = false; // Build 258
     try {
       const _impDates = indices.map(ix => entriesToProcess[ix].date).sort();
       if(_impDates.length){
@@ -14448,6 +14463,15 @@ async function acceptAllAndSave(){
           const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
           (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
         });
+        // Build 258: raw bookings grouped by date|shift for the apply preloads.
+        // Fetch succeeded → an absent key means ZERO bookings there (a valid
+        // preload, common on fresh weeks) — _bkOk lets the call site pass []
+        // instead of null so the applies still skip their fetches.
+        _bk.forEach(b => {
+          const k = `${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
+          (_bkByDS[k] = _bkByDS[k] || []).push(b);
+        });
+        _bkOk = true;
       }
     } catch(e){ console.warn('[Save All] bookings pre-fetch for pins failed:', e.message); }
     const rotationEntries = [];
@@ -14460,7 +14484,13 @@ async function acceptAllAndSave(){
       const bnDef = getDefaultTemplate(name, shift);
       if(bnDef && bnDef.length > 0){
         // BN has a default — apply it (which also recalculates rotation incorporating breaks)
-        defaultApplyPromises.push(applyDefaultToShift(name, date, shift, bnDef).catch(()=>{}));
+        // Build 258: seeds from data already in hand — the BN's row from the
+        // records this save just wrote, bookings from the 241 range prefetch.
+        const _dsKey = `${date}|${shift}`;
+        defaultApplyPromises.push(applyDefaultToShift(name, date, shift, bnDef, false, null, {
+          scheds: records.filter(r => `${String(r.ShiftDate).slice(0,10)}|${r.ShiftType}` === _dsKey),
+          bookings: _bkOk ? (_bkByDS[_dsKey] || []) : null
+        }).catch(()=>{}));
       } else {
         // No default — calculate rotation with empty break set
         const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
@@ -15193,9 +15223,13 @@ function renderBNShiftPill(){
 // Helper: get BN's covered units for a given date/shift
 // testSharePointConnectivity removed — SharePoint hosting abandoned in favour of Google Sheets/Apps Script
 // exportSimData removed — SIM_MODE export no longer needed in production
-async function getBNUnits(bnName, dt, shift){
-  const scheds = await spGet(LISTS.schedule,
-    `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
+async function getBNUnits(bnName, dt, shift, preloadedScheds=null){
+  // Build 258: optional preload — the server query is date+shift+name only,
+  // so a name filter over a shift-wide list replicates it exactly.
+  const scheds = preloadedScheds
+    ? preloadedScheds.filter(r => r.BreakNurseName === bnName)
+    : await spGet(LISTS.schedule,
+        `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
   const units = [];
   scheds.forEach(s=>{ try{ JSON.parse(s.Units||'[]').forEach(u=>{ if(!units.includes(u)) units.push(u); }); }catch{} });
   return units;
