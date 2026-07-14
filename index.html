@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-251';
+const APP_VERSION = '2026-07-13-252';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11405,6 +11405,12 @@ async function saveAssign(){
     // because as far as it knows, they haven't covered them recently.
     // The helper dedupes by dropping any existing entry for this date first,
     // matching the pattern used by suggestAssignments and partial saves.
+    // Build 252 (save-tail prefetch): the schedule table is FINAL as of the
+    // consolidated post above (nothing later in this chain writes it —
+    // verified by scan). Fire the tail refresh's full-scope read NOW so it
+    // overlaps the WH/warm/recalc tail instead of running after it. Fail-
+    // open: on error the tail loadAssignments simply fetches itself.
+    const _tailScheds = spGet(LISTS.schedule, _assignListFilter()).catch(() => null);
     try { await _savePartialWingHistory(nurse, shift, dt, units); }
     catch(e){ console.warn('Wing history write failed (non-fatal):', e); }
     S.aUnits=[];
@@ -11482,7 +11488,7 @@ async function saveAssign(){
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
-    loadAssignments();
+    loadAssignments((await _tailScheds) || undefined); // Build 252: prefetched during the tail
     notifyProdLogChanged(nurse);
     // Build 143: notify target BNs of transfers so their Prod Log + My Shift
     // refresh and the moved bookings appear under their view.
@@ -11663,6 +11669,20 @@ async function loadAssignments(preloadedScheds){
   }
 }
 
+// Build 252: the assignment-list filter, extracted so saveAssign's tail
+// prefetch and the core read from ONE construction (no drift). Reads the
+// same viewRange state + date inputs the core always has.
+function _assignListFilter(){
+  if(_viewRange !== 'all'){
+    const from = document.getElementById('viewDateFrom').value;
+    const to   = document.getElementById('viewDateTo').value;
+    if(!from && !to){ return `ShiftDate ge '${activeShiftFloor()}'`; }
+    if(from && to){ return `ShiftDate ge '${from}' and ShiftDate le '${to}'`; }
+    if(from){ return `ShiftDate ge '${from}'`; }
+    return `ShiftDate le '${to}'`;
+  }
+  return `ShiftDate ge '${activeShiftFloor()}'`;
+}
 async function _loadAssignmentsCore(preloadedScheds){
   clearSchedCache();
   clearCoverageCountsCache();
@@ -11672,20 +11692,7 @@ async function _loadAssignmentsCore(preloadedScheds){
   // Idempotent and cheap; safest to refresh on every view load.
   renderBNFilter();
   const t = today();
-  let filter;
-
-  // Any non-'all' preset (thisweek, nextweek, range) reads from the date inputs.
-  // setViewRange populates those inputs when This Week / Next Week buttons are tapped.
-  if(_viewRange !== 'all'){
-    const from = document.getElementById('viewDateFrom').value;
-    const to   = document.getElementById('viewDateTo').value;
-    if(!from && !to){ filter = `ShiftDate ge '${activeShiftFloor()}'`; }
-    else if(from && to){ filter = `ShiftDate ge '${from}' and ShiftDate le '${to}'`; }
-    else if(from){ filter = `ShiftDate ge '${from}'`; }
-    else { filter = `ShiftDate le '${to}'`; }
-  } else {
-    filter = `ShiftDate ge '${activeShiftFloor()}'`;
-  }
+  const filter = _assignListFilter();
 
   try{
     // Build 240 (Finding 10): the poller passes the rows it already fetched
