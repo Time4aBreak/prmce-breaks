@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-13-256';
+const APP_VERSION = '2026-07-13-257';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3585,14 +3585,6 @@ if(typeof window !== 'undefined' && !window._3CTickStarted){
   // doesn't poll in lockstep; visibilitychange kicker gives an immediate
   // refresh pass when the tab returns (pairs with the document.hidden gates
   // at the top of every poller).
-  // Build 256 (boot freshness): fire the tick ONCE at boot instead of
-  // waiting out the first 15s interval. P255 measured boot painting from
-  // stale localStorage for 15-18s before the first batched refresh — update
-  // banner, roster changes, and unit flips from other devices all delayed.
-  // The tick is the existing verified machine (one batched refreshMany +
-  // targeted re-renders + the banner check); running it at T=0 makes boot
-  // cross-device-fresh in ~2s using zero new machinery.
-  _3CTick().catch(()=>{});
   setInterval(_3CTick, 15 * 1000 + Math.floor(Math.random() * 3000));
   document.addEventListener('visibilitychange', () => {
     if(document.hidden) return;
@@ -5061,6 +5053,15 @@ function init(){
   // Includes one-time migration of legacy 3C-only keys into the new
   // combined unitStatuses/unitSchedules format.
   warmUnitStatuses().catch(()=>{});
+
+  // Build 257 (boot freshness, corrected placement): fire the tick ONCE at
+  // boot so cross-device state (banner, roster, unit statuses) is fresh in
+  // ~2s instead of after the first 15s interval. Build 256 put this call
+  // inside the top-level guard block at the setInterval — which executes
+  // MID-PARSE, before thousands of definitions below it and before init's
+  // DOM setup; P255 measured the resulting failure cascade (14 boot calls,
+  // 13.3s settle). Here in init's tail, everything is defined and built.
+  _3CTick().catch(()=>{});
 
   // Set today's date on all pickers
   // Covering tab uses shiftDate so Noc after midnight shows the correct shift date
