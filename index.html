@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-266';
+const APP_VERSION = '2026-07-15-267';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6043,9 +6043,10 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     try {
       // Build 258: both seeds derivable from preloads (name filter = the
       // exact server query; CreatedBy filter = the exact pins query).
-      const _rs = (preloads && preloads.scheds)
-        ? preloads.scheds.filter(r => r.BreakNurseName === name)
-        : await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+      const _rsPre = (preloads && preloads.scheds) ? preloads.scheds.filter(r => r.BreakNurseName === name) : null;
+      const _rs = (_rsPre && _rsPre.length)
+        ? _rsPre
+        : await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`); // Build 267: filtered-empty preload → fetch
       _seedRow = _rs.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
       _seedPins = (preloads && preloads.bookings)
         ? preloads.bookings.filter(b => b.CreatedBy === name)
@@ -14557,8 +14558,12 @@ async function acceptAllAndSave(){
         // Build 258: seeds from data already in hand — the BN's row from the
         // records this save just wrote, bookings from the 241 range prefetch.
         const _dsKey = `${date}|${shift}`;
+        // Build 267: records entries are batch-upsert ENVELOPES {matchFields,
+        // data} — 258 filtered on the envelope (r.ShiftDate = undefined, key
+        // never matched, every apply got scheds:[] — a live incident). Filter
+        // and unwrap on .data; the preload must be FLAT row objects.
         defaultApplyPromises.push(applyDefaultToShift(name, date, shift, bnDef, false, null, {
-          scheds: records.filter(r => `${String(r.ShiftDate).slice(0,10)}|${r.ShiftType}` === _dsKey),
+          scheds: records.filter(r => r.data && `${String(r.data.ShiftDate).slice(0,10)}|${r.data.ShiftType}` === _dsKey).map(r => r.data),
           bookings: _bkOk ? (_bkByDS[_dsKey] || []) : null
         }).catch(()=>{}));
       } else {
@@ -15298,8 +15303,13 @@ function renderBNShiftPill(){
 async function getBNUnits(bnName, dt, shift, preloadedScheds=null){
   // Build 258: optional preload — the server query is date+shift+name only,
   // so a name filter over a shift-wide list replicates it exactly.
-  const scheds = preloadedScheds
-    ? preloadedScheds.filter(r => r.BreakNurseName === bnName)
+  // Build 267: if the name filter over a preload yields NOTHING, the caller
+  // fed a wrong or incomplete list (the BN's own row must exist by the time
+  // any preloaded path runs) — fall back to the fetch instead of trusting
+  // an empty derivation. Degrade, never detonate.
+  const _pre = preloadedScheds ? preloadedScheds.filter(r => r.BreakNurseName === bnName) : null;
+  const scheds = (_pre && _pre.length)
+    ? _pre
     : await spGet(LISTS.schedule,
         `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(bnName)}'`);
   const units = [];
