@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-265';
+const APP_VERSION = '2026-07-15-266';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17138,7 +17138,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             : centerHtml;
 
         const _isNowSlot = _nowSlotStr && slot === _nowSlotStr;
-        const _nowStyle = _isNowSlot ? 'border-left:4px solid #00897b;background:#e0f2f1;' : '';
+        const _nowStyle = _isNowSlot ? 'border-left:4px solid #00897b;' : ''; // Build 266: edge only, plain fill (Tomas's call)
         return `<div class="slot-row bn-confirm-row ${rowClass}"${_isNowSlot ? ' data-nowslot="1"' : ''} style="${_nowStyle}${_preShiftStyle}margin-bottom:6px;display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 12px;${extraStyle}">
           <div class="slot-time">${fmt12(slot)}${_isNowSlot ? ' <span style="background:#00897b;color:#fff;border-radius:99px;padding:0 6px;font-size:.62rem;font-weight:700;vertical-align:middle">NOW</span>' : ''}</div>
           <div>${_centerHtmlFinal}</div>
