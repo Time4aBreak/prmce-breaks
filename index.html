@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-14-261';
+const APP_VERSION = '2026-07-14-262';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5058,6 +5058,12 @@ function init(){
 
   // Shift detection
   S.shift = detectShift();
+  // Build 262: the 261 restore set S.unit at parse, but the if(S.unit)
+  // auto-load gate lives only on the tab-SWITCH path — a fresh page load
+  // never ran it (live-caught: unit card selected, shift/calendar/slots
+  // blank until a tap). Replicate the gate at boot, after the shift
+  // default it depends on.
+  if(S.unit){ updateNameCardVisibility(); loadSlots(); }
   renderShiftPill();
 
   // Warm user-saved preferred names
