@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-269';
+const APP_VERSION = '2026-07-15-270';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5964,7 +5964,10 @@ async function applyDefaultToAll(){
 // apply, serialized server-side.
 async function applyDefaultToShift(name, date, shift, defaultSlots, force=false, asOf=null, preloads=null){
   const units = await getBNUnits(name, date, shift, preloads && preloads.scheds);
-  if(!units.length) return;
+  if(!units.length){
+    console.warn('[applyTrace] EXIT no-units —', name, date, shift, '· preloaded:', !!(preloads && preloads.scheds));
+    return;
+  }
 
   // Has the sign-up window already opened for this shift's date?
   // For today's shift: check current time. For future dates: window hasn't opened yet.
@@ -5985,6 +5988,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
         `NurseName eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}' and IsBNBreak eq 1`);
 
   if(existing.length && !force){
+    console.info('[applyTrace] EXIT preserve-existing —', name, date, shift, '· existing:', existing.length, '· source:', (preloads && preloads.bookings) ? 'preload' : 'fetch');
     // Preserve existing breaks. Just recalculate rotation so unit assignments
     // match the (possibly updated) unit set, using the BN's current break
     // times as fixed exclusions. No writes to bookings.
@@ -6023,11 +6027,12 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
       });
     }
     if(rows.length){
-      await gasCallPost({
+      const _ir = await gasCallPost({
         action: 'batchInsert',
         sheet: LISTS.bookings,
         rows: encodeURIComponent(JSON.stringify(rows))
       });
+      console.info('[applyTrace] INSERTED (started-branch) —', name, date, shift, '· sent:', rows.length, '· server said:', JSON.stringify(_ir).slice(0, 200));
     }
     // No rotation recalc — shift has started, unit assignments are locked
   } else {
@@ -6078,11 +6083,12 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
       });
     }
     if(rows.length){
-      await gasCallPost({
+      const _ir = await gasCallPost({
         action: 'batchInsert',
         sheet: LISTS.bookings,
         rows: encodeURIComponent(JSON.stringify(rows))
       });
+      console.info('[applyTrace] INSERTED —', name, date, shift, '· sent:', rows.length, '· server said:', JSON.stringify(_ir).slice(0, 200));
     }
     // Rotation was already persisted to BNState by saveRotation (above).
     // No additional write needed — previous redundant spBatchSetState removed.
@@ -14551,8 +14557,12 @@ async function acceptAllAndSave(){
       const { name, date, shift, startTime, hours } = entriesToProcess[i];
       const rawUnits = importUnitSel[i] || [];
       const units = filterClosedUnits(expandCPair(rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]), date, shift), date, shift);
-      if(!units.length) continue;
+      if(!units.length){
+        console.warn('[applyTrace] SKIPPED (all units closed) —', name, date, shift, '· raw:', JSON.stringify(rawUnits));
+        continue;
+      }
       const bnDef = getDefaultTemplate(name, shift);
+      console.info('[applyTrace] entry —', name, date, shift, '· units:', JSON.stringify(units), '· template:', bnDef && bnDef.length ? JSON.stringify(bnDef) : 'none');
       if(bnDef && bnDef.length > 0){
         // BN has a default — apply it (which also recalculates rotation incorporating breaks)
         // Build 258: seeds from data already in hand — the BN's row from the
