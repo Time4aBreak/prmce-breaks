@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-267';
+const APP_VERSION = '2026-07-15-268';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14611,9 +14611,15 @@ async function acceptAllAndSave(){
         .rows.push({ date: d.ShiftDate, units: JSON.parse(d.Units) });
     }
     const _whFlush = [];
+    // Build 268: THE IMPORT TRAIN, finally named by P260's stack attribution
+    // (Object.refresh<acceptAllAndSave ×18, sequential ~1.6s each ≈ 28s).
+    // The refresh-before-merge convention (Build 231) is CORRECT and stays —
+    // only the transport shape changes: one batched refreshMany (identical
+    // per-key compare/store + write-lock filter, Build 215) replaces the
+    // per-key awaits inside the loop.
+    await syncedLS.refreshMany(Object.keys(_whByKey));
     for(const k of Object.keys(_whByKey)){
       const g = _whByKey[k];
-      await syncedLS.refresh(k);
       let hist = getNurseWingHistory(g.name, g.shift);
       for(const row of g.rows){
         hist = hist.filter(e => e.date !== row.date);
