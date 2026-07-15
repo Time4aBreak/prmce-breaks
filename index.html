@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-268';
+const APP_VERSION = '2026-07-15-269';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14565,7 +14565,14 @@ async function acceptAllAndSave(){
         defaultApplyPromises.push(applyDefaultToShift(name, date, shift, bnDef, false, null, {
           scheds: records.filter(r => r.data && `${String(r.data.ShiftDate).slice(0,10)}|${r.data.ShiftType}` === _dsKey).map(r => r.data),
           bookings: _bkOk ? (_bkByDS[_dsKey] || []) : null
-        }).catch(()=>{}));
+        }).catch(e => {
+          // Build 269: the silent swallow masked a real recurring failure —
+          // two consecutive imports each lost exactly ONE apply (a Mar 29
+          // boundary entry, different BN each time; no transport op, no
+          // marker — an early throw). Keep swallowing (one bad apply must
+          // not abort the batch) but NAME the corpse.
+          console.warn('[Save All] applyDefaultToShift FAILED —', name, date, shift, '·', e && e.message, e);
+        }));
       } else {
         // No default — calculate rotation with empty break set
         const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
