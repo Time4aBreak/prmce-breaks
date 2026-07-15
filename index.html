@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-264';
+const APP_VERSION = '2026-07-15-265';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5262,6 +5262,33 @@ function showSubTab(name, btn){
   }
   if(name==='bn'){
     populateBNDropdown();
+    // Build 265 (BN half of the persistence ruling): lazy identity restore
+    // at tab entry — staff users never pay for it. The ext token
+    // (bnExt_{name}_{date}_{shift}, written per shift by the login flow) is
+    // the restore gate: fresh name pref + a token for the DETECTED live
+    // shift = they already logged in THIS shift → walk the canonical door
+    // (fill the two fields, call loadBNView — exactly what a tap does).
+    // No token → pre-select the name in the dropdown only; the ext is a
+    // required per-shift input, so the picker flow proceeds as normal.
+    // Expiry is implicit and exact: a new shift means a new token key.
+    if(!BNS.name){
+      const _pn = _devicePref('bnNamePref', 50400000);
+      const _sel = document.getElementById('bnNameSelect');
+      if(_pn && _sel && Array.prototype.some.call(_sel.options, o => o.value === _pn)){
+        _sel.value = _pn;
+        (async () => {
+          try {
+            const live = await detectBNShiftForName(_pn);
+            const _tok = live ? localStorage.getItem(`bnExt_${_pn}_${live.date}_${live.shift}`) : null;
+            if(live && _tok){
+              const _ei = document.getElementById('bnExtInput');
+              if(_ei) _ei.value = _tok;
+              loadBNView();
+            }
+          } catch(e){}
+        })();
+      }
+    }
     // Start polling if a BN is already signed in; otherwise wait until they
     // sign in (loadBNView also calls startProdLogPolling after successful load).
     if(BNS && BNS.name){
@@ -14976,6 +15003,7 @@ async function loadBNView(){
 
   BNS.name  = name;
   BNS.ext   = resolvedExt;
+  _saveDevicePref('bnNamePref', name); // Build 265: identity committed
   BNS.shift = resolvedShift;
   BNS.date  = resolvedDate;
   // Build 102 diagnostic: trace where BNS.date is set, to chase the
@@ -15198,6 +15226,7 @@ async function saveExtForLiveShift(name, ext, live){
   BNS.name = name;
   BNS.date = live.date;
   BNS.shift = live.shift;
+  _saveDevicePref('bnNamePref', name); // Build 265: identity committed
   BNS.ext = ext;
   localStorage.setItem(`bnExt_${name}_${live.date}_${live.shift}`, ext);
 
