@@ -1814,7 +1814,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-14-258';
+const APP_VERSION = '2026-07-14-260';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13159,7 +13159,19 @@ async function runImport(){
 }
 
 // Store extracted entries so shift can be toggled after render
-let importEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+// Build 260: ONE guarded accessor for bnImportedEntries. A corrupt or
+// double-encoded value (caught live 07-14: a console script pre-stringified
+// the value into syncedLS.set, which stringifies internally) crashed BOOT
+// via this module-level init and tab navigation via the summary renderer.
+// Every reader routes through here; non-array and parse-error both land []
+// — corrupt state degrades, never detonates.
+function getImportedEntries(){
+  try {
+    const r = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+    return Array.isArray(r) ? r : [];
+  } catch(e){ return []; }
+}
+let importEntries = getImportedEntries();
 // Async refresh from backend on load
 (async () => {
   try {
@@ -13634,7 +13646,7 @@ async function renderImportRows(entries, forceReplace = false){
   // New batch incoming → re-enable Re-suggest / Clear / Save All. They may
   // have been disabled by a previous Save All success.
   setImportActionsActive(true);
-  const existingEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+  const existingEntries = getImportedEntries(); // Build 260: guarded accessor
 
   // Find overlapping dates between new import and existing entries
   const newDates = [...new Set(entries.map(e => e.date))];
@@ -13664,7 +13676,7 @@ async function renderImportRows(entries, forceReplace = false){
   }
 
   // Re-read after possible replacement
-  const baseEntries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+  const baseEntries = getImportedEntries(); // Build 260: guarded accessor
 
   // Deduplicate: key = name|date|shift — no merging, new always wins for replaced dates
   const existingKeys = new Set(baseEntries.map(e => `${e.name}|${e.date}|${e.shift}`));
@@ -13921,7 +13933,12 @@ function suggestedSlotCount(units, date, shift){
 function renderImportedEntriesSummary(){
   const el = document.getElementById('importedEntriesSummary');
   if (!el) return;
-  const entries = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
+  // Build 259: intake guard — a corrupt or double-encoded bnImportedEntries
+  // (caught live 07-14: a console script double-stringified the key and tab
+  // navigation crashed on entries.forEach) must degrade to "no entries",
+  // never take down showTab. Parse errors and non-array shapes both land
+  // in the safe branch.
+  const entries = getImportedEntries(); // Build 260: shared guarded accessor
   if (!entries.length){
     el.innerHTML = 'No schedule entries imported yet.';
     return;
