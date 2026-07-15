@@ -1778,9 +1778,24 @@ const MAX_SLOTS  = 3;
 // ── Portal state ─────────────────────────────────────
 const PORTAL = { unlocked: false, level: null }; // level: 'bn' or 'admin'
 
+// Build 261 (Tomas's ruling: persist selections across reloads): plain
+// localStorage device prefs — deliberately NOT syncedLS; a selection is
+// per-device context, and roaming work profiles carry localStorage with
+// the login anyway. 14h expiry: survives a full shift of app-switching,
+// self-cleans a shared device between shifts.
+function _devicePref(key, maxAgeMs){
+  try {
+    const p = JSON.parse(localStorage.getItem(key) || 'null');
+    if (p && p.v && typeof p.v === 'string' && Date.now() - p.ts < maxAgeMs) return p.v;
+  } catch(e){}
+  return null;
+}
+function _saveDevicePref(key, v){
+  try { localStorage.setItem(key, JSON.stringify({ v, ts: Date.now() })); } catch(e){}
+}
 const S = {
   shift:           null,   // 'Day' | 'Noc'
-  unit:            null,
+  unit:            _devicePref('signupUnitPref', 50400000), // Build 261: restored ≤14h; the existing if(S.unit) entry gate auto-loads
   adminOk:         false,
   summShift:       'Day',
   summUnit:        'All',
@@ -1814,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-14-260';
+const APP_VERSION = '2026-07-14-261';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5390,6 +5405,7 @@ function showTab(name, btn){
 // ═══════════════════════════════════════════════════════
 function pickUnit(u){
   S.unit=u;
+  _saveDevicePref('signupUnitPref', u); // Build 261
   S.pendingClaims.clear();
   S.pendingCancels.clear();
   S.pendingTransfers.clear();
