@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-14-263';
+const APP_VERSION = '2026-07-15-264';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5058,13 +5058,16 @@ function init(){
 
   // Shift detection
   S.shift = detectShift();
-  // Build 263 (replacing 262's excerpt): when a unit was restored, run the
-  // CANONICAL staff entry — selectStaffShift — not a hand-picked subset of
-  // its lines. 262 called two of its ~12 steps and the live UI showed it:
-  // calendar and banner painted, but the shift card and slot rows didn't
-  // (name-card state trio, cache clears, and the banner/slotsList prep were
-  // all skipped). Calling the flow is the fix; excerpting it was the bug.
-  if(S.unit){ selectStaffShift(S.shift); }
+  // Build 264 (the restore's true front door — third placement, evidence-
+  // led this time): pickUnit(u) is what a unit TAP runs, and it is the ONLY
+  // shower of the two boot-hidden containers — shiftCard ("Current Shift")
+  // and slotsWrap (the slot rows' parent). 262/263 entered through side
+  // doors (a gate excerpt, then the shift entry) and left both containers
+  // display:none — the diagnostic proved rows IN the DOM, invisible ON the
+  // screen (gen:1, rows:8, tmr:true, nothing rendered). pickUnit also owns
+  // the load's full prep (dataset.lastHtml reset, caches, name-card state,
+  // wrong-unit check) and ends in loadSlots itself.
+  if(S.unit){ pickUnit(S.unit); }
   renderShiftPill();
 
   // Warm user-saved preferred names
