@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-278';
+const APP_VERSION = '2026-07-15-279';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15032,6 +15032,13 @@ async function loadBNView(){
   // (most accurate — handles overlap windows, doubles, and boundary cases),
   // then fall back to BN-hour time boundaries if no active schedule found.
   let resolvedShift = null, resolvedDate = null, resolvedSched = null;
+  // Build 279: EXPLICIT provenance. The old trace label inferred its answer
+  // by comparing the result to what the fallback would produce — but a
+  // genuinely detected live shift ALWAYS matches the fallback's answer, so
+  // the label read 'fallback-shiftDate' even on success and the 2 AM Jul-14
+  // trace is unadjudicable. Three real outcomes, three real labels, and a
+  // thrown error carries its message instead of being swallowed.
+  let _resolvedFrom = 'detect-null';
   try {
     const lookup = await detectBNShiftForName(name);
     if(lookup){
@@ -15040,11 +15047,13 @@ async function loadBNView(){
       // Build 120 (2026-05-26): also retain the schedule record so we
       // can read its Ext field as the cross-device source of truth.
       resolvedSched = lookup.sched || null;
+      _resolvedFrom = 'detected-live';
     }
-  } catch(e){ /* fall through to time-based guess */ }
+  } catch(e){ _resolvedFrom = 'detect-threw(' + ((e && e.message) || 'unknown') + ')'; }
   if(!resolvedShift){
     resolvedShift = detectBNShift();
     resolvedDate  = shiftDate(resolvedShift);
+    _resolvedFrom += '→fallback-shiftDate';
   }
 
   // Source-of-truth ext resolution:
@@ -15083,7 +15092,7 @@ async function loadBNView(){
   // Build 102 diagnostic: trace where BNS.date is set, to chase the
   // intermittent "date jumps to tomorrow" bug observed 2026-05-25.
   // Remove after the cause is identified.
-  _logDateTrace(`loadBNView set BNS.date=${BNS.date} shift=${BNS.shift} (resolvedFrom=${resolvedShift && resolvedDate === (typeof shiftDate === 'function' ? shiftDate(resolvedShift) : null) ? 'fallback-shiftDate' : 'detectBNShiftForName'}) localToday=${today()}`);
+  _logDateTrace(`loadBNView set BNS.date=${BNS.date} shift=${BNS.shift} (resolvedFrom=${_resolvedFrom}) localToday=${today()}`);
   BNS.defaultShift = BNS.shift;
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
