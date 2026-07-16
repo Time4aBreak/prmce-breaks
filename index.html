@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-277';
+const APP_VERSION = '2026-07-15-278';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5294,8 +5294,16 @@ function showSubTab(name, btn){
             if(live && _tok){
               const _ei = document.getElementById('bnExtInput');
               if(_ei) _ei.value = _tok;
-              loadBNView();
             }
+            // Build 278: restore must equal a manual pick. Setting the
+            // select programmatically fires no change handler, and 265
+            // only loaded the view in the token branch — live-caught: a
+            // remembered name with no token left the tab EMPTY until the
+            // user switched names away and back (the manual handler
+            // firing). The token decides whether the ext is pre-filled;
+            // it does not decide whether the view loads. loadBNView
+            // handles the no-live-shift case itself (the forward-scan).
+            loadBNView();
           } catch(e){}
         })();
       }
