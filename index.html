@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-279';
+const APP_VERSION = '2026-07-15-280';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15011,7 +15011,17 @@ function populateBNDropdown(){
     importedNames.map(n => `<option value="${n}"${n===prev?' selected':''}>${firstName(n)}</option>`).join('');
 }
 
+let _bnViewGen = 0; // Build 280: generation counter — see guard notes inside loadBNView
 async function loadBNView(){
+  // Build 280: the _loadSlotsGen lesson applied to the view's OWN state.
+  // Live-reproduced tonight with 279's honest labels: loadBNView ran twice
+  // one second apart; flight #1 got a stale detect-null (row written
+  // minutes earlier, not yet visible to that read), flight #2 correctly
+  // detected the LIVE shift — then flight #1's forward-scan landed LAST
+  // and stomped BNS to a date a week out, mid-shift. The 2 AM Jul-14
+  // incident (and its double-jump) was this exact race. A superseded
+  // flight may not touch BNS.
+  const _myGen = ++_bnViewGen;
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first.', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
@@ -15050,6 +15060,7 @@ async function loadBNView(){
       _resolvedFrom = 'detected-live';
     }
   } catch(e){ _resolvedFrom = 'detect-threw(' + ((e && e.message) || 'unknown') + ')'; }
+  if(_myGen !== _bnViewGen) return; // Build 280: superseded while detecting — touch nothing
   if(!resolvedShift){
     resolvedShift = detectBNShift();
     resolvedDate  = shiftDate(resolvedShift);
@@ -15180,6 +15191,7 @@ async function loadBNView(){
             // comparisons). Storing the full timestamp here breaks subsequent
             // queries (`ShiftDate ge '2026-05-15T00:00:00'`) and the date
             // input which expects 'YYYY-MM-DD'.
+            if(_myGen !== _bnViewGen) return; // Build 280: a newer flight owns BNS — this scan's jump is stale
             const _prevDate = BNS.date;
             BNS.date  = future[0].ShiftDate.slice(0,10);
             BNS.shift = future[0].ShiftType;
