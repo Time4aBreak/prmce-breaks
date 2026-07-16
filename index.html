@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-276';
+const APP_VERSION = '2026-07-15-277';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -16718,6 +16718,16 @@ async function loadBNConfirm(){
     const scheds = results[0];
     const allBookings = reconcileBookings(results[1]);
     const notifyState = results[2];
+
+    // Build 277: the OTHER half of 276's stale-flight guard. 276 protected
+    // the painter; this protects the HIDER — live-caught within the hour:
+    // entering as a BN with no row TODAY launches a today-flight, the
+    // forward-scan jumps and paints the next shift, then the stale
+    // today-flight lands last with zero rows and takes this hide branch,
+    // blanking the freshly painted view. A flight whose world moved while
+    // it was in the air may touch NOTHING — not the wrap, not the loader,
+    // not the cache.
+    if(dt !== (BNS.date || today()) || shift !== BNS.shift){ if(loader) loader.style.display = 'none'; return; }
 
     if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; return; }
 
