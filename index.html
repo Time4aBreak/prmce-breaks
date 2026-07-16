@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-270';
+const APP_VERSION = '2026-07-15-274';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3322,6 +3322,17 @@ async function _3CTick(){
   // fires an immediate pass on return, so nobody waits a full interval
   // after waking the phone.
   if(document.hidden) return;
+  // Build 274: REV_BNState gate in front of the batched refreshMany — every
+  // syncedLS/state write bumps it, so an unchanged counter means the whole
+  // watched set is provably fresh and the beat costs bytes. Wake-kicker
+  // semantics preserved: unchanged-while-asleep correctly skips. FAIL-OPEN.
+  let _tkRevNow = null;
+  try {
+    const _r = await gasCallPost({ action: 'getRevision' });
+    _tkRevNow = (_r && _r.BNState) ? String(_r.BNState) : null;
+    if(_tkRevNow && _tickLastRev && _tkRevNow === _tickLastRev) return;
+  } catch(e){ /* fail-open */ }
+  if(_tkRevNow) _tickLastRev = _tkRevNow;
   // Pull latest 3C state + app version from BNState before reading. Without
   // this, the tick paints whatever localStorage already has — meaning a
   // schedule change or app-update push made on another device never surfaces
@@ -7672,9 +7683,28 @@ async function _loadSlotsCore(silent=false){
 // Silent background refresh — fetches data and only updates DOM if something changed
 async function silentRefreshSlots(){
   if(document.hidden) return; // Build 215: no polling while hidden
+  // Build 271: no slot polling while another MAIN tab is active — both P260
+  // runs showed 15–25 background slot fetches during admin portal work
+  // (pure waste that also contends with the import's own writes). This
+  // device's slots UI is the poller's only customer; other devices run
+  // their own instances. Fail-open: no .tab.active found → poll as before.
+  // Tab re-entry does a full fresh load, so no staleness window on return.
+  const _activeTab = document.querySelector('.tab.active');
+  if(_activeTab && _activeTab.id !== 'tab-staff') return; // signup pane's real id is tab-staff (grep-verified: tab-staff | tab-portal)
   if(!S.unit) return;
   const list = document.getElementById('slotsList');
   if(!list) return;
+
+  // Build 274 (247/273 idiom): byte-cheap revision check before the two
+  // table reads. Slots depend on bookings + schedule; any claim, cancel,
+  // transfer, assignment, or status flip bumps a counter. FAIL-OPEN.
+  let _slRevNow = null;
+  try {
+    const _r = await gasCallPost({ action: 'getRevision' });
+    _slRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
+    if(_slRevNow && _slotsLastRev && _slRevNow === _slotsLastRev) return;
+  } catch(e){ /* fail-open */ }
+  if(_slRevNow) _slotsLastRev = _slRevNow;
 
   try {
     const dt = staffShiftDate(S.shift), shift = S.shift;
@@ -15553,6 +15583,13 @@ const _prodLogInputs = new Map();
 // the subtab, or BN's shift ends. Conflict detection on each poll reconciles
 // queued actions against current backend state — see handleQueueConflicts().
 const POLL_INTERVAL_MS = 10000;
+// Build 273 (Tomas: prod log as close to real time as limits allow → option C):
+// the prod log gets its OWN faster beat — POLL_INTERVAL_MS is shared by the
+// coverage and schedule pollers and must stay 10s.
+const PRODLOG_POLL_MS = 5000;
+let _prodLogLastRev = null;
+// Build 274: the same gate for the app's three remaining pollers.
+let _slotsLastRev = null, _covLastRev = null, _tickLastRev = null;
 let _prodLogPollTmr = null;
 let _prodLogLastFingerprint = null;
 let _prodLogLastSlot = null;          // last slot the prod log rendered for; drives a seamless clock-only re-render at slot boundaries
@@ -15580,7 +15617,7 @@ function startProdLogPolling(){
   const jitter = Math.floor(Math.random() * 3000);
   _prodLogPollTmr = setTimeout(function start(){
     silentRefreshProdLog();
-    _prodLogPollTmr = setInterval(silentRefreshProdLog, POLL_INTERVAL_MS);
+    _prodLogPollTmr = setInterval(silentRefreshProdLog, PRODLOG_POLL_MS); // Build 273: 5s beat, revision-gated
   }, jitter);
 }
 function stopProdLogPolling(){
@@ -16309,6 +16346,20 @@ async function silentRefreshProdLog(){
   // Skip if shift is over — no more changes to track
   try { if(typeof shiftIsOver === 'function' && shiftIsOver(BNS.date, BNS.shift)) { stopProdLogPolling(); return; } } catch{}
 
+  // Build 273 (the 247 idiom, prodlog half): ask the byte-cheap revision
+  // counters before the two table reads. The prodlog view depends on BOTH
+  // sheets (its own comment below: schedule inactive-flips must trigger it),
+  // so the gate key is the composite. FAIL-OPEN: any error falls through to
+  // the fetch. Write-early like 247; the fingerprint layer below keeps
+  // renders exact when a revision bumps on writes this view doesn't show.
+  let _plRevNow = null;
+  try {
+    const _r = await gasCallPost({ action: 'getRevision' });
+    _plRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
+    if(_plRevNow && _prodLogLastRev && _plRevNow === _prodLogLastRev) return;
+  } catch(e){ /* fail-open */ }
+  if(_plRevNow) _prodLogLastRev = _plRevNow;
+
   try {
     const dt = BNS.date || today(), shift = BNS.shift;
     const nextDt = (function(d){
@@ -16461,6 +16512,14 @@ async function silentRefreshCoverage(){
   if(!listEl) return;
   const activeSub = document.querySelector('.subtab.active');
   if(!activeSub || activeSub.id !== 'subtab-summary') return;
+  // Build 274: same revision gate — coverage reads the same two sheets.
+  let _cvRevNow = null;
+  try {
+    const _r = await gasCallPost({ action: 'getRevision' });
+    _cvRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
+    if(_cvRevNow && _covLastRev && _cvRevNow === _covLastRev) return;
+  } catch(e){ /* fail-open */ }
+  if(_cvRevNow) _covLastRev = _cvRevNow;
   try {
     const dt = document.getElementById('summDate')?.value || today();
     const shift = S.summShift || detectShift();
