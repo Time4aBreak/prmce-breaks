@@ -1829,7 +1829,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-15-274';
+const APP_VERSION = '2026-07-15-276';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14813,6 +14813,14 @@ function clearImportSel(i){
 }
 
 async function rerunSuggest(i, name, date, shift){
+  // Build 275: the onclick bakes shift at RENDER time, but setImportShift
+  // mutates the entry without re-rendering — a flipped card's button still
+  // carried the extraction-time shift (live-caught: Re-suggest after a
+  // Noc→Day flip recomputed AND toasted for the Noc group, re-dealing the
+  // wrong cards). The entry is the truth; the arg is only a fallback.
+  // saveImportRow was always immune — index-only, live read — same principle.
+  const _live = _currentImportEntries[i];
+  if(_live && _live.shift) shift = _live.shift;
   // Re-run algorithm for this nurse's shift group
   const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
   const nurses = entriesToProcess
@@ -16738,6 +16746,16 @@ async function loadBNConfirm(){
 // Synchronous render body — assumes data is already fetched. Called from
 // loadBNConfirm (after fetch) and _renderBNConfirm (from cache, on stage taps).
 function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt){
+  // Build 276: stale-flight guard for ALL painters (loadBNConfirm and the
+  // 5s refresher both land here). Live-caught: a poll cycle captured
+  // dt=Jul-16, the user picked Jul-23 mid-flight, the old cycle landed last
+  // and painted Jul-16's body over the fresh view — then the revision gate
+  // preserved the corpse for 9 minutes (no rev change = no repaint), and a
+  // stale fingerprint store would teach the next beat the wrong content is
+  // current. If the view moved while this render's data was in flight, the
+  // paint belongs to a screen that no longer exists — discard it. Mirrors
+  // Sign Up's _loadSlotsGen lesson.
+  if(dt !== (BNS.date || today()) || shift !== BNS.shift) return;
   try {    // Sync Mark unavailable button state with current schedule. If any
     // schedule entry for this BN/date/shift has Status='inactive' and no
     // active entries exist, BN is currently marked unavailable.
