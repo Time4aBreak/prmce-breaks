@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-17-282';
+const APP_VERSION = '2026-07-17-283';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7347,7 +7347,7 @@ async function _loadSlotsCore(silent=false){
     // cancel will execute on Submit before the new claim, freeing the slot.
     const myStagedCancelCount = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
     const effectiveOwnedCount = mySameShift.length - myStagedCancelCount;
-    const pendingClaimSameShift = [...S.pendingClaims].filter(c => !c.includes('|') || c.split('|')[1] === shift).length;
+    const pendingClaimSameShift = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === shift).length;
     const canClaimMore = (effectiveOwnedCount + pendingClaimSameShift) < MAX_SLOTS;
 
     // Build BN name label — include both main and overlap BNs
@@ -7580,7 +7580,7 @@ async function _loadSlotsCore(silent=false){
         else                              { canClaim=true; }
       }
 
-      const isPending = S.pendingClaims.has(slot);
+      const isPending = S.pendingClaims.has(_claimKey(slot));
       const isPastSlot = shiftIsActive && isPast(slot, shift);
       // Owned-slot staging state (only meaningful when isMine)
       const myBookingId      = isMine ? booking.Id : null;
@@ -7833,10 +7833,22 @@ function renderSlotsFromCache(){
   list.dataset.lastHtml = html;
 }
 
-function togglePending(slotTime, slotShift){
+// Build 283 (streams plumbing): canonical pending-claim keys. Three
+// segments — time|shift|bn — one builder, one parser, every consumer.
+// BN names contain no pipes. The empty-bn form ("0715|Noc|") is valid
+// during plumbing; 284 threads real BN names from the tapped row.
+// Legacy 1-2 segment keys parse with defaults (no such keys persist —
+// pendingClaims is per-session — but parse tolerance costs nothing).
+function _claimKey(slotTime, slotShift, bn){
+  return `${slotTime}|${slotShift || S.shift}|${bn || ''}`;
+}
+function _parseClaimKey(key){
+  const p = String(key).split('|');
+  return { time: p[0], shift: p[1] || S.shift, bn: p[2] || '' };
+}
+function togglePending(slotTime, slotShift, bn){
   if(S.submitting) return; // block selection changes during submission
-  // For Other shift, key includes the shift type: "HHMM|ShiftType"
-  const key = slotShift && slotShift !== S.shift ? `${slotTime}|${slotShift}` : slotTime;
+  const key = _claimKey(slotTime, slotShift, bn);
   if(S.pendingClaims.has(key)){
     S.pendingClaims.delete(key);
   } else {
@@ -7920,7 +7932,7 @@ function _renderSingleSlotRow(slot){
   // (transfer keeps the slot in the system, just changes the owner).
   const myStagedCancels = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
   const effectiveOwned = mySameShift.length - myStagedCancels;
-  const pendingClaimCount = [...S.pendingClaims].filter(c => !c.includes('|') || c.split('|')[1] === shift).length;
+  const pendingClaimCount = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === shift).length;
   const canClaimMore = (effectiveOwned + pendingClaimCount) < MAX_SLOTS;
   const shiftWindowOpen = staffWindowOpen(shift);
   const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
@@ -7929,7 +7941,7 @@ function _renderSingleSlotRow(slot){
   const isMine  = booking && booking.NurseName === nurseName && nurseName;
   const isTaken = booking && !isMine;
   const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
-  const isPending = S.pendingClaims.has(slot);
+  const isPending = S.pendingClaims.has(_claimKey(slot));
   // Owned-slot staging state lookups (only meaningful when isMine)
   const myBookingId   = isMine ? booking.Id : null;
   const isCancelStaged   = isMine && S.pendingCancels.has(myBookingId);
@@ -8208,7 +8220,9 @@ function updateSubmitBar(){
   // Build a human-readable summary. For pure-claim case (most common) preserve
   // the original detailed format with slot times. Mixed actions show counts.
   if(nCancel === 0 && nTransfer === 0){
-    const times = [...S.pendingClaims].sort((a,b) => sortKey(a,S.shift)-sortKey(b,S.shift)).map(fmt12).join(', ');
+    // Build 283: parse keys before display — the old path ran fmt12 on raw
+    // keys, garbling any staged Other-shift key ("0715|Day"). Latent fix.
+    const times = [...S.pendingClaims].map(_parseClaimKey).sort((a,b) => sortKey(a.time,a.shift)-sortKey(b.time,b.shift)).map(k => fmt12(k.time)).join(', ');
     lbl.textContent = `${nClaim} break${nClaim!==1?'s':''} selected: ${times}`;
   } else {
     const parts = [];
@@ -8415,15 +8429,14 @@ async function submitClaims(){
 
   // ── Process new claims ──
   const slots = [...S.pendingClaims].sort((a,b) => {
-    const aTime = a.includes('|') ? a.split('|')[0] : a;
-    const bTime = b.includes('|') ? b.split('|')[0] : b;
-    const aSh   = a.includes('|') ? a.split('|')[1] : S.shift;
-    const bSh   = b.includes('|') ? b.split('|')[1] : S.shift;
-    return sortKey(aTime, aSh) - sortKey(bTime, bSh);
+    const ka = _parseClaimKey(a), kb = _parseClaimKey(b);
+    return sortKey(ka.time, ka.shift) - sortKey(kb.time, kb.shift);
   });
   for(const slot of slots){
-    const slotTime  = slot.includes('|') ? slot.split('|')[0] : slot;
-    const slotShift = slot.includes('|') ? slot.split('|')[1] : S.shift;
+    const _k = _parseClaimKey(slot);
+    const slotTime  = _k.time;
+    const slotShift = _k.shift;
+    const slotBN    = _k.bn; // Build 283: staged BN — threads into claimSlot in 284
     const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit);
     if(result === 'ok'){
       results.claimed.push(slotTime);
@@ -8709,7 +8722,7 @@ function renderOtherSlotsFromCache(){
     const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && isStaffBooking(b));
     const isMine  = myTimes.has(time);
     const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
-    const pendingKey = `${time}|${slotShift}`;
+    const pendingKey = _claimKey(time, slotShift);
     const isPending = S.pendingClaims.has(pendingKey);
 
     if(isMine){
