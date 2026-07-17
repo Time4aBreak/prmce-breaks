@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-17-283';
+const APP_VERSION = '2026-07-17-284';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8437,13 +8437,13 @@ async function submitClaims(){
     const slotTime  = _k.time;
     const slotShift = _k.shift;
     const slotBN    = _k.bn; // Build 283: staged BN — threads into claimSlot in 284
-    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit);
+    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit, slotBN);
     if(result === 'ok'){
       results.claimed.push(slotTime);
       // Add to cached data so next iteration's max/race checks see it.
       // Build 138: use submitUnit (not live S.unit) to match what claimSlot
       // just wrote — otherwise the cache could lie if user navigated.
-      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false});
+      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false, CoveredBy: slotBN || ''});
     }
     else results.failed.push({ label: fmt12(slotTime), reason: result });
   }
@@ -8807,7 +8807,7 @@ function renderOtherSlotsFromCache(){
 // legitimate distinct claims.
 const _claimsInFlight = new Set();
 
-async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null){
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy=''){ // Build 284: coveredBy = the BN whose row was tapped (streams ruling)
   // Build 138 (2026-05-27): Capture unit at function entry. Without this,
   // submitClaims's batch loop reads S.unit fresh on each iteration — if
   // the user navigates to another unit mid-submit (via pickUnit), later
@@ -8948,7 +8948,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // Bug #8: in-flight guard. Block this exact (unit, slot, shift, ext)
     // combination if a prior POST is still pending or just completed.
     // Prevents network-slow tap-retry from creating duplicate rows.
-    const _inFlightKey = `${_unit}|${slotTime}|${slotShift}|${nurseExt}`;
+    const _inFlightKey = `${_unit}|${slotTime}|${slotShift}|${nurseExt}|${coveredBy||''}`; // Build 284: two BNs' same-time rows are distinct claims
     if(_claimsInFlight.has(_inFlightKey)){
       if(!silent){ toast(`${fmt12(slotTime)} is already being claimed.`, true); }
       return 'duplicate-in-flight';
@@ -8958,7 +8958,8 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       await spPost(LISTS.bookings,{
         Title:`${_unit}-${dt}-${slotTime}`,
         NurseName:name, Unit:_unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
-        IsOtherShift: (S.shift === 'Other') ? 1 : 0
+        IsOtherShift: (S.shift === 'Other') ? 1 : 0,
+        CoveredBy: coveredBy || '' // Build 284: attribution stamp — empty until 285 threads row BNs; bnOwns falls back per-unit exactly as before
       });
     } finally {
       // Clear the guard ~3 seconds after the POST completes — long enough
