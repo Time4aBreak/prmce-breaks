@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-22-286';
+const APP_VERSION = '2026-07-22-287';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7534,6 +7534,19 @@ async function _loadSlotsCore(silent=false){
     // Build slot→BN map from rotations for per-slot BN display
     const _getBNFirst = bnDisplayName; // Build 239: single source of truth
     const _slotBNMap = {};
+    // Build 287: streams — same rotation walks, but PUSH per slot instead of
+    // last-writer-wins, keeping raw names for CoveredBy stamping/matching.
+    // loadRotationWithFallback already gives rotation-less coverers their
+    // full-stream fallback, so the limit case (single-unit BN = every slot)
+    // comes free. _slotBNMap stays as-is for legacy consumers.
+    _slotStreams = {};
+    _slotBookingsArr = bookings;
+    const _pushStream = (s, sched) => {
+      const raw = sched.BreakNurseName;
+      (_slotStreams[s] = _slotStreams[s] || []);
+      if(!_slotStreams[s].some(e => e.raw === raw))
+        _slotStreams[s].push({ raw, disp: _getBNFirst(raw) });
+    };
     for(const sched of covering){
       const rot = loadRotationWithFallback(sched.BreakNurseName, dt, shift, sched);
       if(rot) Object.entries(rot).forEach(([s,u]) => {
@@ -7541,11 +7554,12 @@ async function _loadSlotsCore(silent=false){
         // Skip slots in the overlap window — those display the opp BN, not the main BN
         if(isOverlapSlot(s, shift)) return;
         _slotBNMap[s] = _getBNFirst(sched.BreakNurseName);
+        _pushStream(s, sched);
       });
     }
     for(const sched of oppCovering){
       const rot = loadRotationWithFallback(sched.BreakNurseName, oppSchedDt, oppShift, sched);
-      if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit) _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); });
+      if(rot) Object.entries(rot).forEach(([s,u]) => { if(u===S.unit){ _slotBNMap[s] = _getBNFirst(sched.BreakNurseName); _pushStream(s, sched); } });
     }
     // Fallback: overlap slots not assigned to this unit in the rotation still get the opp BN's name.
     // The Day BN covers the unit during the whole overlap window even if their rotation
@@ -7557,10 +7571,7 @@ async function _loadSlotsCore(silent=false){
 
     let html='';
     future.forEach(slot=>{
-      const booking=bMap[slot];
-      const isMine = booking && booking.NurseName===nurseName && nurseName;
-      const isTaken= booking && !isMine;
-      const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
+      const booking0=bMap[slot];
 
       // Determine if this is an overlap slot (covered by opposite shift BN)
       const slotMin = toMin(slot);
@@ -7578,7 +7589,25 @@ async function _loadSlotsCore(silent=false){
       const _slotShift = isOverlap ? oppShift : shift;
       const _slotDate  = isOverlap ? oppSchedDt : dt;
       const _crossBooking = findBNConflict(_slotSched, slot, S.unit, allBookingsRaw, _slotDate, _slotShift);
-      if(_crossBooking && !booking) return; // hide only if slot would otherwise appear open on this unit
+      if(_crossBooking && !booking0) return; // hide only if slot would otherwise appear open on this unit
+
+      // Build 287 (streams): one row per stream. Single-stream slots keep
+      // today's exact semantics (booking = bMap, bn = the 285/286 default).
+      // Multi-stream slots bind bookings by CoveredBy; an unstamped booking
+      // binds to the first stream only, never duplicated across rows.
+      const _streamsAll = (_slotStreams[slot] && _slotStreams[slot].length)
+        ? _slotStreams[slot]
+        : [{ raw: _slotRowBN || '', disp: _slotBNMap[slot] || '' }];
+      const _slotBs = _streamsAll.length > 1
+        ? _slotBookingsArr.filter(b => isStaffBooking(b) && normSlot(String(b.SlotTime)) === slot && b.ShiftType === _slotShift)
+        : null;
+      _streamsAll.forEach((_st, _sIdx) => {
+      const _bnEsc = String(_st.raw).replace(/'/g, "\\'");
+      const booking = _streamsAll.length <= 1 ? booking0
+        : (_slotBs.find(b => b.CoveredBy === _st.raw) || (_sIdx === 0 ? _slotBs.find(b => !b.CoveredBy) : null) || null);
+      const isMine = booking && booking.NurseName===nurseName && nurseName;
+      const isTaken= booking && !isMine;
+      const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
 
       // Sign-up window: current shift always open; next shift visible but locked until start
       const nowM_ = nowMin();
@@ -7598,7 +7627,7 @@ async function _loadSlotsCore(silent=false){
         else                              { canClaim=true; }
       }
 
-      const isPending = S.pendingClaims.has(_claimKey(slot));
+      const isPending = S.pendingClaims.has(_claimKey(slot, null, _st.raw));
       const isPastSlot = shiftIsActive && isPast(slot, shift);
       // Owned-slot staging state (only meaningful when isMine)
       const myBookingId      = isMine ? booking.Id : null;
@@ -7641,7 +7670,8 @@ async function _loadSlotsCore(silent=false){
       } else if(booking){
         nameCellHtml = formatNurse(booking.NurseName);
       } else {
-        nameCellHtml = canClaim ? `Available${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}` : (lockReason === openLabel ? (_slotBNMap[slot] || lockReason) : `${lockReason}${_slotBNMap[slot] ? ` · ${_slotBNMap[slot]}` : ''}`);
+        const _dispBN = _st.disp || _slotBNMap[slot] || '';
+        nameCellHtml = canClaim ? `Available${_dispBN ? ` · ${_dispBN}` : ''}` : (lockReason === openLabel ? (_dispBN || lockReason) : `${lockReason}${_dispBN ? ` · ${_dispBN}` : ''}`);
       }
       // Action cell — owned slots route through the new picker; others unchanged
       let actionHtml = '';
@@ -7658,15 +7688,16 @@ async function _loadSlotsCore(silent=false){
           actionHtml = `<button class="btn btn-danger btn-sm" onclick="openPicker('${booking.Id}','${slot}')">✕ Manage</button>`;
         }
       } else if(isPending){
-        actionHtml = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>`;
+        actionHtml = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}', null, '${_bnEsc}')">↺ Undo</button>`;
       } else if(canClaim){
-        actionHtml = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>`;
+        actionHtml = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}', null, '${_bnEsc}')">+ Select</button>`;
       }
-      html+=`<div class="slot-row ${cls}" data-slot="${slot}" style="${rowStyle}">
+      html+=`<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${_st.raw}" style="${rowStyle}">
         <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
         <div class="slot-name ${booking||isPending?'filled':''}">${nameCellHtml}</div>
         <div>${actionHtml}</div>
       </div>`;
+      }); // Build 287: end per-stream
     });
     // Stale-callback guard: if a newer loadSlots() invocation has started,
     // bail BEFORE touching the DOM. Previously this check ran AFTER the
@@ -7858,6 +7889,12 @@ function renderSlotsFromCache(){
 // from this, so staged keys — and therefore claims — carry attribution
 // with zero template changes. 286's multi-row templates pass explicit bn.
 let _slotRowBN = '';
+// Build 287 (streams): per-slot stream arrays [{raw, disp}] rebuilt on every
+// completed standard render (self-resetting, gate-safe per the 286 lesson),
+// plus the raw staff-bookings array so both row builders can bind multiple
+// same-slot bookings to their streams via CoveredBy.
+let _slotStreams = {};
+let _slotBookingsArr = [];
 // Build 283 (streams plumbing): canonical pending-claim keys. Three
 // segments — time|shift|bn — one builder, one parser, every consumer.
 // BN names contain no pipes. The empty-bn form ("0715|Noc|") is valid
@@ -7911,14 +7948,18 @@ function _updateSlotRow(slot){
   if(!_slotRenderCache){ renderSlotsFromCache(); return; }
   const list = document.getElementById('slotsList');
   if(!list) return;
-  const oldRow = list.querySelector(`[data-slot="${slot}"]`);
-  if(!oldRow){ renderSlotsFromCache(); return; }
+  // Build 287: a slot may render as SEVERAL stream rows — replace the set.
+  const oldRows = list.querySelectorAll(`[data-slot="${slot}"]`);
+  if(!oldRows.length){ renderSlotsFromCache(); return; }
   const html = _renderSingleSlotRow(slot);
   if(!html){ renderSlotsFromCache(); return; }
   const tmp = document.createElement('div');
   tmp.innerHTML = html;
-  const newRow = tmp.firstElementChild;
-  if(newRow) oldRow.replaceWith(newRow);
+  const newRows = [...tmp.children];
+  if(newRows.length){
+    oldRows[0].before(...newRows);
+    oldRows.forEach(r => r.remove());
+  }
 }
 
 function _updateOtherSlotRow(slot, slotShift){
@@ -7963,11 +8004,24 @@ function _renderSingleSlotRow(slot){
   const shiftWindowOpen = staffWindowOpen(shift);
   const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
   const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
-  const booking = bMap[slot];
+  // Build 287 (streams): the mirror emits one row per stream — the core
+  // loop's twin conversion. Same binding rules; callers' contract unchanged
+  // (they still receive "this slot's HTML", now possibly several rows).
+  const _streamsAll = (_slotStreams[slot] && _slotStreams[slot].length)
+    ? _slotStreams[slot]
+    : [{ raw: _slotRowBN || '', disp: '' }];
+  const _slotBs = _streamsAll.length > 1
+    ? _slotBookingsArr.filter(b => isStaffBooking(b) && normSlot(String(b.SlotTime)) === slot && b.ShiftType === shift)
+    : null;
+  let _out = '';
+  _streamsAll.forEach((_st, _sIdx) => {
+  const _bnEsc = String(_st.raw).replace(/'/g, "\\'");
+  const booking = _streamsAll.length <= 1 ? bMap[slot]
+    : (_slotBs.find(b => b.CoveredBy === _st.raw) || (_sIdx === 0 ? _slotBs.find(b => !b.CoveredBy) : null) || null);
   const isMine  = booking && booking.NurseName === nurseName && nurseName;
   const isTaken = booking && !isMine;
   const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
-  const isPending = S.pendingClaims.has(_claimKey(slot));
+  const isPending = S.pendingClaims.has(_claimKey(slot, null, _st.raw));
   // Owned-slot staging state lookups (only meaningful when isMine)
   const myBookingId   = isMine ? booking.Id : null;
   const isCancelStaged   = isMine && S.pendingCancels.has(myBookingId);
@@ -8010,7 +8064,9 @@ function _renderSingleSlotRow(slot){
   } else if(booking){
     nameCell = formatNurse(booking.NurseName);
   } else {
-    nameCell = canClaim ? 'Available' : (lockReason || 'Available');
+    // Build 287 rider: the mirror used to label plain 'Available' while the
+    // core showed 'Available · BN' — surgical repaints dropped the name.
+    nameCell = canClaim ? `Available${_st.disp ? ` · ${_st.disp}` : ''}` : (lockReason || 'Available');
   }
   // Action cell — depends on staging state
   const slotIsPast = isPast(slot, shift);
@@ -8031,15 +8087,17 @@ function _renderSingleSlotRow(slot){
       actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${booking.Id}','${slot}')">✕ Manage</button>`;
     }
   } else if(isPending){
-    actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}')">↺ Undo</button>`;
+    actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="togglePending('${slot}', null, '${_bnEsc}')">↺ Undo</button>`;
   } else if(canClaim){
-    actionCell = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}')">+ Select</button>`;
+    actionCell = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}', null, '${_bnEsc}')">+ Select</button>`;
   }
-  return `<div class="slot-row ${cls}" data-slot="${slot}" style="${rowStyle}">
+  _out += `<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${_st.raw}" style="${rowStyle}">
       <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
       <div class="slot-name ${booking||isPending?'filled':''}">${nameCell}</div>
       <div>${actionCell}</div>
     </div>`;
+  }); // Build 287: end per-stream (mirror)
+  return _out;
 }
 
 function clearPending(){
