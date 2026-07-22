@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-22-285';
+const APP_VERSION = '2026-07-22-286';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5468,6 +5468,7 @@ function showTab(name, btn){
 // ═══════════════════════════════════════════════════════
 function pickUnit(u){
   S.unit=u;
+  _slotRowBN = ''; // Build 286: new unit — attribution unknown until its render derives it
   _saveDevicePref('signupUnitPref', u); // Build 261
   S.pendingClaims.clear();
   S.pendingCancels.clear();
@@ -6784,9 +6785,16 @@ async function loadSlots(silent=false){
   return p;
 }
 async function _loadSlotsCore(silent=false){
-  _slotRowBN = ''; // Build 285: reset per pass — set below only on the standard path's unambiguous case
+  // Build 286: NO entry reset. 285's reset-per-pass fought the Build-274
+  // revision gates: quiet polls enter, reset, and early-return before the
+  // derivation, leaving attribution blank at tap time (live-caught: row 56
+  // CoveredBy empty on a verified 285 deploy). A gated early return means
+  // the world is UNCHANGED — retaining the last derived value is correct.
+  // The derivation below self-resets on every real render; explicit clears
+  // live only where the world actually changes: pickUnit and the Other fork.
   if(!S.unit) return;
   // Route Other shift to its own handler
+  _slotRowBN = ''; // Build 286: Other attribution unsolved until its rebuild — never inherit the last standard unit's BN
   if(S.shift === 'Other'){
     return loadOtherSlots(silent);
   }
