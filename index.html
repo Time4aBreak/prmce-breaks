@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-22-288';
+const APP_VERSION = '2026-07-22-289';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11238,6 +11238,7 @@ async function _loadSummaryInner(mySeq){
       // of which BN covers the unit. Mirrors bnOwns in the BN portal.
       // Legacy/Sign Up bookings (no CreatedBy) fall back to unit-based
       // ownership via slotOwnerBN / unitBN.
+      if(b.CoveredBy) return b.CoveredBy; // Build 289: the stream stamp outranks everything (bnOwns rule 1)
       if(b.CreatedBy) return b.CreatedBy;
       // Build N+4: historical attribution — if the unit had a main BN
       // who's now inactive AND this booking's slot time predates the
@@ -11257,6 +11258,7 @@ async function _loadSummaryInner(mySeq){
     const getBNExtForBooking = (b) => {
       // Mirror getBNForBooking: CreatedBy attribution wins. Look up the
       // creator's ext directly so the displayed BN name and ext agree.
+      if(b.CoveredBy) return bnNameExt[b.CoveredBy] || ''; // Build 289: stream stamp first
       if(b.CreatedBy) return bnNameExt[b.CreatedBy] || '';
       // Build N+4: same historical-attribution rule — past bookings on
       // an outage'd unit show the inactive BN's ext.
