@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-17-284';
+const APP_VERSION = '2026-07-22-285';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6784,6 +6784,7 @@ async function loadSlots(silent=false){
   return p;
 }
 async function _loadSlotsCore(silent=false){
+  _slotRowBN = ''; // Build 285: reset per pass — set below only on the standard path's unambiguous case
   if(!S.unit) return;
   // Route Other shift to its own handler
   if(S.shift === 'Other'){
@@ -7364,6 +7365,15 @@ async function _loadSlotsCore(silent=false){
       .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
       .map(c => formatBNName(c.BreakNurseName))
     )];
+    // Build 285: raw (unformatted) distinct ACTIVE main coverers of this
+    // unit — the attribution identity. Stamp only when unambiguous;
+    // multi-coverer slots wait for 286's explicit per-row BNs.
+    const _rawMainBNs = [...new Set(coveringForDisplay
+      .filter(s => s.Status !== 'inactive')
+      .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
+      .map(c => c.BreakNurseName)
+    )];
+    _slotRowBN = _rawMainBNs.length === 1 ? _rawMainBNs[0] : '';
 
     // Include opp BN in meta only while the overlap window is still active
     const nowM = nowKey(shift);
@@ -7833,6 +7843,13 @@ function renderSlotsFromCache(){
   list.dataset.lastHtml = html;
 }
 
+// Build 285: the current render pass's unambiguous coverer for S.unit.
+// Set by _loadSlotsCore's standard path when exactly ONE distinct active
+// main BN covers the unit (raw BreakNurseName, matching CoveredBy/bnOwns
+// format); empty when multiple/none/Other. togglePending defaults its bn
+// from this, so staged keys — and therefore claims — carry attribution
+// with zero template changes. 286's multi-row templates pass explicit bn.
+let _slotRowBN = '';
 // Build 283 (streams plumbing): canonical pending-claim keys. Three
 // segments — time|shift|bn — one builder, one parser, every consumer.
 // BN names contain no pipes. The empty-bn form ("0715|Noc|") is valid
@@ -7848,6 +7865,7 @@ function _parseClaimKey(key){
 }
 function togglePending(slotTime, slotShift, bn){
   if(S.submitting) return; // block selection changes during submission
+  bn = bn || _slotRowBN; // Build 285: default attribution = the pass's unambiguous coverer (explicit bn overrides; unstage taps rebuild the same key unless coverage changed mid-staging, which re-renders anyway)
   const key = _claimKey(slotTime, slotShift, bn);
   if(S.pendingClaims.has(key)){
     S.pendingClaims.delete(key);
