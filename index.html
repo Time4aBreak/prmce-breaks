@@ -1836,7 +1836,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-22-289';
+const APP_VERSION = '2026-07-22-290';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5519,11 +5519,16 @@ async function checkWrongUnit(selectedUnit){
   try {
     let mine;
     if(S.shift === 'Other'){
-      const [d,n] = await Promise.all([
+      // Build 290: the Noc arm's rows live under the shift-START date — in
+      // the 06:30–08:30 window that's yesterday, which today-only queries miss.
+      const _nDt = shiftDate('Noc');
+      const _q = [
         spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq 'Day'`),
         spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq 'Noc'`)
-      ]);
-      mine = [...d, ...n];
+      ];
+      if(_nDt !== dt) _q.push(spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and SlotDate ge '${_nDt}' and SlotDate le '${_nDt}T23' and ShiftType eq 'Noc'`));
+      const _r = await Promise.all(_q);
+      mine = _r.flat();
     } else {
       mine = await spGet(LISTS.bookings,
         `NurseName eq '${esc(name)}' and SlotDate ge '${staffShiftDate(S.shift)}' and SlotDate le '${staffShiftDate(S.shift)}T23' and ShiftType eq '${S.shift}'`);
@@ -6794,8 +6799,11 @@ async function _loadSlotsCore(silent=false){
   // live only where the world actually changes: pickUnit and the Other fork.
   if(!S.unit) return;
   // Route Other shift to its own handler
-  _slotRowBN = ''; // Build 286: Other attribution unsolved until its rebuild — never inherit the last standard unit's BN
   if(S.shift === 'Other'){
+    // Build 290: world-change clear kept INSIDE the branch (the 286 rule —
+    // never reset on paths that can gated/early-exit while standard rows are
+    // on screen). Other rows carry explicit bn since this build.
+    _slotRowBN = '';
     return loadOtherSlots(silent);
   }
   const _myGen = ++_loadSlotsGen; // capture generation at call time
@@ -7539,6 +7547,11 @@ async function _loadSlotsCore(silent=false){
     // loadRotationWithFallback already gives rotation-less coverers their
     // full-stream fallback, so the limit case (single-unit BN = every slot)
     // comes free. _slotBNMap stays as-is for legacy consumers.
+    // LOCKSTEP CONTRACT (Build 290): loadOtherSlots composes this same gate
+    // set per source shift (absorbed/pinned restriction · absorber-busy
+    // filter · window-aware rotations · bnStart gate · streams · cross-form
+    // overlap fold · 3C per-slot closure). Any gate added to this assembly
+    // must be mirrored there, and vice versa.
     _slotStreams = {};
     _slotBookingsArr = bookings;
     const _pushStream = (s, sched) => {
@@ -7770,6 +7783,13 @@ async function silentRefreshSlots(){
   } catch(e){ /* fail-open */ }
   if(_slRevNow) _slotsLastRev = _slRevNow;
 
+  // Build 290 (rider O1): the Other view polls too — real staff live on it.
+  // The revision gate above already short-circuited when nothing changed, so
+  // this recomposes only after an actual bookings/schedule write. The
+  // standard body below would no-op for Other anyway (ShiftType 'Other'
+  // matches no rows). loadOtherSlots carries its own try/catch.
+  if(S.shift === 'Other'){ loadOtherSlots(true); return; }
+
   try {
     const dt = staffShiftDate(S.shift), shift = S.shift;
 
@@ -7863,7 +7883,7 @@ let _slotRenderCache = null; // { future, bMap, bnBreaks, nurseName, nurseExt, c
 // so togglePending can re-render instantly (no network round trip) when the
 // user picks/deselects slots. Populated at the end of loadOtherSlots, cleared
 // when shift or unit or end time changes so stale data never renders.
-let _otherSlotRenderCache = null; // { allSlots, allBookings, nurseName, activeDayBN, activeNocBN, myBookingsCount }
+let _otherSlotRenderCache = null; // Build 290: { entries:[{time,armShift,srcDt,sortM,streams:[{raw,disp}],bookings:[...]}], allBookings, nurseName, activeDayBN, activeNocBN }
 
 function renderSlotsFromCache(){
   if(!_slotRenderCache){ loadSlots(true); return; } // fallback if no cache yet
@@ -7901,17 +7921,26 @@ let _slotBookingsArr = [];
 // during plumbing; 284 threads real BN names from the tapped row.
 // Legacy 1-2 segment keys parse with defaults (no such keys persist —
 // pendingClaims is per-session — but parse tolerance costs nothing).
-function _claimKey(slotTime, slotShift, bn){
-  return `${slotTime}|${slotShift || S.shift}|${bn || ''}`;
+function _claimKey(slotTime, slotShift, bn, srcDt){
+  // Build 290: optional 4th segment = the SOURCE-SHIFT date the slot was
+  // composed from (Other threads it so the claim writes that SlotDate,
+  // clock-independently). Empty on standard rows = derive at claim time,
+  // behavior unchanged. One builder, one parser — keep it that way.
+  // Known edge (290 review): the same physical overlap slot can be staged
+  // from a standard tab (3-segment key) AND the Other tab (4-segment key)
+  // as two distinct pending entries. Both submit; the 204/205 cross-date
+  // guards block the second write. Same class as the pre-existing
+  // shift-flip staging edge — write-safety holds, no dedupe needed.
+  return `${slotTime}|${slotShift || S.shift}|${bn || ''}|${srcDt || ''}`;
 }
 function _parseClaimKey(key){
   const p = String(key).split('|');
-  return { time: p[0], shift: p[1] || S.shift, bn: p[2] || '' };
+  return { time: p[0], shift: p[1] || S.shift, bn: p[2] || '', dt: p[3] || '' };
 }
-function togglePending(slotTime, slotShift, bn){
+function togglePending(slotTime, slotShift, bn, srcDt){
   if(S.submitting) return; // block selection changes during submission
   bn = bn || _slotRowBN; // Build 285: default attribution = the pass's unambiguous coverer (explicit bn overrides; unstage taps rebuild the same key unless coverage changed mid-staging, which re-renders anyway)
-  const key = _claimKey(slotTime, slotShift, bn);
+  const key = _claimKey(slotTime, slotShift, bn, srcDt); // Build 290: srcDt only from Other rows
   if(S.pendingClaims.has(key)){
     S.pendingClaims.delete(key);
   } else {
@@ -8355,7 +8384,7 @@ async function submitClaims(){
   // For Other shift, slots may span two dates (Day date + Noc date)
   // Use both dates for the pre-fetch so race checks work correctly
   const dt = S.shift === 'Other' ? today() : staffShiftDate(S.shift);
-  const nocDt = staffShiftDate('Noc');
+  const nocDt = shiftDate('Noc'); // Build 290: match the fork's composed Noc date (08:30 boundary) so morning-window race checks see the running shift's rows; non-Other paths never use this (needsBothDates is Other-gated)
   const needsBothDates = S.shift === 'Other' && nocDt !== dt;
 
   // Helper to restore the button + submitting flag from any early return path.
@@ -8521,13 +8550,14 @@ async function submitClaims(){
     const slotTime  = _k.time;
     const slotShift = _k.shift;
     const slotBN    = _k.bn; // Build 283: staged BN — threads into claimSlot in 284
-    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit, slotBN);
+    const slotDt    = _k.dt; // Build 290: staged source-shift date (Other rows only)
+    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit, slotBN, slotDt);
     if(result === 'ok'){
       results.claimed.push(slotTime);
       // Add to cached data so next iteration's max/race checks see it.
       // Build 138: use submitUnit (not live S.unit) to match what claimSlot
       // just wrote — otherwise the cache could lie if user navigated.
-      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift, IsBNBreak:false, CoveredBy: slotBN || ''});
+      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:(slotDt || dt), ShiftType:slotShift, IsBNBreak:false, CoveredBy: slotBN || ''}); // Build 290: cache mirrors the written date
     }
     else results.failed.push({ label: fmt12(slotTime), reason: result });
   }
@@ -8563,6 +8593,21 @@ async function submitClaims(){
 }
 
 async function loadOtherSlots(silent=false){
+  // ── BUILD 290: the Other rebuild — COMPOSE, DON'T RE-DERIVE ─────────────
+  // The fork assembles the SAME gate set the standard path applies, per
+  // source shift (Day @ today(), Noc @ shiftDate('Noc') — the 08:30 BN
+  // boundary, i.e. the date the running Noc's schedules and rotations live
+  // under): absorbed slot restriction · absorber-busy-elsewhere filter
+  // (getAbsorbedSlots, excludeUnit) · window-aware rotations + fallback
+  // deals (loadRotationWithFallback → row StartTime/Hours honored) ·
+  // bnStart gate · per-BN streams (287 row model; per-stream BN-break hide
+  // and findBNConflict) · cross-form overlap booking fold · reconcile-
+  // Bookings · 3C per-slot closure. Each composed row carries its source
+  // date; claims thread it through the pending key's 4th segment so the
+  // write is clock-independent (count #4 — the row-54 ghost class).
+  // LOCKSTEP CONTRACT: any gate added to the standard path's slot assembly
+  // in _loadSlotsCore must be mirrored here, and vice versa (paired note at
+  // the standard path's streams construction).
   const loader = document.getElementById('slotsLoader');
   const list   = document.getElementById('slotsList');
   const meta   = document.getElementById('slotsMeta');
@@ -8577,41 +8622,42 @@ async function loadOtherSlots(silent=false){
 
   const endMin = toMin(endTime.length === 4 ? endTime : endTime.replace(':',''));
   const nowM   = nowMin();
-  const dt     = today();
-  const nocDt  = shiftDate('Noc'); // For Noc schedule, use shift date (yesterday if after midnight)
+  const dt     = today();           // Day source-shift identity
+  const nocDt  = shiftDate('Noc');  // Noc source-shift identity (08:30 boundary)
 
   try {
-    // Fetch all schedules once + bookings
-    // Sequential spGet: schedule first, then bookings
     const otherFloor = nocDt < dt ? nocDt : dt;
-    const allSchedsRaw = await spGet(LISTS.schedule, `ShiftDate ge '${otherFloor}'`);
-    const dayBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
-    const nocBookingsRaw = nocDt !== dt ? await spGet(LISTS.bookings, `SlotDate ge '${nocDt}' and SlotDate le '${nocDt}T23'`) : [];
-    const dayScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === 'Day');
-    const nocScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === nocDt && s.ShiftType === 'Noc');
-    const dayBookings = dayBookingsRaw.filter(b => b.Unit === S.unit && b.ShiftType === 'Day');
-    const nocBookings = (nocDt !== dt ? nocBookingsRaw : dayBookingsRaw).filter(b => b.Unit === S.unit && b.ShiftType === 'Noc');
+    // Sequential spGet: schedule first, then bookings (Apps Script serializes).
+    // Build 290 (count #3): reconcileBookings on both pools so this client's
+    // fresh writes are visible during the eventual-consistency window —
+    // standard-path parity.
+    const allSchedsRaw   = await spGet(LISTS.schedule, `ShiftDate ge '${otherFloor}'`);
+    const dayBookingsRaw = reconcileBookings(await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`));
+    const nocBookingsRaw = nocDt !== dt
+      ? reconcileBookings(await spGet(LISTS.bookings, `SlotDate ge '${nocDt}' and SlotDate le '${nocDt}T23'`))
+      : [];
 
+    const dayScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt    && s.ShiftType === 'Day');
+    const nocScheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === nocDt && s.ShiftType === 'Noc');
+    // Build 290: Noc coverage judged at the Noc shift's OWN date (the old
+    // fork fed today's date into unitCoveredBy's closure checks).
     const dayCovering = dayScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Day'));
-    const nocCovering = nocScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, dt, 'Noc'));
-    // Warm rotation caches so rotation filter has data
-    // Build 255: routed through warmMany (fire-and-forget preserved).
-    syncedLS.warmMany([
+    const nocCovering = nocScheds.filter(s => s.Status !== 'inactive' && unitCoveredBy(s, S.unit, nocDt, 'Noc'));
+
+    // Warm BEFORE the gate walks read (the old fork fire-and-forgot and the
+    // first render could miss rotations; standard awaits its warms too).
+    await syncedLS.warmMany([
       ...dayCovering.map(s => rotationKey(s.BreakNurseName, dt, 'Day')),
       ...nocCovering.map(s => rotationKey(s.BreakNurseName, nocDt, 'Noc'))
     ]).catch(()=>{});
+    await warmBNStartTimes([
+      ...dayCovering.map(s => ({ name: s.BreakNurseName, date: dt,    shift: 'Day' })),
+      ...nocCovering.map(s => ({ name: s.BreakNurseName, date: nocDt, shift: 'Noc' }))
+    ]).catch(()=>{});
     warm3CStatus(dt, 'Day').catch(()=>{});
+    warm3CStatus(nocDt, 'Noc').catch(()=>{});
 
-    // ── Update coverage banner from loadOtherSlots data ──
-    // Three states:
-    //   1. No schedules at all for this unit → red "no Break Relief"
-    //   2. Schedules exist but filter produces zero claimable slots → yellow
-    //      "no Break Relief for the selected shift" (coverage ended, rotation
-    //      has no future slots for this unit, or similar)
-    //   3. Schedules exist AND slots will be shown → teal "has Break Relief"
-    // We compute the slot count AFTER the filters below, but the banner is
-    // rendered here; to handle state 2, we defer banner paint to after the
-    // filtered slot list is known (see end-of-filter block below).
+    // Banner state 1: no coverage anywhere.
     const banner = document.getElementById('coverageBanner');
     if(banner){
       if(!dayCovering.length && !nocCovering.length){
@@ -8622,32 +8668,115 @@ async function loadOtherSlots(silent=false){
         banner.style.color = 'var(--red)';
         banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)}</strong> has no Break Relief`;
       }
-      // state 2 & 3 handled after slot filter runs (so we know if slots remain)
+      // states 2 & 3 painted after the gates run (so we know if slots remain)
     }
 
-    // Build rotation sets per shift — same logic as loadSlots
-    const dayRotSlots = new Set();
-    const nocRotSlots = new Set();
-    let dayHasRotation = false, nocHasRotation = false;
-    for(const sched of dayCovering){
-      const rot = loadRotation(sched.BreakNurseName, dt, 'Day');
-      if(rot){ dayHasRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) dayRotSlots.add(sl); }); }
-    }
-    for(const sched of nocCovering){
-      const rot = loadRotation(sched.BreakNurseName, nocDt, 'Noc');
-      if(rot){ nocHasRotation = true; Object.entries(rot).forEach(([sl,u])=>{ if(u===S.unit) nocRotSlots.add(sl); }); }
-    }
-    // Only apply rotation filter if the BN has rotation data for this unit.
-    // Match loadSlots's rule: if rotation exists and this unit has any slots in
-    // it (past or future), trust it — the rotation represents the BN's full
-    // shift assignment, and out-of-rotation slots shouldn't be claimable even
-    // if all rotation slots for this unit are now in the past.
-    const useDayRotation = dayHasRotation && dayRotSlots.size > 0;
-    const useNocRotation = nocHasRotation && nocRotSlots.size > 0;
+    // Unit-scoped staff bookings per stored FORM (ShiftType as written).
+    const dayUnitB = dayBookingsRaw.filter(b => b.Unit === S.unit && b.ShiftType === 'Day' && isStaffBooking(b));
+    const nocUnitB = (nocDt !== dt ? nocBookingsRaw : dayBookingsRaw)
+      .filter(b => b.Unit === S.unit && b.ShiftType === 'Noc' && isStaffBooking(b));
+    // Bookings occupying the physical slot rendered on `armShift`, including
+    // the cross-form overlap fold (count #3): an overlap slot claimed from
+    // the Day/Noc tab is stored under the other ShiftType/date but occupies
+    // the same physical slot. Lowest Id first — the 203 first-claimed rule.
+    const bookingsAt = (time, armShift) => {
+      const pad = normSlot(time);
+      const own = (armShift === 'Day' ? dayUnitB : nocUnitB).filter(b => normSlot(b.SlotTime) === pad);
+      const foldWin = armShift === 'Day' ? 'Noc' : 'Day'; // evening window for Day rows, morning for Noc rows
+      const other = isOverlapSlot(pad, foldWin)
+        ? (armShift === 'Day' ? nocUnitB : dayUnitB).filter(b => normSlot(b.SlotTime) === pad)
+        : [];
+      return [...own, ...other].sort((a,b) => Number(a.Id) - Number(b.Id));
+    };
 
-    // Generate all slots from both shifts
-    const daySlots = generateSlots('Day').filter(s => getSlotTier(s,'Day') !== 'hardBlocked');
-    const nocSlots = generateSlots('Noc').filter(s => getSlotTier(s,'Noc') !== 'hardBlocked');
+    // Per-BN own-break slots from BOTH pools (names are unique per BN).
+    const _breakByBN = {};
+    [...dayBookingsRaw, ...nocBookingsRaw].forEach(b => {
+      if(!isBNBreak(b)) return;
+      (_breakByBN[b.NurseName] = _breakByBN[b.NurseName] || new Set()).add(normSlot(b.SlotTime));
+    });
+
+    // ── Assemble one source shift's gated slot entries ──
+    const buildArm = async (armShift, armDt, covering, rawPool) => {
+      if(!covering.length) return { entries: [], absorbed: false, suppCovering: [] };
+      const suppCovering = covering.filter(s => String(s.IsSupplemental) === '1');
+      const isAbs = covering.every(s => String(s.IsSupplemental) === '1');
+      const unitB = armShift === 'Day' ? dayUnitB : nocUnitB;
+      // Absorbed restriction (count #1): only slot times holding an active
+      // staff booking on THIS unit are offered/managed (7256 idiom).
+      const allowed = isAbs
+        ? new Set(unitB.filter(b => String(b.IsCancelled) !== '1').map(b => normSlot(b.SlotTime)))
+        : null;
+      // Absorber-busy-elsewhere (count #1, the N+3/Q2 filter): hide slots
+      // where a covering BN is committed to absorbed bookings on OTHER units.
+      const busyElsewhere = new Set();
+      if(!isAbs){
+        for(const sched of covering){
+          const _abs = await getAbsorbedSlots(sched.BreakNurseName, armDt, armShift,
+            { scheds: allSchedsRaw, bookings: rawPool }, S.unit);
+          _abs.forEach(t => busyElsewhere.add(t));
+        }
+      }
+      // Streams (counts #2 + #5a): push-walk over window-aware fallback
+      // rotations — a row's StartTime/Hours and rotation-less coverers'
+      // fallback deals both arrive through loadRotationWithFallback.
+      const streams = {}; // slot → [{raw, disp, sched}]
+      let anyRot = false;
+      for(const sched of covering){
+        const rot = loadRotationWithFallback(sched.BreakNurseName, armDt, armShift, sched);
+        if(!rot) continue;
+        anyRot = true;
+        Object.entries(rot).forEach(([sl, u]) => {
+          if(u !== S.unit) return;
+          const p = normSlot(sl);
+          (streams[p] = streams[p] || []);
+          if(!streams[p].some(e => e.raw === sched.BreakNurseName))
+            streams[p].push({ raw: sched.BreakNurseName, disp: firstName(sched.BreakNurseName), sched });
+        });
+      }
+      const streamSlots = new Set(Object.keys(streams));
+      const useRot = anyRot && streamSlots.size > 0; // standard rule: trust an existing rotation
+      // bnStart gate (count #5b), per BN, in the arm's own sortKey space.
+      const startKeyByBN = {};
+      covering.forEach(c => {
+        const v = syncedLS.get(`bnStart_${c.BreakNurseName}_${armDt}_${armShift}`);
+        if(v) startKeyByBN[c.BreakNurseName] = sortKey(v, armShift);
+      });
+      // 3C mid-shift closure (rider O2): per-slot unless manually assigned
+      // on this arm (the _3CManuallyAssigned rule, computed arm-locally).
+      const c3Manual = S.unit === '3C' && is3COpen(armDt, armShift) && covering.some(s => {
+        try { const u = JSON.parse(s.Units || '[]'); return u.includes('3C') || u.includes('C_PAIR'); }
+        catch { return false; }
+      });
+      const gen = generateSlots(armShift).filter(s => getSlotTier(s, armShift) !== 'hardBlocked');
+      const entries = [];
+      for(const s of gen){
+        const p = normSlot(s);
+        if(allowed && !allowed.has(p)) continue;
+        if(busyElsewhere.has(p)) continue;
+        if(useRot && !streamSlots.has(p)) continue;
+        if(S.unit === '3C' && !c3Manual && !is3COpenAt(slotDateTime(armDt, p, armShift))) continue;
+        const bs = bookingsAt(p, armShift);
+        // Per-stream gates: BN's own break · BN start time · booked-elsewhere
+        // (findBNConflict per stream's OWN sched — BN-A busy never hides
+        // BN-B's row; a stream keeping a bound booking always renders).
+        let sts = (streams[p] && streams[p].length) ? streams[p] : [{ raw: '', disp: '', sched: null }];
+        sts = sts.filter(st => {
+          if(st.raw && _breakByBN[st.raw] && _breakByBN[st.raw].has(p)) return false;
+          if(st.raw && startKeyByBN[st.raw] !== undefined && sortKey(p, armShift) < startKeyByBN[st.raw]) return false;
+          if(st.sched && !bs.some(b => b.CoveredBy === st.raw)
+             && findBNConflict(st.sched, p, S.unit, rawPool, armDt, armShift)) return false;
+          return true;
+        });
+        if(!sts.length && !bs.length) continue;
+        entries.push({ time: p, armShift, srcDt: armDt,
+          streams: sts.map(st => ({ raw: st.raw, disp: st.disp })), bookings: bs });
+      }
+      return { entries, absorbed: isAbs, suppCovering };
+    };
+
+    const dayArm = await buildArm('Day', dt,    dayCovering, dayBookingsRaw);
+    const nocArm = await buildArm('Noc', nocDt, nocCovering, nocDt !== dt ? nocBookingsRaw : dayBookingsRaw);
 
     // Determine if shift crosses midnight: window wraps around midnight relative to CURRENT time.
     // e.g. now=11PM, end=2PM → crosses midnight (true)
@@ -8656,53 +8785,49 @@ async function loadOtherSlots(silent=false){
     // e.g. now=11PM, end=5AM → crosses midnight (true)
     const crossesMidnight = endMin < nowM;
     // For midnight-crossing shifts, adjust all comparisons consistently:
-    // PM times stay as-is (e.g. 11:15 PM = 1395), AM times get +1440 (e.g. 3:35 AM = 1655)
-    // nowM also gets +1440 when current time is AM, so past PM slots are excluded
+    // PM times stay as-is, AM times get +1440; nowM also +1440 when current
+    // time is AM so past PM slots are excluded. (Unchanged fork convention.)
     const nowMAdj = (crossesMidnight && nowM < 12*60) ? nowM + 1440 : nowM;
     const endAdj  = crossesMidnight ? endMin + 1440 : endMin;
-    const allSlots = [
-      ...daySlots.map(s => {
-        const raw = toMin(s);
-        const sm = (crossesMidnight && raw < 12*60) ? raw + 1440 : raw;
-        return { time: s, shift: 'Day', sortM: sm };
-      }),
-      ...nocSlots.map(s => {
-        const raw = toMin(s);
-        // When NOT crossing midnight, use raw time — sortKey's +1440 offset for AM times
-        // puts them above any PM endAdj (e.g. 1:55 AM sortKey=1555 > endAdj=840) so they
-        // get wrongly filtered out. Raw time (115) compares correctly against the window.
-        const sm = crossesMidnight ? sortKey(s,'Noc') : raw;
-        return { time: s, shift: 'Noc', sortM: sm };
-      })
-    ]
-    .filter(s => {
-      const m = s.sortM;
-      return m >= nowMAdj && m <= endAdj;
-    })
-    .filter(s => s.shift === 'Day' ? dayCovering.length > 0 : nocCovering.length > 0)
-    .filter(s => !(s.shift === 'Day' && toMin(s.time) >= getOverlapRange('Noc').max)) // Day BN coverage ends at evening overlap max (8:00 PM)
-    .filter(s => {
-      // Apply rotation filter — only show slots assigned to this unit
-      if(s.shift === 'Day') return !useDayRotation || dayRotSlots.has(s.time);
-      return !useNocRotation || nocRotSlots.has(s.time);
-    })
-    .filter(s => {
-      // Hide slots where BN is on break — same as loadSlots
-      const _allOtherBNNames = [...new Set([...dayCovering, ...nocCovering].map(sc => sc.BreakNurseName))];
-      const _bnBreak = [...dayBookingsRaw, ...nocBookingsRaw].find(b =>
-        isBNBreak(b) && _allOtherBNNames.includes(b.NurseName) &&
-        String(b.SlotTime).padStart(4,'0') === s.time
-      );
-      return !_bnBreak;
-    })
-    .sort((a,b) => a.sortM - b.sortM);
+    const sortMFor = (p, armShift) => {
+      const raw = toMin(p);
+      if(armShift === 'Day') return (crossesMidnight && raw < 12*60) ? raw + 1440 : raw;
+      // When NOT crossing midnight, raw time — sortKey's +1440 for AM Noc
+      // slots would put them above any PM endAdj and wrongly filter them out.
+      return crossesMidnight ? sortKey(p, 'Noc') : raw;
+    };
+    let allEntries = [...dayArm.entries, ...nocArm.entries]
+      .map(e => ({ ...e, sortM: sortMFor(e.time, e.armShift) }))
+      .filter(e => e.sortM >= nowMAdj && e.sortM <= endAdj)
+      .filter(e => !(e.armShift === 'Day' && toMin(e.time) >= getOverlapRange('Noc').max)); // Day BN coverage ends at evening overlap max (8:00 PM)
 
-    // Banner: state 2 vs state 3 based on whether the filter produced slots.
-    // State 2: BN(s) are scheduled but no claimable slots remain (rotation's
-    // slots for this unit already past, or Day coverage doesn't extend into
-    // Other shift window). State 3: slots are available.
+    // Rider O4 (7513 idiom): seed the nurse's own in-window claims that the
+    // gates filtered out, so they stay manageable from this tab. Arms are
+    // disjoint physical ranges (Day 0835–2015, Noc 2035–0815), so a padded
+    // time identifies the entry.
+    const _sFirst = document.getElementById('nurseName').value.trim();
+    const _sExt   = document.getElementById('nurseExt').value.trim();
+    const seedName = _sFirst && /^[0-9]{5}$/.test(_sExt) ? `${toTitleCase(_sFirst)} (${_sExt})` : null;
+    if(seedName){
+      const have = new Set(allEntries.map(e => e.time));
+      [...dayUnitB, ...nocUnitB].forEach(b => {
+        if(b.NurseName !== seedName) return;
+        const p = normSlot(b.SlotTime);
+        if(have.has(p)) return;
+        const arm = b.ShiftType === 'Noc' ? 'Noc' : 'Day';
+        const sm = sortMFor(p, arm);
+        if(sm < nowMAdj || sm > endAdj) return;
+        allEntries.push({ time: p, armShift: arm,
+          srcDt: (String(b.SlotDate || '').slice(0,10) || (arm === 'Noc' ? nocDt : dt)),
+          streams: [], bookings: bookingsAt(p, arm), sortM: sm });
+        have.add(p);
+      });
+    }
+    allEntries.sort((a,b) => a.sortM - b.sortM);
+
+    // Banner states 2 & 3.
     if(banner && (dayCovering.length || nocCovering.length)){
-      if(allSlots.length === 0){
+      if(allEntries.length === 0){
         setNameCardEnabled(false);
         banner.style.display = 'block';
         banner.style.background = '#fff8dd';
@@ -8716,34 +8841,27 @@ async function loadOtherSlots(silent=false){
         banner.style.borderColor = 'var(--teal)';
         banner.style.color = 'var(--teal-dk)';
         const parts = [];
-        if(allSlots.some(s => s.shift === 'Day')) parts.push('Day');
-        if(allSlots.some(s => s.shift === 'Noc')) parts.push('Noc');
-        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)}</strong> has Break Relief (${parts.join(' & ')})!`;
+        if(allEntries.some(e => e.armShift === 'Day')) parts.push('Day');
+        if(allEntries.some(e => e.armShift === 'Noc')) parts.push('Noc');
+        let _absNote = '';
+        if(dayArm.absorbed || nocArm.absorbed){
+          const _absNames = [...new Set([...dayArm.suppCovering, ...nocArm.suppCovering]
+            .map(s => firstName(s.BreakNurseName)))].join(' and ');
+          const _absShift = [dayArm.absorbed ? 'Day' : '', nocArm.absorbed ? 'Noc' : ''].filter(Boolean).join(' & ');
+          _absNote = `<div style="font-size:.8rem;margin-top:6px;opacity:.9">&#x26a0;&#xfe0f; ${escHTML(S.unit)}'s ${escHTML(_absShift)} Break Nurse is unavailable — ${escHTML(_absNames)} can only cover the slots shown.</div>`;
+        }
+        banner.innerHTML = `&#x2713; <strong>${escHTML(S.unit)}</strong> has Break Relief (${parts.join(' & ')})!${_absNote}`;
       }
     }
 
-    if(!allSlots.length){
+    if(!allEntries.length){
       meta.textContent = '';
       list.innerHTML = '<div class="empty">No break slots available for the remainder of your shift.</div>';
       loader.style.display = 'none';
       return;
     }
 
-    // Use booking results from batch query above
-    const allBookings = [...dayBookings, ...nocBookings];
-
-    // My bookings across both shifts — read from DOM same as loadSlots
-    const _otherFirstName = document.getElementById('nurseName').value.trim();
-    const _otherExt       = document.getElementById('nurseExt').value.trim();
-    const nurseName = _otherFirstName && /^[0-9]{5}$/.test(_otherExt) ? `${toTitleCase(_otherFirstName)} (${_otherExt})` : null;
-
-    // Only show BN names for shifts that have slots in the filtered list
-    const hasDay = allSlots.some(s => s.shift === 'Day');
-    const hasNoc = allSlots.some(s => s.shift === 'Noc');
-    // Build 100: filter out frozen supps from the BN display lists. A frozen
-    // supp = IsSupp=1 AND its CoveredFrom main BN is active for that shift.
-    // Same rationale as loadSlots's coveringForDisplay: after "Let absorber
-    // keep", the supp covers specific bookings only, not unit-wide.
+    // Build 100: frozen-supp filter for the BN display names (unchanged).
     const filterFrozenSupps = (covers) => covers.filter(s => {
       if(String(s.IsSupplemental) !== '1') return true;
       if(!s.CoveredFrom) return true;
@@ -8754,18 +8872,25 @@ async function loadOtherSlots(silent=false){
       );
       return !originalActive;
     });
-    const dayCoveringForDisplay = filterFrozenSupps(dayCovering);
-    const nocCoveringForDisplay = filterFrozenSupps(nocCovering);
-    const activeDayBN = hasDay ? dayCoveringForDisplay.map(s => firstName(s.BreakNurseName)).join(', ') : '';
-    const activeNocBN = hasNoc ? nocCoveringForDisplay.map(s => firstName(s.BreakNurseName)).join(', ') : '';
+    const hasDay = allEntries.some(e => e.armShift === 'Day');
+    const hasNoc = allEntries.some(e => e.armShift === 'Noc');
+    const activeDayBN = hasDay ? filterFrozenSupps(dayCovering).map(s => firstName(s.BreakNurseName)).join(', ') : '';
+    const activeNocBN = hasNoc ? filterFrozenSupps(nocCovering).map(s => firstName(s.BreakNurseName)).join(', ') : '';
 
-    // Cache everything togglePending / renderOtherSlotsFromCache will need so
-    // subsequent pending-toggles are instant (no network round trip).
     _otherSlotRenderCache = {
-      allSlots, allBookings, nurseName, activeDayBN, activeNocBN
+      entries: allEntries,
+      allBookings: [...dayUnitB, ...nocUnitB],
+      nurseName: seedName, activeDayBN, activeNocBN
     };
 
     renderOtherSlotsFromCache();
+
+    // Rider O1 (Build 290): start the same silent-refresh timer the standard
+    // path starts at its success tail. Placement mirrored exactly — the empty
+    // and no-endTime returns above do NOT start it, matching standard.
+    clearInterval(S.refreshTmr);
+    S.refreshTmr = setInterval(silentRefreshSlots, 10000 + Math.floor(Math.random() * 3000)); // Build 215: jitter
+
     loader.style.display = 'none';
   } catch(e){
     list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
@@ -8778,23 +8903,17 @@ async function loadOtherSlots(silent=false){
 // clearPending for Other shift to avoid sluggish repeat queries.
 function renderOtherSlotsFromCache(){
   if(!_otherSlotRenderCache){ loadOtherSlots(true); return; } // fallback if no cache yet
-  const { allSlots, allBookings, nurseName, activeDayBN, activeNocBN } = _otherSlotRenderCache;
+  const { entries, allBookings, nurseName, activeDayBN, activeNocBN } = _otherSlotRenderCache;
   const list = document.getElementById('slotsList');
   const meta = document.getElementById('slotsMeta');
   if(!list) return;
 
-  // Re-compute per-render state (name/ext may have changed; pending set changes
-  // on every tap). Pull name fresh each call to stay current.
+  // Pull name fresh each call (name/ext may have changed since the load).
   const _rFirstName = document.getElementById('nurseName').value.trim();
   const _rExt       = document.getElementById('nurseExt').value.trim();
   const curName = _rFirstName && /^[0-9]{5}$/.test(_rExt) ? `${toTitleCase(_rFirstName)} (${_rExt})` : nurseName;
   const myBookings = curName ? allBookings.filter(b => b.NurseName === curName && isStaffBooking(b)) : [];
-  const myTimes    = new Set(myBookings.map(b => b.SlotTime));
-  // canClaimMore factors in: existing bookings, pending claims, and pending
-  // cancels (which reduce effective ownership). Without subtracting cancels,
-  // a nurse who owns 3 slots and stages a cancel on one will still see "Max
-  // reached" on remaining open slots, blocking the natural cancel-and-replace
-  // flow.
+  // Staged cancels reduce effective ownership — the cancel-and-replace flow.
   const myStagedCancelsOther = myBookings.filter(b => S.pendingCancels.has(b.Id)).length;
   const effectiveOwnedOther = myBookings.length - myStagedCancelsOther;
   const canClaimMore = (effectiveOwnedOther + S.pendingClaims.size) < MAX_SLOTS;
@@ -8802,83 +8921,103 @@ function renderOtherSlotsFromCache(){
   const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
   if(meta) meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
 
-  list.innerHTML = allSlots.map(({time, shift: slotShift}) => {
-    const booking = allBookings.find(b => b.SlotTime === time && b.ShiftType === slotShift && isStaffBooking(b));
-    const isMine  = myTimes.has(time);
-    const bnLabel = slotShift === 'Day' ? activeDayBN : activeNocBN;
-    const pendingKey = _claimKey(time, slotShift);
-    const isPending = S.pendingClaims.has(pendingKey);
+  const html = [];
+  for(const e of entries){
+    const { time, armShift, srcDt, streams, bookings } = e;
+    const keyAttr = `${time}|${armShift}`;
+    let maxRowShown = false;
 
-    if(isMine){
-      const myBooking = allBookings.find(b => b.SlotTime===time && b.ShiftType===slotShift && b.NurseName===curName && isStaffBooking(b));
-      const myBookingId = myBooking ? myBooking.Id : null;
-      const isCancelStaged   = myBookingId && S.pendingCancels.has(myBookingId);
-      const isTransferStaged = myBookingId && S.pendingTransfers.has(myBookingId);
-      const isPickerOpen     = myBookingId && S.pickerOpenFor === myBookingId;
-      const transferData     = isTransferStaged ? S.pendingTransfers.get(myBookingId) : null;
-      // Row visual treatment based on staging state
-      let rowStyle = 'display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;margin-bottom:6px;';
-      let timeStyle = '';
-      let nameCell;
-      if(isCancelStaged){
-        rowStyle += 'background:#fff5f5;border:1.5px solid #f5c0c0;opacity:0.7';
-        timeStyle = 'color:var(--muted);text-decoration:line-through';
-        nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(curName)}</span>`;
-      } else if(isTransferStaged){
-        rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
-        timeStyle = 'color:#a06a00;font-weight:700';
-        const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
-        nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
-      } else {
-        rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
-        timeStyle = 'font-weight:700;color:var(--teal-dk)';
-        nameCell = formatNurse(curName);
-      }
-      // Action cell
-      let actionCell = '';
-      if(myBooking && !isPast(time, slotShift)){
-        if(isCancelStaged || isTransferStaged){
-          actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${myBookingId}','${time}')">↺ Undo</button>`;
-        } else if(isPickerOpen){
-          actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
-            <button class="btn btn-danger btn-sm" onclick="pickCancel('${myBookingId}','${time}')">Cancel</button>
-            <button class="btn btn-primary btn-sm" onclick="pickTransfer('${myBookingId}','${time}','${escHTML(curName)}')">Transfer</button>
-            <button class="btn btn-ghost btn-sm" onclick="pickKeep('${time}')">Keep</button>
-          </div>`;
+    // One row per binding. Build 290 (287 model): a stream keeps its own
+    // booking via CoveredBy; an unstamped booking binds to the FIRST stream
+    // only; leftover bookings (stamped for a BN with no stream — coverage
+    // changed after the claim) still render as taken rows so no claim is
+    // ever invisible (the bMap guarantee, stream-shaped).
+    const _row = (st, booking) => {
+      const bnEsc = String(st.raw).replace(/'/g, "\\'");
+      const isMine = booking && curName && booking.NurseName === curName;
+      if(isMine){
+        const myBookingId = booking.Id;
+        const isCancelStaged   = S.pendingCancels.has(myBookingId);
+        const isTransferStaged = S.pendingTransfers.has(myBookingId);
+        const isPickerOpen     = S.pickerOpenFor === myBookingId;
+        const transferData     = isTransferStaged ? S.pendingTransfers.get(myBookingId) : null;
+        let rowStyle = 'display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;margin-bottom:6px;';
+        let timeStyle = '';
+        let nameCell;
+        if(isCancelStaged){
+          rowStyle += 'background:#fff5f5;border:1.5px solid #f5c0c0;opacity:0.7';
+          timeStyle = 'color:var(--muted);text-decoration:line-through';
+          nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(curName)}</span>`;
+        } else if(isTransferStaged){
+          rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
+          timeStyle = 'color:#a06a00;font-weight:700';
+          const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
+          nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
         } else {
-          actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${myBookingId}','${time}')">✕ Manage</button>`;
+          rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
+          timeStyle = 'font-weight:700;color:var(--teal-dk)';
+          nameCell = formatNurse(curName);
         }
-      }
-      return `<div class="slot-row mine" data-slot-key="${time}|${slotShift}" style="${rowStyle}">
+        let actionCell = '';
+        if(!isPast(time, armShift)){
+          if(isCancelStaged || isTransferStaged){
+            actionCell = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${myBookingId}','${time}')">↺ Undo</button>`;
+          } else if(isPickerOpen){
+            actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn btn-danger btn-sm" onclick="pickCancel('${myBookingId}','${time}')">Cancel</button>
+              <button class="btn btn-primary btn-sm" onclick="pickTransfer('${myBookingId}','${time}','${escHTML(curName)}')">Transfer</button>
+              <button class="btn btn-ghost btn-sm" onclick="pickKeep('${time}')">Keep</button>
+            </div>`;
+          } else {
+            actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${myBookingId}','${time}')">✕ Manage</button>`;
+          }
+        }
+        return `<div class="slot-row mine" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="${rowStyle}">
         <div class="slot-time" style="${timeStyle}">${fmt12(time)}</div>
         <div class="slot-name filled">${nameCell}</div>
         <div>${actionCell}</div>
       </div>`;
-    }
-    if(booking){
-      // Build 201: match Day/Noc (_renderSingleSlotRow line ~7286) — show the
-      // claimant's name, not a bare "Taken". Hiding the name made the slot look
-      // unmanageable on Other; with the name visible, the owning staff nurse can
-      // recognize their slot, and entering their name+ext flips this row to the
-      // mine/Manage path above (cancel/transfer/keep), same as Day/Noc.
-      return `<div class="slot-row taken" data-slot-key="${time}|${slotShift}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
+      }
+      if(booking){
+        // Build 201: show the claimant's name so the owner can recognize the
+        // slot; entering name+ext flips this row to the mine/Manage path.
+        return `<div class="slot-row taken" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
         <div class="slot-name filled">${formatNurse(booking.NurseName)}</div>
       </div>`;
-    }
-    if(!canClaimMore && !isPending){
-      return `<div class="slot-row" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
+      }
+      const pendingKey = _claimKey(time, armShift, st.raw, srcDt);
+      const isPending = S.pendingClaims.has(pendingKey);
+      if(!isPending && !canClaimMore){
+        if(maxRowShown) return '';
+        maxRowShown = true; // one informational row per slot, not one per stream
+        return `<div class="slot-row" data-slot-key="${keyAttr}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
         <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${MAX_SLOTS} slots reached</div>
       </div>`;
-    }
-
-    return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${time}|${slotShift}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${slotShift}')">
+      }
+      const bnLabel = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN);
+      return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">
       <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
       <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
-      <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${slotShift}')">${isPending?'↺ Undo':'+  Select'}</button>
+      <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">${isPending?'↺ Undo':'+  Select'}</button>
     </div>`;
-  }).join('');
+    };
+
+    const usedIdx = new Set();
+    const rows = streams.length ? streams : [{ raw: '', disp: '' }];
+    rows.forEach((st, si) => {
+      let bIdx = bookings.findIndex((b, i) => !usedIdx.has(i) && b.CoveredBy === st.raw);
+      if(bIdx < 0 && si === 0) bIdx = bookings.findIndex((b, i) => !usedIdx.has(i) && !b.CoveredBy);
+      if(bIdx >= 0) usedIdx.add(bIdx);
+      html.push(_row(st, bIdx >= 0 ? bookings[bIdx] : null));
+    });
+    bookings.forEach((b, i) => {
+      if(usedIdx.has(i)) return;
+      html.push(_row({ raw: b.CoveredBy || '', disp: '' }, b));
+    });
+  }
+  list.innerHTML = html.join('');
 }
 
 // Bug #8 (build 95, 2026-05-24): in-process dedup guard to prevent the same
@@ -8891,7 +9030,7 @@ function renderOtherSlotsFromCache(){
 // legitimate distinct claims.
 const _claimsInFlight = new Set();
 
-async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy=''){ // Build 284: coveredBy = the BN whose row was tapped (streams ruling)
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy='', srcDt=''){ // Build 284: coveredBy = the BN whose row was tapped (streams ruling) · Build 290: srcDt = source-shift date threaded from the composed Other row
   // Build 138 (2026-05-27): Capture unit at function entry. Without this,
   // submitClaims's batch loop reads S.unit fresh on each iteration — if
   // the user navigates to another unit mid-submit (via pickUnit), later
@@ -8910,7 +9049,8 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   document.getElementById('nameExtHint').style.display = 'none';
   const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
   let dt;
-  if(slotShiftOverride === 'Noc') dt = staffShiftDate('Noc');
+  if(srcDt) dt = srcDt; // Build 290 (count #4): the composed row's source-shift date — the write no longer re-derives from the wall clock, so an Other Noc-tail claim in the 06:30–08:30 window lands on the shift-START date (the row-54 ghost class is impossible by construction)
+  else if(slotShiftOverride === 'Noc') dt = staffShiftDate('Noc');
   else if(slotShiftOverride === 'Day') dt = today();
   else dt = staffShiftDate(S.shift);
 
@@ -9025,7 +9165,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // by anyone. First claim wins; this blocks the second. Runs only for overlap
     // times, so non-overlap claims pay no extra fetch.
     if(isOverlapSlot(slotTime, 'Day') || isOverlapSlot(slotTime, 'Noc')){
-      const _dNoc = staffShiftDate('Noc'), _dDay = staffShiftDate('Day');
+      const _dNoc = shiftDate('Noc'), _dDay = staffShiftDate('Day'); // Build 290: BN boundary (08:30) — after 06:30 staffShiftDate flips to today and this guard went blind to yesterday-dated Noc-form overlap rows for the whole morning window
       const _floor = _dNoc < _dDay ? _dNoc : _dDay;
       const _ceil  = _dNoc > _dDay ? _dNoc : _dDay;
       const _crossPool = reconcileBookings(await spGet(LISTS.bookings,
@@ -16260,7 +16400,7 @@ async function submitStagedActions(){
         // bookings directly, bypassing claimSlot, so an overlap slot logged here
         // could double-book one already taken on the other date. Refuse if so.
         if(isOverlapSlot(info.slotTime, 'Day') || isOverlapSlot(info.slotTime, 'Noc')){
-          const _dNoc = staffShiftDate('Noc'), _dDay = staffShiftDate('Day');
+          const _dNoc = shiftDate('Noc'), _dDay = staffShiftDate('Day'); // Build 290: BN boundary (08:30) — after 06:30 staffShiftDate flips to today and this guard went blind to yesterday-dated Noc-form overlap rows for the whole morning window
           const _floor = _dNoc < _dDay ? _dNoc : _dDay;
           const _ceil  = _dNoc > _dDay ? _dNoc : _dDay;
           const _crossPool = reconcileBookings(await spGet(LISTS.bookings,
