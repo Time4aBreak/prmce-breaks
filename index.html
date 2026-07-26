@@ -561,9 +561,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="card">
       <div class="card-label">Date Range</div>
       <div style="display:flex;gap:7px;flex-wrap:wrap;margin-bottom:10px">
-        <button class="range-btn active" id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
-        <button class="range-btn"        id="rb-ytd"  onclick="setRange('ytd',this)">Year to Date</button>
-        <button class="range-btn"        id="rb-cum"  onclick="setRange('cum',this)">All Time</button>
+        <button class="range-btn"        id="rb-week" onclick="setRange('week',this)">This Week</button>
+        <button class="range-btn active" id="rb-2wk"  onclick="setRange('twowk',this)">Last 2 Weeks</button>
+        <button class="range-btn"        id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
         <button class="range-btn"        id="rb-cust" onclick="setRange('cust',this)">Custom</button>
       </div>
       <div id="customRange" style="display:none">
@@ -575,154 +575,45 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
     </div>
 
-    <!-- Build 128 (2026-05-26): Fairness Summary — top-of-page answer
-         to "is the algorithm distributing fairly?" Three core metrics
-         per shift, plus outlier callouts. -->
-    <div class="card" id="rptFairnessCard" style="display:none">
-      <div class="card-label">⚖️ Fairness Summary</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
-        Coefficient of variation across BNs — lower is fairer. Outliers flagged below each metric.
-        Color: <span style="color:var(--teal-dk);font-weight:600">green</span> &lt;15%,
-        <span style="color:#d97706;font-weight:600">yellow</span> 15-30%,
-        <span style="color:var(--red);font-weight:600">red</span> &gt;30%.
+    <!-- Build 291: Reports rebuilt fresh — four questions, four cards.
+         Plain-English callout on top of each card, small table underneath. -->
+
+    <div id="rptStatus"></div>
+
+    <div class="card" id="rptCovScoreCard" style="display:none">
+      <div class="card-label">🛡️ Unit Coverage</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
+        For each unit: shifts with its own break nurse, shifts with only an absorber, and shifts with nobody.
       </div>
-      <div id="rptFairnessBody"></div>
+      <div id="rptCovScoreCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
+      <div id="rptCovScoreBody" style="overflow-x:auto"></div>
     </div>
 
-    <!-- KPI cards -->
-    <div class="rpt-grid" id="rptKPIs">
-      <div class="empty"><div class="spinner"></div></div>
+    <div class="card" id="rptDeliveredCard" style="display:none">
+      <div class="card-label">☕ Breaks Delivered</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
+        Staff breaks claimed per covered shift, unit by unit — coverage on paper vs breaks in hand.
+      </div>
+      <div id="rptDeliveredCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
+      <div id="rptDeliveredBody" style="overflow-x:auto"></div>
     </div>
 
-    <!-- Coverage rate bar -->
-    <div class="card" id="rptCovCard" style="display:none">
-      <div class="card-label">Break Coverage Rate</div>
-      <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:6px">
-        <span id="rptCovPct" style="font-size:2.2rem;font-weight:700;font-family:'DM Mono',monospace;color:var(--teal-dk)">—</span>
-        <span style="font-size:.8rem;color:var(--muted)">of available slots were claimed</span>
+    <div class="card" id="rptRotationCard" style="display:none">
+      <div class="card-label">🔄 Rotation Grid</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
+        Shifts each break nurse was assigned each unit (main assignments only — absorber pickups excluded).
       </div>
-      <div class="rpt-bar-wrap"><div class="rpt-bar" id="rptCovBar" style="width:0%"></div></div>
-      <div style="display:flex;justify-content:space-between;font-size:.75rem;color:var(--muted);margin-top:6px">
-        <span id="rptCovClaimed"></span>
-        <span id="rptCovAvail"></span>
-      </div>
+      <div id="rptRotationCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
+      <div id="rptRotationBody" style="overflow-x:auto"></div>
     </div>
 
-    <!-- Breaks by unit -->
-    <div class="card" id="rptUnitCard" style="display:none">
-      <div class="card-label">Breaks by Unit</div>
-      <div id="rptUnitList"></div>
-    </div>
-
-    <!-- Coverage Offered per Unit by Tier -->
-    <div class="card" id="rptTierCard" style="display:none">
-      <div class="card-label">Coverage Offered per Unit by Tier</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
-        Format <code style="background:var(--bg);padding:1px 4px;border-radius:3px">X / Y</code>: offered after BN breaks / total assigned.
-        <strong>Days Open</strong> column: dates the unit was operational / total dates in range — closed days excluded from tier totals. Tap any column header to sort.
+    <div class="card" id="rptSelfCareCard" style="display:none">
+      <div class="card-label">🧑‍⚕️ Break-Nurse Self-Care</div>
+      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
+        Own breaks logged per shift worked. The nurse covering four units who never logs a break is a flag, not a hero.
       </div>
-      <div style="margin-bottom:18px">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
-        <div id="rptTierDayTable" style="overflow-x:auto"></div>
-      </div>
-      <div>
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--noc)">🌙 Noc Shift</div>
-        <div id="rptTierNocTable" style="overflow-x:auto"></div>
-      </div>
-    </div>
-
-    <!-- BN × Unit Assignment Matrix -->
-    <div class="card" id="rptBNUnitCard" style="display:none">
-      <div class="card-label">BN × Unit Assignments</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:12px;line-height:1.4">
-        Counts how many times each BN was assigned each unit in range. Reveals whether unit spreads come from BN concentration or algorithm choice. Tap any column header to sort.
-        Cells colored relative to BN's own row mean:
-        <span style="background:rgba(220,38,38,0.2);padding:1px 6px;border-radius:3px;color:#7c1d1d;font-weight:600">over</span>
-        <span style="background:rgba(217,119,6,0.2);padding:1px 6px;border-radius:3px;font-weight:600">elevated</span>
-        <span style="background:rgba(3,105,161,0.15);padding:1px 6px;border-radius:3px;color:#0c4a6e">under</span>
-        — for BNs who cover multiple units. Single-unit BNs unhighlighted.
-      </div>
-      <div style="margin-bottom:18px">
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--day)">☀️ Day Shift</div>
-        <div id="rptBNUnitDayTable" style="overflow-x:auto"></div>
-      </div>
-      <div>
-        <div style="font-size:.85rem;font-weight:600;margin-bottom:6px;display:flex;align-items:center;gap:6px;color:var(--noc)">🌙 Noc Shift</div>
-        <div id="rptBNUnitNocTable" style="overflow-x:auto"></div>
-      </div>
-    </div>
-
-    <!-- Popular time slots -->
-    <div class="card" id="rptTimeCard" style="display:none">
-      <div class="card-label">Most In-Demand Break Times</div>
-      <div id="rptTimeList"></div>
-    </div>
-
-    <!-- Break nurse workload -->
-    <div class="card" id="rptBNCard" style="display:none">
-      <div class="card-label">Break Nurse Workload</div>
-      <div id="rptBNList"></div>
-    </div>
-
-    <!-- Shift breakdown -->
-    <div class="card" id="rptShiftCard" style="display:none">
-      <div class="card-label">Day vs Noc Breakdown</div>
-      <div id="rptShiftList"></div>
-    </div>
-
-    <!-- Coverage Volume: Slots per BN -->
-    <div class="card" id="rptVolBNCard" style="display:none">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-label" style="margin:0">🩺 Slots Covered per Break Nurse</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="range-btn active" id="volbn-both" onclick="setVolBNFilter('both',this)">Both</button>
-          <button class="range-btn" id="volbn-day" onclick="setVolBNFilter('Day',this)">Day</button>
-          <button class="range-btn" id="volbn-noc" onclick="setVolBNFilter('Noc',this)">Noc</button>
-        </div>
-      </div>
-      <div id="rptVolBNList"></div>
-    </div>
-
-    <!-- Unit Engagement Rankings -->
-    <div class="card" id="rptEngCard" style="display:none">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-label" style="margin:0">📊 Unit Engagement Rankings</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="range-btn active" id="eng-claimed" onclick="setEngFilter('claimed',this)">Claim Rate</button>
-          <button class="range-btn" id="eng-unclaimed" onclick="setEngFilter('unclaimed',this)">Unclaimed Rate</button>
-        </div>
-      </div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">
-        Based on slots actually offered to each unit by the block rotation
-      </div>
-      <div id="rptEngList"></div>
-    </div>
-
-    <!-- Slot Popularity Rankings -->
-    <div class="card" id="rptPopCard" style="display:none">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-label" style="margin:0">⏰ Slot Popularity Ranking</div>
-        <div style="display:flex;gap:5px;flex-wrap:wrap">
-          <button class="range-btn active" id="pop-both" onclick="setPopFilter('both',this)">Both</button>
-          <button class="range-btn" id="pop-day" onclick="setPopFilter('Day',this)">Day</button>
-          <button class="range-btn" id="pop-noc" onclick="setPopFilter('Noc',this)">Noc</button>
-        </div>
-      </div>
-      <div id="rptPopList"></div>
-    </div>
-
-    <!-- Break Utilization -->
-    <div class="card" id="rptUtilCard" style="display:none">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-        <div class="card-label" style="margin:0">📈 Break Utilization</div>
-        <div style="display:flex;gap:6px;flex-wrap:wrap">
-          <button class="range-btn active" id="util-all"    onclick="setUtilFilter('all',this)">All Units</button>
-          <button class="range-btn"        id="util-unit"   onclick="setUtilFilter('unit',this)">Per Unit</button>
-          <button class="range-btn"        id="util-bn"     onclick="setUtilFilter('bn',this)">Per Break Nurse</button>
-          <button class="range-btn"        id="util-bnunit" onclick="setUtilFilter('bnunit',this)">Per BN per Unit</button>
-        </div>
-      </div>
-      <div id="rptUtilList"></div>
+      <div id="rptSelfCareCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
+      <div id="rptSelfCareBody" style="overflow-x:auto"></div>
     </div>
 
   </div><!-- /rptPanel -->
@@ -1836,7 +1727,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-22-290';
+const APP_VERSION = '2026-07-26-291';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17868,331 +17759,9 @@ async function _confirmAllBreaksFallback(dt, shift){
 
 
 // ═══════════════════════════════════════════════════════
-// BREAK UTILIZATION REPORT
-// ═══════════════════════════════════════════════════════
-let _utilBookings = [], _utilScheds = [], _utilFilter = 'all';
-
-function setUtilFilter(filter, btn){
-  _utilFilter = filter;
-  document.querySelectorAll('#rptUtilCard .range-btn').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  renderUtilization(_utilBookings, _utilScheds, filter);
-}
-
-function renderUtilization(bookings, scheds, filter){
-  _utilBookings = bookings;
-  _utilScheds = scheds;
-  _utilFilter = filter;
-
-  const list = document.getElementById('rptUtilList');
-  if(!list) return;
-
-  const staffBookings = bookings.filter(b => isStaffBooking(b));
-  const confirmed  = staffBookings.filter(b => isConfirmed(b));
-  const notTaken   = staffBookings.filter(b => isNotTaken(b));
-  const pending    = staffBookings.filter(b => isPending(b));
-
-  // Build schedule map for BN lookup
-  const schedMap = {};
-  scheds.forEach(s => {
-    let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-    units.forEach(u => {
-      schedMap[`${s.ShiftDate}|${s.ShiftType}|${u}`] = s.BreakNurseName;
-    });
-  });
-
-  function utilRow(label, conf, notT, pend){
-    const total = conf + notT + pend;
-    if(!total) return '';
-    const confPct  = Math.round(conf/total*100);
-    const notTPct  = Math.round(notT/total*100);
-    const pendPct  = 100 - confPct - notTPct;
-    return `<div style="margin-bottom:14px">
-      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:4px">
-        <span style="font-size:.875rem;font-weight:500">${label}</span>
-        <span style="font-size:.75rem;color:var(--muted)">${total} claimed</span>
-      </div>
-      <div style="display:flex;height:8px;border-radius:4px;overflow:hidden;gap:1px">
-        ${conf  ? `<div style="flex:${confPct};background:var(--green);border-radius:4px 0 0 4px" title="Confirmed: ${conf}"></div>` : ''}
-        ${notT  ? `<div style="flex:${notTPct};background:var(--muted)" title="Not Taken: ${notT}"></div>` : ''}
-        ${pend  ? `<div style="flex:${pendPct};background:var(--border)" title="Pending: ${pend}"></div>` : ''}
-      </div>
-      <div style="display:flex;gap:12px;margin-top:4px;font-size:.72rem;color:var(--muted)">
-        <span style="color:var(--green)">✓ ${conf} confirmed</span>
-        <span>✗ ${notT} not taken</span>
-        <span>⏳ ${pend} pending</span>
-      </div>
-    </div>`;
-  }
-
-  if(filter === 'all'){
-    list.innerHTML = utilRow('All Units Combined',
-      confirmed.length, notTaken.length, pending.length) ||
-      '<div class="empty">No data yet.</div>';
-
-  } else if(filter === 'unit'){
-    const units = [...new Set(staffBookings.map(b => b.Unit))].sort();
-    list.innerHTML = units.map(u => {
-      const uBook = staffBookings.filter(b => b.Unit === u);
-      const uConf = uBook.filter(b => isConfirmed(b)).length;
-      const uNot  = uBook.filter(b => isNotTaken(b)).length;
-      const uPend = uBook.filter(b => isPending(b)).length;
-      return utilRow(u, uConf, uNot, uPend);
-    }).join('') || '<div class="empty">No data yet.</div>';
-
-  } else if(filter === 'bn'){
-    const bns = [...new Set(staffBookings.map(b => {
-      const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      return b.CreatedBy || schedMap[key] || 'Unknown';
-    }))].sort();
-    list.innerHTML = bns.map(bn => {
-      const bnBook = staffBookings.filter(b => {
-        const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-        return (b.CreatedBy || schedMap[key] || 'Unknown') === bn;
-      });
-      const bConf = bnBook.filter(b => isConfirmed(b)).length;
-      const bNot  = bnBook.filter(b => isNotTaken(b)).length;
-      const bPend = bnBook.filter(b => isPending(b)).length;
-      return utilRow(bn, bConf, bNot, bPend);
-    }).join('') || '<div class="empty">No data yet.</div>';
-
-  } else if(filter === 'bnunit'){
-    // Group by BN + Unit
-    const groups = {};
-    staffBookings.forEach(b => {
-      const key2 = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      const bn = b.CreatedBy || schedMap[key2] || 'Unknown';
-      const gkey = `${bn} — ${b.Unit}`;
-      if(!groups[gkey]) groups[gkey] = [];
-      groups[gkey].push(b);
-    });
-    list.innerHTML = Object.entries(groups).sort((a,b)=>a[0].localeCompare(b[0])).map(([label, bks]) => {
-      const gConf = bks.filter(b => isConfirmed(b)).length;
-      const gNot  = bks.filter(b => isNotTaken(b)).length;
-      const gPend = bks.filter(b => isPending(b)).length;
-      return utilRow(label, gConf, gNot, gPend);
-    }).join('') || '<div class="empty">No data yet.</div>';
-  }
-}
-
-
-// ═══════════════════════════════════════════════════════
-// ANALYTICS — NEW METRICS
-// ═══════════════════════════════════════════════════════
-
-let _rptVolBNShift = 'both';
-let _rptEngFilter  = 'claimed';
-let _rptPopFilter  = 'both';
-let _rptAllBookings = [], _rptAllScheds = [];
-
-function setVolBNFilter(f, btn){
-  _rptVolBNShift = f;
-  document.querySelectorAll('#rptVolBNCard .range-btn').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  renderVolBN(_rptAllBookings, _rptAllScheds);
-}
-
-function setEngFilter(f, btn){
-  _rptEngFilter = f;
-  document.querySelectorAll('#rptEngCard .range-btn').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  renderEngagement(_rptAllBookings, _rptAllScheds);
-}
-
-function setPopFilter(f, btn){
-  _rptPopFilter = f;
-  document.querySelectorAll('#rptPopCard .range-btn').forEach(b => b.classList.remove('active'));
-  if(btn) btn.classList.add('active');
-  renderPopularity(_rptAllBookings);
-}
-
-// ── Slots covered per Break Nurse ────────────────────
-function renderVolBN(bookings, scheds){
-  _rptAllBookings = bookings; _rptAllScheds = scheds;
-  const list = document.getElementById('rptVolBNList');
-  if(!list) return;
-
-  const staffBookings = bookings.filter(b => isStaffBooking(b));
-  const confirmed = staffBookings.filter(b => isConfirmed(b));
-
-  // Build schedMap: unit+date+shift -> BN
-  const schedMap = {};
-  scheds.forEach(s => {
-    let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-    units.forEach(u => {
-      schedMap[`${s.ShiftDate}|${s.ShiftType}|${u}`] = { bn: s.BreakNurseName, shift: s.ShiftType };
-    });
-  });
-
-  // Count confirmed breaks per BN, optionally filtered by shift
-  const byBN = {};
-  confirmed.forEach(b => {
-    const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-    const sched = schedMap[key];
-    if(!sched) return;
-    if(_rptVolBNShift !== 'both' && sched.shift !== _rptVolBNShift) return;
-    // Attribution-first: a manual break logged via CreatedBy credits the
-    // creator, not the unit's covering BN. Shift bucket still comes from
-    // the unit's schedule.
-    const attrBN = b.CreatedBy || sched.bn;
-    if(!byBN[attrBN]) byBN[attrBN] = { total: 0, day: 0, noc: 0 };
-    byBN[attrBN].total++;
-    byBN[attrBN][sched.shift === 'Day' ? 'day' : 'noc']++;
-  });
-
-  const sorted = Object.entries(byBN).sort((a,b) => b[1].total - a[1].total);
-  if(!sorted.length){ list.innerHTML = '<div class="empty">No confirmed breaks in this range.</div>'; return; }
-
-  const maxVal = sorted[0][1].total;
-  list.innerHTML = sorted.map(([bn, counts], idx) => {
-    const val = _rptVolBNShift === 'both' ? counts.total
-      : _rptVolBNShift === 'Day' ? counts.day : counts.noc;
-    return `<div class="rpt-row">
-      <div style="min-width:20px;font-size:.72rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
-      <div class="rpt-row-lbl">${firstName(bn)}</div>
-      <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(val/maxVal*100)}%"></div></div></div>
-      <div style="text-align:right">
-        <div class="rpt-row-val">${val}</div>
-        ${_rptVolBNShift === 'both' ? `<div style="font-size:.7rem;color:var(--muted);display:inline-flex;align-items:center;gap:2px">${counts.day}${sunSVG(10)} · ${counts.noc}${moonSVG(10)}</div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-
-  document.getElementById('rptVolBNCard').style.display = 'block';
-}
-
-// ── Unit Engagement Rankings ────────────────────────
-function renderEngagement(bookings, scheds){
-  _rptAllBookings = bookings; _rptAllScheds = scheds;
-  const list = document.getElementById('rptEngList');
-  if(!list) return;
-
-  const staffBookings = bookings.filter(b => isStaffBooking(b));
-
-  // Calculate offered slots per unit using block rotation
-  // For each assignment, calculate how many slots were offered to each unit
-  const offeredByUnit  = {};
-  const claimedByUnit  = {};
-
-  // Count actual claimed breaks per unit
-  staffBookings.forEach(b => {
-    claimedByUnit[b.Unit] = (claimedByUnit[b.Unit] || 0) + 1;
-  });
-
-  // Estimate offered slots: each assignment = ~NUM_SLOTS/numUnits per unit
-  // This is a simplification — proper calculation needs stored rotation data
-  const unitAssignmentDays = {};
-  scheds.forEach(s => {
-    let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-    // Count C_PAIR as one unit
-    const normalized = units.filter(u => u !== '3C' && u !== '4C');
-    if(units.includes('3C') || units.includes('4C')) normalized.push('C_PAIR');
-    normalized.forEach(u => {
-      unitAssignmentDays[u] = (unitAssignmentDays[u] || 0) + 1;
-    });
-    if(units.includes('3C')) { unitAssignmentDays['3C'] = (unitAssignmentDays['3C']||0) + 1; }
-    if(units.includes('4C')) { unitAssignmentDays['4C'] = (unitAssignmentDays['4C']||0) + 1; }
-  });
-
-  // Offered ≈ (days assigned) × (NUM_SLOTS / avg units per shift)
-  // Use a fixed estimate of 12 slots per unit per shift (36 total ÷ ~3 units)
-  const SLOTS_PER_UNIT = 12;
-  Object.keys(unitAssignmentDays).forEach(u => {
-    offeredByUnit[u] = (offeredByUnit[u] || 0) + unitAssignmentDays[u] * SLOTS_PER_UNIT;
-  });
-
-  const allUnits = [...new Set([...Object.keys(offeredByUnit), ...Object.keys(claimedByUnit)])];
-  const rows = allUnits.map(u => {
-    const offered = offeredByUnit[u] || 0;
-    const claimed = claimedByUnit[u] || 0;
-    const claimRate   = offered > 0 ? claimed / offered : 0;
-    const unclaimRate = offered > 0 ? (offered - claimed) / offered : 0;
-    return { unit: u, offered, claimed, claimRate, unclaimRate };
-  });
-
-  const sorted = [...rows].sort((a,b) =>
-    _rptEngFilter === 'claimed' ? b.claimRate - a.claimRate : b.unclaimRate - a.unclaimRate
-  );
-
-  if(!sorted.length){ list.innerHTML = '<div class="empty">No data in this range.</div>'; return; }
-
-  const maxRate = Math.max(...sorted.map(r => _rptEngFilter === 'claimed' ? r.claimRate : r.unclaimRate));
-
-  list.innerHTML = sorted.map((r, idx) => {
-    const rate = _rptEngFilter === 'claimed' ? r.claimRate : r.unclaimRate;
-    const pct  = Math.round(rate * 100);
-    const color = _rptEngFilter === 'claimed'
-      ? (pct >= 70 ? 'var(--green)' : pct >= 40 ? 'var(--teal)' : 'var(--muted)')
-      : (pct >= 50 ? 'var(--red)' : pct >= 25 ? 'var(--day)' : 'var(--teal)');
-    return `<div class="rpt-row">
-      <div style="min-width:20px;font-size:.72rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
-      <div class="rpt-row-lbl" style="min-width:52px;font-family:'DM Mono',monospace;font-size:.85rem">${r.unit}</div>
-      <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${maxRate>0?Math.round(rate/maxRate*100):0}%;background:${color}"></div></div></div>
-      <div style="text-align:right">
-        <div class="rpt-row-val" style="color:${color}">${pct}%</div>
-        <div style="font-size:.7rem;color:var(--muted)">${r.claimed} / ${r.offered} slots</div>
-      </div>
-    </div>`;
-  }).join('');
-
-  document.getElementById('rptEngCard').style.display = 'block';
-}
-
-// ── Slot Popularity Ranking ─────────────────────────
-function renderPopularity(bookings){
-  _rptAllBookings = bookings;
-  const list = document.getElementById('rptPopList');
-  if(!list) return;
-
-  const staffBookings = bookings.filter(b => isStaffBooking(b));
-  const filtered = _rptPopFilter === 'both' ? staffBookings
-    : staffBookings.filter(b => b.ShiftType === _rptPopFilter);
-
-  if(!filtered.length){ list.innerHTML = '<div class="empty">No claimed breaks in this range.</div>'; return; }
-
-  // Count claims per slot time
-  const bySlot = {};
-  filtered.forEach(b => {
-    bySlot[b.SlotTime] = (bySlot[b.SlotTime] || 0) + 1;
-  });
-
-  const sorted = Object.entries(bySlot).sort((a,b) => b[1] - a[1]);
-  const maxCount = sorted[0][1];
-
-  // Show top 15 + bottom 5
-  const top = sorted.slice(0, 15);
-  const bottom = sorted.slice(-5).reverse();
-
-  function slotRows(rows, label){
-    return `<div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin:10px 0 6px;padding:0 2px">${label}</div>` +
-    rows.map(([slotTime, count], idx) => {
-      const pct = Math.round(count/maxCount*100);
-      const tier = _rptPopFilter !== 'both' ? getSlotTier(slotTime, _rptPopFilter) : '';
-      const tierLabel = tier === 'earlyLow' ? '↑ early'
-        : tier === 'lateLow' ? '↓ late'
-        : tier === 'thirdLow' ? '↓ end'
-        : tier === 'hardBlocked' ? '🚫'
-        : '';
-      return `<div class="rpt-row">
-        <div style="min-width:20px;font-size:.72rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
-        <div style="flex:1;font-family:'DM Mono',monospace;font-size:.85rem">${fmt12(slotTime)}</div>
-        ${tierLabel ? `<div style="font-size:.7rem;color:var(--muted);min-width:40px">${tierLabel}</div>` : ''}
-        <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${pct}%"></div></div></div>
-        <div class="rpt-row-val" style="min-width:30px;text-align:right">${count}</div>
-      </div>`;
-    }).join('');
-  }
-
-  list.innerHTML = slotRows(top, `Top ${top.length} most claimed`)
-    + (sorted.length > 15 ? slotRows(bottom, 'Least claimed') : '');
-
-  document.getElementById('rptPopCard').style.display = 'block';
-}
-
-// ═══════════════════════════════════════════════════════
 // REPORTS TAB
 // ═══════════════════════════════════════════════════════
-const RPT = { range: 'mtd', from: '', to: '', unlocked: false };
+const RPT = { range: 'twowk', from: '', to: '', unlocked: false };
 
 function unlockReports(){
   const entered = document.getElementById('rptPwInput').value;
@@ -18248,16 +17817,20 @@ function onReportDateChange(which){
 function getRangeDates(){
   const t = today();
   const now = new Date();
+  const daysAgo = n => {
+    const d = new Date(); d.setDate(d.getDate() - n);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  };
   switch(RPT.range){
+    case 'week':  return { from: daysAgo(6),  to: t };  // last 7 days incl. today
+    case 'twowk': return { from: daysAgo(13), to: t };  // last 14 days incl. today
     case 'mtd': {
       const f = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
       return { from: f, to: t };
     }
-    case 'ytd': return { from: `${now.getFullYear()}-01-01`, to: t };
-    case 'cum': return { from: '2000-01-01', to: '9999-12-31' };
     case 'cust': return {
       from: document.getElementById('rptFrom').value || t,
-      to:   document.getElementById('rptTo').value   || t
+    to:   document.getElementById('rptTo').value   || t
     };
     default: return { from: t, to: t };
   }
@@ -18271,800 +17844,259 @@ function fmtDateRange(from, to){
 }
 
 // ═══════════════════════════════════════════════════════
-// Coverage Offered per Unit by Tier — answers
-// "How many slots is each unit offered per tier?"
-// (Foundation for fairness analysis.)
+// REPORTS — Build 291 fresh rebuild. Four questions, four cards:
+//   1 Unit Coverage        "was every unit covered?"
+//   2 Breaks Delivered     "did staff actually get breaks?"
+//   3 Rotation Grid        "are BNs rotating between units fairly?"
+//   4 BN Self-Care         "are BNs taking their own breaks?"
+// One plain-English callout per card, table underneath. Everything is
+// computed from BNSchedule + BNBookings in range. Noc rows carry the
+// shift-START date by convention (ShiftDate / SlotDate invariants), so
+// shifts bucket correctly with no clock math. Cancels are deleted rows —
+// reports count what stood. Tab stays behind the portal password.
 // ═══════════════════════════════════════════════════════
-const _TIER_UNITS = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S'];
-const _TIER_WING_FLOOR = {
-  '3A':1,'4A':2,'5A':3,'6A':4,'7A':5,'3C':6,'4C':7,
-  '6N':8,'7N':9,'8N':10,'8S':11,'9N':12,'9S':13,'10N':14,'10S':15
-};
-// 2026-05-22: thirdLow tier retired — slots moved to lateLow. Column dropped
-// from the per-tier report below.
-const _TIER_NAMES = ['earlyLow','prime','lateLow'];
 
-let _tierMatrixData = { Day: [], Noc: [] };
-let _tierSort = { Day: {col:'unit', dir:'asc'}, Noc: {col:'unit', dir:'asc'} };
+// Lazy: WING_* constants are declared later in the file (rotation engine);
+// arrow bodies evaluate at call time, so this is safe. Real units only —
+// the C_PAIR token is expanded, never counted as a unit.
+const _rptUnits = () => [...WING_A, ...WING_C_PAIR, ...WING_D];
 
-function _computeTierMatrix(scheds, bnBreaks, shift, datesByShift){
-  // Index BN breaks for this shift by name+date → set of slot times
-  const breakIndex = {};
-  bnBreaks.filter(b => b.ShiftType === shift).forEach(b => {
-    const date = String(b.SlotDate).slice(0,10);
-    const key = `${b.NurseName}|${date}`;
-    if(!breakIndex[key]) breakIndex[key] = new Set();
-    breakIndex[key].add(normSlot(b.SlotTime));
-  });
-
-  // Initialize matrix
-  const matrix = {};
-  _TIER_UNITS.forEach(u => {
-    matrix[u] = { open: 0 };
-    _TIER_NAMES.forEach(t => matrix[u][t] = { raw: 0, eff: 0 });
-  });
-
-  // Count open shifts per unit across all dates where any BN was scheduled
-  datesByShift.forEach(date => {
-    _TIER_UNITS.forEach(u => {
-      if(isUnitOpenForShift(u, date, shift)) matrix[u].open++;
-    });
-  });
-
-  // Walk schedule rows of this shift, load each BN's rotation, tally cells
-  scheds.filter(s => s.ShiftType === shift).forEach(s => {
-    const date = String(s.ShiftDate).slice(0,10);
-    const rotation = loadRotationWithFallback(s.BreakNurseName, date, shift, s);
-    if(!rotation) return;
-    const bnBreakSet = breakIndex[`${s.BreakNurseName}|${date}`] || new Set();
-    Object.entries(rotation).forEach(([slot, unit]) => {
-      if(!matrix[unit]) return; // skip C_PAIR or unknown
-      const slotKey = normSlot(slot);
-      const tier = getSlotTier(slotKey, shift);
-      if(!_TIER_NAMES.includes(tier)) return; // skip hardBlocked
-      matrix[unit][tier].raw++;
-      if(!bnBreakSet.has(slotKey)) matrix[unit][tier].eff++;
-    });
-  });
-
-  return _TIER_UNITS.map(u => {
-    const m = matrix[u];
-    const totalRaw = _TIER_NAMES.reduce((a,t) => a + m[t].raw, 0);
-    const totalEff = _TIER_NAMES.reduce((a,t) => a + m[t].eff, 0);
-    return {
-      unit: u,
-      shiftsOpen: m.open,
-      shiftsTotal: datesByShift.size,
-      earlyLow: m.earlyLow, prime: m.prime, lateLow: m.lateLow,
-      totalRaw, totalEff
-    };
-  });
+function _rptRowUnits(s){
+  try {
+    const u = JSON.parse(s.Units || '[]');
+    const out = [];
+    u.forEach(x => x === 'C_PAIR' ? out.push('3C','4C') : out.push(x));
+    return out;
+  } catch { return []; }
 }
+const _rptActive = s => s.Status !== 'inactive';
+const _rptIsSupp = s => String(s.IsSupplemental) === '1';
 
-function _renderTierMatrix(rows, shift){
-  const sort = _tierSort[shift];
-  const sorted = [...rows].sort((a,b) => {
-    let av, bv;
-    switch(sort.col){
-      case 'unit':   av = _TIER_WING_FLOOR[a.unit] || 99; bv = _TIER_WING_FLOOR[b.unit] || 99; break;
-      case 'shifts': av = a.shiftsOpen; bv = b.shiftsOpen; break;
-      case 'total':  av = a.totalEff;  bv = b.totalEff; break;
-      default:       av = a[sort.col]?.eff ?? 0; bv = b[sort.col]?.eff ?? 0;
-    }
-    return sort.dir === 'asc' ? av - bv : bv - av;
+// ── Card 1: Unit Coverage ──────────────────────────────────────────────
+function _rptCoverage(scheds){
+  // A "shift instance" is a (date, shift) pair where the app was in use at
+  // all. Days with zero rows are skipped entirely rather than counted as
+  // fifteen uncovered units — keeps sparse history honest.
+  const inst = {};
+  scheds.forEach(s => {
+    const sh = s.ShiftType;
+    if(sh !== 'Day' && sh !== 'Noc') return;
+    const d = String(s.ShiftDate).slice(0,10);
+    (inst[`${d}|${sh}`] = inst[`${d}|${sh}`] || []).push(s);
   });
-
-  const ind = c => sort.col === c ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const thStyle = 'cursor:pointer;padding:6px 4px;font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);user-select:none;white-space:nowrap';
-  const tdStyle = 'padding:6px 4px;text-align:center;font-family:"DM Mono",monospace;font-size:.8rem;border-bottom:1px solid var(--border)';
-  const tdUnitStyle = 'padding:6px 4px;text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--border)';
-
-  const head = `<tr>
-    <th style="${thStyle};text-align:left" onclick="sortTierMatrix('${shift}','unit')">Unit${ind('unit')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','shifts')">Days Open${ind('shifts')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','earlyLow')">Early${ind('earlyLow')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','prime')">Prime${ind('prime')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','lateLow')">Late${ind('lateLow')}</th>
-    <th style="${thStyle}" onclick="sortTierMatrix('${shift}','total')">Total${ind('total')}</th>
-  </tr>`;
-
-  const body = sorted.map(r => {
-    const dim = r.shiftsOpen === 0 ? 'opacity:0.45' : '';
-    return `<tr style="${dim}">
-      <td style="${tdUnitStyle}">${r.unit}</td>
-      <td style="${tdStyle}">${r.shiftsOpen}/${r.shiftsTotal}</td>
-      <td style="${tdStyle}">${r.earlyLow.eff}/${r.earlyLow.raw}</td>
-      <td style="${tdStyle}">${r.prime.eff}/${r.prime.raw}</td>
-      <td style="${tdStyle}">${r.lateLow.eff}/${r.lateLow.raw}</td>
-      <td style="${tdStyle};font-weight:600">${r.totalEff}/${r.totalRaw}</td>
-    </tr>`;
-  }).join('');
-
-  return `<table style="width:100%;border-collapse:collapse">
-    <thead>${head}</thead>
-    <tbody>${body}</tbody>
-  </table>`;
-}
-
-function sortTierMatrix(shift, col){
-  const s = _tierSort[shift];
-  if(s.col === col){
-    s.dir = s.dir === 'asc' ? 'desc' : 'asc';
-  } else {
-    s.col = col;
-    s.dir = col === 'unit' ? 'asc' : 'desc';
-  }
-  const tbl = document.getElementById(`rptTier${shift}Table`);
-  if(tbl) tbl.innerHTML = _renderTierMatrix(_tierMatrixData[shift], shift);
-}
-
-// ═══════════════════════════════════════════════════════
-// BN × Unit assignment matrix — answers
-// "Are spreads driven by BN concentration or algorithm bias?"
-// One row per BN. Columns = units they were assigned, count = days
-// in range. Closed-unit columns excluded; C-wing columns shown only
-// if any BN actually had them assigned in this range.
-// ═══════════════════════════════════════════════════════
-let _bnUnitMatrixData = { Day: {bns:[], units:[]}, Noc: {bns:[], units:[]} };
-let _bnUnitSort = { Day: {col:'bn', dir:'asc'}, Noc: {col:'bn', dir:'asc'} };
-
-function _computeBNUnitMatrix(scheds, shift, datesByShift){
-  // counts[bn][unit] = number of days that BN was assigned that unit
-  const counts = {};
-  const unitsSeen = new Set();
-  // Build 96 (2026-05-24): track shifts worked per BN, so the table can
-  // surface "Avg units per shift" alongside total assignments. A "shift
-  // worked" = one active main schedule row (not supplemental, not inactive).
-  // Same filtering as the assignment count below.
-  const shiftsByBN = {};
-  // Build 98: per-shift unit-count distribution and C_PAIR usage. For the
-  // expandable row that shows the workload mix per BN — exposes whether
-  // a BN's lower Avg/Sh comes from many small shifts vs fewer large ones,
-  // and whether C_PAIR (3C+4C combined) is concentrated on certain BNs.
-  // distribution[bn] = { '1': N, '2': M, '3': K, '4': J, '5+': L }
-  // cpairShifts[bn]  = count of shifts that included C_PAIR
-  const distribution = {};
-  const cpairShifts  = {};
-
-  // Build 131 (2026-05-26): Track per-BN scheduled dates so we can compute
-  // opportunities[bn][unit] = days where BN was scheduled AND unit was open.
-  // This drives the rate-based fairness metric (assignments / opportunities)
-  // which gives apples-to-apples comparison across BNs with different shift
-  // counts AND across units with different open-day counts.
-  const bnDates = {};
-
-  scheds.filter(s => s.ShiftType === shift && s.Status !== 'inactive' && String(s.IsSupplemental) !== '1').forEach(s => {
-    const bn = s.BreakNurseName;
-    if(!bn) return;
-    const date = String(s.ShiftDate).slice(0,10);
-    let rawUnits = [];
-    try { rawUnits = JSON.parse(s.Units || '[]'); } catch {}
-    // Expand C_PAIR to its open halves at the row's date; drop closed units.
-    const units = filterClosedUnits(expandCPair(rawUnits, date, shift), date, shift);
-    if(!counts[bn]) counts[bn] = {};
-    if(!bnDates[bn]) bnDates[bn] = new Set();
-    bnDates[bn].add(date);
-    // Count this shift even if all units happened to be closed — the BN
-    // was still scheduled. A row with empty Units after closure should
-    // not silently disappear from the workload calc.
-    shiftsByBN[bn] = (shiftsByBN[bn] || 0) + 1;
+  const units = _rptUnits();
+  const per = {}; units.forEach(u => per[u] = { main:0, absorbed:0, none:0 });
+  const keys = Object.keys(inst);
+  keys.forEach(k => {
+    const rows = inst[k].filter(_rptActive);
     units.forEach(u => {
-      counts[bn][u] = (counts[bn][u] || 0) + 1;
-      unitsSeen.add(u);
-    });
-    // Distribution bucket — clamp at 5+ so wide assignments don't blow up
-    // the chart. Effective unit count (post-expansion / post-closure).
-    if(!distribution[bn]) distribution[bn] = {};
-    const bucket = units.length >= 5 ? '5+' : String(units.length);
-    distribution[bn][bucket] = (distribution[bn][bucket] || 0) + 1;
-    // C_PAIR detection — check the RAW units array, not expanded
-    if(rawUnits.includes('C_PAIR')){
-      cpairShifts[bn] = (cpairShifts[bn] || 0) + 1;
-    }
-  });
-
-  // Sort units in wing-then-floor order, filtered to only ones we saw
-  const orderedUnits = _TIER_UNITS.filter(u => unitsSeen.has(u));
-
-  // Build 130 (2026-05-26): Compute open-days per unit for this shift.
-  // Used by Fairness Summary to weight unit-share CV — units that were
-  // operational rarely (e.g., 5A, 3C) shouldn't pull the overall metric
-  // up as much as units that ran daily.
-  const openDaysPerUnit = {};
-  if(datesByShift){
-    orderedUnits.forEach(u => { openDaysPerUnit[u] = 0; });
-    datesByShift.forEach(date => {
-      orderedUnits.forEach(u => {
-        if(isUnitOpenForShift(u, date, shift)) openDaysPerUnit[u]++;
-      });
-    });
-  }
-
-  // Build 131 (2026-05-26): Compute opportunities per (BN, unit) — days
-  // both BN was scheduled AND unit was open. Drives the rate-based
-  // fairness metric. Without this, a closed unit shows up as "low
-  // coverage" in raw counts even though the algorithm correctly excluded
-  // it during assignment.
-  const opportunities = {};
-  Object.keys(bnDates).forEach(bn => {
-    opportunities[bn] = {};
-    orderedUnits.forEach(u => {
-      let count = 0;
-      bnDates[bn].forEach(date => {
-        if(isUnitOpenForShift(u, date, shift)) count++;
-      });
-      opportunities[bn][u] = count;
+      const covering = rows.filter(s => _rptRowUnits(s).includes(u));
+      if(!covering.length) per[u].none++;
+      else if(covering.every(_rptIsSupp)) per[u].absorbed++;
+      else per[u].main++;
     });
   });
-
-  const bns = Object.keys(counts).sort().map(bn => {
-    const row = { bn, total: 0 };
-    orderedUnits.forEach(u => {
-      row[u] = counts[bn][u] || 0;
-      row.total += row[u];
-    });
-    row.shifts = shiftsByBN[bn] || 0;
-    row.avgPerShift = row.shifts > 0 ? (row.total / row.shifts) : 0;
-    row.distribution = distribution[bn] || {};
-    row.cpairShifts  = cpairShifts[bn] || 0;
-    return row;
-  });
-  return { bns, units: orderedUnits, openDaysPerUnit, opportunities, totalDays: datesByShift ? datesByShift.size : 0 };
+  return { per, nInst: keys.length };
 }
 
-// Build 128 (2026-05-26): Fairness Summary — compute and render.
-//
-// Three metrics per shift:
-//   1. Workload spread (CV of avgPerShift across BNs)
-//      Low → all BNs work similar volumes per shift
-//   2. Unit-share spread (mean CV across per-unit columns)
-//      Low → each unit is shared evenly across BNs who cover it
-//   3. Outliers — specific BN/unit pairs concentrated > 2× expected,
-//      and BN workload outliers > 1 SD from mean.
-//
-// CV (coefficient of variation) = stddev / mean. Lower is more uniform.
-// Expressed as percentage for display.
-function _computeFairnessSummary(matrixData){
-  const bns = matrixData.bns;
-  const units = matrixData.units;
-  if(!bns.length || !units.length){
-    return null;
-  }
-
-  // ── Workload spread (CV across BNs' avgPerShift) ──
-  const avgs = bns.map(r => r.avgPerShift).filter(v => v > 0);
-  const workloadMean = avgs.length ? avgs.reduce((a,b)=>a+b,0) / avgs.length : 0;
-  const workloadVar = avgs.length && workloadMean > 0
-    ? avgs.reduce((a,v) => a + (v-workloadMean)**2, 0) / avgs.length
-    : 0;
-  const workloadSD = Math.sqrt(workloadVar);
-  const workloadCV = workloadMean > 0 ? (workloadSD / workloadMean) : 0;
-
-  // ── Unit-share spread (rate-based) ──
-  // Build 131 (2026-05-26): For each unit, compute each BN's coverage RATE
-  // = assignments / opportunities. Opportunities = days both the BN was
-  // scheduled AND the unit was open. This normalizes for two sources of
-  // variation that aren't unfairness:
-  //   1. BNs with more shifts had more chances → comparing raw counts
-  //      penalizes BNs with fewer shifts.
-  //   2. Closed-unit days reduce everyone's opportunity equally → previous
-  //      raw-count CV inflated against units like 5A that were closed.
-  // Now the CV reflects only the algorithm's choices when both BN and
-  // unit were available.
-  const openDays = matrixData.openDaysPerUnit || {};
-  const oppMap = matrixData.opportunities || {};
-  let unitCVs = [];
-  units.forEach(u => {
-    // Collect (bn, rate) pairs where opportunity > 0
-    const rates = [];
-    bns.forEach(r => {
-      const opp = (oppMap[r.bn] && oppMap[r.bn][u]) || 0;
-      if(opp > 0){
-        rates.push({ bn: r.bn, rate: r[u] / opp, count: r[u], opp });
-      }
-    });
-    if(rates.length < 2) return;
-    const values = rates.map(x => x.rate);
-    const mean = values.reduce((a,b)=>a+b,0) / values.length;
-    if(mean <= 0) return;
-    const variance = values.reduce((a,v) => a + (v-mean)**2, 0) / values.length;
-    const weight = openDays[u] != null ? openDays[u] : 1;
-    unitCVs.push({
-      unit: u,
-      cv: Math.sqrt(variance) / mean,
-      mean,
-      rates,
-      bnCount: rates.length,
-      weight
-    });
-  });
-  let unitShareCV = 0;
-  if(unitCVs.length){
-    const totalWeight = unitCVs.reduce((a,x)=>a+x.weight,0);
-    if(totalWeight > 0){
-      unitShareCV = unitCVs.reduce((a,x)=>a+x.cv*x.weight,0) / totalWeight;
-    } else {
-      unitShareCV = unitCVs.reduce((a,x)=>a+x.cv,0) / unitCVs.length;
-    }
-  }
-
-  // ── Workload outliers ──
-  // BNs whose avgPerShift is > 1 SD from mean (working notably more or less)
-  const workloadOutliers = bns
-    .filter(r => r.shifts > 0 && workloadSD > 0)
-    .map(r => ({
-      bn: r.bn,
-      avg: r.avgPerShift,
-      z: (r.avgPerShift - workloadMean) / workloadSD
-    }))
-    .filter(x => Math.abs(x.z) >= 1)
-    .sort((a,b) => Math.abs(b.z) - Math.abs(a.z))
-    .slice(0, 3);
-
-  // ── Unit-share outliers ──
-  // Per-unit "dominator" — a BN whose coverage RATE for that unit is
-  // >= 2× the mean coverage rate among BNs who had any opportunities.
-  // Build 131 (2026-05-26): rate-based instead of count-based, so a BN
-  // who had more shifts isn't flagged just for having more chances.
-  const unitConcentrations = [];
-  unitCVs.forEach(uc => {
-    if(uc.rates.length < 2) return;
-    uc.rates.forEach(e => {
-      const factor = e.rate / uc.mean;
-      if(factor >= 2){
-        unitConcentrations.push({
-          unit: uc.unit,
-          bn: e.bn,
-          n: e.count,
-          opp: e.opp,
-          rate: e.rate,
-          factor,
-          otherBns: uc.rates.length - 1
-        });
-      }
-    });
-  });
-  unitConcentrations.sort((a,b) => b.factor - a.factor);
-
-  return {
-    workloadMean,
-    workloadSD,
-    workloadCV,
-    unitShareCV,
-    workloadOutliers,
-    unitConcentrations: unitConcentrations.slice(0, 3),
-    bnCount: bns.length,
-    unitCount: units.length
-  };
-}
-
-function _fairnessColor(cv){
-  // Same thresholds described in the card header (green/yellow/red)
-  if(cv < 0.15) return 'var(--teal-dk)';
-  if(cv < 0.30) return '#d97706';
-  return 'var(--red)';
-}
-
-function _renderFairnessSummary(daySum, nocSum){
-  const labelStyle = 'font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;font-weight:600';
-  const valStyle = 'font-family:"DM Mono",monospace;font-size:1.4rem;font-weight:700';
-  const cardStyle = 'flex:1;min-width:140px;padding:10px 12px;background:var(--bg-soft,#f7f7f5);border-radius:6px;border:1px solid var(--border)';
-
-  function shiftBlock(sum, label, icon){
-    if(!sum){
-      return `<div style="margin-bottom:18px"><div style="font-size:.85rem;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon} ${label}</div><div style="color:var(--muted);font-size:.8rem">No data in range.</div></div>`;
-    }
-    const wkPct = (sum.workloadCV * 100).toFixed(0) + '%';
-    const usPct = (sum.unitShareCV * 100).toFixed(0) + '%';
-    const wkColor = _fairnessColor(sum.workloadCV);
-    const usColor = _fairnessColor(sum.unitShareCV);
-
-    const outlierLines = [];
-    if(sum.workloadOutliers.length){
-      sum.workloadOutliers.forEach(o => {
-        const dir = o.z > 0 ? 'above' : 'below';
-        const dirColor = o.z > 0 ? 'var(--red)' : '#0369a1';
-        outlierLines.push(`<span style="color:${dirColor};font-weight:600">${escHTML(firstName(o.bn))}</span> avg ${o.avg.toFixed(1)}/shift — ${Math.abs(o.z).toFixed(1)} SD ${dir} mean (${sum.workloadMean.toFixed(1)})`);
-      });
-    }
-    if(sum.unitConcentrations.length){
-      sum.unitConcentrations.forEach(c => {
-        const pct = (c.rate * 100).toFixed(0);
-        outlierLines.push(`<strong>${c.unit}</strong> concentrated on <span style="color:var(--red);font-weight:600">${escHTML(firstName(c.bn))}</span> — assigned ${c.n}/${c.opp} open shifts (${pct}% rate, ${c.factor.toFixed(1)}× peer avg)`);
-      });
-    }
-
-    const outliersHtml = outlierLines.length
-      ? `<div style="margin-top:10px;font-size:.78rem;line-height:1.7">
-           <div style="${labelStyle};margin-bottom:4px">Outliers</div>
-           ${outlierLines.map(l => `<div>• ${l}</div>`).join('')}
-         </div>`
-      : `<div style="margin-top:10px;font-size:.78rem;color:var(--teal-dk)">✓ No notable outliers — distribution looks balanced.</div>`;
-
-    return `<div style="margin-bottom:18px">
-      <div style="font-size:.85rem;font-weight:600;margin-bottom:8px;display:flex;align-items:center;gap:6px">${icon} ${label}</div>
-      <div style="display:flex;gap:10px;flex-wrap:wrap">
-        <div style="${cardStyle}">
-          <div style="${labelStyle}">Workload spread</div>
-          <div style="${valStyle};color:${wkColor}">${wkPct}</div>
-          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">CV of avg slots/shift across ${sum.bnCount} BNs</div>
-        </div>
-        <div style="${cardStyle}">
-          <div style="${labelStyle}">Unit-share spread</div>
-          <div style="${valStyle};color:${usColor}">${usPct}</div>
-          <div style="font-size:.7rem;color:var(--muted);margin-top:2px">CV of coverage rates (assigned / opportunities) across ${sum.unitCount} units</div>
-        </div>
-      </div>
-      ${outliersHtml}
-    </div>`;
-  }
-
-  return shiftBlock(daySum, 'Day Shift', '☀️') + shiftBlock(nocSum, 'Noc Shift', '🌙');
-}
-
-function _renderBNUnitMatrix(data, shift){
-  if(!data.bns.length){
-    return `<div style="font-size:.85rem;color:var(--muted);padding:8px 4px">No assignments in range.</div>`;
-  }
-  const sort = _bnUnitSort[shift];
-  const sorted = [...data.bns].sort((a,b) => {
-    let av, bv;
-    if(sort.col === 'bn'){ av = a.bn; bv = b.bn; return sort.dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av); }
-    if(sort.col === 'total'){ av = a.total; bv = b.total; }
-    else if(sort.col === 'shifts'){ av = a.shifts; bv = b.shifts; }
-    else if(sort.col === 'avg'){ av = a.avgPerShift; bv = b.avgPerShift; }
-    else { av = a[sort.col] || 0; bv = b[sort.col] || 0; }
-    return sort.dir === 'asc' ? av - bv : bv - av;
-  });
-
-  const ind = c => sort.col === c ? (sort.dir === 'asc' ? ' ▲' : ' ▼') : '';
-  const thStyle = 'cursor:pointer;padding:6px 4px;font-size:.7rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid var(--border);user-select:none;white-space:nowrap';
-  const tdStyle = 'padding:6px 4px;text-align:center;font-family:"DM Mono",monospace;font-size:.8rem;border-bottom:1px solid var(--border)';
-  const tdNameStyle = 'padding:6px 8px 6px 4px;text-align:left;font-weight:600;font-size:.85rem;border-bottom:1px solid var(--border);white-space:nowrap';
-
-  // Build 128 (2026-05-26): Row-based heatmap. For each BN row, compute
-  // their mean count across units they actually cover (non-zero cells).
-  // Color each cell relative to that BN's own mean — surfaces internal
-  // concentration: a cell at 2× row mean = bright red (over-concentrated);
-  // ≤ 0.5× row mean = blue (under-covered relative to the BN's pattern).
-  // Zeros stay as muted dots — distinct visual category from "low" coverage.
-  const rowMeans = {};
-  sorted.forEach(r => {
-    const nonZero = data.units.map(u => r[u]).filter(v => v > 0);
-    rowMeans[r.bn] = nonZero.length ? nonZero.reduce((a,b)=>a+b,0) / nonZero.length : 0;
-  });
-  function cellStyle(v, rowMean){
-    if(v === 0 || rowMean === 0) return '';
-    const factor = v / rowMean;
-    // Smooth bidirectional gradient anchored at 1.0.
-    if(factor >= 1.5) return `background:rgba(220,38,38,${Math.min(0.30, (factor-1.5)*0.20 + 0.12).toFixed(2)});font-weight:600;color:#7c1d1d`;
-    if(factor >= 1.15) return `background:rgba(217,119,6,${((factor-1)*0.40).toFixed(2)});font-weight:600`;
-    if(factor <= 0.5)  return `background:rgba(3,105,161,${Math.min(0.30, (0.5-factor)*0.40 + 0.10).toFixed(2)});color:#0c4a6e`;
-    if(factor <= 0.85) return `background:rgba(3,105,161,${((1-factor)*0.30).toFixed(2)})`;
-    return '';
-  }
-
-  const head = `<tr>
-    <th style="${thStyle};text-align:left" onclick="sortBNUnitMatrix('${shift}','bn')">BN${ind('bn')}</th>
-    ${data.units.map(u => `<th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','${u}')">${u}${ind(u)}</th>`).join('')}
-    <th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','total')">Total${ind('total')}</th>
-    <th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','shifts')">Shifts${ind('shifts')}</th>
-    <th style="${thStyle}" onclick="sortBNUnitMatrix('${shift}','avg')">Avg/Sh${ind('avg')}</th>
-  </tr>`;
-
-  const body = sorted.map((r, i) => {
-    const rowMean = rowMeans[r.bn];
-    const cells = data.units.map(u => {
-      const v = r[u];
-      if(v === 0) return `<td style="${tdStyle};color:var(--muted)">·</td>`;
-      const heat = cellStyle(v, rowMean);
-      return `<td style="${tdStyle};${heat}">${v}</td>`;
-    }).join('');
-    const avgDisplay = r.shifts > 0 ? r.avgPerShift.toFixed(1) : '–';
-    // Build 98: per-BN expansion row. Tap name to toggle. Shows distribution
-    // of unit count per shift + C_PAIR usage. Helps diagnose why two BNs
-    // with similar shifts have different totals (often C_PAIR concentration).
-    const expId = `bnExp-${shift}-${i}`;
-    const buckets = ['1','2','3','4','5+'];
-    const distItems = buckets
-      .map(k => ({ k, v: r.distribution[k] || 0 }))
-      .filter(x => x.v > 0);
-    const distHtml = distItems.length
-      ? distItems.map(x => `<span style="display:inline-block;margin-right:14px;font-family:'DM Mono',monospace;font-size:.78rem">${x.k} ${x.k === '1' ? 'unit' : 'units'}: <strong>${x.v}</strong> ${x.v === 1 ? 'shift' : 'shifts'}</span>`).join('')
-      : '<span style="color:var(--muted);font-size:.8rem">No shifts recorded.</span>';
-    const cpairPct = r.shifts > 0 ? Math.round(r.cpairShifts * 100 / r.shifts) : 0;
-    const cpairLine = r.cpairShifts > 0
-      ? `<div style="margin-top:6px;font-size:.78rem">C_PAIR (3C+4C combined) included on <strong>${r.cpairShifts}</strong> of ${r.shifts} shifts (${cpairPct}%)</div>`
-      : `<div style="margin-top:6px;font-size:.78rem;color:var(--muted)">No C_PAIR assignments</div>`;
-    return `<tr>
-      <td style="${tdNameStyle};cursor:pointer;user-select:none" onclick="toggleBNExpansion('${expId}', this)"><span class="bn-exp-caret" style="display:inline-block;transition:transform .2s;color:var(--muted);font-size:.7rem;margin-right:4px">▶</span>${escHTML(r.bn)}</td>
-      ${cells}
-      <td style="${tdStyle};font-weight:600">${r.total}</td>
-      <td style="${tdStyle};color:var(--muted)">${r.shifts}</td>
-      <td style="${tdStyle};font-weight:600">${avgDisplay}</td>
-    </tr>
-    <tr id="${expId}" style="display:none;background:var(--bg-soft,#f7f7f5)">
-      <td colspan="${3 + data.units.length + 3}" style="padding:10px 14px;border-bottom:1px solid var(--border);font-size:.85rem;line-height:1.5">
-        <div style="font-weight:600;color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Units per shift distribution</div>
-        <div>${distHtml}</div>
-        ${cpairLine}
-      </td>
-    </tr>`;
-  }).join('');
-
-  return `<table style="width:100%;border-collapse:collapse;min-width:${180 + data.units.length * 50}px">
-    <thead>${head}</thead>
-    <tbody>${body}</tbody>
+function _rptRenderCoverage(cov){
+  const co = document.getElementById('rptCovScoreCallout');
+  const body = document.getElementById('rptCovScoreBody');
+  const units = _rptUnits();
+  const worst = units.map(u => [u, cov.per[u]]).sort((a,b) => b[1].none - a[1].none)[0];
+  co.innerHTML = (!worst || worst[1].none === 0)
+    ? `✅ Every unit had break-nurse coverage on all ${cov.nInst} tracked shifts.`
+    : `⚠️ <strong>${escHTML(worst[0])}</strong> had no coverage ${worst[1].none} of ${cov.nInst} shifts — most in the house.`;
+  const rows = units.map(u => [u, cov.per[u]])
+    .sort((a,b) => (b[1].none - a[1].none) || (b[1].absorbed - a[1].absorbed));
+  const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
+  const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
+  body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
+    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Covered</th><th style="${th}">Absorber only</th><th style="${th}">Uncovered</th></tr>
+    ${rows.map(([u,c]) => `<tr style="border-top:1px solid var(--border)">
+      <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
+      <td style="${td};color:var(--teal-dk)">${c.main}</td>
+      <td style="${td};color:${c.absorbed ? '#a06a00' : 'var(--muted)'}">${c.absorbed}</td>
+      <td style="${td};color:${c.none ? 'var(--red)' : 'var(--muted)'};font-weight:${c.none ? '700' : '400'}">${c.none}</td>
+    </tr>`).join('')}
   </table>`;
+  document.getElementById('rptCovScoreCard').style.display = 'block';
 }
 
-// Toggle a BN expansion row. Tapping the BN name swaps display: none/table-row
-// and rotates the caret. Per-shift since each shift table has its own ids.
-function toggleBNExpansion(rowId, nameCell){
-  const row = document.getElementById(rowId);
-  if(!row) return;
-  const open = row.style.display !== 'none';
-  row.style.display = open ? 'none' : 'table-row';
-  const caret = nameCell && nameCell.querySelector('.bn-exp-caret');
-  if(caret) caret.style.transform = open ? 'rotate(0deg)' : 'rotate(90deg)';
+// ── Card 2: Breaks Delivered ───────────────────────────────────────────
+function _rptDelivered(cov, bookings){
+  const staff = bookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1');
+  const per = {}; _rptUnits().forEach(u => per[u] = { claims:0, confirmed:0 });
+  staff.forEach(b => {
+    if(per[b.Unit]){
+      per[b.Unit].claims++;
+      if(isConfirmed(b)) per[b.Unit].confirmed++;
+    }
+  });
+  let totC = 0, totN = 0, anyConf = 0;
+  Object.keys(per).forEach(u => {
+    const nights = cov.per[u].main + cov.per[u].absorbed;
+    per[u].nights = nights;
+    per[u].avg = nights ? per[u].claims / nights : 0;
+    totC += per[u].claims; totN += nights; anyConf += per[u].confirmed;
+  });
+  return { per, houseAvg: totN ? totC / totN : 0, anyConf };
 }
 
-function sortBNUnitMatrix(shift, col){
-  const s = _bnUnitSort[shift];
-  if(s.col === col){
-    s.dir = s.dir === 'asc' ? 'desc' : 'asc';
+function _rptRenderDelivered(del){
+  const co = document.getElementById('rptDeliveredCallout');
+  const body = document.getElementById('rptDeliveredBody');
+  const h = del.houseAvg;
+  const qual = _rptUnits().map(u => [u, del.per[u]]).filter(([,p]) => p.nights >= 3);
+  if(!qual.length){
+    co.innerHTML = `Not enough covered shifts in this range yet for per-unit averages.`;
   } else {
-    s.col = col;
-    s.dir = col === 'bn' ? 'asc' : 'desc';
+    const low = qual.slice().sort((a,b) => a[1].avg - b[1].avg)[0];
+    co.innerHTML = (h > 0 && low[1].avg >= h * 0.75)
+      ? `✅ Break delivery is even across units — lowest is <strong>${escHTML(low[0])}</strong> at ${low[1].avg.toFixed(1)}/shift vs house average ${h.toFixed(1)}.`
+      : `⚠️ <strong>${escHTML(low[0])}</strong> staff averaged ${low[1].avg.toFixed(1)} breaks per covered shift — house average ${h.toFixed(1)}.`;
   }
-  const tbl = document.getElementById(`rptBNUnit${shift}Table`);
-  if(tbl) tbl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData[shift], shift);
+  const showConf = del.anyConf > 0;
+  const rows = _rptUnits().map(u => [u, del.per[u]]).filter(([,p]) => p.nights > 0)
+    .sort((a,b) => a[1].avg - b[1].avg);
+  const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
+  const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
+  body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
+    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Breaks</th>${showConf ? `<th style="${th}">Confirmed taken</th>` : ''}<th style="${th}">Covered shifts</th><th style="${th}">Per shift</th></tr>
+    ${rows.map(([u,p]) => `<tr style="border-top:1px solid var(--border)">
+      <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
+      <td style="${td}">${p.claims}</td>
+      ${showConf ? `<td style="${td};color:var(--teal-dk)">${p.confirmed}</td>` : ''}
+      <td style="${td};color:var(--muted)">${p.nights}</td>
+      <td style="${td};font-weight:700;color:${(del.houseAvg > 0 && p.avg < del.houseAvg * 0.75) ? 'var(--red)' : 'var(--teal-dk)'}">${p.avg.toFixed(1)}</td>
+    </tr>`).join('')}
+  </table>`;
+  document.getElementById('rptDeliveredCard').style.display = 'block';
 }
 
+// ── Card 3: Rotation Grid ──────────────────────────────────────────────
+function _rptRotation(scheds){
+  const rows = scheds.filter(s => _rptActive(s) && !_rptIsSupp(s)
+    && (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
+  const grid = {}, nights = {}, wingA = {};
+  const aSet = new Set([...WING_A, ...WING_C_PAIR]);
+  rows.forEach(s => {
+    const bn = s.BreakNurseName; if(!bn) return;
+    nights[bn] = (nights[bn] || 0) + 1;
+    grid[bn] = grid[bn] || {};
+    _rptRowUnits(s).forEach(u => {
+      grid[bn][u] = (grid[bn][u] || 0) + 1;
+      if(aSet.has(u)) wingA[bn] = (wingA[bn] || 0) + 1;
+    });
+  });
+  return { grid, nights, wingA };
+}
+
+function _rptRenderRotation(rot){
+  const co = document.getElementById('rptRotationCallout');
+  const body = document.getElementById('rptRotationBody');
+  const units = _rptUnits();
+  const bns = Object.keys(rot.nights).sort((a,b) => rot.nights[b] - rot.nights[a]);
+  // Concentration callout: for each unit with 4+ assignments and 2+ BNs in
+  // range, find the biggest single-BN share; report the widest gap.
+  let flag = null;
+  units.forEach(u => {
+    const counts = bns.map(bn => [bn, rot.grid[bn] && rot.grid[bn][u] || 0]).filter(([,c]) => c > 0)
+      .sort((a,b) => b[1] - a[1]);
+    const total = counts.reduce((a,[,c]) => a + c, 0);
+    if(total < 4 || bns.length < 2) return;
+    const top = counts[0], second = counts[1] ? counts[1][1] : 0;
+    const gap = top[1] - second;
+    if(!flag || gap > flag.gap) flag = { u, bn: top[0], top: top[1], second, total, gap };
+  });
+  co.innerHTML = (flag && flag.top >= flag.total * 0.6 && flag.gap >= 3)
+    ? `⚠️ <strong>${escHTML(flag.u)}</strong> went to ${escHTML(bnDisplayName(flag.bn))} ${flag.top} of ${flag.total} assignments — next closest is ${flag.second}.`
+    : `✅ No unit is concentrated on a single break nurse in this range.`;
+  const td = 'padding:5px 7px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
+  const th = 'padding:5px 7px;font-size:.66rem;color:var(--muted);text-align:center;font-family:\'DM Mono\',monospace';
+  body.innerHTML = `<table style="border-collapse:collapse">
+    <tr><th style="${th};text-align:left">Nurse</th>${units.map(u => `<th style="${th}">${escHTML(u)}</th>`).join('')}</tr>
+    ${bns.map(bn => {
+      const aPct = rot.nights[bn] ? Math.round(100 * (rot.wingA[bn] || 0) /
+        Object.values(rot.grid[bn] || {}).reduce((a,c) => a + c, 0) || 0) : 0;
+      return `<tr style="border-top:1px solid var(--border)">
+      <td style="${td};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(bn))}</strong>
+        <div style="font-size:.66rem;color:var(--muted)">${rot.nights[bn]} shifts · A-wing ${aPct}%</div></td>
+      ${units.map(u => { const c = rot.grid[bn] && rot.grid[bn][u] || 0;
+        return `<td style="${td};color:${c ? 'var(--text)' : 'var(--border)'}">${c || '·'}</td>`; }).join('')}
+    </tr>`; }).join('')}
+  </table>`;
+  document.getElementById('rptRotationCard').style.display = 'block';
+}
+
+// ── Card 4: BN Self-Care ───────────────────────────────────────────────
+function _rptSelfCare(scheds, bookings){
+  const rows = scheds.filter(s => _rptActive(s)
+    && (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
+  const nights = {};
+  rows.forEach(s => { if(s.BreakNurseName) nights[s.BreakNurseName] = (nights[s.BreakNurseName] || 0) + 1; });
+  const own = {};
+  bookings.filter(b => isBNBreak(b) && String(b.IsCancelled) !== '1')
+    .forEach(b => own[b.NurseName] = (own[b.NurseName] || 0) + 1);
+  const per = Object.keys(nights).map(bn => ({
+    bn, nights: nights[bn], breaks: own[bn] || 0, avg: (own[bn] || 0) / nights[bn]
+  })).sort((a,b) => a.avg - b.avg);
+  const tot = per.reduce((a,p) => a + p.breaks, 0);
+  const totN = per.reduce((a,p) => a + p.nights, 0);
+  return { per, houseAvg: totN ? tot / totN : 0 };
+}
+
+function _rptRenderSelfCare(sc){
+  const co = document.getElementById('rptSelfCareCallout');
+  const body = document.getElementById('rptSelfCareBody');
+  const qual = sc.per.filter(p => p.nights >= 2);
+  if(!qual.length){
+    co.innerHTML = `Not enough shifts in range yet to judge break-nurse self-care.`;
+  } else {
+    const low = qual[0];
+    co.innerHTML = (sc.houseAvg > 0 && low.avg < sc.houseAvg * 0.6)
+      ? `⚠️ <strong>${escHTML(bnDisplayName(low.bn))}</strong> logged ${low.breaks} own break${low.breaks === 1 ? '' : 's'} across ${low.nights} shifts (${low.avg.toFixed(1)}/shift) — the norm this period is ${sc.houseAvg.toFixed(1)}.`
+      : `✅ Break nurses are logging their own breaks — house norm ${sc.houseAvg.toFixed(1)} per shift.`;
+  }
+  const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
+  const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
+  body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
+    <tr><th style="${th};text-align:left">Nurse</th><th style="${th}">Shifts</th><th style="${th}">Own breaks</th><th style="${th}">Per shift</th></tr>
+    ${sc.per.map(p => `<tr style="border-top:1px solid var(--border)">
+      <td style="${td};text-align:left;font-weight:600;white-space:nowrap">${escHTML(bnDisplayName(p.bn))}</td>
+      <td style="${td};color:var(--muted)">${p.nights}</td>
+      <td style="${td}">${p.breaks}</td>
+      <td style="${td};font-weight:700;color:${(sc.houseAvg > 0 && p.avg < sc.houseAvg * 0.6) ? 'var(--red)' : 'var(--teal-dk)'}">${p.avg.toFixed(1)}</td>
+    </tr>`).join('')}
+  </table>`;
+  document.getElementById('rptSelfCareCard').style.display = 'block';
+}
+
+// ── Orchestrator (name + gate preserved: the tab hook calls this) ──────
 async function loadReports(){
-  if (!RPT.unlocked) return;
+  if(!RPT.unlocked) return;
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
-
-  const kpis = document.getElementById('rptKPIs');
-  kpis.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
-  ['rptCovCard','rptUnitCard','rptTimeCard','rptBNCard','rptShiftCard',
-   'rptVolBNCard','rptEngCard','rptPopCard','rptUtilCard','rptTierCard','rptBNUnitCard','rptFairnessCard']
+  const status = document.getElementById('rptStatus');
+  ['rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
-
+  status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
-    // Fetch all bookings in range
-    const bookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${from}' and SlotDate le '${to}'`);
-    const staffBookings   = bookings.filter(b => isStaffBooking(b));
-    const confirmedBookings = staffBookings.filter(b => isConfirmed(b));
-    const notTakenBookings  = staffBookings.filter(b => isNotTaken(b));
-    const cancelledCount    = bookings.filter(b => b.IsCancelled == 1 || b.BreakStatus === 'cancelled').length;
-    const noShowRate = staffBookings.length > 0
-      ? Math.round((notTakenBookings.length / staffBookings.length) * 100) : 0;
-
-    // Fetch all schedule assignments in range (for available slots calc)
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${from}' and ShiftDate le '${to}'`);
-
-    // Available slots = each assignment covers NUM_SLOTS slots
-    const availableSlots = scheds.length * NUM_SLOTS;
-
-    // ── KPI Cards ──────────────────────────────────────
-    const covRate = availableSlots > 0
-      ? Math.round((confirmedBookings.length / availableSlots) * 100) : 0;
-    const claimRate = availableSlots > 0
-      ? Math.round((staffBookings.length / availableSlots) * 100) : 0;
-
-    kpis.innerHTML = [
-      { val: confirmedBookings.length, lbl: 'Confirmed Breaks', sub: 'actually taken' },
-      { val: staffBookings.length,     lbl: 'Claimed Breaks',   sub: 'signed up' },
-      { val: availableSlots,           lbl: 'Available Slots',  sub: `${scheds.length} assignments` },
-      { val: covRate + '%',            lbl: 'Completion Rate',  sub: 'confirmed / available' },
-      { val: (availableSlots - staffBookings.length), lbl: 'Unclaimed Slots', sub: 'never signed up' },
-      { val: (staffBookings.length - confirmedBookings.length - notTakenBookings.length), lbl: 'Unconfirmed', sub: 'claimed, pending' },
-      { val: notTakenBookings.length,  lbl: 'Not Taken',        sub: `${noShowRate}% of claimed` },
-      { val: cancelledCount,           lbl: 'Cancelled',        sub: 'removed by BN or manager' }
-    ].map(k => `
-      <div class="rpt-card">
-        <div class="rpt-val">${k.val}</div>
-        <div class="rpt-lbl">${k.lbl}</div>
-        <div class="rpt-sub">${k.sub}</div>
-      </div>
-    `).join('');
-
-    // ── Coverage Rate Bar ──────────────────────────────
-    document.getElementById('rptCovPct').textContent = covRate + '%';
-    document.getElementById('rptCovBar').style.width  = Math.min(covRate,100) + '%';
-    document.getElementById('rptCovClaimed').textContent = `${confirmedBookings.length} confirmed`;
-    document.getElementById('rptCovAvail').textContent   = `${availableSlots} available`;
-    document.getElementById('rptCovCard').style.display  = 'block';
-
-    // ── Breaks by Unit ─────────────────────────────────
-    const byUnit = {};
-    confirmedBookings.forEach(b => { byUnit[b.Unit] = (byUnit[b.Unit]||0) + 1; });
-    const maxUnit = Math.max(1, ...Object.values(byUnit));
-    const unitsSorted = Object.entries(byUnit).sort((a,b) => b[1]-a[1]);
-
-    if (unitsSorted.length) {
-      document.getElementById('rptUnitList').innerHTML = unitsSorted.map(([u,n]) => `
-        <div class="rpt-row">
-          <div class="rpt-row-lbl">${u}</div>
-          <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(n/maxUnit*100)}%"></div></div></div>
-          <div class="rpt-row-val" style="min-width:30px;text-align:right">${n}</div>
-        </div>`).join('');
-      document.getElementById('rptUnitCard').style.display = 'block';
+    const bookings = await spGet(LISTS.bookings, `SlotDate ge '${from}' and SlotDate le '${to}'`);
+    const scheds   = await spGet(LISTS.schedule, `ShiftDate ge '${from}' and ShiftDate le '${to}'`);
+    const cov = _rptCoverage(scheds);
+    if(!cov.nInst){
+      status.innerHTML = '<div class="empty">No shifts in this date range yet.</div>';
+      return;
     }
-
-    // ── Slot Demand — avg minutes after shift start when claimed ──
-    // Lower avg = nurses grabbed it sooner = more in demand
-    // Shift start: Day=06:30, Noc=18:30 (in minutes from midnight)
-    const shiftStartMin = { Day: SIGNUP_OPEN_DAY, Noc: SIGNUP_OPEN_NOC };
-
-    const slotClaimTimes = {}; // slotTime → [minutesAfterShiftStart, ...]
-    staffBookings.forEach(b => {
-      if (!b.Created) return;
-      const created = new Date(b.Created);
-      const claimedMin = created.getHours()*60 + created.getMinutes();
-      const shiftStart = shiftStartMin[b.ShiftType] || shiftStartMin.Day;
-
-      // Handle midnight wrap for Noc (if claimed before midnight, add 1440)
-      let minsAfter = claimedMin - shiftStart;
-      if (b.ShiftType === 'Noc' && claimedMin < shiftStart) minsAfter += 1440;
-      if (minsAfter < 0) minsAfter = 0; // claimed before shift start counts as 0
-
-      if (!slotClaimTimes[b.SlotTime]) slotClaimTimes[b.SlotTime] = [];
-      slotClaimTimes[b.SlotTime].push(minsAfter);
-    });
-
-    // Calculate avg minutes after shift start per slot, sort ascending (soonest first)
-    const slotDemand = Object.entries(slotClaimTimes).map(([slotTime, times]) => ({
-      slotTime,
-      avgMins: Math.round(times.reduce((a,b) => a+b, 0) / times.length),
-      count: times.length
-    })).sort((a,b) => a.avgMins - b.avgMins);
-
-    const maxMins = Math.max(1, ...slotDemand.map(s => s.avgMins));
-
-    function fmtMins(m){
-      if (m < 60) return `${m}m after shift start`;
-      return `${Math.floor(m/60)}h ${m%60}m after shift start`;
-    }
-
-    if (slotDemand.length) {
-      document.getElementById('rptTimeList').innerHTML =
-        '<div style="font-size:.75rem;color:var(--muted);margin-bottom:10px">Sorted by how quickly nurses claim each slot — top = grabbed soonest after shift start</div>' +
-        slotDemand.map((s, idx) => `
-        <div class="rpt-row">
-          <div style="min-width:22px;font-size:.75rem;font-weight:700;color:var(--muted)">#${idx+1}</div>
-          <div class="rpt-row-lbl" style="font-family:'DM Mono',monospace;font-size:.85rem">${fmt12(s.slotTime)}</div>
-          <div style="flex:2">
-            <div class="rpt-bar-wrap">
-              <div class="rpt-bar" style="width:${Math.round((1 - s.avgMins/maxMins)*100)}%;background:${idx<3?'var(--teal)':'var(--teal-mid)'}"></div>
-            </div>
-          </div>
-          <div style="text-align:right">
-            <div class="rpt-row-val">${fmtMins(s.avgMins)}</div>
-            <div style="font-size:.7rem;color:var(--muted)">${s.count} claim${s.count!==1?'s':''}</div>
-          </div>
-        </div>`).join('');
-      document.getElementById('rptTimeCard').style.display = 'block';
-    }
-
-
-    // ── Break Utilization ──────────────────────────────
-    const utilCard = document.getElementById('rptUtilCard');
-    if(utilCard){
-      renderUtilization(staffBookings, scheds, 'all');
-      utilCard.style.display = 'block';
-    }
-
-    // ── New analytics ──────────────────────────────────
-    renderVolBN(bookings, scheds);
-    renderEngagement(bookings, scheds);
-    renderPopularity(bookings);
-
-    // ── Coverage Offered per Unit by Tier ──────────────
-    // Build 130 (2026-05-26): hoisted dayDates/nocDates out of the tier
-    // block so the BN×Unit matrix can also use them (needed for openDays
-    // per unit, which feeds the Fairness Summary weighting).
-    const dayDates = new Set(), nocDates = new Set();
-    scheds.forEach(s => {
-      const date = String(s.ShiftDate).slice(0,10);
-      if(s.ShiftType === 'Day') dayDates.add(date);
-      else if(s.ShiftType === 'Noc') nocDates.add(date);
-    });
-
-    {
-      const bnBreaksForTier = bookings.filter(b => isBNBreak(b));
-      _tierMatrixData.Day = _computeTierMatrix(scheds, bnBreaksForTier, 'Day', dayDates);
-      _tierMatrixData.Noc = _computeTierMatrix(scheds, bnBreaksForTier, 'Noc', nocDates);
-      const dayEl = document.getElementById('rptTierDayTable');
-      const nocEl = document.getElementById('rptTierNocTable');
-      if(dayEl) dayEl.innerHTML = _renderTierMatrix(_tierMatrixData.Day, 'Day');
-      if(nocEl) nocEl.innerHTML = _renderTierMatrix(_tierMatrixData.Noc, 'Noc');
-      const tierCard = document.getElementById('rptTierCard');
-      if(tierCard) tierCard.style.display = 'block';
-    }
-
-    // ── BN × Unit Assignment Matrix ────────────────────
-    {
-      _bnUnitMatrixData.Day = _computeBNUnitMatrix(scheds, 'Day', dayDates);
-      _bnUnitMatrixData.Noc = _computeBNUnitMatrix(scheds, 'Noc', nocDates);
-      const dayEl = document.getElementById('rptBNUnitDayTable');
-      const nocEl = document.getElementById('rptBNUnitNocTable');
-      if(dayEl) dayEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Day, 'Day');
-      if(nocEl) nocEl.innerHTML = _renderBNUnitMatrix(_bnUnitMatrixData.Noc, 'Noc');
-      const card = document.getElementById('rptBNUnitCard');
-      if(card) card.style.display = 'block';
-    }
-
-    // Build 128 (2026-05-26): Fairness Summary — relies on the same
-    // BN×Unit matrix data, so computed right after.
-    {
-      const daySum = _computeFairnessSummary(_bnUnitMatrixData.Day);
-      const nocSum = _computeFairnessSummary(_bnUnitMatrixData.Noc);
-      const body = document.getElementById('rptFairnessBody');
-      const card = document.getElementById('rptFairnessCard');
-      if(body) body.innerHTML = _renderFairnessSummary(daySum, nocSum);
-      if(card) card.style.display = 'block';
-    }
-
-        // ── Break Nurse Workload ───────────────────────────
-    // Match confirmed bookings to their assigned BN via schedule
-    const schedMap = {};
-    scheds.forEach(s => {
-      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-      units.forEach(u => {
-        const key = `${s.ShiftDate}|${s.ShiftType}|${u}`;
-        schedMap[key] = s.BreakNurseName;
-      });
-    });
-
-    const byBN = {};
-    confirmedBookings.forEach(b => {
-      const key = `${b.SlotDate}|${b.ShiftType}|${b.Unit}`;
-      // Attribution-first: manual breaks (with CreatedBy) credit the
-      // creator. Sign Up / legacy bookings fall back to unit schedule.
-      const bn  = b.CreatedBy || schedMap[key] || 'Unknown';
-      byBN[bn] = (byBN[bn]||0) + 1;
-    });
-    const bnSorted = Object.entries(byBN).sort((a,b) => b[1]-a[1]);
-    const maxBN = Math.max(1, ...Object.values(byBN));
-
-    if (bnSorted.length) {
-      document.getElementById('rptBNList').innerHTML = bnSorted.map(([bn,n]) => `
-        <div class="rpt-row">
-          <div class="rpt-row-lbl">${firstName(bn)}</div>
-          <div style="flex:2"><div class="rpt-bar-wrap"><div class="rpt-bar" style="width:${Math.round(n/maxBN*100)}%"></div></div></div>
-          <div class="rpt-row-val" style="min-width:30px;text-align:right">${n}</div>
-        </div>`).join('');
-      document.getElementById('rptBNCard').style.display = 'block';
-    }
-
-    // ── Day vs Noc breakdown ───────────────────────────
-    const byShift = { Day: 0, Noc: 0 };
-    confirmedBookings.forEach(b => { byShift[b.ShiftType] = (byShift[b.ShiftType]||0) + 1; });
-    const total = byShift.Day + byShift.Noc || 1;
-
-    document.getElementById('rptShiftList').innerHTML = [
-      { sh: 'Day', icon: sunSVG(13), color: 'var(--day)' },
-      { sh: 'Noc', icon: moonSVG(13), color: 'var(--noc)' }
-    ].map(({sh, icon, color}) => `
-      <div class="rpt-row">
-        <div class="rpt-row-lbl">${icon} ${sh}</div>
-        <div style="flex:2"><div class="rpt-bar-wrap">
-          <div class="rpt-bar" style="width:${Math.round(byShift[sh]/total*100)}%;background:${color}"></div>
-        </div></div>
-        <div class="rpt-row-val" style="min-width:30px;text-align:right">${byShift[sh]}</div>
-        <div class="rpt-row-pct">${Math.round(byShift[sh]/total*100)}%</div>
-      </div>`).join('');
-    document.getElementById('rptShiftCard').style.display = 'block';
-
-  } catch(e) {
-    const isTimeout = e.message && e.message.includes('timed out');
-    const msg = isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : e.message;
-    kpis.innerHTML = `<div class="empty" style="color:var(--red)">${msg}<br><br>
+    status.innerHTML = '';
+    _rptRenderCoverage(cov);
+    _rptRenderDelivered(_rptDelivered(cov, bookings));
+    _rptRenderRotation(_rptRotation(scheds));
+    _rptRenderSelfCare(_rptSelfCare(scheds, bookings));
+  } catch(e){
+    const isTimeout = /timeout/i.test(e.message || '');
+    status.innerHTML = `<div class="empty" style="color:var(--red)">${isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : e.message}<br><br>
       <button class="btn btn-ghost btn-sm" onclick="loadReports()">↺ Try again</button></div>`;
   }
 }
