@@ -1739,7 +1739,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-293';
+const APP_VERSION = '2026-07-26-294';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5378,6 +5378,10 @@ function pickUnit(u){
   S.pendingTransfers.clear();
   S.pickerOpenFor = null;
   updateSubmitBar();
+  // Build 294 (bug #5): same synchronous blank as the shift switch — a unit
+  // change is a world change too.
+  const _puList = document.getElementById('slotsList');
+  if(_puList) _puList.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   document.querySelectorAll('.unit-btn').forEach(b=>b.classList.remove('active'));
   const _ubtn = document.getElementById(`ub-${u}`);
   if(_ubtn) _ubtn.classList.add('active');
@@ -5527,6 +5531,12 @@ function selectStaffShift(sh){
   // shift mode isn't valid for the new one.
   _slotRenderCache = null;
   _otherSlotRenderCache = null;
+  // Build 294 (bug #5): blank the list SYNCHRONOUSLY — the outgoing view's
+  // rows must not be tappable for even a frame while the new view loads
+  // (the S7 first-attempt fumble: a stale standard row tapped under
+  // S.shift='Other' staged a clock-dated 'Other' claim).
+  const _swList = document.getElementById('slotsList');
+  if(_swList) _swList.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   const ow = document.getElementById('otherEndWrap');
   if(ow) ow.style.display = sh === 'Other' ? 'block' : 'none';
   if(sh === 'Other') populateOtherEndTimes();
@@ -7842,6 +7852,13 @@ function _parseClaimKey(key){
 }
 function togglePending(slotTime, slotShift, bn, srcDt){
   if(S.submitting) return; // block selection changes during submission
+  if(S.shift === 'Other' && !slotShift){
+    // Build 294 (bug #5): every legitimate Other-view row passes an explicit
+    // shift; a null here is the stale-tap signature — a standard row still
+    // on screen mid-switch. Refuse to stage it.
+    toast('One sec — the view is still loading. Tap the slot again.', true);
+    return;
+  }
   bn = bn || _slotRowBN; // Build 285: default attribution = the pass's unambiguous coverer (explicit bn overrides; unstage taps rebuild the same key unless coverage changed mid-staging, which re-renders anyway)
   const key = _claimKey(slotTime, slotShift, bn, srcDt); // Build 290: srcDt only from Other rows
   if(S.pendingClaims.has(key)){
@@ -8943,6 +8960,15 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   // through submitClaims) fall back to live S.unit, which is fine since
   // the user can't navigate during a single synchronous claim flow.
   const _unit = unitOverride || S.unit;
+  // Build 294 (bug #5): a claim can only belong to a Day or Noc shift form.
+  // A stale row tapped mid-view-switch once wrote ShiftType 'Other' with a
+  // clock-derived date. The write layer is the last line of defense —
+  // refuse anything else, whatever the UI raced.
+  const _effShift = slotShiftOverride || S.shift;
+  if(_effShift !== 'Day' && _effShift !== 'Noc'){
+    if(!silent) toast('That tap landed while the view was still loading — try the slot again.', true);
+    return 'Stale view — claim not written';
+  }
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
