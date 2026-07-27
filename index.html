@@ -747,6 +747,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="unit-check-grid" id="aUnits"></div>
         </div>
 
+        <div id="editModeBar" style="display:none;background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.82rem;color:#a06a00">
+          ✏️ Editing <strong id="editModeWho"></strong> — saving will <em>move</em> this assignment.
+          <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px;color:#a06a00" onclick="cancelEditMode()">✕ Cancel edit</button>
+        </div>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
     </div>
@@ -1739,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-294';
+const APP_VERSION = '2026-07-26-295';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9274,6 +9278,14 @@ async function manageSlotAction(action){
 // ═══════════════════════════════════════════════════════
 // EDIT ASSIGNMENT
 // ═══════════════════════════════════════════════════════
+// Build 295 (bug #4): the rows Edit loaded — consumed exactly once by save.
+// {name, date, shift, ids, units, at}
+let _editSource = null;
+function cancelEditMode(){
+  _editSource = null;
+  const bar = document.getElementById('editModeBar');
+  if(bar) bar.style.display = 'none';
+}
 async function editAssign(id){
   _schedulePollHoldUntil = Date.now() + 90000; // Build 240: quiet the poller while editing
   try {
@@ -9306,6 +9318,23 @@ async function editAssign(id){
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
     const allBNScheds = shiftScheds.filter(r => r.BreakNurseName === s.BreakNurseName);
+    const _srcUnits = [...new Set(allBNScheds.flatMap(r => { try { return JSON.parse(r.Units||'[]'); } catch { return []; } }))];
+    // Build 295 (bug #4): remember what Edit loaded, visibly. Saving spends
+    // this memory; ✕ Cancel edit or another Edit replaces it.
+    _editSource = {
+      name: s.BreakNurseName,
+      date: s.ShiftDate.slice(0,10),
+      shift: s.ShiftType,
+      ids: allBNScheds.map(r => r.Id),
+      units: _srcUnits,
+      at: Date.now()
+    };
+    { const bar = document.getElementById('editModeBar');
+      const who = document.getElementById('editModeWho');
+      if(bar && who){
+        who.textContent = `${firstName(s.BreakNurseName)} · ${_editSource.date} ${s.ShiftType}`;
+        bar.style.display = 'block';
+      } }
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
     }))];
@@ -11655,6 +11684,33 @@ async function saveAssign(){
     // rows). One ~2s round trip removed from every save.
     const existing = allScheds.filter(r => r.BreakNurseName === nurse);
 
+    // Build 295 (bug #4, the true move): `existing` keys the DESTINATION
+    // identity, so when Edit changed the date or shift the loaded rows
+    // survived as forks (lived twice on Janice 8/18–8/20). Fold the edit
+    // source's ids into the delete set — SAME NURSE ONLY (a different-nurse
+    // save is a reassign, and must never delete an abandoned edit's rows).
+    let _srcOldRotKey = null;
+    if(_editSource && _editSource.name === nurse && _editSource.ids.length){
+      const _moved = _editSource.date !== dt || _editSource.shift !== shift;
+      if(_moved){
+        // Bookings under the moved-away assignment would silently lose their
+        // coverage row — surface it before anything deletes.
+        try {
+          const _srcBk = await spGet(LISTS.bookings,
+            `SlotDate ge '${_editSource.date}' and SlotDate le '${_editSource.date}T23' and ShiftType eq '${_editSource.shift}'`);
+          const _hit = _srcBk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1'
+            && _editSource.units.includes(b.Unit)).length;
+          if(_hit > 0 && !await customConfirm(
+            `${_hit} break${_hit !== 1 ? 's are' : ' is'} booked under ${firstName(nurse)}'s ${_editSource.date} ${_editSource.shift} assignment. Moving it leaves them without coverage.`,
+            'Move anyway', 'Go back')){ return; } // Go back keeps edit mode alive — adjust the date or ✕ Cancel edit
+        } catch(e){ /* fetch failed — proceed; the move itself must not be blocked by a read hiccup */ }
+        const _have = new Set(existing.map(r => String(r.Id)));
+        _editSource.ids.forEach(id => { if(!_have.has(String(id))) existing.push({ Id: id }); });
+        _srcOldRotKey = rotationKey(_editSource.name, _editSource.date, _editSource.shift);
+      }
+    }
+    cancelEditMode(); // memory spent (or not applicable) — either way, one use only
+
     let bookingsToCancel = [];
     let transfers = [];     // [{booking, targetBN}] — bookings-only since 224 (D8)
     let keepOverrides = []; // [{slot, unit}] — written to outgoing BN's rotation after recompute
@@ -11750,6 +11806,7 @@ async function saveAssign(){
       }
     }
 
+    if(_srcOldRotKey){ try { await syncedLS.delete(_srcOldRotKey); } catch(e){} } // Build 295: retire the moved-away identity's dealt rotation — it would silently resurrect if that (name, date, shift) is ever re-created
     const _createdRow = await spPost(LISTS.schedule,{
       Title:`${nurse}-${dt}-${shift}`,
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
