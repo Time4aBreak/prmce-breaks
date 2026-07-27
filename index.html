@@ -1739,7 +1739,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-292';
+const APP_VERSION = '2026-07-26-293';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17896,11 +17896,17 @@ function _rptCoverage(scheds){
     (inst[`${d}|${sh}`] = inst[`${d}|${sh}`] || []).push(s);
   });
   const units = _rptUnits();
-  const per = {}; units.forEach(u => per[u] = { main:0, absorbed:0, none:0 });
+  const per = {}; units.forEach(u => per[u] = { main:0, absorbed:0, none:0, closed:0 });
   const keys = Object.keys(inst);
   keys.forEach(k => {
+    const kd = k.split('|')[0], ksh = k.split('|')[1];
     const rows = inst[k].filter(_rptActive);
     units.forEach(u => {
+      // Build 293: a closed unit is neither covered nor uncovered — it is
+      // out of service, and its shifts leave the math. (Confirmed the hard
+      // way: 3C closed 7/13→9/5 while older deals still listed it, and the
+      // card was counting noise as coverage.)
+      if(!isUnitOpenForShift(u, kd, ksh)){ per[u].closed++; return; }
       const covering = rows.filter(s => _rptRowUnits(s).includes(u));
       if(!covering.length) per[u].none++;
       else if(covering.every(_rptIsSupp)) per[u].absorbed++;
@@ -17914,22 +17920,30 @@ function _rptRenderCoverage(cov){
   const co = document.getElementById('rptCovScoreCallout');
   const body = document.getElementById('rptCovScoreBody');
   const units = _rptUnits();
-  const worst = units.map(u => [u, cov.per[u]]).sort((a,b) => b[1].none - a[1].none)[0];
+  const openN = u => cov.nInst - cov.per[u].closed; // Build 293: per-unit denominator excludes closed shifts
+  const ranked = units.map(u => [u, cov.per[u]]).filter(([u]) => openN(u) > 0)
+    .sort((a,b) => b[1].none - a[1].none);
+  const worst = ranked[0];
   co.innerHTML = (!worst || worst[1].none === 0)
-    ? `✅ Every unit had break-nurse coverage on all ${cov.nInst} tracked shifts.`
-    : `⚠️ <strong>${escHTML(worst[0])}</strong> had no coverage ${worst[1].none} of ${cov.nInst} shifts — most in the house.`;
+    ? `✅ Every open unit had break-nurse coverage on its tracked shifts.`
+    : `⚠️ <strong>${escHTML(worst[0])}</strong> had no coverage ${worst[1].none} of ${openN(worst[0])} shifts — most in the house.`;
   const rows = units.map(u => [u, cov.per[u]])
     .sort((a,b) => (b[1].none - a[1].none) || (b[1].absorbed - a[1].absorbed));
   const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
   const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
   body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
     <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Covered</th><th style="${th}">Absorber only</th><th style="${th}">Uncovered</th></tr>
-    ${rows.map(([u,c]) => `<tr style="border-top:1px solid var(--border)">
+    ${rows.map(([u,c]) => {
+      if(cov.nInst - c.closed === 0) return `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
+      <td style="${td};color:var(--muted);font-style:italic" colspan="3">closed all range</td>
+    </tr>`;
+      return `<tr style="border-top:1px solid var(--border)">
+      <td style="${td};text-align:left;font-weight:600">${escHTML(u)}${c.closed ? ` <span style="font-size:.65rem;color:var(--muted);font-weight:400">(closed ${c.closed})</span>` : ''}</td>
       <td style="${td};color:var(--teal-dk)">${c.main}</td>
       <td style="${td};color:${c.absorbed ? '#a06a00' : 'var(--muted)'}">${c.absorbed}</td>
       <td style="${td};color:${c.none ? 'var(--red)' : 'var(--muted)'};font-weight:${c.none ? '700' : '400'}">${c.none}</td>
-    </tr>`).join('')}
+    </tr>`; }).join('')}
   </table>`;
   document.getElementById('rptCovScoreCard').style.display = 'block';
 }
@@ -18097,6 +18111,8 @@ function _rptRenderSelfCare(sc){
 // already fetches, plus the unit-status timelines warmed at load.
 const _rptFmtD = ds => { try { const d = new Date(ds + 'T12:00:00');
   return d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }); } catch { return ds; } };
+const _rptNextDay = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() + 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; };
 const _rptDayList = (from, to) => {
   const out = []; if(!from || !to || from > to) return out;
   const d = new Date(from + 'T12:00:00'); const end = new Date(to + 'T12:00:00');
@@ -18117,15 +18133,20 @@ function _rptCoverageExtras(rangeRows, futureRows, from, to){
   const eraMin  = rr.length ? rr.map(dsOf).reduce((a,b) => a < b ? a : b) : '';
   const has = (pool, d, sh) => pool.some(s => dsOf(s) === d && s.ShiftType === sh);
 
-  // Past holes: within the selected range AND the app's known era, strictly
-  // before today. (Today and beyond belong to the upcoming preview — the
-  // split keeps one gap from being reported twice.)
+  // Build 293: holes cover the WHOLE selected range up to the horizon —
+  // past AND future — so a gap two weeks out can't hide between "past" and
+  // the 7-day preview (the 8/9 + 8/18 lesson: a misleading checkmark is
+  // worse than none). The preview below stays as the always-on early-
+  // warning lane; overlap between the two lines is two lenses on one fact.
   const holes = [];
-  if(eraMin){
-    _rptDayList(from < eraMin ? eraMin : from, to).forEach(d => {
-      if(d >= t) return;
-      if(horizon && d > horizon) return;
-      ['Day','Noc'].forEach(sh => { if(!has(rr, d, sh)) holes.push(`${_rptFmtD(d)} ${sh}`); });
+  const futureOnly = from >= t;
+  if(eraMin || (futureOnly && fr.length)){
+    const hFrom = eraMin && from < eraMin ? eraMin : from;
+    const hTo = horizon && horizon < to ? horizon : to;
+    _rptDayList(hFrom, hTo).forEach(d => {
+      ['Day','Noc'].forEach(sh => {
+        if(!has(rr, d, sh) && !has(fr, d, sh)) holes.push(`${_rptFmtD(d)} ${sh}`);
+      });
     });
   }
 
@@ -18146,15 +18167,32 @@ function _rptCoverageExtras(rangeRows, futureRows, from, to){
   const closures = [];
   const cTo = horizon && horizon < to ? horizon : to;
   _rptUnits().forEach(u => {
-    const days = [];
+    // Build 293: consecutive days compress to runs ("7/13 – 9/5"), split by
+    // which shifts are closed so annotations stay truthful.
+    const cats = { both: [], day: [], noc: [] };
     _rptDayList(from, cTo).forEach(d => {
       const dc = !isUnitOpenForShift(u, d, 'Day');
       const nc = !isUnitOpenForShift(u, d, 'Noc');
-      if(dc && nc) days.push(_rptFmtD(d));
-      else if(dc) days.push(`${_rptFmtD(d)} (Day)`);
-      else if(nc) days.push(`${_rptFmtD(d)} (Noc)`);
+      if(dc && nc) cats.both.push(d);
+      else if(dc) cats.day.push(d);
+      else if(nc) cats.noc.push(d);
     });
-    if(days.length) closures.push(`${u} closed: ${days.join(', ')}`);
+    const runs = (list) => {
+      const out = []; let i = 0;
+      while(i < list.length){
+        let j = i;
+        while(j + 1 < list.length && _rptNextDay(list[j]) === list[j + 1]) j++;
+        out.push(i === j ? _rptFmtD(list[i]) : `${_rptFmtD(list[i])} – ${_rptFmtD(list[j])}`);
+        i = j + 1;
+      }
+      return out;
+    };
+    const parts = [
+      ...runs(cats.both),
+      ...runs(cats.day).map(r => `${r} (Day)`),
+      ...runs(cats.noc).map(r => `${r} (Noc)`)
+    ];
+    if(parts.length) closures.push(`${u} closed: ${parts.join(', ')}`);
   });
 
   return { holes, upcoming, horizon, closures };
