@@ -1743,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-296';
+const APP_VERSION = '2026-07-26-297';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19487,10 +19487,22 @@ async function _loadExistingAssignmentFor(val){
         ? `⚠️ Loaded ${firstName(val)}'s existing ${shift} units (${S.aUnits.join(', ')}) — replaced your selected ${_prevSel.join(', ')}. Re-pick if you meant to carry them.`
         : `Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`, _replacedSel);
     } else {
-      S.aUnits = [];
-      S.editingAssignId = null;
-      document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
-      hideBusy();
+      // Build 297 (bug #7b): during an active edit-move, an EMPTY destination
+      // must not wipe the carried selection — those are the units being
+      // moved. Keeping them also preserves replace-detection for a later
+      // toggle back to a populated shift. Outside edit mode, aiming the form
+      // at an empty identity still clears, as before.
+      const _editingNow = (typeof _editSource !== 'undefined' && _editSource);
+      if(_editingNow && S.aUnits.length){
+        S.editingAssignId = null;
+        hideBusy();
+        toast(`${firstName(val)} has no ${shift} assignment on ${date} yet — kept your selected units to carry.`);
+      } else {
+        S.aUnits = [];
+        S.editingAssignId = null;
+        document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
+        hideBusy();
+      }
     }
   } catch(e){
     hideBusy();
