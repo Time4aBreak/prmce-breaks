@@ -1743,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-297';
+const APP_VERSION = '2026-07-26-298';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13094,11 +13094,10 @@ function updateProgressBar(container, done, total, label){
   if(lbl && label) lbl.textContent = label;
 }
 
-// Display a rejection modal when the AI extraction flagged ANY warnings
-// (obscured cells, partial shifts, or other suspicious entries). The whole
-// extraction is rejected — no entries are processed — to prevent partial
-// data states. The user re-screenshots and tries again. Any in-progress
-// _currentImportEntries from a previous successful extraction stays intact.
+// Build 298: NO CALLERS since the R3 inform-and-flag policy — warnings now
+// banner beside the cards and the Save-All count gate covers occlusion
+// shortfalls. Kept (one screen, zero risk) in case a hard-failure path
+// ever wants a blocking version again.
 function _showExtractionRejected(warnings){
   const items = (warnings || []).map(w => `<li style="margin-bottom:6px;line-height:1.5">${escHTML(String(w))}</li>`).join('');
   const wrap = document.createElement('div');
@@ -13203,6 +13202,42 @@ async function _extractPass(scanMode){
     }
     entries = JSON.parse(arrMatch[0]);
   }
+  // Build 298 (R1+R4): normalize every entry ONCE at birth — dates padded,
+  // shifts exactly Day/Noc, names trimmed — so the cards, the gate, and the
+  // save can never disagree about the same text (the 8/18 gate-blindness
+  // class). Then the arithmetic vote: the start time outvotes the reader's
+  // shift label (the Janice 20:00→'Day' class, both passes agreeing).
+  // Because this runs BEFORE consensus keys form, a vote-corrected shift
+  // HEALS cross-pass disagreement instead of spawning duplicate cards;
+  // corrections are flagged downstream for human eyes.
+  entries = (entries || []).map(e => {
+    if(!e || typeof e !== 'object') return e;
+    if(typeof e.name === 'string') e.name = e.name.trim().replace(/\s+/g, ' ');
+    if(e.date != null){
+      const dm = String(e.date).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+      if(dm) e.date = `${dm[1]}-${dm[2].padStart(2, '0')}-${dm[3].padStart(2, '0')}`;
+    }
+    if(typeof e.shift === 'string'){
+      const s = e.shift.trim().toLowerCase();
+      e.shift = s.startsWith('d') ? 'Day' : (s.startsWith('n') ? 'Noc' : e.shift.trim());
+    }
+    if(e.startTime != null){
+      const st = String(e.startTime).replace(/\D/g, '');
+      if(st.length >= 3 && st.length <= 4) e.startTime = st.padStart(4, '0');
+    }
+    if(typeof e.startTime === 'string' && /^\d{4}$/.test(e.startTime)
+       && e.startTime !== '0000' && Number(e.hours) !== 0){
+      const h = parseInt(e.startTime.slice(0, 2), 10);
+      const byTime = (h >= 8 && h < 20) ? 'Day' : 'Noc';
+      if((e.shift === 'Day' || e.shift === 'Noc') && e.shift !== byTime){
+        e._timeVote = `shift corrected ${e.shift}→${byTime} from start time ${e.startTime}`;
+        e.shift = byTime;
+      } else if(e.shift !== 'Day' && e.shift !== 'Noc'){
+        e.shift = byTime;
+      }
+    }
+    return e;
+  });
   return { entries, warnings };
 }
 
@@ -13290,18 +13325,27 @@ async function runImport(){
       console.warn('[extraction] consensus unavailable:', ((settled[0].reason || settled[1].reason) || {}).message);
     }
 
-    // Stash warnings globally so renderImportRows can display them in context.
+    // Build 298 (R3): warnings INFORM instead of rejecting the batch. The
+    // old policy threw away a whole good extraction over one doubted cell
+    // (the Jul-26 false rejection) while the true occlusion protection
+    // already lives downstream: the AI extracts everything it CAN see, and
+    // the Save-All count gate catches the shortfall. So: banner the
+    // warnings next to the cards; let the count gate do its job.
     window._lastExtractionWarnings = warnings;
-
-    // If the AI flagged ANY warnings (obscured cells, popups, overlays),
-    // reject the extraction entirely. These warnings indicate data integrity
-    // issues — the AI can't see what's underneath an overlay, so we can't
-    // trust the rest of the extraction either. User must re-screenshot.
-    if(warnings.length){
-      _showExtractionRejected(warnings);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
-    }
+    { const _res = document.getElementById('importResults');
+      const _rows = document.getElementById('importRows');
+      let _wb = document.getElementById('impWarnBanner');
+      if(warnings.length){
+        if(!_wb && _res && _rows){
+          _wb = document.createElement('div');
+          _wb.id = 'impWarnBanner';
+          _res.insertBefore(_wb, _rows);
+        }
+        if(_wb){
+          _wb.style.cssText = 'background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:.85rem;color:#a06a00;line-height:1.5';
+          _wb.innerHTML = `⚠️ The reader reported:<ul style="margin:6px 0 6px 18px;padding:0">${warnings.map(w => `<li>${escHTML(String(w))}</li>`).join('')}</ul>Review the affected rows against the screenshot — the Save-All count check will also catch anything hidden.`;
+        }
+      } else if(_wb){ _wb.remove(); } }
 
     // Client-side validation pass: filter entries the AI flagged as non-Break,
     // and tag partial (short-duration) Break shifts for special handling.
@@ -13331,13 +13375,17 @@ async function runImport(){
     // the hours filter rejects below drop out naturally, so disagreements on
     // non-Break cells (regular shifts, off-days) never surface as noise.
     entries.forEach(e => {
-      if(e._consensus && !e.isFlagged){
+      if((e._consensus || e._timeVote) && !e.isFlagged){
         e.isFlagged = true;
         // Build 235 (Tomas): plain language on the card — nurses don't know
         // what a transposed scan is. The row/column direction stays in the
-        // console (logged below) for diagnostics.
-        e.flagReason = 'needs verification — check the source screenshot';
+        // console (logged below) for diagnostics. Build 298: start-time
+        // corrections ride the same lane with their own wording.
+        e.flagReason = e._timeVote
+          ? 'shift corrected from the start time — verify against the source'
+          : 'needs verification — check the source screenshot';
         _flagCount++;
+        if(e._timeVote) console.log('[extraction] time vote:', e.name, e.date, '·', e._timeVote);
       }
     });
     entries.forEach(e => {
@@ -14348,7 +14396,7 @@ async function clearAllImportSels(){
 }
 
 async function resuggestAll(){
-  const batch = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const batch = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
   if(!batch.length){ toast('No entries to re-suggest.', true); return; }
 
   clearCoverageCountsCache();
@@ -14491,8 +14539,11 @@ function _impExpectedSet(n){
 }
 
 function _impGateEntries(){
-  const src = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length)
-    ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  // Build 298 (R2): ONE source of truth. The old fallback to a leftover
+  // list is how the gate once audited ghost data while a real card sat on
+  // screen (the 8/18 divergent-audit night). If staging is empty, the gate
+  // sees empty — honestly.
+  const src = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries) ? _currentImportEntries : [];
   return src.filter(e => e && !e.isDiscarded);
 }
 
@@ -14603,8 +14654,7 @@ async function _impGateAddCommit(){
   // LIVE by the gate's own checksum ("expected 8 · staged 1", 2026-07-03).
   // This is the same full-batch shape the unit-status re-render call uses;
   // matching side effect: suggestions recompute across the batch.
-  const _batch = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length)
-    ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const _batch = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries) ? _currentImportEntries : []; // Build 298 (R2): single source, no fallback
   await renderImportRows([..._batch, { name, date, shift, manual: true }], true);
   toast(`✓ Added ${firstName(name)} · ${date} ${shift} — tap Save All to re-check.`);
 }
@@ -14676,7 +14726,7 @@ async function acceptAllAndSave(){
 
   // Guard: refuse to save if any flagged entries are unresolved. The user
   // must either Suggest/manually assign units, or Discard them, before Save All.
-  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const entriesToProcess = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
   const unresolvedFlagged = entriesToProcess.filter((e, i) =>
     e.isFlagged && !e.isDiscarded && (importUnitSel[i] || []).length === 0
   );
@@ -15077,7 +15127,7 @@ async function rerunSuggest(i, name, date, shift){
   const _live = _currentImportEntries[i];
   if(_live && _live.shift) shift = _live.shift;
   // Re-run algorithm for this nurse's shift group
-  const entriesToProcess = _currentImportEntries.length ? _currentImportEntries : (window._lastEntriesToProcess || []);
+  const entriesToProcess = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
   const nurses = entriesToProcess
     .filter(e => e.date===date && e.shift===shift)
     .map(e => e.name);
