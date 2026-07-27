@@ -1743,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-298';
+const APP_VERSION = '2026-07-26-299';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13332,14 +13332,16 @@ async function runImport(){
     // the Save-All count gate catches the shortfall. So: banner the
     // warnings next to the cards; let the count gate do its job.
     window._lastExtractionWarnings = warnings;
-    { const _res = document.getElementById('importResults');
-      const _rows = document.getElementById('importRows');
+    { const _rows = document.getElementById('importRows');
       let _wb = document.getElementById('impWarnBanner');
       if(warnings.length){
-        if(!_wb && _res && _rows){
+        if(!_wb && _rows && _rows.parentNode){
           _wb = document.createElement('div');
           _wb.id = 'impWarnBanner';
-          _res.insertBefore(_wb, _rows);
+          // Build 299: insert against the row container's ACTUAL parent —
+          // assuming importRows was a direct child of importResults crashed
+          // the whole extraction on the first real warnings batch.
+          _rows.parentNode.insertBefore(_wb, _rows);
         }
         if(_wb){
           _wb.style.cssText = 'background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:.85rem;color:#a06a00;line-height:1.5';
