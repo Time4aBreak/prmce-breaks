@@ -1743,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-299';
+const APP_VERSION = '2026-07-26-300';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11546,12 +11546,24 @@ async function suggestUnitsForManualAssign(btn){
     // one covering. Pull existing scheduled BNs for the date+shift.
     const existing = await spGet(LISTS.schedule,
       `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    const otherBNs = existing
-      .filter(s => s.Status !== 'inactive' && s.BreakNurseName !== nurse)
-      .map(s => s.BreakNurseName);
+    const otherRows = existing
+      .filter(s => s.Status !== 'inactive' && s.BreakNurseName !== nurse);
+    const otherBNs = otherRows.map(s => s.BreakNurseName);
     const nurses = [...new Set([nurse, ...otherBNs])];
 
-    const result = await suggestAssignments(nurses, shift, dt);
+    // Build 300 (bug #6): the teammates' SAVED units are LOCKED — the
+    // dealer must propose around them, not re-imagine them. (The 8/20
+    // night: the old sliced re-deal proposed exactly Tess's saved trio
+    // and only the duplicate guard saved the sheet.)
+    const locked = {};
+    otherRows.forEach(s => {
+      try {
+        const u = JSON.parse(s.Units || '[]');
+        if(u.length) locked[s.BreakNurseName] = [...new Set([...(locked[s.BreakNurseName] || []), ...u])];
+      } catch(e){}
+    });
+
+    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked);
     const slots = result[nurse] || [];
     if(!slots.length){
       toast('Suggester returned no units for this BN', true);
@@ -18803,8 +18815,24 @@ function _clearWingHistoryForDate(name, shift, date){
   saveNurseWingHistory(name, shift, existing);
 }
 
-async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null){
+async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null){
   if(!nurses.length) return {};
+  // Build 300 (bug #6): locked-assignments overlay. When teammates already
+  // HOLD saved units, deal the remaining nurse(s) AROUND them — never slice
+  // a hypothetical full re-deal (the 8/20 collision: Suggest proposed
+  // exactly Tess's saved trio). Locked BNs: excluded from dealing (their
+  // wing history untouched), units removed from the pool, entries returned
+  // verbatim. Quota math still sees the full team, so the newcomer gets a
+  // normal per-nurse share.
+  const _locked = lockedAssignments || null;
+  const _lockedBNs = _locked ? Object.keys(_locked) : [];
+  const _lockedUnits = new Set(_lockedBNs.flatMap(b => _locked[b] || []));
+  const dealNurses = _lockedBNs.length ? nurses.filter(nm => !_lockedBNs.includes(nm)) : nurses;
+  if(!dealNurses.length){
+    const out = {};
+    _lockedBNs.forEach(b => { out[b] = (_locked[b] || []).slice(); });
+    return out;
+  }
 
   // ── Step 1: Pre-warm cross-device cache ─────────────
   await warmAllBNWingHistory(nurses.map(n => ({name: n, shift}))).catch(()=>{});
@@ -18835,9 +18863,14 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
       floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
     }));
 
-  const poolMaxCount = Math.max(0, ...pool.map(p => p.globalCount));
-  const aPool = pool.filter(s => s.wing === 'A');
-  const dPool = pool.filter(s => s.wing === 'D');
+  // Build 300: a slot leaves the pool if ANY of its units is locked
+  // (C_PAIR drops when 3C or 4C is held). The wing-need averages below then
+  // describe the REMAINING gap — exactly the question for a nurse being
+  // dealt around a standing team.
+  const poolAvail = _lockedUnits.size ? pool.filter(p => !p.units.some(u => _lockedUnits.has(u))) : pool;
+  const poolMaxCount = Math.max(0, ...poolAvail.map(p => p.globalCount));
+  const aPool = poolAvail.filter(s => s.wing === 'A');
+  const dPool = poolAvail.filter(s => s.wing === 'D');
 
   // ── Step 3: Wing assignment per BN ──────────────────
   function _bnSortHash(name, seed){
@@ -18845,14 +18878,14 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     for(let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
     return Math.abs(h);
   }
-  const nursesSorted = [...nurses].sort((a, b) => {
+  const nursesSorted = [...dealNurses].sort((a, b) => {
     const aD = nurseWingCount(a, shift, 'D');
     const bD = nurseWingCount(b, shift, 'D');
     if(aD !== bD) return aD - bD; // least-recent-D goes first
     return (_bnSortHash(a, dateSeed) % 1000) - (_bnSortHash(b, dateSeed) % 1000);
   });
 
-  const n = nurses.length;
+  const n = dealNurses.length;
   const wingAssignment = {};
 
   if(n === 1){
@@ -18868,8 +18901,8 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     let soloWing;
     if(aAvg < dAvg) soloWing = 'A';
     else if(dAvg < aAvg) soloWing = 'D';
-    else soloWing = (_bnSortHash(nurses[0], dateSeed) % 2) === 0 ? 'A' : 'D';
-    wingAssignment[nurses[0]] = soloWing;
+    else soloWing = (_bnSortHash(dealNurses[0], dateSeed) % 2) === 0 ? 'A' : 'D';
+    wingAssignment[dealNurses[0]] = soloWing;
   } else {
     const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : 0;
     const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : 0;
@@ -18926,7 +18959,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
 
   // First-pick pass: each row picks one slot. Quota set to 1 temporarily.
   const firstPickRows = rows.map(r => ({ ...r, quota: 1, picked: [] }));
-  const candidateCols = pool;
+  const candidateCols = poolAvail;
   const firstCost = firstPickRows.map(r => candidateCols.map(slotEntry => {
     if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
     return _composeCost(r.bn, slotEntry, r.history, []);
@@ -19020,6 +19053,12 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     }
     assignments[r.bn] = nurseSlots.map(s => s.slot);
   });
+
+  // Build 300: locked BNs ride back verbatim (already-expanded units;
+  // expandSuggestionUnits is a no-op on real unit names).
+  if(_lockedBNs.length){
+    _lockedBNs.forEach(b => { assignments[b] = (_locked[b] || []).slice(); });
+  }
 
   return assignments;
 }
