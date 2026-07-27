@@ -926,7 +926,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div id="restoreModalList" style="overflow-y:auto;flex:1;margin-bottom:14px"></div>
     <div style="display:flex;gap:8px;justify-content:flex-end">
       <button class="btn btn-ghost" onclick="restoreModalConfirm(false)">Leave all open</button>
-      <button class="btn btn-primary" onclick="restoreModalConfirm(true)">Confirm</button>
+      <button class="btn btn-primary" onclick="restoreModalConfirm(true)">Apply these choices</button>
     </div>
   </div>
 </div>
@@ -1743,7 +1743,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-295';
+const APP_VERSION = '2026-07-26-296';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3192,7 +3192,7 @@ function showAppVersionLine(){
 // Cancel a future-scheduled unit status change. 3C uses legacy storage;
 // other units use the unified path.
 async function cancelScheduledUnitChangeUI(unit, effectiveAt){
-  if(!await customConfirm(`Cancel this scheduled ${unit} change?`, 'Yes, cancel it', 'Go back')) return;
+  if(!await customConfirm(`Cancel this scheduled ${unit} change?`, 'Cancel the change', 'Keep it scheduled')) return;
   if(unit === '3C'){
     const list = get3CSchedule().filter(e => e.effectiveAt !== effectiveAt);
     await set3CSchedule(list);
@@ -3607,7 +3607,7 @@ async function openUnitStatusModal(unit){
         Current status: <strong style="color:var(--text)">${currentStatus === 'open' ? 'Open' : 'Closed'}</strong>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_unitApplyNow('${unit}','${targetStatus}')">Apply Now</button>
+        <button type="button" class="btn btn-primary" onclick="_unitApplyNow('${unit}','${targetStatus}')">${targetStatus === 'closed' ? 'Close' : 'Open'} ${unit} now</button>
         <button type="button" class="btn btn-ghost" onclick="_unitScheduleLater('${unit}','${targetStatus}')">Schedule for later</button>
         <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
@@ -3646,7 +3646,7 @@ function _unitScheduleLater(unit, targetStatus){
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_unitScheduleSave('${unit}','${targetStatus}')">Save</button>
+        <button type="button" class="btn btn-primary" onclick="_unitScheduleSave('${unit}','${targetStatus}')">Schedule the ${targetStatus === 'closed' ? 'close' : 'reopen'}</button>
         <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
     </div>`;
@@ -3661,7 +3661,7 @@ function _unitScheduleSave(unit, targetStatus){
   const [hh,mm] = timeVal.split(':').map(Number);
   const effectiveAt = new Date(y, m-1, d, hh, mm);
   if(effectiveAt <= new Date()){
-    toast('Scheduled time must be in the future. Use Apply Now for immediate changes.', true);
+    toast('Scheduled time must be in the future — for an immediate change, use the now button instead.', true);
     return;
   }
   _closeUnitStatusModal();
@@ -3875,7 +3875,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} will open ${effectiveLabel}. All future shifts will be re-dealt to fold ${unit} back into coverage — break-nurse assignments may change.</div>`;
     }
 
-    const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? 'Confirm & Notify Nurses' : 'Confirm';
+    const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? `Close ${unit} & notify ${affectedBookings.length} nurse${affectedBookings.length !== 1 ? 's' : ''}` : `${targetStatus === 'closed' ? 'Close' : 'Open'} ${unit} now`;
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
@@ -3887,7 +3887,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
     document.body.appendChild(modal);
   } catch(e){
     hideBusy();
-    toast(`Error: ${e.message}`, true);
+    toast(`Couldn't save the change — ${e.message}`, true);
   }
 }
 
@@ -4299,7 +4299,7 @@ async function commitUnitChange(){
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
     hideBusy();
-    toast(`Error: ${e.message}`, true);
+    toast(`Couldn't save the change — ${e.message}`, true);
   } finally {
     // Safety net: guarantee the busy overlay dismisses even if the success
     // path didn't reach an inline hideBusy. Calling hideBusy a second time
@@ -4910,7 +4910,7 @@ function resetInactivityTimer(){
     const extEl  = document.getElementById('nurseExt');
     if(nameEl && extEl && (nameEl.value.trim() || extEl.value.trim())){
       clearNameExt();
-      toast('Session cleared after 5 minutes of inactivity.');
+      toast('Session cleared after 5 minutes — re-enter your extension to continue.');
     }
   }, INACTIVITY_MS);
 }
@@ -6053,7 +6053,7 @@ async function resetShiftToDefault(){
   if(!def || !def.length){
     toast('No default schedule set for ' + shift + ' shift', true); return;
   }
-  if(!await customConfirm('Reset this shift to your default break schedule?','Reset','Cancel')) return;
+  if(!await customConfirm('Reset this shift to your default break schedule?','Reset this shift','Keep current')) return;
   await applyDefaultToShift(name, dt, shift, def, true);
   toast('Shift reset to default');
   loadBNConfirm();
@@ -6072,7 +6072,7 @@ async function resetAllToDefault(){
   if(!dayDef.length && !nocDef.length){
     toast('No default schedule set yet', true); return;
   }
-  if(!await customConfirm('Reset ALL upcoming shifts to your default break schedule?','Reset All','Cancel')) return;
+  if(!await customConfirm('Reset ALL upcoming shifts to your default break schedule?','Reset all shifts','Keep current')) return;
 
   const scheds = await spGet(LISTS.schedule,
     `BreakNurseName eq '${esc(name)}'`);
@@ -7872,7 +7872,7 @@ function togglePending(slotTime, slotShift, bn, srcDt){
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
       document.getElementById('nameExtHint').style.display = 'block';
-      toast('Please enter your first name and a 5-digit Spectra extension.', true);
+      toast('Enter your first name and a 5-digit Spectra extension', true);
       return;
     }
     if(S.pendingClaims.size >= MAX_SLOTS){
@@ -8275,7 +8275,7 @@ async function submitClaims(){
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
-    toast('Please enter your first name and a 5-digit Spectra extension.', true);
+    toast('Enter your first name and a 5-digit Spectra extension', true);
     return;
   }
 
@@ -8976,7 +8976,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
-    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Please enter your first name and a 5-digit Spectra extension.', true); }
+    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Enter your first name and a 5-digit Spectra extension', true); }
     return 'Name/ext missing';
   }
   document.getElementById('nameExtHint').style.display = 'none';
@@ -9121,7 +9121,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // Prevents network-slow tap-retry from creating duplicate rows.
     const _inFlightKey = `${_unit}|${slotTime}|${slotShift}|${nurseExt}|${coveredBy||''}`; // Build 284: two BNs' same-time rows are distinct claims
     if(_claimsInFlight.has(_inFlightKey)){
-      if(!silent){ toast(`${fmt12(slotTime)} is already being claimed.`, true); }
+      if(!silent){ toast(`${fmt12(slotTime)} is being claimed by someone else right now — try another slot.`, true); }
       return 'duplicate-in-flight';
     }
     _claimsInFlight.add(_inFlightKey);
@@ -9139,7 +9139,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       // cancel-and-re-claim isn't blocked.
       setTimeout(() => _claimsInFlight.delete(_inFlightKey), 3000);
     }
-    if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(_nurseFirst)}!`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
+    if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(_nurseFirst)}`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
   }catch(e){
     if(!silent){
@@ -9313,7 +9313,7 @@ async function editAssign(id){
     );
 
     if(confirmed.length > 0){
-      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Proceed','Cancel')) return;
+      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Edit units anyway','Go back')) return;
     }
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
@@ -10690,8 +10690,8 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
       });
 
       okBtn.textContent = cancelledCount
-        ? `Confirm — cover ${coveredCount}, cancel ${cancelledCount}`
-        : `Confirm coverage`;
+        ? `Cover ${coveredCount}, cancel ${cancelledCount}`
+        : `Cover as shown`;
     }
 
     // Build the absorbed/flagged contract from the current on-screen state.
@@ -11673,7 +11673,7 @@ async function saveAssign(){
       });
     if(conflicts.length){
       const lines = conflicts.map(c => `• ${firstName(c.bn)} already covers ${c.units.join(', ')}`).join('\n');
-      if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Continue','Cancel')){ loadAssignments(); return; }
+      if(!await customConfirm(`Duplicate unit assignment:\n\n${lines}\n\nThese units will be covered by two BNs on the same shift.`,'Assign anyway — double cover','Pick different units')){ loadAssignments(); return; }
     }
 
     // If editing, delete ALL existing records for this BN/date/shift first (consolidates duplicates)
@@ -11897,7 +11897,7 @@ async function saveAssign(){
         }
         await saveRotation(nurse, dt, shift, rot);
       }
-    } catch(e){ toast('Rotation error: ' + e.message, true); }
+    } catch(e){ toast(`Couldn't save the rotation — ${e.message}`, true); }
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
@@ -15270,7 +15270,7 @@ async function loadBNView(){
   // flight may not touch BNS.
   const _myGen = ++_bnViewGen;
   const name = document.getElementById('bnNameSelect').value.trim();
-  if (!name) { toast('Select your name first.', true); return; }
+  if (!name) { toast('Select your name first', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
 
   // Clear ext and slot display immediately when switching to a different BN
@@ -19470,6 +19470,10 @@ async function _loadExistingAssignmentFor(val){
       const allUnits = [...new Set(active.flatMap(s => {
         try { return JSON.parse(s.Units || '[]'); } catch { return []; }
       }))];
+      // Build 296 (bug #7): when this reload replaces a non-empty, different
+      // selection during an active edit, the toast must say so — "modify and
+      // Save" alone let a carried selection vanish with a whisper.
+      const _prevSel = [...S.aUnits];
       S.aUnits = [...allUnits];
       document.querySelectorAll('.uc').forEach(c => {
         const u = c.id.replace('au-','');
@@ -19477,7 +19481,11 @@ async function _loadExistingAssignmentFor(val){
       });
       S.editingAssignId = active[0].Id;
       hideBusy();
-      toast(`Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`);
+      const _replacedSel = (typeof _editSource !== 'undefined' && _editSource)
+        && _prevSel.length && _prevSel.slice().sort().join(',') !== S.aUnits.slice().sort().join(',');
+      toast(_replacedSel
+        ? `⚠️ Loaded ${firstName(val)}'s existing ${shift} units (${S.aUnits.join(', ')}) — replaced your selected ${_prevSel.join(', ')}. Re-pick if you meant to carry them.`
+        : `Loaded ${firstName(val)}'s existing ${shift} assignment — modify and Save`, _replacedSel);
     } else {
       S.aUnits = [];
       S.editingAssignId = null;
