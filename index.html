@@ -580,6 +580,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <div id="rptStatus"></div>
 
+    <div class="card" id="rptSnapshotCard" style="display:none">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div class="card-label" style="margin-bottom:0">📝 Summary Snapshot</div>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="copyRptSnapshot(this)" style="font-size:.72rem;padding:4px 10px">📋 Copy</button>
+      </div>
+      <div id="rptSnapshotBody" style="font-size:.9rem;line-height:1.6"></div>
+    </div>
+
     <div class="card" id="rptCovScoreCard" style="display:none">
       <div class="card-label">🛡️ Unit Coverage</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
@@ -587,6 +595,10 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
       <div id="rptCovScoreCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptCovScoreBody" style="overflow-x:auto"></div>
+      <div id="rptCovHolesPast" style="font-size:.85rem;margin-top:10px;line-height:1.5"></div>
+      <div id="rptCovUpcoming" style="font-size:.85rem;margin-top:6px;line-height:1.5"></div>
+      <div id="rptCovClosures" style="font-size:.8rem;color:var(--muted);margin-top:6px;line-height:1.5"></div>
+      <div id="rptCovHorizon" style="font-size:.78rem;color:var(--muted);margin-top:6px"></div>
     </div>
 
     <div class="card" id="rptDeliveredCard" style="display:none">
@@ -1727,7 +1739,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-291';
+const APP_VERSION = '2026-07-26-292';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17797,19 +17809,18 @@ function setRange(key, btn){
 // If a picked date would invalidate the OTHER input's existing value
 // (rare since the constraint blocks it), auto-clamp to match.
 function onReportDateChange(which){
+  // Build 292: clamp-only validation. The Build-129 min/max attributes were
+  // sticky across range changes — a previous To pinned From's max, which
+  // masqueraded as an "import range" limit at the OS picker. Clamps are
+  // order-independent; also heal any stale attributes already set.
   const fromEl = document.getElementById('rptFrom');
   const toEl   = document.getElementById('rptTo');
   if(!fromEl || !toEl) return;
-  if(which === 'from'){
-    toEl.min = fromEl.value || '';
-    if(fromEl.value && toEl.value && toEl.value < fromEl.value){
-      toEl.value = fromEl.value;
-    }
-  } else {
-    fromEl.max = toEl.value || '';
-    if(fromEl.value && toEl.value && fromEl.value > toEl.value){
-      fromEl.value = toEl.value;
-    }
+  fromEl.removeAttribute('max'); fromEl.removeAttribute('min');
+  toEl.removeAttribute('max');   toEl.removeAttribute('min');
+  if(fromEl.value && toEl.value){
+    if(which === 'from' && toEl.value < fromEl.value) toEl.value = fromEl.value;
+    if(which === 'to'   && fromEl.value > toEl.value) fromEl.value = toEl.value;
   }
   loadReports();
 }
@@ -18009,7 +18020,8 @@ function _rptRenderRotation(rot){
     const gap = top[1] - second;
     if(!flag || gap > flag.gap) flag = { u, bn: top[0], top: top[1], second, total, gap };
   });
-  co.innerHTML = (flag && flag.top >= flag.total * 0.6 && flag.gap >= 3)
+  const _conc = !!(flag && flag.top >= flag.total * 0.6 && flag.gap >= 3);
+  co.innerHTML = _conc
     ? `⚠️ <strong>${escHTML(flag.u)}</strong> went to ${escHTML(bnDisplayName(flag.bn))} ${flag.top} of ${flag.total} assignments — next closest is ${flag.second}.`
     : `✅ No unit is concentrated on a single break nurse in this range.`;
   const td = 'padding:5px 7px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
@@ -18027,6 +18039,7 @@ function _rptRenderRotation(rot){
     </tr>`; }).join('')}
   </table>`;
   document.getElementById('rptRotationCard').style.display = 'block';
+  return !_conc; // Build 292: snapshot consumes the verdict
 }
 
 // ── Card 4: BN Self-Care ───────────────────────────────────────────────
@@ -18054,9 +18067,16 @@ function _rptRenderSelfCare(sc){
     co.innerHTML = `Not enough shifts in range yet to judge break-nurse self-care.`;
   } else {
     const low = qual[0];
-    co.innerHTML = (sc.houseAvg > 0 && low.avg < sc.houseAvg * 0.6)
-      ? `⚠️ <strong>${escHTML(bnDisplayName(low.bn))}</strong> logged ${low.breaks} own break${low.breaks === 1 ? '' : 's'} across ${low.nights} shifts (${low.avg.toFixed(1)}/shift) — the norm this period is ${sc.houseAvg.toFixed(1)}.`
-      : `✅ Break nurses are logging their own breaks — house norm ${sc.houseAvg.toFixed(1)} per shift.`;
+    const ties = qual.filter(p => p.avg === low.avg);
+    if(sc.houseAvg > 0 && low.avg < sc.houseAvg * 0.6){
+      // Build 292: naming one nurse out of a many-way tie was misleading
+      // (dual-running adoption skew). Ties get counted, not named.
+      co.innerHTML = ties.length > 1
+        ? `⚠️ ${ties.length} nurses are at ${low.avg.toFixed(1)} own breaks per shift — the norm this period is ${sc.houseAvg.toFixed(1)}.`
+        : `⚠️ <strong>${escHTML(bnDisplayName(low.bn))}</strong> logged ${low.breaks} own break${low.breaks === 1 ? '' : 's'} across ${low.nights} shifts (${low.avg.toFixed(1)}/shift) — the norm this period is ${sc.houseAvg.toFixed(1)}.`;
+    } else {
+      co.innerHTML = `✅ Break nurses are logging their own breaks — house norm ${sc.houseAvg.toFixed(1)} per shift.`;
+    }
   }
   const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
   const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
@@ -18072,28 +18092,158 @@ function _rptRenderSelfCare(sc){
   document.getElementById('rptSelfCareCard').style.display = 'block';
 }
 
+// ── Build 292: coverage extras — past holes, upcoming preview, closure
+// context, schedule horizon. All pure arithmetic over data loadReports
+// already fetches, plus the unit-status timelines warmed at load.
+const _rptFmtD = ds => { try { const d = new Date(ds + 'T12:00:00');
+  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'numeric', day: 'numeric' }); } catch { return ds; } };
+const _rptDayList = (from, to) => {
+  const out = []; if(!from || !to || from > to) return out;
+  const d = new Date(from + 'T12:00:00'); const end = new Date(to + 'T12:00:00');
+  while(d <= end){
+    out.push(`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`);
+    d.setDate(d.getDate() + 1);
+  }
+  return out;
+};
+
+function _rptCoverageExtras(rangeRows, futureRows, from, to){
+  const t = today();
+  const act = rs => rs.filter(s => _rptActive(s) && (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
+  const rr = act(rangeRows), fr = act(futureRows);
+  const dsOf = s => String(s.ShiftDate).slice(0,10);
+  const allDates = [...rr.map(dsOf), ...fr.map(dsOf)];
+  const horizon = allDates.length ? allDates.reduce((a,b) => a > b ? a : b) : '';
+  const eraMin  = rr.length ? rr.map(dsOf).reduce((a,b) => a < b ? a : b) : '';
+  const has = (pool, d, sh) => pool.some(s => dsOf(s) === d && s.ShiftType === sh);
+
+  // Past holes: within the selected range AND the app's known era, strictly
+  // before today. (Today and beyond belong to the upcoming preview — the
+  // split keeps one gap from being reported twice.)
+  const holes = [];
+  if(eraMin){
+    _rptDayList(from < eraMin ? eraMin : from, to).forEach(d => {
+      if(d >= t) return;
+      if(horizon && d > horizon) return;
+      ['Day','Noc'].forEach(sh => { if(!has(rr, d, sh)) holes.push(`${_rptFmtD(d)} ${sh}`); });
+    });
+  }
+
+  // Upcoming: today through +6 days, capped at the horizon — beyond the
+  // horizon is "no data", not "no coverage".
+  const upcoming = [];
+  if(horizon){
+    const e = new Date(t + 'T12:00:00'); e.setDate(e.getDate() + 6);
+    const end7 = `${e.getFullYear()}-${String(e.getMonth()+1).padStart(2,'0')}-${String(e.getDate()).padStart(2,'0')}`;
+    _rptDayList(t, horizon < end7 ? horizon : end7).forEach(d => {
+      ['Day','Noc'].forEach(sh => { if(!has(fr, d, sh)) upcoming.push(`${_rptFmtD(d)} ${sh}`); });
+    });
+  }
+
+  // Closure context: dates in range where a unit's shift start resolves
+  // closed on the status timeline, so closure days don't read as coverage
+  // failures. Annotate the shift only when the two shifts differ.
+  const closures = [];
+  const cTo = horizon && horizon < to ? horizon : to;
+  _rptUnits().forEach(u => {
+    const days = [];
+    _rptDayList(from, cTo).forEach(d => {
+      const dc = !isUnitOpenForShift(u, d, 'Day');
+      const nc = !isUnitOpenForShift(u, d, 'Noc');
+      if(dc && nc) days.push(_rptFmtD(d));
+      else if(dc) days.push(`${_rptFmtD(d)} (Day)`);
+      else if(nc) days.push(`${_rptFmtD(d)} (Noc)`);
+    });
+    if(days.length) closures.push(`${u} closed: ${days.join(', ')}`);
+  });
+
+  return { holes, upcoming, horizon, closures };
+}
+
+function _rptRenderCoverageExtras(x){
+  const hp = document.getElementById('rptCovHolesPast');
+  const up = document.getElementById('rptCovUpcoming');
+  const cl = document.getElementById('rptCovClosures');
+  const hz = document.getElementById('rptCovHorizon');
+  if(hp) hp.innerHTML = x.holes.length
+    ? `<span style="color:var(--red);font-weight:600">No coverage:</span> ${x.holes.map(escHTML).join(' · ')}`
+    : `<span style="color:var(--teal-dk)">✓ No zero-coverage shifts in this range.</span>`;
+  if(up) up.innerHTML = x.upcoming.length
+    ? `<span style="color:#a06a00;font-weight:600">Coming up:</span> ${x.upcoming.map(h => escHTML(h) + ' — no break nurse scheduled').join(' · ')}`
+    : (x.horizon ? `<span style="color:var(--teal-dk)">✓ Next 7 days staffed (within the schedule on file).</span>` : '');
+  if(cl) cl.innerHTML = x.closures.length ? x.closures.map(escHTML).join(' · ') : '';
+  if(hz) hz.textContent = x.horizon ? `Schedule on file through ${_rptFmtD(x.horizon)}` : 'No future schedule on file.';
+}
+
+// ── Build 292: summary snapshot — a few plain sentences for someone who
+// never opens the app, with a copy button. Assembled from numbers the
+// other cards already computed.
+let _rptSnapshotText = '';
+function _rptRenderSnapshot(rangeLabel, cov, del, rotOk, x){
+  const card = document.getElementById('rptSnapshotCard');
+  const body = document.getElementById('rptSnapshotBody');
+  if(!card || !body) return;
+  const bits = [];
+  bits.push(`${rangeLabel}: ${cov.nInst} covered shift${cov.nInst === 1 ? '' : 's'} on file.`);
+  bits.push(x.holes.length
+    ? `${x.holes.length} shift${x.holes.length === 1 ? '' : 's'} had no break nurse at all (${x.holes.join(', ')}).`
+    : `No zero-coverage shifts.`);
+  if(del.houseAvg > 0) bits.push(`Breaks delivered: ${del.houseAvg.toFixed(1)} per covered shift house-wide.`);
+  bits.push(rotOk
+    ? `Unit rotation is even — no unit concentrated on any one nurse.`
+    : `Rotation shows concentration — see the grid.`);
+  if(x.upcoming.length) bits.push(`Coming up unstaffed: ${x.upcoming.join(', ')}.`);
+  if(x.horizon) bits.push(`Schedule on file through ${_rptFmtD(x.horizon)}.`);
+  _rptSnapshotText = bits.join(' ');
+  body.textContent = _rptSnapshotText;
+  card.style.display = 'block';
+}
+function copyRptSnapshot(btn){
+  const ta = document.createElement('textarea');
+  ta.value = _rptSnapshotText;
+  document.body.appendChild(ta); ta.select();
+  try { document.execCommand('copy'); } catch(e){}
+  document.body.removeChild(ta);
+  if(btn){ const old = btn.textContent; btn.textContent = '✅ Copied'; setTimeout(() => { btn.textContent = old; }, 1500); }
+}
+
 // ── Orchestrator (name + gate preserved: the tab hook calls this) ──────
 async function loadReports(){
   if(!RPT.unlocked) return;
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
   const status = document.getElementById('rptStatus');
-  ['rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard']
+  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
   status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
-    const bookings = await spGet(LISTS.bookings, `SlotDate ge '${from}' and SlotDate le '${to}'`);
-    const scheds   = await spGet(LISTS.schedule, `ShiftDate ge '${from}' and ShiftDate le '${to}'`);
+    // Build 292: warm the status timelines the closure line reads (no-ops
+    // after app load) before any pure-function status calls.
+    await Promise.all([
+      warmUnitStatuses().catch(() => {}),
+      syncedLS.warm('unit3CDefault').catch(() => {}),
+      syncedLS.warm('unit3CSchedule').catch(() => {})
+    ]);
+    const t = today();
+    const bookings   = await spGet(LISTS.bookings, `SlotDate ge '${from}' and SlotDate le '${to}'`);
+    const scheds     = await spGet(LISTS.schedule, `ShiftDate ge '${from}' and ShiftDate le '${to}'`);
+    // Build 292: future rows power the upcoming preview + horizon,
+    // independent of the selected range.
+    const futureRows = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     const cov = _rptCoverage(scheds);
     if(!cov.nInst){
       status.innerHTML = '<div class="empty">No shifts in this date range yet.</div>';
       return;
     }
     status.innerHTML = '';
+    const del = _rptDelivered(cov, bookings);
     _rptRenderCoverage(cov);
-    _rptRenderDelivered(_rptDelivered(cov, bookings));
-    _rptRenderRotation(_rptRotation(scheds));
+    _rptRenderCoverageExtras(_rptCoverageExtras(scheds, futureRows, from, to));
+    _rptRenderDelivered(del);
+    const rotOk = _rptRenderRotation(_rptRotation(scheds));
     _rptRenderSelfCare(_rptSelfCare(scheds, bookings));
+    _rptRenderSnapshot(fmtDateRange(from, to), cov, del, rotOk,
+      _rptCoverageExtras(scheds, futureRows, from, to));
   } catch(e){
     const isTimeout = /timeout/i.test(e.message || '');
     status.innerHTML = `<div class="empty" style="color:var(--red)">${isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : e.message}<br><br>
