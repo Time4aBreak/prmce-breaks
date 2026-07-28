@@ -795,7 +795,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <!-- Claim limits & ramp (Build 301) -->
     <div class="card">
       <div class="card-label" style="margin:0 0 4px">Claim Limits &amp; Ramp</div>
-      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and how many more unlock after a wait. The clock runs from shift start — Day 6:30 AM, Noc 6:30 PM.</div>
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and the clock time when the extra slots unlock. A time earlier than the shift's start means the next morning — Noc unlocking at 2:00 AM does what it says.</div>
       <div id="rampCfgBody"></div>
       <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
     </div>
@@ -1431,7 +1431,7 @@ async function warmUnitStatuses(){
 // behavior (3, no wait). A shift's limits bind anyone claiming its slots,
 // whatever tab they came through; the Other view's total caps the sum.
 // Limits gate NEW claims only — owned slots are never confiscated.
-const RAMP_DEFAULTS = { Day:{max:3,atOpen:3,waitMin:0,addAfter:0}, Noc:{max:3,atOpen:3,waitMin:0,addAfter:0}, otherTotal:3 };
+const RAMP_DEFAULTS = { Day:{max:3,atOpen:3,unlockAt:'06:30',addAfter:0}, Noc:{max:3,atOpen:3,unlockAt:'18:30',addAfter:0}, otherTotal:3 };
 function _rampCfg(){
   try {
     const raw = syncedLS.get('rampConfig');
@@ -1462,22 +1462,34 @@ function rampMaxFor(shiftForm){
 function rampOtherTotal(){
   return Math.max(1, Number(_rampCfg().otherTotal) || MAX_SLOTS);
 }
+function _rampUnlockMs(shiftForm, dateStr, c){
+  // Build 302: the unlock is a CLOCK TIME. A time earlier than the shift's
+  // start means the next morning (the app's own Noc-rollover convention).
+  // Legacy waitMin shapes from Build-301 saves still resolve.
+  const startHM = shiftForm === 'Day' ? '06:30' : '18:30';
+  const base = new Date(`${dateStr}T${startHM}:00`).getTime();
+  const ua = (c && typeof c.unlockAt === 'string' && /^\d{2}:\d{2}$/.test(c.unlockAt)) ? c.unlockAt : null;
+  if(ua){
+    let u = new Date(`${dateStr}T${ua}:00`).getTime();
+    if(u < base) u += 86400000;
+    return u;
+  }
+  const legacyWait = Math.min(720, Math.max(0, Number(c && c.waitMin) || 0));
+  return base + legacyWait * 60000;
+}
 function rampAllowedCount(shiftForm, dateStr){
   const c = _rampCfg()[shiftForm];
   if(!c || !dateStr) return MAX_SLOTS;
   const max = Math.max(1, Number(c.max) || MAX_SLOTS);
   const aoRaw = Number(c.atOpen);
   const atOpen = Math.min(max, Number.isFinite(aoRaw) ? Math.max(0, aoRaw) : max);
-  const waitMin = Math.min(720, Math.max(0, Number(c.waitMin) || 0));
   const addAfter = Math.max(0, Number(c.addAfter) || 0);
-  const t0 = new Date(`${dateStr}T${shiftForm === 'Day' ? '06:30' : '18:30'}:00`).getTime();
-  const unlocked = Date.now() >= t0 + waitMin * 60000;
+  const unlocked = Date.now() >= _rampUnlockMs(shiftForm, dateStr, c);
   return Math.min(max, atOpen + (unlocked ? addAfter : 0));
 }
 function rampUnlockLabel(shiftForm, dateStr){
   const c = _rampCfg()[shiftForm] || {};
-  const t0 = new Date(`${dateStr}T${shiftForm === 'Day' ? '06:30' : '18:30'}:00`).getTime();
-  const u = new Date(t0 + Math.min(720, Math.max(0, Number(c.waitMin) || 0)) * 60000);
+  const u = new Date(_rampUnlockMs(shiftForm, dateStr, c));
   return fmt12(`${String(u.getHours()).padStart(2,'0')}${String(u.getMinutes()).padStart(2,'0')}`);
 }
 function rampCheckBackLine(shiftForm, dateStr){
@@ -1490,7 +1502,7 @@ function initRampCard(){
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · wait ${num(p+'Wait', cc.waitMin, 720)} min · then +${num(p+'Add', cc.addAfter, 8)}
+      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
     </div>`;
   body.innerHTML = row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
@@ -1500,9 +1512,10 @@ function initRampCard(){
 }
 async function saveRampCfg(btn){
   const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
+  const tv = (id, dflt) => { const el = document.getElementById(id); return (el && /^\d{2}:\d{2}$/.test(el.value)) ? el.value : dflt; };
   const cfg = {
-    Day: { max: Math.max(1, v('rampDayMax')), atOpen: v('rampDayOpen'), waitMin: Math.min(720, v('rampDayWait')), addAfter: v('rampDayAdd') },
-    Noc: { max: Math.max(1, v('rampNocMax')), atOpen: v('rampNocOpen'), waitMin: Math.min(720, v('rampNocWait')), addAfter: v('rampNocAdd') },
+    Day: { max: Math.max(1, v('rampDayMax')), atOpen: v('rampDayOpen'), unlockAt: tv('rampDayUnlock', '06:30'), addAfter: v('rampDayAdd') },
+    Noc: { max: Math.max(1, v('rampNocMax')), atOpen: v('rampNocOpen'), unlockAt: tv('rampNocUnlock', '18:30'), addAfter: v('rampNocAdd') },
     otherTotal: Math.max(1, v('rampOtherTot'))
   };
   const old = btn ? btn.textContent : '';
@@ -1842,7 +1855,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-301';
+const APP_VERSION = '2026-07-26-302';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
