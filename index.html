@@ -1568,8 +1568,10 @@ async function saveRampCfg(btn){
     await syncedLS.set('rampConfig', cfg);
     await syncedLS.set('coverageConfig', covCfg);
     initRampCard();
-    if(_dry) toast(_dry, true);
-    toast('✓ Limits saved — each device picks them up on its next refresh');
+    // Build 304: one toast, both facts — the app's toast is a single
+    // element, so a follow-up success call was clobbering the pool-dry
+    // warning before anyone could read it.
+    toast(_dry ? `✓ Saved — but heads up: ${_dry}` : '✓ Limits saved — each device picks them up on its next refresh', !!_dry);
   } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
@@ -1901,7 +1903,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-303';
+const APP_VERSION = '2026-07-26-304';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
