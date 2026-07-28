@@ -354,6 +354,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
       <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">⚙️ Schedule</button>
       <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
+      <button class="sub-tab" id="st-settings" onclick="showSubTab('settings',this)" style="display:none">🛠️ Settings</button>
     </div>
 
     <!-- Sub-tab content -->
@@ -776,6 +777,15 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
+  </div><!-- /adminPanel -->
+    </div><!-- /subtab-admin -->
+
+    <!-- ═══════════ SETTINGS TAB (Build 305) ═══════════
+         Admin-gated by the tab button itself (revealed with st-admin at
+         both unlock sites); the cards inside carry no second gate, same
+         protection level as the unlocked adminPanel they came from. -->
+    <div id="subtab-settings" class="subtab" style="display:none">
+      <div id="settingsPanel">
     <!-- Sim mode controls (only visible in simulation mode) -->
     <div class="card" id="simControls" style="border-color:var(--border)">
       <div class="card-label">🗄 Data Management</div>
@@ -870,7 +880,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <!-- Imported schedule summary — collapsible, at bottom -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleImportedEntries()">
-        <div class="card-label" style="margin:0">📅 Imported Schedule Entries</div>
+        <div class="card-label" style="margin:0">📅 Imported Staffing Record</div>
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();clearAllImportedEntries()" style="font-size:.72rem">Clear All</button>
           <span id="importedEntriesChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
@@ -881,8 +891,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       </div>
     </div>
 
-  </div><!-- /adminPanel -->
-    </div><!-- /subtab-admin -->
+      </div><!-- /settingsPanel -->
+    </div><!-- /subtab-settings -->
 
   </div><!-- /portalPanel -->
 </div><!-- /tab-portal -->
@@ -1903,7 +1913,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-304';
+const APP_VERSION = '2026-07-26-305';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5253,6 +5263,8 @@ function unlockPortal(){
     // admin password validation for BN-level logins (Option C gate).
     const adminBtn = document.getElementById('st-admin');
     if(adminBtn) adminBtn.style.display = 'inline-flex';
+    const settingsBtn = document.getElementById('st-settings');
+    if(settingsBtn) settingsBtn.style.display = 'inline-flex';
 
     showSubTab('summary', document.getElementById('st-summary'));
     // Auto-detect Day/Noc for coverage tab
@@ -5333,6 +5345,14 @@ function showSubTab(name, btn){
   if(panel){ panel.style.display='block'; panel.classList.add('active'); }
   if(btn) btn.classList.add('active');
 
+  if(name==='settings'){
+    // Build 305: the moved cards' renderers — all idempotent, all safe to
+    // call on every entry.
+    try { refreshUnitStatusGrid(); } catch(e){}
+    try { initRampCard(); } catch(e){}
+    try { renderImportedNamesList(); } catch(e){}
+    try { renderImportedEntriesSummary(); } catch(e){}
+  }
   if(name==='summary'){
     // Auto-select current shift and date each time Covering tab is opened
     const curShift = detectShift();
@@ -5493,6 +5513,8 @@ function showTab(name, btn){
       PORTAL.unlocked = true; PORTAL.level = 'admin';
       const adminBtn = document.getElementById('st-admin');
       if(adminBtn) adminBtn.style.display = 'inline-flex';
+      const settingsBtn2 = document.getElementById('st-settings');
+      if(settingsBtn2) settingsBtn2.style.display = 'inline-flex';
       // Auto-detect current shift for coverage tab
       const _devShift = detectShift();
       S.summShift = _devShift;
