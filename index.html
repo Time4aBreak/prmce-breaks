@@ -794,8 +794,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <!-- Claim limits & ramp (Build 301) -->
     <div class="card">
-      <div class="card-label" style="margin:0 0 4px">Claim Limits &amp; Ramp</div>
-      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and the clock time when the extra slots unlock. A time earlier than the shift's start means the next morning — Noc unlocking at 2:00 AM does what it says.</div>
+      <div class="card-label" style="margin:0 0 4px">Claim &amp; Coverage Limits</div>
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and the clock time when the extra slots unlock (a time earlier than the shift's start means the next morning). Below: how many units each break nurse is dealt, by team size, and the partial-shift formula.</div>
       <div id="rampCfgBody"></div>
       <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
     </div>
@@ -1418,7 +1418,8 @@ async function warmUnitStatuses(){
     await Promise.all([
       syncedLS.warm('unitStatuses'),
       syncedLS.warm('unitSchedules'),
-      syncedLS.warm('rampConfig') // Build 301
+      syncedLS.warm('rampConfig'), // Build 301
+      syncedLS.warm('coverageConfig') // Build 303
     ]);
     migrate3CIntoUnitStatuses();
     try { initRampCard(); } catch(e){}
@@ -1432,6 +1433,26 @@ async function warmUnitStatuses(){
 // whatever tab they came through; the Other view's total caps the sum.
 // Limits gate NEW claims only — owned slots are never confiscated.
 const RAMP_DEFAULTS = { Day:{max:3,atOpen:3,unlockAt:'06:30',addAfter:0}, Noc:{max:3,atOpen:3,unlockAt:'18:30',addAfter:0}, otherTotal:3 };
+// Build 303: coverage sizing — how many units each BN is dealt, by team
+// size (index = team size - 1; last entry catches 4+), plus the partials
+// formula. Defaults reproduce the legacy table exactly.
+const COV_DEFAULTS = { Day:{byTeam:[3,3,2,2]}, Noc:{byTeam:[3,3,3,3]}, partial:{units:1, perHours:4} };
+function _covCfg(){
+  try {
+    const raw = syncedLS.get('coverageConfig');
+    const c = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    if(!c) return COV_DEFAULTS;
+    const arr = (a, d) => (Array.isArray(a) && a.length === 4 && a.every(x => Number.isFinite(Number(x)) && Number(x) >= 1)) ? a.map(Number) : d;
+    return {
+      Day: { byTeam: arr(c.Day && c.Day.byTeam, COV_DEFAULTS.Day.byTeam) },
+      Noc: { byTeam: arr(c.Noc && c.Noc.byTeam, COV_DEFAULTS.Noc.byTeam) },
+      partial: {
+        units: Math.max(1, Number(c.partial && c.partial.units) || 1),
+        perHours: Math.max(1, Number(c.partial && c.partial.perHours) || 4)
+      }
+    };
+  } catch(e){ return COV_DEFAULTS; }
+}
 function _rampCfg(){
   try {
     const raw = syncedLS.get('rampConfig');
@@ -1504,10 +1525,21 @@ function initRampCard(){
       <strong style="width:44px">${label}</strong>
       max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
     </div>`;
+  const cov = _covCfg();
+  const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
+      <strong style="width:44px">${label}</strong>
+      <span style="color:var(--muted)">when</span> 1&nbsp;BN&nbsp;→ ${num(p+'T1', bt[0], 6)} · 2&nbsp;→ ${num(p+'T2', bt[1], 6)} · 3&nbsp;→ ${num(p+'T3', bt[2], 6)} · 4+&nbsp;→ ${num(p+'T4', bt[3], 6)} <span style="color:var(--muted)">units each</span>
+    </div>`;
   body.innerHTML = row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
-    `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
+    `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
       <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
+    </div>
+    <div style="border-top:1px solid var(--border);padding-top:10px;font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:8px">COVERAGE SIZING</div>` +
+    covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
+    `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
+      <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
+      <span style="color:var(--muted)">never more than a full-timer's quota</span>
     </div>`;
 }
 async function saveRampCfg(btn){
@@ -1520,10 +1552,24 @@ async function saveRampCfg(btn){
   };
   const old = btn ? btn.textContent : '';
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  const cv = (id, dflt) => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : NaN; return Number.isFinite(n) && n >= 1 ? n : dflt; };
+  const covCfg = {
+    Day: { byTeam: [cv('covDayT1',3), cv('covDayT2',3), cv('covDayT3',2), cv('covDayT4',2)] },
+    Noc: { byTeam: [cv('covNocT1',3), cv('covNocT2',3), cv('covNocT3',3), cv('covNocT4',3)] },
+    partial: { units: cv('covPartUnits',1), perHours: cv('covPartHours',4) }
+  };
+  // Pool-dry hint: the house holds ~14 dealable slots — warn (non-blocking)
+  // when any team-size row wants more than exists.
+  let _dry = '';
+  ['Day','Noc'].forEach(sh => covCfg[sh].byTeam.forEach((u, i) => {
+    if((i + 1) * u > 14 && !_dry) _dry = `Heads up: ${sh} with ${i + 1} BNs at ${u} each wants ${(i + 1) * u} of ~14 open slots — some will come up short.`;
+  }));
   try {
     await syncedLS.set('rampConfig', cfg);
+    await syncedLS.set('coverageConfig', covCfg);
     initRampCard();
-    toast('✓ Claim limits saved — each device picks them up on its next refresh');
+    if(_dry) toast(_dry, true);
+    toast('✓ Limits saved — each device picks them up on its next refresh');
   } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
@@ -1855,7 +1901,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-302';
+const APP_VERSION = '2026-07-26-303';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12623,7 +12669,7 @@ async function dedupAssignments(){
 }
 
 async function clearSimData(){
-  if(!await customConfirm('Clear ALL data — assignments, bookings, the nurse roster, and all settings? This cannot be undone. Re-importing a schedule rebuilds the roster.','Clear All','Cancel')) return;
+  if(!await customConfirm('Clear ALL data — assignments, bookings, the nurse roster, and all settings, and the portal passwords reset to defaults? This cannot be undone. Re-importing a schedule rebuilds the roster.','Clear All','Cancel')) return;
 
   // Local-mirror wipe. Synced keys (bnRotation_*, bnWingHistory_*, unit*, imported*)
   // re-hydrate from BNState on next load, so dropping local copies is safe ONCE the
@@ -12642,7 +12688,13 @@ async function clearSimData(){
       k === 'bnImportedEntries' || k === 'bnImportedNames' ||
       k === 'unit3CDefault' || k === 'unit3CSchedule' ||
       k === 'unitStatuses' || k === 'unitSchedules' || k === 'unitSubLog' ||
-      k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue'
+      k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue' ||
+      // Build 303 audit: every synced key must join this list or its stale
+      // local mirror desyncs from the cleared server (the Build-149 lesson).
+      // Passwords included — the server-side BNState clear resets them to
+      // defaults regardless, so local copies must follow.
+      k === 'rampConfig' || k === 'coverageConfig' || k === 'bnImportGateLog' ||
+      k === 'portalPw_admin' || k === 'portalPw_bn' || k === 'bnAdminPw' || k === 'bnBnPw'
     ).forEach(k => localStorage.removeItem(k));
   };
 
@@ -13585,7 +13637,14 @@ async function runImport(){
       // a flagged partial via Suggest, it gets sized correctly).
       if(hoursValid && hoursNum > 0 && hoursNum < 12){
         e.isPartial = true;
-        e.partialUnitCount = Math.max(1, Math.ceil(hoursNum / 4));
+        // Build 303: "For each partial shift assign U units per H hours" —
+        // capped so no configuration can hand a partial more than the
+        // largest full-timer quota for that shift.
+        const _pc = _covCfg().partial;
+        const _covMax = Math.max(...(_covCfg()[e.shift === 'Day' ? 'Day' : 'Noc'].byTeam));
+        e.partialUnitCount = Math.min(
+          Math.max(1, Math.ceil(hoursNum / _pc.perHours) * _pc.units),
+          Math.max(1, _covMax));
         _partialCount++;
       }
       _validEntries.push(e);
@@ -18625,9 +18684,16 @@ function proximityScore(a, b){
 // without overloading the BN. Some units necessarily go without breaks
 // when a BN works alone; that's operational reality.
 function unitsPerNurse(shift, nurseCount){
-  if(nurseCount === 1) return 3;
-  if(shift === 'Day') return nurseCount <= 2 ? 3 : 2;
-  return 3;
+  // Build 303: the table lives in settings now ("When N BNs are scheduled
+  // for a full shift, assign U units to each"). Fail-open = the legacy law.
+  try {
+    const bt = _covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam;
+    return bt[Math.min(Math.max(1, nurseCount), 4) - 1];
+  } catch(e){
+    if(nurseCount === 1) return 3;
+    if(shift === 'Day') return nurseCount <= 2 ? 3 : 2;
+    return 3;
+  }
 }
 
 // ── All-time coverage counts ──────────────────────────
