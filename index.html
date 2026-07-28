@@ -792,6 +792,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
       <div id="unitStatusScheduled" style="margin-top:12px;font-size:.82rem"></div>
     </div>
 
+    <!-- Claim limits & ramp (Build 301) -->
+    <div class="card">
+      <div class="card-label" style="margin:0 0 4px">Claim Limits &amp; Ramp</div>
+      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and how many more unlock after a wait. The clock runs from shift start — Day 6:30 AM, Noc 6:30 PM.</div>
+      <div id="rampCfgBody"></div>
+      <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
+    </div>
+
     <!-- App version / push update -->
     <!-- Push button visible to admin so they can deploy version updates to
          the fleet after every release. The status line above tells admin
@@ -1409,12 +1417,103 @@ async function warmUnitStatuses(){
   try {
     await Promise.all([
       syncedLS.warm('unitStatuses'),
-      syncedLS.warm('unitSchedules')
+      syncedLS.warm('unitSchedules'),
+      syncedLS.warm('rampConfig') // Build 301
     ]);
     migrate3CIntoUnitStatuses();
+    try { initRampCard(); } catch(e){}
   } catch{}
 }
 
+
+// ═══ Build 301: configurable claim limits + ramp ═══════════════════════
+// One cross-device key ('rampConfig'); absent or garbled = today's exact
+// behavior (3, no wait). A shift's limits bind anyone claiming its slots,
+// whatever tab they came through; the Other view's total caps the sum.
+// Limits gate NEW claims only — owned slots are never confiscated.
+const RAMP_DEFAULTS = { Day:{max:3,atOpen:3,waitMin:0,addAfter:0}, Noc:{max:3,atOpen:3,waitMin:0,addAfter:0}, otherTotal:3 };
+function _rampCfg(){
+  try {
+    const raw = syncedLS.get('rampConfig');
+    const c = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    if(!c) return RAMP_DEFAULTS;
+    return {
+      Day: Object.assign({}, RAMP_DEFAULTS.Day, c.Day || {}),
+      Noc: Object.assign({}, RAMP_DEFAULTS.Noc, c.Noc || {}),
+      otherTotal: Number(c.otherTotal) || RAMP_DEFAULTS.otherTotal
+    };
+  } catch(e){ return RAMP_DEFAULTS; }
+}
+// The staff-facing date a claim on this shift form belongs to (Noc rolls
+// to yesterday until 06:30 — the running night's morning tail).
+function _rampShiftDate(shift){
+  const now = new Date();
+  if(shift === 'Day') return today();
+  if(now.getHours() * 60 + now.getMinutes() < 390){
+    const d = new Date(now.getTime() - 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  }
+  return today();
+}
+function rampMaxFor(shiftForm){
+  const c = _rampCfg()[shiftForm];
+  return Math.max(1, Number(c && c.max) || MAX_SLOTS);
+}
+function rampOtherTotal(){
+  return Math.max(1, Number(_rampCfg().otherTotal) || MAX_SLOTS);
+}
+function rampAllowedCount(shiftForm, dateStr){
+  const c = _rampCfg()[shiftForm];
+  if(!c || !dateStr) return MAX_SLOTS;
+  const max = Math.max(1, Number(c.max) || MAX_SLOTS);
+  const aoRaw = Number(c.atOpen);
+  const atOpen = Math.min(max, Number.isFinite(aoRaw) ? Math.max(0, aoRaw) : max);
+  const waitMin = Math.min(720, Math.max(0, Number(c.waitMin) || 0));
+  const addAfter = Math.max(0, Number(c.addAfter) || 0);
+  const t0 = new Date(`${dateStr}T${shiftForm === 'Day' ? '06:30' : '18:30'}:00`).getTime();
+  const unlocked = Date.now() >= t0 + waitMin * 60000;
+  return Math.min(max, atOpen + (unlocked ? addAfter : 0));
+}
+function rampUnlockLabel(shiftForm, dateStr){
+  const c = _rampCfg()[shiftForm] || {};
+  const t0 = new Date(`${dateStr}T${shiftForm === 'Day' ? '06:30' : '18:30'}:00`).getTime();
+  const u = new Date(t0 + Math.min(720, Math.max(0, Number(c.waitMin) || 0)) * 60000);
+  return fmt12(`${String(u.getHours()).padStart(2,'0')}${String(u.getMinutes()).padStart(2,'0')}`);
+}
+function rampCheckBackLine(shiftForm, dateStr){
+  return `Check back after ${rampUnlockLabel(shiftForm, dateStr)} to sign up for more break time`;
+}
+function initRampCard(){
+  const body = document.getElementById('rampCfgBody');
+  if(!body) return;
+  const c = _rampCfg();
+  const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
+  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
+      <strong style="width:44px">${label}</strong>
+      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · wait ${num(p+'Wait', cc.waitMin, 720)} min · then +${num(p+'Add', cc.addAfter, 8)}
+    </div>`;
+  body.innerHTML = row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
+    `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
+      <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
+      <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
+    </div>`;
+}
+async function saveRampCfg(btn){
+  const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
+  const cfg = {
+    Day: { max: Math.max(1, v('rampDayMax')), atOpen: v('rampDayOpen'), waitMin: Math.min(720, v('rampDayWait')), addAfter: v('rampDayAdd') },
+    Noc: { max: Math.max(1, v('rampNocMax')), atOpen: v('rampNocOpen'), waitMin: Math.min(720, v('rampNocWait')), addAfter: v('rampNocAdd') },
+    otherTotal: Math.max(1, v('rampOtherTot'))
+  };
+  const old = btn ? btn.textContent : '';
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await syncedLS.set('rampConfig', cfg);
+    initRampCard();
+    toast('✓ Claim limits saved — each device picks them up on its next refresh');
+  } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
+  finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
+}
 
 // Expand C_PAIR to actual units based on 3C status for a given date/shift
 function expandCPair(units, date, shift){
@@ -1743,7 +1842,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-300';
+const APP_VERSION = '2026-07-26-301';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7282,7 +7381,9 @@ async function _loadSlotsCore(silent=false){
     const myStagedCancelCount = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
     const effectiveOwnedCount = mySameShift.length - myStagedCancelCount;
     const pendingClaimSameShift = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === shift).length;
-    const canClaimMore = (effectiveOwnedCount + pendingClaimSameShift) < MAX_SLOTS;
+    const _rampAllow = rampAllowedCount(shift, _rampShiftDate(shift)); // Build 301
+    const _rampMax = rampMaxFor(shift);
+    const canClaimMore = (effectiveOwnedCount + pendingClaimSameShift) < _rampAllow;
 
     // Build BN name label — include both main and overlap BNs
     // Look up BN extensions — from schedule record first, fall back to localStorage
@@ -7553,7 +7654,7 @@ async function _loadSlotsCore(silent=false){
       if(!isTaken && !isMine){
         if(!shiftWindowOpen)              { canClaim=false; lockReason=openLabel; }
         else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
-        else if(!canClaimMore)            { canClaim=false; lockReason='Max 3 slots reached'; }
+        else if(!canClaimMore)            { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
         else                              { canClaim=true; }
       }
 
@@ -7875,8 +7976,20 @@ function togglePending(slotTime, slotShift, bn, srcDt){
       toast('Enter your first name and a 5-digit Spectra extension', true);
       return;
     }
-    if(S.pendingClaims.size >= MAX_SLOTS){
-      toast(`Max ${MAX_SLOTS} slots per shift.`, true);
+    // Build 301: a shift's limits bind anyone claiming its slots, any tab;
+    // the Other view's total caps the sum across both arms. (Backstop —
+    // the render already locks rows; claimSlot re-checks at submit.)
+    const _formShift = slotShift || S.shift;
+    const _formDt = (S.shift === 'Other' && srcDt) ? srcDt : _rampShiftDate(_formShift);
+    const _stagedForm = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === _formShift).length;
+    const _allowForm = rampAllowedCount(_formShift, _formDt);
+    if(_stagedForm >= _allowForm){
+      const _mx = rampMaxFor(_formShift);
+      toast(_allowForm < _mx ? rampCheckBackLine(_formShift, _formDt) : `Max ${_mx} slots per shift.`, true);
+      return;
+    }
+    if(S.shift === 'Other' && S.pendingClaims.size >= rampOtherTotal()){
+      toast(`Max ${rampOtherTotal()} slots total on the Other view.`, true);
       return;
     }
     S.pendingClaims.add(key);
@@ -7953,7 +8066,9 @@ function _renderSingleSlotRow(slot){
   const myStagedCancels = mySameShift.filter(b => S.pendingCancels.has(b.Id)).length;
   const effectiveOwned = mySameShift.length - myStagedCancels;
   const pendingClaimCount = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === shift).length;
-  const canClaimMore = (effectiveOwned + pendingClaimCount) < MAX_SLOTS;
+  const _rampAllow = rampAllowedCount(shift, _rampShiftDate(shift)); // Build 301
+  const _rampMax = rampMaxFor(shift);
+  const canClaimMore = (effectiveOwned + pendingClaimCount) < _rampAllow;
   const shiftWindowOpen = staffWindowOpen(shift);
   const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
   const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
@@ -7985,7 +8100,7 @@ function _renderSingleSlotRow(slot){
   if(!isTaken && !isMine){
     if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
     else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
-    else if(!canClaimMore)             { canClaim=false; lockReason='Max 3 slots reached'; }
+    else if(!canClaimMore)             { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
     else                               { canClaim=true; }
   }
   // Row class & visual treatment.
@@ -8840,10 +8955,11 @@ function renderOtherSlotsFromCache(){
   // Staged cancels reduce effective ownership — the cancel-and-replace flow.
   const myStagedCancelsOther = myBookings.filter(b => S.pendingCancels.has(b.Id)).length;
   const effectiveOwnedOther = myBookings.length - myStagedCancelsOther;
-  const canClaimMore = (effectiveOwnedOther + S.pendingClaims.size) < MAX_SLOTS;
+  const _otherTotal = rampOtherTotal(); // Build 301: the Other view's total across both arms
+  const canClaimMore = (effectiveOwnedOther + S.pendingClaims.size) < _otherTotal;
 
   const bnNames = [...new Set([activeDayBN, activeNocBN].filter(Boolean))].join(' / ');
-  if(meta) meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${MAX_SLOTS} per shift`;
+  if(meta) meta.textContent = `Break nurse for ${S.unit}: ${bnNames || '—'} · Slots are 15 min — claim up to ${_otherTotal} total`;
 
   const html = [];
   for(const e of entries){
@@ -8917,7 +9033,7 @@ function renderOtherSlotsFromCache(){
         maxRowShown = true; // one informational row per slot, not one per stream
         return `<div class="slot-row" data-slot-key="${keyAttr}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
-        <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${MAX_SLOTS} slots reached</div>
+        <div class="slot-name" style="color:var(--muted);font-size:.8rem">Max ${_otherTotal} slots reached</div>
       </div>`;
       }
       const bnLabel = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN);
@@ -9037,9 +9153,16 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     const staffMine = allBookingsToday.filter(b =>
       b.NurseName === name && b.Unit === _unit && b.ShiftType === slotShift && isStaffBooking(b)
     );
-    if(staffMine.length >= MAX_SLOTS){
-      if(!silent) toast(`Max ${MAX_SLOTS} slots per shift.`, true);
-      return `Max ${MAX_SLOTS} reached`;
+    // Build 301: submit-time re-check against the LIVE allowance — even a
+    // config change mid-staging can't be raced. Unit-scoped count semantics
+    // preserved from the original check.
+    const _rcDt = (typeof srcDt === 'string' && srcDt) ? srcDt : _rampShiftDate(slotShift);
+    const _rcAllow = rampAllowedCount(slotShift, _rcDt);
+    const _rcMax = rampMaxFor(slotShift);
+    if(staffMine.length >= _rcAllow){
+      const _rcLine = _rcAllow < _rcMax ? rampCheckBackLine(slotShift, _rcDt) : `Max ${_rcMax} slots per shift.`;
+      if(!silent) toast(_rcLine, true);
+      return _rcAllow < _rcMax ? _rcLine : `Max ${_rcMax} reached`;
     }
 
     // Race condition check — from pre-fetched data.
