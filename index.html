@@ -733,6 +733,23 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
             </div>
           </div>
         </div>
+        <div class="row" style="margin-bottom:12px">
+          <div class="field">
+            <label>Shift Length</label>
+            <div class="toggle-row">
+              <div class="toggle-opt active" id="aFull" onclick="setAPartial(false)">Full</div>
+              <div class="toggle-opt" id="aPart" onclick="setAPartial(true)">Partial</div>
+            </div>
+          </div>
+          <div class="field" id="aPartTimes" style="display:none">
+            <label>Start – Stop</label>
+            <div style="display:flex;gap:8px;align-items:center">
+              <input type="time" id="aPartStart" value="20:00" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <span style="color:var(--muted)">–</span>
+              <input type="time" id="aPartEnd" value="00:00" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+            </div>
+          </div>
+        </div>
 
         <div style="margin-bottom:12px">
           <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Break Nurse</label>
@@ -1915,7 +1932,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-306';
+const APP_VERSION = '2026-07-26-307';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9486,6 +9503,24 @@ async function manageSlotAction(action){
 // ═══════════════════════════════════════════════════════
 // EDIT ASSIGNMENT
 // ═══════════════════════════════════════════════════════
+// Build 307: manual partial shifts.
+let _aPartial = false;
+function setAPartial(on){
+  _aPartial = !!on;
+  const f = document.getElementById('aFull'), p = document.getElementById('aPart');
+  if(f) f.classList.toggle('active', !on);
+  if(p) p.classList.toggle('active', on);
+  const t = document.getElementById('aPartTimes');
+  if(t) t.style.display = on ? '' : 'none';
+}
+function _aPartialHours(){
+  const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
+  if(!s || !e || !/^\d{2}:\d{2}$/.test(s.value) || !/^\d{2}:\d{2}$/.test(e.value)) return 0;
+  const m = v => parseInt(v.slice(0,2), 10) * 60 + parseInt(v.slice(3), 10);
+  const mins = (m(e.value) - m(s.value) + 1440) % 1440;
+  return Math.round(mins / 6) / 10; // hours, one decimal (cross-midnight safe)
+}
+
 // Build 295 (bug #4): the rows Edit loaded — consumed exactly once by save.
 // {name, date, shift, ids, units, at}
 let _editSource = null;
@@ -9543,6 +9578,19 @@ async function editAssign(id){
         who.textContent = `${firstName(s.BreakNurseName)} · ${_editSource.date} ${s.ShiftType}`;
         bar.style.display = 'block';
       } }
+    // Build 307: partial rows prefill the Shift Length controls (end time
+    // derived from start + hours; only Hours is stored).
+    { const _st = String(s.StartTime || '').replace(/\D/g, '');
+      const _hr = Number(s.Hours) || 0;
+      if(/^\d{4}$/.test(_st) && _hr > 0 && _hr < 12){
+        setAPartial(true);
+        const sEl = document.getElementById('aPartStart'), eEl = document.getElementById('aPartEnd');
+        if(sEl) sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`;
+        if(eEl){
+          const em = ((parseInt(_st.slice(0,2), 10) * 60 + parseInt(_st.slice(2), 10)) + Math.round(_hr * 60)) % 1440;
+          eEl.value = `${String(Math.floor(em / 60)).padStart(2,'0')}:${String(em % 60).padStart(2,'0')}`;
+        }
+      } else setAPartial(false); }
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
     }))];
@@ -11771,7 +11819,24 @@ async function suggestUnitsForManualAssign(btn){
       } catch(e){}
     });
 
-    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked);
+    // Build 307: a partial shift is sized by the Partials formula and dealt
+    // by the under-covered picker (the import's own partial path), never
+    // the full-shift dealer. Teammates' saved units are excluded — rule B
+    // holds for partials too.
+    if(typeof _aPartial !== 'undefined' && _aPartial){
+      const hrs = _aPartialHours();
+      if(!hrs){ toast('Enter the partial start and stop times first.', true); return; }
+      const pc = _covCfg().partial;
+      const covMax = Math.max(..._covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam);
+      const nUnits = Math.min(Math.max(1, Math.ceil(hrs / pc.perHours) * pc.units), Math.max(1, covMax));
+      const lockedU = [...new Set(Object.values(locked).flat())];
+      const slots = await _pickPartialSlots(shift, dt, nUnits, {}, lockedU);
+      S.aUnits = slots.slice();
+      document.querySelectorAll('.uc').forEach(cb => { const u = cb.id.replace('au-',''); cb.classList.toggle('on', S.aUnits.includes(u)); });
+      toast(`Suggested ${slots.length} unit${slots.length !== 1 ? 's' : ''} for the ${hrs}h partial`);
+      return;
+    }
+    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked, true);
     const slots = result[nurse] || [];
     if(!slots.length){
       toast('Suggester returned no units for this BN', true);
@@ -11848,6 +11913,14 @@ async function saveAssign(){
   const dt=document.getElementById('aDate').value;
   const shift=S.aShift;
   const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
+  // Build 307: partial shifts carry their times onto the row.
+  let _pStart = '', _pHours = 0;
+  if(typeof _aPartial !== 'undefined' && _aPartial){
+    _pHours = _aPartialHours();
+    if(!_pHours){ toast('Enter the partial start and stop times.', true); loadAssignments(); return; }
+    if(_pHours >= 12){ toast('12+ hours is a full shift — switch Shift Length to Full.', true); loadAssignments(); return; }
+    _pStart = document.getElementById('aPartStart').value.replace(':', '');
+  }
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
@@ -12030,7 +12103,8 @@ async function saveAssign(){
     const _createdRow = await spPost(LISTS.schedule,{
       Title:`${nurse}-${dt}-${shift}`,
       BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
-      Units:JSON.stringify(units)
+      Units:JSON.stringify(units),
+      StartTime: _pStart, Hours: _pStart ? String(_pHours) : ''
     });
     // Update wing history so the fairness algorithm sees this manual
     // assignment alongside suggester-generated ones. Without this, the
@@ -18968,7 +19042,7 @@ function _scoreProximityPenalty(slotEntry, currentPicks){
 // algorithm. We just hand them the slots with the lowest current coverage so
 // they fill the biggest gaps. `batchCountOverlay` reflects what full BNs have
 // already been assigned in this same batch, so partials see the latest state.
-async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
+async function _pickPartialSlots(shift, date, n, batchCountOverlay={}, excludeUnits=[]){
   if(n <= 0) return [];
   let counts;
   try {
@@ -18980,7 +19054,7 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}){
   // both 3C/4C with a single tap on full shifts; for partials we just pick
   // individual open units to keep things simple)
   const pool = ALL_COVERAGE_SLOTS
-    .filter(s => s !== 'C_PAIR' && isUnitOpenForShift(s, date, shift))
+    .filter(s => s !== 'C_PAIR' && isUnitOpenForShift(s, date, shift) && !excludeUnits.includes(s))
     .map(s => ({
       slot: s,
       total: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0)
@@ -19043,7 +19117,7 @@ function _clearWingHistoryForDate(name, shift, date){
   saveNurseWingHistory(name, shift, existing);
 }
 
-async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null){
+async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false){
   if(!nurses.length) return {};
   // Build 300 (bug #6): locked-assignments overlay. When teammates already
   // HOLD saved units, deal the remaining nurse(s) AROUND them — never slice
@@ -19256,6 +19330,14 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   const assignments = {};
   rows.forEach(r => {
     const nurseSlots = r.picked;
+    // Build 307: honor the Build-132 intent — a Suggest the user abandons
+    // must leave no fairness-memory trace. History persists only when the
+    // caller doesn't suppress (form-Suggest suppresses; batch/import paths
+    // keep their save-flow semantics unchanged).
+    if(suppressHistory){
+      assignments[r.bn] = nurseSlots.map(s => s.slot);
+      return;
+    }
     // Update wing history (rolling 60 days), removing any existing entries for this date first
     const existing = getNurseWingHistory(r.bn, shift).filter(e => e.date !== date);
     const wingsUsed = [...new Set(nurseSlots.map(s => s.wing))];
@@ -19817,10 +19899,13 @@ async function _loadExistingAssignmentFor(val){
         hideBusy();
         toast(`${firstName(val)} has no ${shift} assignment on ${date} yet — kept your selected units to carry.`);
       } else {
+        // Build 307 (parked decision #1): the outside-edit wipe gets a voice.
+        const _hadSel = S.aUnits.length ? S.aUnits.join(', ') : '';
         S.aUnits = [];
         S.editingAssignId = null;
         document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
         hideBusy();
+        if(_hadSel) toast(`Cleared — ${firstName(val)} has no ${shift} assignment on ${date}.`);
       }
     }
   } catch(e){
