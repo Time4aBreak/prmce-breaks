@@ -804,8 +804,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <!-- Claim limits & ramp (Build 301) -->
     <div class="card">
-      <div class="card-label" style="margin:0 0 4px">Claim &amp; Coverage Limits</div>
-      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Per shift: how many slots a nurse can hold, how many are claimable at shift start, and the clock time when the extra slots unlock (a time earlier than the shift's start means the next morning). Below: how many units each break nurse is dealt, by team size, and the partial-shift formula.</div>
+      <div class="card-label" style="margin:0 0 4px">Shift Limits</div>
       <div id="rampCfgBody"></div>
       <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
     </div>
@@ -1540,12 +1539,15 @@ function initRampCard(){
       <strong style="width:44px">${label}</strong>
       <span style="color:var(--muted)">when</span> 1&nbsp;BN&nbsp;→ ${num(p+'T1', bt[0], 6)} · 2&nbsp;→ ${num(p+'T2', bt[1], 6)} · 3&nbsp;→ ${num(p+'T3', bt[2], 6)} · 4+&nbsp;→ ${num(p+'T4', bt[3], 6)} <span style="color:var(--muted)">units each</span>
     </div>`;
-  body.innerHTML = row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
+  const hdr = (t, s, top) => `<div style="${top ? 'border-top:1px solid var(--border);padding-top:10px;' : ''}font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:2px">${t}</div><div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">${s}</div>`;
+  body.innerHTML =
+    hdr('BREAK SLOT LIMITS', "How many break slots each nurse can claim per shift. Unlock times earlier than the shift's start mean the next morning.", false) +
+    row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
       <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
     </div>
-    <div style="border-top:1px solid var(--border);padding-top:10px;font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:8px">COVERAGE SIZING</div>` +
+    ${hdr('UNITS PER SHIFT', 'How many units each break nurse is dealt, by team size.', true)}` +
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
       <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
@@ -1913,7 +1915,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-305';
+const APP_VERSION = '2026-07-26-306';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
