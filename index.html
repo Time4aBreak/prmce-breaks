@@ -769,6 +769,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           ✏️ Editing <strong id="editModeWho"></strong> — saving will <em>move</em> this assignment.
           <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px;color:#a06a00" onclick="cancelEditMode()">✕ Cancel edit</button>
         </div>
+        <button type="button" id="editRemoveBtn" class="btn btn-ghost btn-sm" style="display:none;color:var(--red);margin-bottom:8px" onclick="this.disabled=true;removeAssignmentFromEdit().finally(()=>{this.disabled=false})">🗑 Remove</button>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
     </div>
@@ -1932,7 +1933,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-309';
+const APP_VERSION = '2026-07-26-310';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9549,6 +9550,8 @@ function cancelEditMode(){
   _editSource = null;
   const bar = document.getElementById('editModeBar');
   if(bar) bar.style.display = 'none';
+  const rb = document.getElementById('editRemoveBtn');
+  if(rb) rb.style.display = 'none';
 }
 // Build 309: plain removal — mirrors editAssign's consolidation (all the
 // BN's rows for that date+shift die together), guards booked breaks like
@@ -9559,7 +9562,7 @@ function cancelEditMode(){
 async function removeAssignment(id){
   try {
     const one = await spGet(LISTS.schedule, `Id eq ${id}`);
-    if(!one.length){ toast('Assignment not found — refresh and try again.', true); loadAssignments(); return; }
+    if(!one.length){ toast('Assignment not found — refresh and try again.', true); loadAssignments(); return false; }
     const s = one[0];
     const d = String(s.ShiftDate).slice(0,10);
     const shiftScheds = await spGet(LISTS.schedule, `ShiftDate ge '${d}' and ShiftDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`);
@@ -9574,7 +9577,7 @@ async function removeAssignment(id){
     const msg = hit > 0
       ? `${hit} break${hit !== 1 ? 's are' : ' is'} booked under ${who} assignment. Removing it leaves them without coverage.`
       : `Remove ${who} assignment (${units.join(', ') || 'no units'})?`;
-    if(!await customConfirm(msg, hit > 0 ? 'Remove anyway' : 'Remove it', 'Keep it')){ loadAssignments(); return; }
+    if(!await customConfirm(msg, hit > 0 ? 'Remove anyway' : 'Remove it', 'Keep it')){ loadAssignments(); return false; }
     await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(mine.map(r => r.Id))) });
     try { await syncedLS.delete(rotationKey(s.BreakNurseName, d, s.ShiftType)); } catch(e){}
     try {
@@ -9582,11 +9585,24 @@ async function removeAssignment(id){
       saveNurseWingHistory(s.BreakNurseName, s.ShiftType, hist);
     } catch(e){}
     toast(`✓ Removed ${who} assignment`);
+    return true;
   } catch(e){
     toast(`Couldn't remove the assignment — ${e.message}`, true);
+    return false;
   } finally {
     loadAssignments();
   }
+}
+
+// Build 310: the edit-mode bridge — removal is a deliberate act inside a
+// mode you consciously entered. Keep-it preserves the edit session.
+async function removeAssignmentFromEdit(){
+  if(typeof _editSource === 'undefined' || !_editSource || !_editSource.ids.length){
+    toast('Nothing loaded to remove — tap ✏️ Edit on an assignment first.', true);
+    return;
+  }
+  const removed = await removeAssignment(_editSource.ids[0]);
+  if(removed) cancelEditMode();
 }
 
 async function editAssign(id){
@@ -9638,6 +9654,8 @@ async function editAssign(id){
         who.textContent = `${firstName(s.BreakNurseName)} · ${_editSource.date} ${s.ShiftType}`;
         bar.style.display = 'block';
       } }
+    { const rb = document.getElementById('editRemoveBtn');
+      if(rb){ rb.textContent = `🗑 Remove ${firstName(s.BreakNurseName)} from Selected Shift`; rb.style.display = 'block'; } }
     // Build 307: partial rows prefill the Shift Length controls (end time
     // derived from start + hours; only Hours is stored).
     { const _st = String(s.StartTime || '').replace(/\D/g, '');
@@ -12522,7 +12540,6 @@ async function _loadAssignmentsCore(preloadedScheds){
                      destroying CoveredFrom and blinding Mark Available's take-back and
                      213's strip-on-close. Supp lifecycle belongs to the coverage verbs. -->
                 ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Removing…';removeAssignment(${s.Id})">🗑 Remove</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
                      now lives in the Break Nurses roster card (BN quit / fired scenario). Row-level
