@@ -1932,7 +1932,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-307';
+const APP_VERSION = '2026-07-26-308';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9520,6 +9520,27 @@ function _aPartialHours(){
   const mins = (m(e.value) - m(s.value) + 1440) % 1440;
   return Math.round(mins / 6) / 10; // hours, one decimal (cross-midnight safe)
 }
+// Build 308: a partial's window must belong to its shift — the same
+// boundary the extraction prompt lives by. Returns '' when valid, else
+// the refusal message. The 5–8 PM overlap trusts the toggle (both shifts
+// are on duty then).
+function _aPartialWindowError(shift){
+  const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
+  if(!s || !e || !/^\d{2}:\d{2}$/.test(s.value) || !/^\d{2}:\d{2}$/.test(e.value)) return '';
+  const m = v => parseInt(v.slice(0,2), 10) * 60 + parseInt(v.slice(3), 10);
+  const st = m(s.value), en = m(e.value);
+  const t12 = v => fmt12(v.replace(':', ''));
+  if(shift === 'Day'){
+    if(st < 360 || st >= 1200)
+      return `${t12(s.value)} is a Noc start — switch Shift to Noc, or fix the times.`;
+    if(en <= st)
+      return `Day partials can't cross midnight — check the stop time.`;
+  } else {
+    if(st >= 480 && st < 1020)
+      return `${t12(s.value)} is a Day start — switch Shift to Day, or fix the times.`;
+  }
+  return '';
+}
 
 // Build 295 (bug #4): the rows Edit loaded — consumed exactly once by save.
 // {name, date, shift, ids, units, at}
@@ -11826,6 +11847,8 @@ async function suggestUnitsForManualAssign(btn){
     if(typeof _aPartial !== 'undefined' && _aPartial){
       const hrs = _aPartialHours();
       if(!hrs){ toast('Enter the partial start and stop times first.', true); return; }
+      const _winErr = _aPartialWindowError(shift);
+      if(_winErr){ toast(_winErr, true); return; }
       const pc = _covCfg().partial;
       const covMax = Math.max(..._covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam);
       const nUnits = Math.min(Math.max(1, Math.ceil(hrs / pc.perHours) * pc.units), Math.max(1, covMax));
@@ -11919,6 +11942,8 @@ async function saveAssign(){
     _pHours = _aPartialHours();
     if(!_pHours){ toast('Enter the partial start and stop times.', true); loadAssignments(); return; }
     if(_pHours >= 12){ toast('12+ hours is a full shift — switch Shift Length to Full.', true); loadAssignments(); return; }
+    const _winErr = _aPartialWindowError(shift);
+    if(_winErr){ toast(_winErr, true); loadAssignments(); return; }
     _pStart = document.getElementById('aPartStart').value.replace(':', '');
   }
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
