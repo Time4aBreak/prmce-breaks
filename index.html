@@ -1933,7 +1933,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-310';
+const APP_VERSION = '2026-07-26-312';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10358,8 +10358,35 @@ function populateBNStartTimeSlots(){
   // always appears in the list now, even if the clock has moved past it.
   const slots = generateSlots(shift)
     .filter(s => getSlotTier(s, shift) !== 'hardBlocked');
-  el.innerHTML = '<option value="">— full shift —</option>' +
+  // Build 311: a saved start can now be off the slot grid (auto-declared
+  // from a scheduled partial's clock time) — render it, honoring the
+  // Build-191 promise that the saved start always appears.
+  const offGrid = (saved && !slots.includes(saved))
+    ? `<option value="${saved}" selected>${fmt12(saved)} (scheduled)</option>` : '';
+  el.innerHTML = '<option value="">— full shift —</option>' + offGrid +
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
+}
+
+// Build 311: a scheduled partial pre-declares its start — the plan is the
+// default declaration. Fires only when nothing is declared yet; Clear or
+// picking another time overrides, as always. Full-shift rows no-op.
+async function autoDeclareScheduledStart(){
+  try {
+    if(!BNS.name || !BNS.shift) return;
+    const dt = BNS.date || today();
+    if(syncedLS.get(getBNStartKey())) return;
+    if(window._bnStartClearedThisSession) return;
+    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${BNS.shift}'`);
+    const mine = rows.find(r => r.BreakNurseName === BNS.name && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1');
+    if(!mine) return;
+    const st = String(mine.StartTime || '').replace(/\D/g, '');
+    const hr = Number(mine.Hours) || 0;
+    if(!/^\d{4}$/.test(st) || hr <= 0 || hr >= 12) return;
+    await syncedLS.set(getBNStartKey(), st);
+    populateBNStartTimeSlots();
+    loadBNConfirm();
+    toast(`🕐 Start time set to ${fmt12(st)} from your scheduled partial — Clear if you started earlier.`);
+  } catch(e){}
 }
 
 async function onBNStartTimeChange(){
@@ -10389,6 +10416,9 @@ async function onBNStartTimeChange(){
   }
 }
 async function clearBNStartTime(){
+  // Build 312: a deliberate Clear must not be undone by auto-declare —
+  // suppressed for this session; a fresh session/shift re-reads the plan.
+  window._bnStartClearedThisSession = true;
   const key = getBNStartKey();
   const _sy2 = window.scrollY;
   const sel = document.getElementById('bnStartTime');
@@ -10428,6 +10458,7 @@ function restoreBNStartTimeUI(){
     if(Date.now() > endDate.getTime()) localStorage.removeItem(k);
   });
   populateBNStartTimeSlots();
+  autoDeclareScheduledStart();
 }
 
 async function toggleSelfAvailability(){
