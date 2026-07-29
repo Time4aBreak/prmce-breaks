@@ -159,7 +159,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .divider{height:1px;background:var(--border);margin:14px 0}
 
 /* ── Toast ── */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:nowrap;pointer-events:none}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:normal;max-width:min(92vw,560px);text-align:center;line-height:1.45;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast.err{background:#1a1a2e}
 
@@ -1933,7 +1933,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-315';
+const APP_VERSION = '2026-07-26-316';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9546,7 +9546,7 @@ function _aPartialWindowError(shift){
     // Day view never reads Noc rows). Cross-boundary coverage is two rows,
     // and the message teaches the split.
     if(en > 510 && en < 1020)
-      return `Noc shifts wrap up by 8:30 AM — for ${t12(s.value)}–${t12(e.value)} coverage, save a Noc partial ending 8:30 AM and a Day partial from 8:30 AM.`;
+      return `Noc partials end by 8:30 AM — save Noc ${t12(s.value)}–8:30 AM plus Day 8:30 AM–${t12(e.value)}.`;
   }
   return '';
 }
