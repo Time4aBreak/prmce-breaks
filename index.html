@@ -1932,7 +1932,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-308';
+const APP_VERSION = '2026-07-26-309';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9550,6 +9550,45 @@ function cancelEditMode(){
   const bar = document.getElementById('editModeBar');
   if(bar) bar.style.display = 'none';
 }
+// Build 309: plain removal — mirrors editAssign's consolidation (all the
+// BN's rows for that date+shift die together), guards booked breaks like
+// the 295 move, retires the dealt rotation, and scrubs the date's
+// fairness-history entry (the nurse never covered it; leaving the entry
+// would bias future deals — the exact scrub our test teardowns always
+// did by hand, productized).
+async function removeAssignment(id){
+  try {
+    const one = await spGet(LISTS.schedule, `Id eq ${id}`);
+    if(!one.length){ toast('Assignment not found — refresh and try again.', true); loadAssignments(); return; }
+    const s = one[0];
+    const d = String(s.ShiftDate).slice(0,10);
+    const shiftScheds = await spGet(LISTS.schedule, `ShiftDate ge '${d}' and ShiftDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`);
+    const mine = shiftScheds.filter(r => r.BreakNurseName === s.BreakNurseName && String(r.IsSupplemental) !== '1');
+    const units = [...new Set(mine.flatMap(r => { try { return JSON.parse(r.Units || '[]'); } catch { return []; } }))];
+    let hit = 0;
+    try {
+      const bk = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`);
+      hit = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit)).length;
+    } catch(e){}
+    const who = `${firstName(s.BreakNurseName)}'s ${d} ${s.ShiftType}`;
+    const msg = hit > 0
+      ? `${hit} break${hit !== 1 ? 's are' : ' is'} booked under ${who} assignment. Removing it leaves them without coverage.`
+      : `Remove ${who} assignment (${units.join(', ') || 'no units'})?`;
+    if(!await customConfirm(msg, hit > 0 ? 'Remove anyway' : 'Remove it', 'Keep it')){ loadAssignments(); return; }
+    await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(mine.map(r => r.Id))) });
+    try { await syncedLS.delete(rotationKey(s.BreakNurseName, d, s.ShiftType)); } catch(e){}
+    try {
+      const hist = getNurseWingHistory(s.BreakNurseName, s.ShiftType).filter(e => e.date !== d);
+      saveNurseWingHistory(s.BreakNurseName, s.ShiftType, hist);
+    } catch(e){}
+    toast(`✓ Removed ${who} assignment`);
+  } catch(e){
+    toast(`Couldn't remove the assignment — ${e.message}`, true);
+  } finally {
+    loadAssignments();
+  }
+}
+
 async function editAssign(id){
   _schedulePollHoldUntil = Date.now() + 90000; // Build 240: quiet the poller while editing
   try {
@@ -12483,6 +12522,7 @@ async function _loadAssignmentsCore(preloadedScheds){
                      destroying CoveredFrom and blinding Mark Available's take-back and
                      213's strip-on-close. Supp lifecycle belongs to the coverage verbs. -->
                 ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Removing…';removeAssignment(${s.Id})">🗑 Remove</button>` : ''}
                 ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
                 <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
                      now lives in the Break Nurses roster card (BN quit / fired scenario). Row-level
