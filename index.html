@@ -1933,7 +1933,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-312';
+const APP_VERSION = '2026-07-26-315';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9536,9 +9536,17 @@ function _aPartialWindowError(shift){
       return `${t12(s.value)} is a Noc start — switch Shift to Noc, or fix the times.`;
     if(en <= st)
       return `Day partials can't cross midnight — check the stop time.`;
+    if(en > 1230)
+      return `Day shifts wrap up by 8:30 PM — set the stop time by then.`;
   } else {
     if(st >= 480 && st < 1020)
       return `${t12(s.value)} is a Day start — switch Shift to Day, or fix the times.`;
+    // Build 314: a Noc row's window can't outlive the Noc grid (8:30 AM) —
+    // the tail would silently evaporate (a row belongs to ONE shift; the
+    // Day view never reads Noc rows). Cross-boundary coverage is two rows,
+    // and the message teaches the split.
+    if(en > 510 && en < 1020)
+      return `Noc shifts wrap up by 8:30 AM — for ${t12(s.value)}–${t12(e.value)} coverage, save a Noc partial ending 8:30 AM and a Day partial from 8:30 AM.`;
   }
   return '';
 }
@@ -11941,7 +11949,7 @@ async function suggestUnitsForManualAssign(btn){
       const covMax = Math.max(..._covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam);
       const nUnits = Math.min(Math.max(1, Math.ceil(hrs / pc.perHours) * pc.units), Math.max(1, covMax));
       const lockedU = [...new Set(Object.values(locked).flat())];
-      const slots = await _pickPartialSlots(shift, dt, nUnits, {}, lockedU);
+      const slots = await _pickPartialSlots(shift, dt, nUnits, {}, lockedU, document.getElementById('aPartStart').value.replace(':', ''));
       S.aUnits = slots.slice();
       document.querySelectorAll('.uc').forEach(cb => { const u = cb.id.replace('au-',''); cb.classList.toggle('on', S.aUnits.includes(u)); });
       toast(`Suggested ${slots.length} unit${slots.length !== 1 ? 's' : ''} for the ${hrs}h partial`);
@@ -19155,7 +19163,20 @@ function _scoreProximityPenalty(slotEntry, currentPicks){
 // algorithm. We just hand them the slots with the lowest current coverage so
 // they fill the biggest gaps. `batchCountOverlay` reflects what full BNs have
 // already been assigned in this same batch, so partials see the latest state.
-async function _pickPartialSlots(shift, date, n, batchCountOverlay={}, excludeUnits=[]){
+async function _pickPartialSlots(shift, date, n, batchCountOverlay={}, excludeUnits=[], startTime=''){
+  // Build 313: a partial's closure check anchors at ITS OWN start, not the
+  // shift's — a unit closed mid-shift (7N at ~21:20) must not be dealt to
+  // a 5–10 AM partial whose whole window is inside the closure. Post-
+  // midnight Noc starts roll to the next calendar day (house convention).
+  // Callers without a startTime keep the shift-start anchor unchanged.
+  let _openAt = null;
+  const _st = String(startTime || '').replace(/\D/g, '');
+  if(/^\d{4}$/.test(_st)){
+    const mins = parseInt(_st.slice(0,2), 10) * 60 + parseInt(_st.slice(2), 10);
+    let _d = new Date(`${date}T${_st.slice(0,2)}:${_st.slice(2)}:00`);
+    if(shift === 'Noc' && mins < 720) _d = new Date(_d.getTime() + 86400000);
+    _openAt = _d;
+  }
   if(n <= 0) return [];
   let counts;
   try {
@@ -19167,7 +19188,7 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}, excludeUn
   // both 3C/4C with a single tap on full shifts; for partials we just pick
   // individual open units to keep things simple)
   const pool = ALL_COVERAGE_SLOTS
-    .filter(s => s !== 'C_PAIR' && isUnitOpenForShift(s, date, shift) && !excludeUnits.includes(s))
+    .filter(s => s !== 'C_PAIR' && (_openAt ? isUnitOpenAt(s, _openAt) : isUnitOpenForShift(s, date, shift)) && !excludeUnits.includes(s))
     .map(s => ({
       slot: s,
       total: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0)
