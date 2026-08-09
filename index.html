@@ -226,14 +226,13 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 <!-- ═══════════ NAV ═══════════ -->
 <nav class="nav">
   <div class="nav-brand">
-    <svg viewBox="0 0 24 24"><path d="M12 2a10 10 0 100 20A10 10 0 0012 2zm1 14h-2v-4H7l5-7 5 7h-4v4z"/></svg>
     <span>PRMCE BREAKS</span>
   </div>
   <div class="nav-tabs">
     <button class="nav-tab active" id="nt-staff"  onclick="showTab('staff',this)">🏥 Sign Up</button>
     <button class="nav-tab"        id="nt-portal" onclick="showTab('portal',this)">🔐 Breakers Portal</button>
   </div>
-  <div class="nav-time" id="navClock"></div>
+  <div class="nav-time" id="navClock" style="white-space:nowrap;flex-shrink:0"></div>
 </nav>
 
 <!-- ═══════════ STAFF TAB ═══════════ -->
@@ -241,13 +240,13 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
   <!-- Unit selection FIRST -->
   <div class="card">
-    <div class="card-label">Your Unit</div>
+    <div class="card-label">My Unit</div>
     <div class="unit-grid" id="unitGrid"></div>
   </div>
 
 
   <div class="card" id="shiftCard" style="display:none">
-    <div class="card-label">Current Shift</div>
+    <div class="card-label">My Shift</div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px">
       <button class="btn btn-sm shift-sel-btn" id="shiftBtnDay"  onclick="selectStaffShift('Day')"  style="display:inline-flex;align-items:center;gap:5px;font-weight:600">Day</button>
       <button class="btn btn-sm shift-sel-btn" id="shiftBtnNoc"  onclick="selectStaffShift('Noc')"  style="display:inline-flex;align-items:center;gap:5px;font-weight:600">Noc</button>
@@ -283,7 +282,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
   <!-- Name & extension -->
   <div class="card" id="nameCard" style="display:none">
-    <div class="card-label">Your Name &amp; Extension</div>
+    <div class="card-label">Name &amp; Extension</div>
     <div class="row">
       <div class="field">
         <label>First Name</label>
@@ -1933,7 +1932,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-316';
+const APP_VERSION = '2026-07-26-318';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5255,7 +5254,7 @@ function validateExt(input){
 function updateClock(){
   const now=new Date();
   document.getElementById('navClock').textContent=
-    now.toLocaleTimeString('en-US',{hour:'2-digit',minute:'2-digit',hour12:true});
+    now.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
 }
 
 // ═══════════════════════════════════════════════════════
@@ -5584,6 +5583,10 @@ function pickUnit(u){
   S.pendingTransfers.clear();
   S.pickerOpenFor = null;
   updateSubmitBar();
+  // Build 317: world-change epoch — any in-flight response for a previous
+  // unit becomes stale; the grid locks while this one's check runs.
+  _slotLoadEpoch++;
+  _setUnitButtonsLocked(true);
   // Build 294 (bug #5): same synchronous blank as the shift switch — a unit
   // change is a world change too.
   const _puList = document.getElementById('slotsList');
@@ -5737,6 +5740,7 @@ function selectStaffShift(sh){
   // shift mode isn't valid for the new one.
   _slotRenderCache = null;
   _otherSlotRenderCache = null;
+  _slotLoadEpoch++; // Build 317: a shift switch is a world change too
   // Build 294 (bug #5): blank the list SYNCHRONOUSLY — the outgoing view's
   // rows must not be tappable for even a frame while the new view loads
   // (the S7 first-attempt fumble: a stale standard row tapped under
@@ -6873,8 +6877,9 @@ function renderCoverageCalendar(){
       const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()];
       cap.innerHTML = `<strong>${dow} ${months[m].slice(0,3)} ${dt.getDate()}</strong> · covered by ${escHTML([...cov[_calSelectedDate]].sort().join(', '))}`;
     } else if(monthCov){
-      // Build 214 (queued at 211, Tomas): count reads as shifts, not days.
-      cap.textContent = `${monthCov} ${S.shift} shift${monthCov === 1 ? '' : 's'} currently scheduled for coverage · tap a highlighted day to see who's covering.`;
+      // Build 318 (Tomas): the count-and-instruction caption retired — the
+      // highlighted days speak for themselves; tapping one still shows who.
+      cap.textContent = '';
     } else {
       cap.textContent = `No ${S.unit} · ${S.shift} coverage scheduled this month.`;
     }
@@ -6890,6 +6895,23 @@ function renderCoverageCalendar(){
 // and the orphaned chain swallows its rejection copy so failed loads
 // don't add unhandled-rejection noise (callers keep the original promise).
 let _lsInFlight = null, _lsInFlightKey = null, _lsInFlightSilent = false;
+// ═══ Build 317: the world-change epoch + unit tap guard ═══════════════
+// The in-flight coalescer joins SAME-key repeats; the unguarded case was a
+// DIFFERENT unit tapped mid-flight — two cores racing, response order
+// deciding whose slots render under whose highlight. The epoch discards
+// any stale response before it touches the screen; the unit grid locks
+// for the check's duration (with a 5s never-stuck fallback).
+let _slotLoadEpoch = 0;
+let _unitLockT = null;
+function _setUnitButtonsLocked(on){
+  document.querySelectorAll('.unit-btn').forEach(b => {
+    b.style.pointerEvents = on ? 'none' : '';
+    b.style.opacity = on ? '.55' : '';
+  });
+  clearTimeout(_unitLockT);
+  if(on) _unitLockT = setTimeout(() => _setUnitButtonsLocked(false), 5000);
+}
+
 async function loadSlots(silent=false){
   if(!S.unit) return;
   const key = S.shift === 'Other'
@@ -6903,12 +6925,17 @@ async function loadSlots(silent=false){
     }
     return _lsInFlight;
   }
+  const _ep = _slotLoadEpoch; // Build 317
   const p = _loadSlotsCore(silent);
   _lsInFlight = p; _lsInFlightKey = key; _lsInFlightSilent = !!silent;
-  p.finally(() => { if(_lsInFlight === p){ _lsInFlight = null; _lsInFlightKey = null; } }).catch(() => {});
+  p.finally(() => {
+    if(_lsInFlight === p){ _lsInFlight = null; _lsInFlightKey = null; }
+    if(!silent && _ep === _slotLoadEpoch) _setUnitButtonsLocked(false); // Build 317: the newest visible load owns the unlock
+  }).catch(() => {});
   return p;
 }
 async function _loadSlotsCore(silent=false){
+  const _ep317 = _slotLoadEpoch; // Build 317: this load's world
   // Build 286: NO entry reset. 285's reset-per-pass fought the Build-274
   // revision gates: quiet polls enter, reset, and early-return before the
   // derivation, leaving attribution blank at tap time (live-caught: row 56
@@ -6960,6 +6987,7 @@ async function _loadSlotsCore(silent=false){
         : Promise.resolve([])
     ]);
     _coverageScheds = allSchedsRaw;        // build 208: feed the coverage calendar (no extra fetch)
+    if(_ep317 !== _slotLoadEpoch) return; // Build 317: a newer world took over mid-fetch — discard
     if(!silent) renderCoverageCalendar();  // repaint only on real loads; 10s refresh just updates data
     const scheds = allSchedsRaw.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     // Update cached flag: any active BN on this shift has 3C in their units?
@@ -7067,9 +7095,7 @@ async function _loadSlotsCore(silent=false){
         if(_hasCov2) _upcomingDates.push(_fds2);
       }
       const _fmtDate2 = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
-      const _upcomingNote2 = _upcomingDates.length
-        ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${shift} coverage: ${_upcomingDates.map(_fmtDate2).join(', ')}</div>`
-        : '';
+      const _upcomingNote2 = ''; // Build 318 (Tomas): upcoming-dates line retired — the calendar already shows them.
 
       // ── Shared: limited coverage calculation ──
       // Only use oppCovering during the sign-up window → overlap window (e.g. 6:30–8:00 PM for Noc)
@@ -7214,9 +7240,7 @@ async function _loadSlotsCore(silent=false){
           if(_hasCov) _upcomingDates.push(_fds);
         }
         const _fmtDate = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
-        const _upcoming = _upcomingDates.length
-          ? `<div style="font-size:.8rem;margin-top:6px;opacity:.9">📅 Upcoming ${shift} coverage: ${_upcomingDates.map(_fmtDate).join(', ')}</div>`
-          : '';
+        const _upcoming = ''; // Build 318 (Tomas): upcoming-dates line retired — the calendar already shows them.
         if(_lastSlotPassed){
           setNameCardEnabled(false);
           // Last overlap slot has passed — full red no coverage
@@ -7287,6 +7311,7 @@ async function _loadSlotsCore(silent=false){
       if(!oppCovering.length){
         if(silent){ loader.style.display='none'; return; }
         meta.textContent = '';
+        if(_ep317 !== _slotLoadEpoch) return; // Build 317: commit belt
         list.innerHTML='';
         loader.style.display='none';
         return;
@@ -8735,6 +8760,7 @@ async function submitClaims(){
 }
 
 async function loadOtherSlots(silent=false){
+  const _ep317 = _slotLoadEpoch; // Build 317: this load's world
   // ── BUILD 290: the Other rebuild — COMPOSE, DON'T RE-DERIVE ─────────────
   // The fork assembles the SAME gate set the standard path applies, per
   // source shift (Day @ today(), Noc @ shiftDate('Noc') — the 08:30 BN
@@ -8796,6 +8822,7 @@ async function loadOtherSlots(silent=false){
       ...dayCovering.map(s => ({ name: s.BreakNurseName, date: dt,    shift: 'Day' })),
       ...nocCovering.map(s => ({ name: s.BreakNurseName, date: nocDt, shift: 'Noc' }))
     ]).catch(()=>{});
+    if(_ep317 !== _slotLoadEpoch) return; // Build 317: stale — discard before any render
     warm3CStatus(dt, 'Day').catch(()=>{});
     warm3CStatus(nocDt, 'Noc').catch(()=>{});
 
