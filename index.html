@@ -1446,8 +1446,8 @@ async function warmUnitStatuses(){
     await Promise.all([
       syncedLS.warm('unitStatuses'),
       syncedLS.warm('unitSchedules'),
-      syncedLS.warm('rampConfig'), // Build 301
-      syncedLS.warm('coverageConfig') // Build 303
+      syncedLS.refresh('rampConfig'), // Build 321: reload = current limits (warm never updates an existing key)
+      syncedLS.refresh('coverageConfig') // Build 321
     ]);
     migrate3CIntoUnitStatuses();
     try { initRampCard(); } catch(e){}
@@ -1602,7 +1602,7 @@ async function saveRampCfg(btn){
     // Build 304: one toast, both facts — the app's toast is a single
     // element, so a follow-up success call was clobbering the pool-dry
     // warning before anyone could read it.
-    toast(_dry ? `✓ Saved — but heads up: ${_dry}` : '✓ Limits saved — each device picks them up on its next refresh', !!_dry);
+    toast(_dry ? `✓ Saved — but heads up: ${_dry}` : '✓ Limits saved — staff screens pick this up within a minute', !!_dry);
   } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
@@ -1934,7 +1934,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-320';
+const APP_VERSION = '2026-07-26-321';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5219,6 +5219,14 @@ function init(){
   // Clock
   updateClock();
   setInterval(updateClock, 10000);
+
+  // Build 321: limits propagate to OPEN screens — the configs ride the
+  // Build-217 refresh (direct BNState read, write-lock aware) once a
+  // minute. Without this, an open phone keeps its first-load limits.
+  setInterval(() => {
+    syncedLS.refresh('rampConfig').catch(()=>{});
+    syncedLS.refresh('coverageConfig').catch(()=>{});
+  }, 60000);
 
   // Show simulation banner if in sim mode
   showSimBanner();
