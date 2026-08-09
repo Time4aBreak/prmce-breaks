@@ -622,7 +622,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="card" id="rptSelfCareCard" style="display:none">
       <div class="card-label">🧑‍⚕️ Break-Nurse Self-Care</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        Own breaks logged per shift worked. The nurse covering four units who never logs a break is a flag, not a hero.
+        Own breaks logged per shift worked.
       </div>
       <div id="rptSelfCareCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptSelfCareBody" style="overflow-x:auto"></div>
@@ -768,7 +768,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           ✏️ Editing <strong id="editModeWho"></strong><span id="editModeMove"></span>
         </div>
         <div id="editActionRow" style="display:none;gap:8px;margin-bottom:8px">
-          <button type="button" class="btn btn-ghost btn-sm" style="flex:1;color:var(--red)" onclick="this.disabled=true;removeAssignmentFromEdit().finally(()=>{this.disabled=false})">🗑 Remove from this shift</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="flex:1;color:var(--red)" onclick="this.disabled=true;const _l=this.textContent;this.textContent='Checking…';removeAssignmentFromEdit().finally(()=>{this.disabled=false;this.textContent=_l})">🗑 Remove from this shift</button>
           <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode()">✕ Cancel edit</button>
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
@@ -1573,7 +1573,58 @@ function initRampCard(){
       <span style="color:var(--muted)">never more than a full-timer's quota</span>
     </div>`;
 }
+// Build 327: when the Units-per-Shift numbers change, the save asks when
+// to apply — re-deal upcoming shifts (tomorrow forward: booking-safe by
+// construction) or keep existing assignments and use the new counts for
+// future scheduling only. Hand-shaped groups (partials, supplementals,
+// unavailable-restructured) are skipped and counted.
+async function applyCoverageLimitsToUpcoming(){
+  try {
+    showBusy('Re-dealing upcoming shifts…');
+    const t = today();
+    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    const groups = {};
+    scheds.forEach(r => {
+      const d = String(r.ShiftDate).slice(0, 10);
+      if(d <= t) return; // strictly tomorrow forward
+      (groups[`${d}|${r.ShiftType}`] = groups[`${d}|${r.ShiftType}`] || []).push(r);
+    });
+    let done = 0, skipped = 0;
+    for(const key of Object.keys(groups).sort()){
+      const rows = groups[key];
+      const handShaped = rows.some(r => String(r.IsSupplemental) === '1'
+        || r.Status === 'inactive'
+        || (r.StartTime && Number(r.Hours) > 0));
+      if(handShaped){ skipped++; continue; }
+      const [d, sh] = key.split('|');
+      const nurses = [...new Set(rows.map(r => r.BreakNurseName).filter(Boolean))];
+      if(!nurses.length){ skipped++; continue; }
+      const result = await suggestAssignments(nurses, sh, d);
+      await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
+        ids: encodeURIComponent(JSON.stringify(rows.map(r => r.Id))) });
+      for(const bn of nurses){
+        const units = expandSuggestionUnits(result[bn] || [], d, sh);
+        if(!units.length) continue;
+        await spPost(LISTS.schedule, {
+          Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
+          Units: JSON.stringify(units)
+        });
+        try { await syncedLS.delete(rotationKey(bn, d, sh)); } catch(e){}
+      }
+      done++;
+    }
+    hideBusy();
+    toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
+    loadAssignments();
+  } catch(e){
+    hideBusy();
+    toast(`Couldn't finish the re-deal — ${e.message}`, true);
+    loadAssignments();
+  }
+}
+
 async function saveRampCfg(btn){
+  const _covBefore = JSON.stringify(_covCfg());
   const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
   const tv = (id, dflt) => { const el = document.getElementById(id); return (el && /^\d{2}:\d{2}$/.test(el.value)) ? el.value : dflt; };
   const cfg = {
@@ -1613,6 +1664,12 @@ async function saveRampCfg(btn){
     // element, so a follow-up success call was clobbering the pool-dry
     // warning before anyone could read it.
     toast(_dry ? `✓ Saved — but heads up: ${_dry}` : '✓ Limits saved — staff screens pick this up within a minute', !!_dry);
+    // Build 327: coverage numbers changed → ask when to apply.
+    if(_covBefore !== JSON.stringify(_covCfg())){
+      if(await customConfirm('Unit counts changed. Apply them to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use the new counts for future scheduling only?', 'Re-deal upcoming', 'Keep as scheduled')){
+        await applyCoverageLimitsToUpcoming();
+      }
+    }
   } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
@@ -1944,7 +2001,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-324'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-09-327'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5068,6 +5125,18 @@ function buildStaffUnitGrid(){
   }
 }
 
+// Build 325: repaint the picker only when the open-set actually changed —
+// the data layer refreshes on the poll; this closes the pixels gap that
+// left a phone showing its startup photograph of the grid.
+function refreshStaffUnitGridIfChanged(){
+  const ug = document.getElementById('unitGrid');
+  if(!ug) return;
+  const show3C = is3COpenAt(new Date()) || _3CManuallyAssigned;
+  const want = STAFF_UNITS.filter(u => u === '3C' ? show3C : isUnitOpenAt(u, new Date())).join('|');
+  const have = [...ug.querySelectorAll('.unit-btn')].map(b => b.textContent).join('|');
+  if(want !== have) buildStaffUnitGrid();
+}
+
 // ═══════════════════════════════════════════════════════
 // STRUCTURAL INTEGRITY CHECK
 // ═══════════════════════════════════════════════════════
@@ -5236,6 +5305,12 @@ function init(){
   setInterval(() => {
     syncedLS.refresh('rampConfig').catch(()=>{});
     syncedLS.refresh('coverageConfig').catch(()=>{});
+    // Build 325: unit statuses join the heartbeat, and the grid repaints
+    // when the open-set changed.
+    Promise.all([
+      syncedLS.refresh('unitStatuses'),
+      syncedLS.refresh('unitSchedules')
+    ]).then(() => refreshStaffUnitGridIfChanged()).catch(()=>{});
   }, 60000);
 
   // Show simulation banner if in sim mode
@@ -7924,6 +7999,15 @@ async function _loadSlotsCore(silent=false){
 // Silent background refresh — fetches data and only updates DOM if something changed
 async function silentRefreshSlots(){
   if(document.hidden) return; // Build 215: no polling while hidden
+  // Build 325: statuses ride the staff poll — a closure reaches an open
+  // Sign Up screen within one tick, and the grid repaints only on change.
+  try {
+    const _t325 = document.querySelector('.tab.active');
+    if(_t325 && _t325.textContent.includes('Sign Up')){
+      Promise.all([syncedLS.refresh('unitStatuses'), syncedLS.refresh('unitSchedules')])
+        .then(() => refreshStaffUnitGridIfChanged()).catch(()=>{});
+    }
+  } catch(e){}
   // Build 271: no slot polling while another MAIN tab is active — both P260
   // runs showed 15–25 background slot fetches during admin portal work
   // (pure waste that also contends with the import's own writes). This
@@ -9646,7 +9730,7 @@ async function removeAssignment(id){
       const bk = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`);
       hit = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit)).length;
     } catch(e){}
-    const who = `${firstName(s.BreakNurseName)}'s ${d} ${s.ShiftType}`;
+    const who = `${firstName(s.BreakNurseName)}'s ${_fmtDayShort(d)} ${s.ShiftType}`;
     const msg = hit > 0
       ? `${hit} break${hit !== 1 ? 's are' : ' is'} booked under ${who} assignment. Removing it leaves them without coverage.`
       : `Remove ${who} assignment (${units.join(', ') || 'no units'})?`;
@@ -18699,7 +18783,7 @@ function _rptRenderSelfCare(sc){
   const body = document.getElementById('rptSelfCareBody');
   const qual = sc.per.filter(p => p.nights >= 2);
   if(!qual.length){
-    co.innerHTML = `Not enough shifts in range yet to judge break-nurse self-care.`;
+    co.innerHTML = `Not enough shifts in range yet for a read on break-nurse self-care.`;
   } else {
     const low = qual[0];
     const ties = qual.filter(p => p.avg === low.avg);
