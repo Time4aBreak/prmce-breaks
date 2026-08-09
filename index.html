@@ -1560,7 +1560,7 @@ function initRampCard(){
     </div>`;
   const hdr = (t, s, top) => `<div style="${top ? 'border-top:1px solid var(--border);padding-top:10px;' : ''}font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:2px">${t}</div><div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">${s}</div>`;
   body.innerHTML =
-    hdr('BREAK SLOT LIMITS', "How many break slots each nurse can claim per shift. Unlock times earlier than the shift's start mean the next morning.", false) +
+    hdr('BREAK SLOT LIMITS', "How many break slots each nurse can claim per shift.", false) +
     row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
@@ -1591,6 +1591,16 @@ async function saveRampCfg(btn){
   };
   // Pool-dry hint: the house holds ~14 dealable slots — warn (non-blocking)
   // when any team-size row wants more than exists.
+  // Build 323 (Tomas): an unlock before the shift's start clock is an
+  // input error, not a next-morning intent — refuse and say so.
+  const _startOf = { Day: '06:30', Noc: '18:30' };
+  for(const sh of ['Day', 'Noc']){
+    if(cfg[sh].unlockAt < _startOf[sh]){
+      toast(`⚠ ${sh} unlock can't be before the ${sh === 'Day' ? '6:30 AM' : '6:30 PM'} shift start — pick a later time.`, true);
+      if(btn){ btn.disabled = false; btn.textContent = old; }
+      return;
+    }
+  }
   let _dry = '';
   ['Day','Noc'].forEach(sh => covCfg[sh].byTeam.forEach((u, i) => {
     if((i + 1) * u > 14 && !_dry) _dry = `Heads up: ${sh} with ${i + 1} BNs at ${u} each wants ${(i + 1) * u} of ~14 open slots — some will come up short.`;
@@ -1934,7 +1944,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-321';
+const APP_VERSION = '2026-07-26-323';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
