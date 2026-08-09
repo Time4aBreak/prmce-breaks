@@ -764,11 +764,13 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
           <div class="unit-check-grid" id="aUnits"></div>
         </div>
 
-        <div id="editModeBar" style="display:none;background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.82rem;color:#a06a00">
-          ✏️ Editing <strong id="editModeWho"></strong> — saving will <em>move</em> this assignment.
-          <button type="button" class="btn btn-ghost btn-sm" style="margin-left:8px;color:#a06a00" onclick="cancelEditMode()">✕ Cancel edit</button>
+        <div id="editModeBar" style="display:none;background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.82rem;color:#a06a00;line-height:1.5">
+          ✏️ Editing <strong id="editModeWho"></strong><span id="editModeMove"></span>
         </div>
-        <button type="button" id="editRemoveBtn" class="btn btn-ghost btn-sm" style="display:none;color:var(--red);margin-bottom:8px" onclick="this.disabled=true;removeAssignmentFromEdit().finally(()=>{this.disabled=false})">🗑 Remove</button>
+        <div id="editActionRow" style="display:none;gap:8px;margin-bottom:8px">
+          <button type="button" class="btn btn-ghost btn-sm" style="flex:1;color:var(--red)" onclick="this.disabled=true;removeAssignmentFromEdit().finally(()=>{this.disabled=false})">🗑 Remove from this shift</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode()">✕ Cancel edit</button>
+        </div>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
     </div>
@@ -1932,7 +1934,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-07-26-318';
+const APP_VERSION = '2026-07-26-320';
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7646,9 +7648,7 @@ async function _loadSlotsCore(silent=false){
         if(_hasCov) _doneUpcoming.push(_dfds);
       }
       const _doneFmt = d => { const [,m,dy] = d.split('-'); return `${parseInt(m)}/${parseInt(dy)}`; };
-      const _doneUpcomingHtml = _doneUpcoming.length
-        ? `<div style="font-size:.8rem;margin-top:6px;opacity:.85">📅 Upcoming ${escHTML(shift)} coverage: ${_doneUpcoming.map(_doneFmt).join(', ')}</div>`
-        : '';
+      const _doneUpcomingHtml = ''; // Build 319 (Tomas): the third and last upcoming-dates line retired — the calendar shows them.
       list.innerHTML = `<div class="empty">Break coverage for ${escHTML(S.unit)} ${escHTML(shift)} is complete for today's shift.${_doneUpcomingHtml}</div>`;
       loader.style.display = 'none';
       return;
@@ -9581,12 +9581,32 @@ function _aPartialWindowError(shift){
 // Build 295 (bug #4): the rows Edit loaded — consumed exactly once by save.
 // {name, date, shift, ids, units, at}
 let _editSource = null;
+// Build 320: one renderer owns the edit surface — the bar names what's
+// loaded; the change-notice appears ONLY when the form's date/shift
+// differs from the source (concrete destination, no jargon), updating
+// live as the user retargets. The action row shows/hides with it.
+function _fmtDayShort(d){
+  const dt = new Date(d + 'T12:00:00');
+  return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][dt.getDay()]} ${dt.getMonth() + 1}/${dt.getDate()}`;
+}
+function updateEditModeBar(){
+  const bar = document.getElementById('editModeBar');
+  const row = document.getElementById('editActionRow');
+  const on = (typeof _editSource !== 'undefined') && !!_editSource;
+  if(bar) bar.style.display = on ? 'block' : 'none';
+  if(row) row.style.display = on ? 'flex' : 'none';
+  if(!on) return;
+  const who = document.getElementById('editModeWho');
+  if(who) who.textContent = `${firstName(_editSource.name)} · ${_fmtDayShort(_editSource.date)} ${_editSource.shift}`;
+  const mv = document.getElementById('editModeMove');
+  const dtEl = document.getElementById('aDate');
+  const dt = dtEl ? dtEl.value : '';
+  const moved = (dt && dt !== _editSource.date) || S.aShift !== _editSource.shift;
+  if(mv) mv.innerHTML = moved ? ` — saving will change this to <strong>${_fmtDayShort(dt || _editSource.date)} ${S.aShift}</strong>.` : '';
+}
 function cancelEditMode(){
   _editSource = null;
-  const bar = document.getElementById('editModeBar');
-  if(bar) bar.style.display = 'none';
-  const rb = document.getElementById('editRemoveBtn');
-  if(rb) rb.style.display = 'none';
+  updateEditModeBar();
 }
 // Build 309: plain removal — mirrors editAssign's consolidation (all the
 // BN's rows for that date+shift die together), guards booked breaks like
@@ -9683,14 +9703,7 @@ async function editAssign(id){
       units: _srcUnits,
       at: Date.now()
     };
-    { const bar = document.getElementById('editModeBar');
-      const who = document.getElementById('editModeWho');
-      if(bar && who){
-        who.textContent = `${firstName(s.BreakNurseName)} · ${_editSource.date} ${s.ShiftType}`;
-        bar.style.display = 'block';
-      } }
-    { const rb = document.getElementById('editRemoveBtn');
-      if(rb){ rb.textContent = `🗑 Remove ${firstName(s.BreakNurseName)} from Selected Shift`; rb.style.display = 'block'; } }
+    updateEditModeBar();
     // Build 307: partial rows prefill the Shift Length controls (end time
     // derived from start + hours; only Hours is stored).
     { const _st = String(s.StartTime || '').replace(/\D/g, '');
@@ -20095,6 +20108,7 @@ async function refreshAssignmentForCurrentInputs(){
 // the new assignment refresh. populateNurseDropdown must complete first
 // (it may reset dropdown value if name not in new date's roster).
 async function onAssignContextChange(){
+  try { updateEditModeBar(); } catch(e){} // Build 320: the change-notice tracks retargeting live
   await populateNurseDropdown();
   update3CToggle();
   updateAdminUnitGrid();
