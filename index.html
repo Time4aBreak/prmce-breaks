@@ -1579,6 +1579,10 @@ function initRampCard(){
 // future scheduling only. Hand-shaped groups (partials, supplementals,
 // unavailable-restructured) are skipped and counted.
 async function applyCoverageLimitsToUpcoming(){
+  // Build 332: _at lives OUTSIDE the try — the catch names the failing
+  // group, and a catch that references try-scoped variables crashes the
+  // error handler itself (which is exactly what buried the real error).
+  let _at = '';
   try {
     showBusy('Re-dealing upcoming shifts…');
     const t = today();
@@ -1607,7 +1611,6 @@ async function applyCoverageLimitsToUpcoming(){
     const _total = _keys.length;
     const _tmo = (p, ms, what) => Promise.race([p,
       new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} timed out`)), ms))]);
-    let _at = '';
     let done = 0, skipped = 0;
     for(const key of _keys){
       const rows = groups[key];
@@ -1648,7 +1651,7 @@ async function applyCoverageLimitsToUpcoming(){
     loadAssignments();
   } catch(e){
     hideBusy();
-    toast(`Couldn't finish the re-deal${_at ? ` at ${_at}` : ''} — ${e.message}. Running Re-deal upcoming again will finish the job.`, true);
+    toast(`Couldn't finish the re-deal${_at ? ` at ${_at}` : ''} — ${(e && e.message) || e || 'unknown error'}. Running Re-deal upcoming again will finish the job.`, true);
     loadAssignments();
   }
 }
@@ -1700,7 +1703,7 @@ async function saveRampCfg(btn){
         await applyCoverageLimitsToUpcoming();
       }
     }
-  } catch(e){ toast(`Couldn't save the limits — ${e.message}`, true); }
+  } catch(e){ toast(`Couldn't save the limits — ${(e && e.message) || e || 'unknown error'}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
 
@@ -2031,7 +2034,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-330'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-09-332'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2703,7 +2706,7 @@ const syncedLS = {
       syncedLS._drainRetryQueue().catch(()=>{});
       return true;
     } catch(e){
-      console.warn(`[syncedLS.set] ${key}: ${e.message}`);
+      console.warn(`[syncedLS.set] ${key}: ${(e && e.message) || e || 'unknown error'}`);
       const attempts = _syncedEnqueueRetry(key);
       // Silent for the first few failures — transient blips shouldn't alarm
       // the user. Only toast once the same key (or any) has stuck around.
@@ -2734,7 +2737,7 @@ const syncedLS = {
       syncedLS._drainRetryQueue().catch(()=>{});
       return true;
     } catch(e){
-      console.warn(`[syncedLS.setMany] ${entries.length} entries failed: ${e.message}`);
+      console.warn(`[syncedLS.setMany] ${entries.length} entries failed: ${(e && e.message) || e || 'unknown error'}`);
       // Enqueue each key individually; drain handles them one by one.
       let maxAttempts = 0;
       entries.forEach(({key}) => {
@@ -2804,7 +2807,7 @@ const syncedLS = {
       await deleteState(key);
       return true;
     } catch(e){
-      console.warn(`[syncedLS.delete] ${key}: ${e.message}`);
+      console.warn(`[syncedLS.delete] ${key}: ${(e && e.message) || e || 'unknown error'}`);
       // Surface to user — silent failures here cause the cross-device drift
       // bug we just hit (phone "cleared" locally but BNState still had the row).
       try { toast('Network error — change not saved. Please try again.', true); } catch{}
@@ -4175,7 +4178,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
     document.body.appendChild(modal);
   } catch(e){
     hideBusy();
-    toast(`Couldn't save the change — ${e.message}`, true);
+    toast(`Couldn't save the change — ${(e && e.message) || e || 'unknown error'}`, true);
   }
 }
 
@@ -4587,7 +4590,7 @@ async function commitUnitChange(){
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
     hideBusy();
-    toast(`Couldn't save the change — ${e.message}`, true);
+    toast(`Couldn't save the change — ${(e && e.message) || e || 'unknown error'}`, true);
   } finally {
     // Safety net: guarantee the busy overlay dismisses even if the success
     // path didn't reach an inline hideBusy. Calling hideBusy a second time
@@ -9194,7 +9197,7 @@ async function loadOtherSlots(silent=false){
 
     loader.style.display = 'none';
   } catch(e){
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
     loader.style.display = 'none';
   }
 }
@@ -9774,7 +9777,7 @@ async function removeAssignment(id){
     toast(`✓ Removed ${who} assignment`);
     return true;
   } catch(e){
-    toast(`Couldn't remove the assignment — ${e.message}`, true);
+    toast(`Couldn't remove the assignment — ${(e && e.message) || e || 'unknown error'}`, true);
     return false;
   } finally {
     loadAssignments();
@@ -11995,7 +11998,7 @@ async function _loadSummaryInner(mySeq){
     });
     el.innerHTML=html;
   }catch(e){
-    el.innerHTML=`<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    el.innerHTML=`<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
   }
 }
 
@@ -12146,7 +12149,7 @@ async function suggestUnitsForManualAssign(btn){
     toast(`Suggested ${filtered.length} unit${filtered.length!==1?'s':''} for ${firstName(nurse)}`);
   } catch(e){
     console.error('Suggest failed:', e);
-    toast(`Suggest failed: ${e.message}`, true);
+    toast(`Suggest failed: ${(e && e.message) || e || 'unknown error'}`, true);
   } finally {
     if(btn){ btn.disabled = false; btn.textContent = originalLabel; }
   }
@@ -12484,7 +12487,7 @@ async function saveAssign(){
         }
         await saveRotation(nurse, dt, shift, rot);
       }
-    } catch(e){ toast(`Couldn't save the rotation — ${e.message}`, true); }
+    } catch(e){ toast(`Couldn't save the rotation — ${(e && e.message) || e || 'unknown error'}`, true); }
     hideBusy();
     toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
@@ -15692,18 +15695,18 @@ async function acceptAllAndSave(){
       const { verifyFailed, missing } = await reconcileWrite();
       btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
       if(verifyFailed){
-        if(status) status.textContent = `⚠ Save could not be confirmed (${e.message}). Reload to check, or re-run SAVE ALL.`;
+        if(status) status.textContent = `⚠ Save could not be confirmed (${(e && e.message) || e || 'unknown error'}). Reload to check, or re-run SAVE ALL.`;
       } else if(missing.length === 0){
         if(status) status.textContent = `✓ ${records.length} saved (recovered after a transport hiccup)`;
       } else if(missing.length < records.length){
         if(status) status.textContent = `⚠ ${records.length - missing.length} of ${records.length} saved — ${missing.length} did NOT save`;
         toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
       } else {
-        if(status) status.textContent = `⚠ Save failed: ${e.message}. Re-run SAVE ALL to retry.`;
+        if(status) status.textContent = `⚠ Save failed: ${(e && e.message) || e || 'unknown error'}. Re-run SAVE ALL to retry.`;
       }
     } catch(reErr){
       btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
-      if(status) status.textContent = `⚠ Batch failed: ${e.message}. Re-run SAVE ALL to retry.`;
+      if(status) status.textContent = `⚠ Batch failed: ${(e && e.message) || e || 'unknown error'}. Re-run SAVE ALL to retry.`;
     }
   }
   // Reload full assignment list with buttons after save
@@ -17107,7 +17110,7 @@ async function submitStagedActions(){
       okCount++;
     } catch(e){
       failCount++;
-      errors.push(`${formatNurse(info.nurseName)} ${fmt12(info.slotTime)}: ${e.message}`);
+      errors.push(`${formatNurse(info.nurseName)} ${fmt12(info.slotTime)}: ${(e && e.message) || e || 'unknown error'}`);
     }
   }
   _prodLogUpdateHeader();
@@ -17685,7 +17688,7 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
       } catch(e){}
     }, 150);
   } catch(e) {
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
     wrap.style.display = 'block';
   }
   loader.style.display = 'none';
@@ -18226,7 +18229,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
     wrap.style.display = 'block';
     _prodLogUpdateHeader();
   } catch(e) {
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${e.message}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
     wrap.style.display = 'block';
   }
 }
@@ -18265,7 +18268,7 @@ async function cancelStaffBooking(id, nurseName, slotTime){
         _bnConfirmCache.allBookings.push(removed);
       }
       _recentMutations.delete(String(id));
-      toast(`Cancel failed: ${e.message}`, true);
+      toast(`Cancel failed: ${(e && e.message) || e || 'unknown error'}`, true);
       _renderBNConfirm();
     });
 }
@@ -18312,7 +18315,7 @@ function undoBreakStatus(id){
         }
       }
       trackPatch(id, originalFields || { BreakStatus: 'confirmed', IsCompleted: 1 });
-      toast(`Undo failed: ${e.message}`, true);
+      toast(`Undo failed: ${(e && e.message) || e || 'unknown error'}`, true);
       if(!_renderBNConfirm()) loadBNConfirm();
     });
 }
@@ -19997,7 +20000,7 @@ async function removeImportedName(name){
     });
   } catch(e) {
     hideBusy();
-    toast(`Failed to delete ${firstName(name)}'s assignments: ${e.message}`, true);
+    toast(`Failed to delete ${firstName(name)}'s assignments: ${(e && e.message) || e || 'unknown error'}`, true);
     return;
   }
 
