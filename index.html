@@ -1593,39 +1593,62 @@ async function applyCoverageLimitsToUpcoming(){
     // base counts once, then an overlay so each group's picks are visible
     // to every later group (the frozen-cache flood is dead).
     clearCoverageCountsCache();
-    const _ov = { Day: {}, Noc: {} };
+    // Build 330: the overlay keys are `slot|shift` — the engine consumes
+    // exactly that (globalCount = counts + overlay[`${s}|${shift}`]). The
+    // 328 sweep wrote bare slot keys into per-shift buckets; every lookup
+    // missed, every group dealt from frozen counts, and one absent suffix
+    // manufactured both floods. This mirrors the import's proven shape.
+    const _ov = {};
+    // Build 329: batched history (ONE setMany flush), a live counter, and
+    // a per-call timeout so a hung request can never freeze the sweep
+    // silently — re-running Re-deal finishes any interrupted group.
+    const _whb = {};
+    const _keys = Object.keys(groups).sort();
+    const _total = _keys.length;
+    const _tmo = (p, ms, what) => Promise.race([p,
+      new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} timed out`)), ms))]);
+    let _at = '';
     let done = 0, skipped = 0;
-    for(const key of Object.keys(groups).sort()){
+    for(const key of _keys){
       const rows = groups[key];
+      const [d, sh] = key.split('|');
+      _at = `${_fmtDayShort(d)} ${sh}`;
+      showBusy(`Re-dealing ${done + skipped + 1}/${_total} — ${_at}…`);
       const handShaped = rows.some(r => String(r.IsSupplemental) === '1'
         || r.Status === 'inactive'
         || (r.StartTime && Number(r.Hours) > 0));
       if(handShaped){ skipped++; continue; }
-      const [d, sh] = key.split('|');
       const nurses = [...new Set(rows.map(r => r.BreakNurseName).filter(Boolean))];
       if(!nurses.length){ skipped++; continue; }
-      const result = await suggestAssignments(nurses, sh, d, _ov[sh] || {});
-      await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
-        ids: encodeURIComponent(JSON.stringify(rows.map(r => r.Id))) });
+      const result = await _tmo(suggestAssignments(nurses, sh, d, _ov, _whb), 30000, 'dealing');
+      await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
+        ids: encodeURIComponent(JSON.stringify(rows.map(r => r.Id))) }), 20000, 'clearing old rows');
       for(const bn of nurses){
         const units = expandSuggestionUnits(result[bn] || [], d, sh);
         if(!units.length) continue;
-        await spPost(LISTS.schedule, {
+        await _tmo(spPost(LISTS.schedule, {
           Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
           Units: JSON.stringify(units)
-        });
+        }), 20000, 'writing the new rows');
         try { await syncedLS.delete(rotationKey(bn, d, sh)); } catch(e){}
-        (result[bn] || []).forEach(tok => { _ov[sh][tok] = (_ov[sh][tok] || 0) + 1; });
+        (result[bn] || []).forEach(tok => { _ov[`${tok}|${sh}`] = (_ov[`${tok}|${sh}`] || 0) + 1; });
       }
       done++;
     }
+    // Build 329: ONE flush for every nurse's history the sweep touched.
+    try {
+      if(Object.keys(_whb).length){
+        if(typeof syncedLS.setMany === 'function') await syncedLS.setMany(_whb);
+        else for(const k of Object.keys(_whb)) await syncedLS.set(k, _whb[k]);
+      }
+    } catch(e){}
     clearCoverageCountsCache(); // the sweep's writes make any cache stale
     hideBusy();
     toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
     loadAssignments();
   } catch(e){
     hideBusy();
-    toast(`Couldn't finish the re-deal — ${e.message}`, true);
+    toast(`Couldn't finish the re-deal${_at ? ` at ${_at}` : ''} — ${e.message}. Running Re-deal upcoming again will finish the job.`, true);
     loadAssignments();
   }
 }
@@ -2008,7 +2031,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-328'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-09-330'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
