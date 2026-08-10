@@ -1589,6 +1589,11 @@ async function applyCoverageLimitsToUpcoming(){
       if(d <= t) return; // strictly tomorrow forward
       (groups[`${d}|${r.ShiftType}`] = groups[`${d}|${r.ShiftType}`] || []).push(r);
     });
+    // Build 328: the sweep adopts the import's count discipline — fresh
+    // base counts once, then an overlay so each group's picks are visible
+    // to every later group (the frozen-cache flood is dead).
+    clearCoverageCountsCache();
+    const _ov = { Day: {}, Noc: {} };
     let done = 0, skipped = 0;
     for(const key of Object.keys(groups).sort()){
       const rows = groups[key];
@@ -1599,7 +1604,7 @@ async function applyCoverageLimitsToUpcoming(){
       const [d, sh] = key.split('|');
       const nurses = [...new Set(rows.map(r => r.BreakNurseName).filter(Boolean))];
       if(!nurses.length){ skipped++; continue; }
-      const result = await suggestAssignments(nurses, sh, d);
+      const result = await suggestAssignments(nurses, sh, d, _ov[sh] || {});
       await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
         ids: encodeURIComponent(JSON.stringify(rows.map(r => r.Id))) });
       for(const bn of nurses){
@@ -1610,9 +1615,11 @@ async function applyCoverageLimitsToUpcoming(){
           Units: JSON.stringify(units)
         });
         try { await syncedLS.delete(rotationKey(bn, d, sh)); } catch(e){}
+        (result[bn] || []).forEach(tok => { _ov[sh][tok] = (_ov[sh][tok] || 0) + 1; });
       }
       done++;
     }
+    clearCoverageCountsCache(); // the sweep's writes make any cache stale
     hideBusy();
     toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
     loadAssignments();
@@ -2001,7 +2008,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-327'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-09-328'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19079,6 +19086,31 @@ async function getUnitCoverageCounts(shift){
       });
     });
   } catch(e) { /* return zeros on error */ }
+  // Build 328: rates over open days — a closed unit's zero-count period is
+  // an ARTIFACT, not a debt. Raw totals made every reopening a flood (7N,
+  // closed 12 days, re-entered as the "most starved" unit and got dealt
+  // everywhere). Each unit's total extrapolates across its open days so
+  // units compete at their true rate.
+  try {
+    const _now = new Date();
+    const _totalDays = 90;
+    const _openDaysOf = (probeUnit) => {
+      let open = 0;
+      for(let k = 0; k < _totalDays; k++){
+        const d = new Date(_now.getTime() - k * 86400000);
+        const probe = new Date(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T${shift === 'Day' ? '12:00' : '22:00'}:00`);
+        if(isUnitOpenAt(probeUnit, probe)) open++;
+      }
+      return open;
+    };
+    Object.keys(counts).forEach(u => {
+      const probeUnit = u === 'C_PAIR' ? '4C' : u;
+      const open = _openDaysOf(probeUnit);
+      if(open > 0 && open < _totalDays){
+        counts[u] = Math.round(counts[u] * _totalDays / open);
+      }
+    });
+  } catch(e){ /* raw totals on any error */ }
   _coverageCountsCache[shift] = counts;
   return counts;
 }
