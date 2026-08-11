@@ -2075,7 +2075,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-11-335'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-11-336'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10631,7 +10631,7 @@ async function autoDeclareScheduledStart(){
     await syncedLS.set(getBNStartKey(), st);
     populateBNStartTimeSlots();
     loadBNConfirm();
-    toast(`🕐 Start time set to ${fmt12(st)} from your scheduled partial — Clear if you started earlier.`);
+    toast(`🕐 Start time set to ${fmt12(st)} from your scheduled partial — pick a later time below if you started late.`);
   } catch(e){}
 }
 
