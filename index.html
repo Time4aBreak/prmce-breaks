@@ -823,7 +823,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
     <!-- Claim limits & ramp (Build 301) -->
     <div class="card">
-      <div class="card-label" style="margin:0 0 4px">Shift Limits</div>
+      <div style="display:flex;align-items:center;gap:8px;margin:0 0 4px"><div class="card-label" style="margin:0">Shift Limits</div><span id="rampDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
       <div id="rampCfgBody"></div>
       <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
     </div>
@@ -845,7 +845,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <!-- Change passwords — collapsible -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePwCard()">
-        <div class="card-label" style="margin:0">🔑 Change Passwords</div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="card-label" style="margin:0">🔑 Change Passwords</div><span id="pwDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
         <span id="pwCardChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
       </div>
       <div id="pwCardBody" style="display:none;margin-top:14px">
@@ -853,14 +853,14 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
         <div class="row" style="margin-bottom:12px">
           <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
           <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="changePw()">Update</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="changePw();setTimeout(_pwDirtyCheck, 600)">Update</button>
         </div>
         <div id="pwMsg" style="font-size:.8rem;margin-bottom:14px;display:none"></div>
         <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Break Nurse Password</div>
         <div class="row">
           <input type="password" id="bnpw1" placeholder="New password" style="flex:1"/>
           <input type="password" id="bnpw2" placeholder="Confirm" style="flex:1"/>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="changeBNPw()">Update</button>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="changeBNPw();setTimeout(_pwDirtyCheck, 600)">Update</button>
         </div>
         <div id="bnpwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
       </div>
@@ -1563,6 +1563,7 @@ function initRampCard(){
   if(!body) return;
   const c = _rampCfg();
   body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
+  { const el = document.getElementById('rampDirtyDot'); if(el) el.style.display = 'none'; } // Build 335: a fresh render is a saved state
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
@@ -2074,7 +2075,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-11-334'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-11-335'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5370,6 +5371,26 @@ function init(){
 
   // Clock
   updateClock();
+  // Build 335: unsaved-info indicators — a card holding a draft must not
+  // look identical to a saved one. Delegated: one listener serves every
+  // wired card.
+  window._pwDirtyCheck = () => {
+    const dirty = ['pw1','pw2','bnpw1','bnpw2'].some(id => (document.getElementById(id)?.value || '') !== '');
+    const el = document.getElementById('pwDirtyDot');
+    if(el) el.style.display = dirty ? '' : 'none';
+  };
+  document.addEventListener('input', (ev) => {
+    const t = ev.target;
+    if(!t || t.tagName !== 'INPUT') return;
+    const rb = document.getElementById('rampCfgBody');
+    if(rb && rb.contains(t)){
+      const dirty = [...rb.querySelectorAll('input')].some(i => i.dataset.r !== undefined && i.value !== i.dataset.r);
+      const el = document.getElementById('rampDirtyDot');
+      if(el) el.style.display = dirty ? '' : 'none';
+      return;
+    }
+    if(['pw1','pw2','bnpw1','bnpw2'].includes(t.id)) window._pwDirtyCheck();
+  });
   setInterval(updateClock, 10000);
 
   // Build 321: limits propagate to OPEN screens — the configs ride the
