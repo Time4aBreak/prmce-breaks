@@ -1611,12 +1611,18 @@ async function applyCoverageLimitsToUpcoming(){
     const _total = _keys.length;
     const _tmo = (p, ms, what) => Promise.race([p,
       new Promise((_, rej) => setTimeout(() => rej(new Error(`${what} timed out`)), ms))]);
+    // Build 333: two phases. Phase 1 computes every deal LOCALLY (the only
+    // network is one counts-fetch per shift, cached); phase 2 applies the
+    // whole write-set in a handful of batch calls — inserts FIRST so a
+    // mid-apply failure leaves harmless temporary duplicates, never an
+    // empty schedule ("Remove duplicate assignments" is the manual out).
     let done = 0, skipped = 0;
+    const _delIds = [], _creates = [], _rotKeys = [];
     for(const key of _keys){
       const rows = groups[key];
       const [d, sh] = key.split('|');
       _at = `${_fmtDayShort(d)} ${sh}`;
-      showBusy(`Re-dealing ${done + skipped + 1}/${_total} — ${_at}…`);
+      showBusy(`Computing ${done + skipped + 1}/${_total} — ${_at}…`);
       const handShaped = rows.some(r => String(r.IsSupplemental) === '1'
         || r.Status === 'inactive'
         || (r.StartTime && Number(r.Hours) > 0));
@@ -1624,20 +1630,39 @@ async function applyCoverageLimitsToUpcoming(){
       const nurses = [...new Set(rows.map(r => r.BreakNurseName).filter(Boolean))];
       if(!nurses.length){ skipped++; continue; }
       const result = await _tmo(suggestAssignments(nurses, sh, d, _ov, _whb), 30000, 'dealing');
-      await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
-        ids: encodeURIComponent(JSON.stringify(rows.map(r => r.Id))) }), 20000, 'clearing old rows');
+      let _any = false;
       for(const bn of nurses){
         const units = expandSuggestionUnits(result[bn] || [], d, sh);
         if(!units.length) continue;
-        await _tmo(spPost(LISTS.schedule, {
-          Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
-          Units: JSON.stringify(units)
-        }), 20000, 'writing the new rows');
-        try { await syncedLS.delete(rotationKey(bn, d, sh)); } catch(e){}
+        _creates.push({ Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
+          Units: JSON.stringify(units) });
+        _rotKeys.push(rotationKey(bn, d, sh));
         (result[bn] || []).forEach(tok => { _ov[`${tok}|${sh}`] = (_ov[`${tok}|${sh}`] || 0) + 1; });
+        _any = true;
       }
-      done++;
+      if(_any){ rows.forEach(r => _delIds.push(r.Id)); done++; } else skipped++;
     }
+    // ── Phase 2: apply ────────────────────────────────────────────────
+    _at = 'applying';
+    const _CHUNK = 50;
+    showBusy(`Applying — writing ${_creates.length} new assignments…`);
+    for(let ci = 0; ci < _creates.length; ci += _CHUNK){
+      await _tmo(gasCallPost({ action: 'batchInsert', sheet: LISTS.schedule,
+        rows: encodeURIComponent(JSON.stringify(_creates.slice(ci, ci + _CHUNK))) }), 60000, 'writing the new rows');
+    }
+    showBusy('Applying — clearing the old rows…');
+    for(let ci = 0; ci < _delIds.length; ci += _CHUNK){
+      await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
+        ids: encodeURIComponent(JSON.stringify(_delIds.slice(ci, ci + _CHUNK))) }), 60000, 'clearing the old rows');
+    }
+    showBusy('Applying — retiring stale rotations…');
+    try {
+      _rotKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+      if(_rotKeys.length && typeof syncedLS.setMany === 'function'){
+        const _tomb = {}; _rotKeys.forEach(k => _tomb[k] = null);
+        await _tmo(syncedLS.setMany(_tomb), 60000, 'retiring rotations');
+      }
+    } catch(e){}
     // Build 329: ONE flush for every nurse's history the sweep touched.
     try {
       if(Object.keys(_whb).length){
@@ -2034,7 +2059,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-332'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-09-333'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
