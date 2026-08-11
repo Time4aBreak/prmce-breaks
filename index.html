@@ -1544,14 +1544,29 @@ function rampUnlockLabel(shiftForm, dateStr){
 function rampCheckBackLine(shiftForm, dateStr){
   return `Check back after ${rampUnlockLabel(shiftForm, dateStr)} to sign up for more break time`;
 }
+// Build 334: the Settings card repaints in place when limits arrive from
+// another device — visible + unfocused + untouched only; an admin
+// mid-edit is never clobbered.
+function refreshRampCardIfChanged(){
+  const body = document.getElementById('rampCfgBody');
+  if(!body || !body.offsetParent) return;                    // not visible
+  if(body.contains(document.activeElement)) return;          // being edited
+  const inputs = [...body.querySelectorAll('input')];
+  if(inputs.some(i => i.dataset.r !== undefined && i.value !== i.dataset.r)) return; // unsaved edits
+  const sig = JSON.stringify([_rampCfg(), _covCfg()]);
+  if(sig === body.dataset.sig) return;                       // nothing new
+  initRampCard();
+}
+
 function initRampCard(){
   const body = document.getElementById('rampCfgBody');
   if(!body) return;
   const c = _rampCfg();
-  const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
+  body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
+  const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
+      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
@@ -2059,7 +2074,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-09-333'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-11-334'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5361,8 +5376,10 @@ function init(){
   // Build-217 refresh (direct BNState read, write-lock aware) once a
   // minute. Without this, an open phone keeps its first-load limits.
   setInterval(() => {
-    syncedLS.refresh('rampConfig').catch(()=>{});
-    syncedLS.refresh('coverageConfig').catch(()=>{});
+    Promise.all([
+      syncedLS.refresh('rampConfig'),
+      syncedLS.refresh('coverageConfig')
+    ]).then(() => refreshRampCardIfChanged()).catch(()=>{});
     // Build 325: unit statuses join the heartbeat, and the grid repaints
     // when the open-set changed.
     Promise.all([
