@@ -351,7 +351,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
       <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
       <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
-      <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">⚙️ Schedule</button>
+      <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">🕐 Schedule</button>
       <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
       <button class="sub-tab" id="st-settings" onclick="showSubTab('settings',this)" style="display:none">🛠️ Settings</button>
     </div>
@@ -2075,7 +2075,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-11-336'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-11-338'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10620,14 +10620,19 @@ async function autoDeclareScheduledStart(){
   try {
     if(!BNS.name || !BNS.shift) return;
     const dt = BNS.date || today();
-    if(syncedLS.get(getBNStartKey())) return;
-    if(window._bnStartClearedThisSession) return;
+    // Build 337: the scheduled start caches on EVERY load — the expansion
+    // guard in onBNStartTimeChange needs it even (especially) when a
+    // declaration already exists.
+    window._bnSchedStart = '';
     const rows = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${BNS.shift}'`);
     const mine = rows.find(r => r.BreakNurseName === BNS.name && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1');
     if(!mine) return;
     const st = String(mine.StartTime || '').replace(/\D/g, '');
     const hr = Number(mine.Hours) || 0;
     if(!/^\d{4}$/.test(st) || hr <= 0 || hr >= 12) return;
+    window._bnSchedStart = st;
+    if(syncedLS.get(getBNStartKey())) return;
+    if(window._bnStartClearedThisSession) return;
     await syncedLS.set(getBNStartKey(), st);
     populateBNStartTimeSlots();
     loadBNConfirm();
@@ -10639,6 +10644,17 @@ async function onBNStartTimeChange(){
   const sel = document.getElementById('bnStartTime');
   const val = sel ? sel.value : '';
   const key = getBNStartKey();
+  // Build 337 (Tomas): a declaration can only NARROW the scheduled window.
+  // A time before a scheduled partial's start would store an inert lie —
+  // slots stay clipped by the schedule while the dropdown claims otherwise.
+  // Keep the current time and teach the real lever.
+  const _ss = window._bnSchedStart || '';
+  if(val && /^\d{4}$/.test(_ss) && sortKey(val, BNS.shift) < sortKey(_ss, BNS.shift)){
+    const cur = syncedLS.get(key);
+    if(sel) sel.value = cur || _ss;
+    showAlert(`The selected start time is before your currently scheduled start time at ${fmt12(_ss)}. Please Manually Edit the start time in the 🕐 Schedule tab.`);
+    return;
+  }
   const _sy1 = window.scrollY;
   // Full-screen busy overlay blocks all taps (dropdown, +Log, everything)
   // until the BNState write commits — same pattern as the rest of the app.
