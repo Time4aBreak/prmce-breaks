@@ -2109,7 +2109,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-349'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-350'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7166,6 +7166,11 @@ function _setUnitButtonsLocked(on){
   // lifecycle (newest-load unlock + the 5s never-stuck fallback).
   const pane = document.getElementById('tab-staff');
   if(pane) pane.style.pointerEvents = on ? 'none' : '';
+  // Build 350 (Tomas): the full blur overlay — same surface as "Apply to
+  // all shifts" — replaces the subtle dim as the visible guard. Only
+  // user-initiated loads reach this function (the silent poll never
+  // locks), and the 5s fallback clears it with everything else.
+  if(on) showBusy('Checking availability…'); else hideBusy();
   clearTimeout(_unitLockT);
   if(on) _unitLockT = setTimeout(() => _setUnitButtonsLocked(false), 5000);
 }
