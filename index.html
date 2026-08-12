@@ -326,6 +326,9 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <span id="slotsMeta"></span>
         <span id="slotsLoader" style="display:none"><div class="spinner"></div></span>
       </div>
+      <div id="calPreviewBar" style="display:none;background:#eaf0fb;border:1.5px solid #b9cdf0;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.85rem;color:#2a4d80">
+        📅 Viewing <strong id="calPreviewDate"></strong> — <button type="button" class="btn btn-ghost btn-sm" style="color:#2a4d80" onclick="clearCalPreview()">← Back to today</button>
+      </div>
       <div id="slotsList"></div>
       <!-- Submit bar — shown when nurse has pending selections -->
       <div id="submitBar" style="display:none;margin-top:14px;padding:12px 14px;background:var(--teal-lt);border-radius:10px;border:1.5px solid var(--teal);display:none;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
@@ -2106,7 +2109,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-348'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-349'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7040,9 +7043,27 @@ function calNav(delta){
   renderCoverageCalendar();
 }
 
+// Build 349 (Tomas, option B — flip CAL_TAP_PREVIEW to false to revert to
+// the map-only calendar): tapping a covered day retargets the slot list to
+// that date as a LOCKED preview (the 346 per-date window renders it safely
+// — BN names, opens-at banner, nothing claimable). Tapping again, or any
+// unit/shift change, snaps back to the live view.
+const CAL_TAP_PREVIEW = true;
 function calPickDate(ds){
   _calSelectedDate = (_calSelectedDate === ds) ? null : ds;
   renderCoverageCalendar();
+  if(CAL_TAP_PREVIEW){
+    _slotLoadEpoch++;
+    _setUnitButtonsLocked(true);
+    loadSlots();
+  }
+}
+function clearCalPreview(){
+  _calSelectedDate = null;
+  renderCoverageCalendar();
+  _slotLoadEpoch++;
+  _setUnitButtonsLocked(true);
+  loadSlots();
 }
 
 function renderCoverageCalendar(){
@@ -7201,7 +7222,13 @@ async function _loadSlotsCore(silent=false){
   if(!silent) { list.innerHTML=''; list.dataset.lastHtml=''; }
 
   try {
-    const dt=staffShiftDate(S.shift), shift=S.shift;
+    const dt=((typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate) ? _calSelectedDate : staffShiftDate(S.shift)), shift=S.shift;
+  { const _pv = document.getElementById('calPreviewBar');
+    if(_pv){
+      const _on = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate);
+      _pv.style.display = _on ? '' : 'none';
+      if(_on){ const _pd = document.getElementById('calPreviewDate'); if(_pd) _pd.textContent = _fmtDayShort(dt); }
+    } }
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
     const oppDt = shift === 'Day'
       ? (()=>{ const d=new Date(dt+'T12:00:00'); d.setDate(d.getDate()-1); return d.toISOString().slice(0,10); })()
