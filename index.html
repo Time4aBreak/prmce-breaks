@@ -2,6 +2,13 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<!-- Build 343: iPhone home-screen package (Spectra → iPhone transition) -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="PRMCE Breaks">
+<meta name="theme-color" content="#0F5A55">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
 <title>PRMCE Breaks</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
 <style>
@@ -209,6 +216,12 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
      laptop/desktop; no-op on phones (card is narrower than the cap). The
      header shares the cap so the ‹ › arrows align with the grid edges. */
   .cal-hd,.cal-grid,.cal-caption{max-width:420px;margin-left:auto;margin-right:auto}
+/* Build 343: iPhone armor — no focus-zoom (16px inputs on small screens),
+   no pull-to-refresh mid-shift, no landscape font inflation. */
+html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
+@media (max-width: 640px){
+  input, select, textarea { font-size: 16px !important; }
+}
 </style>
 </head>
 <body>
@@ -286,7 +299,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
     <div class="row">
       <div class="field">
         <label>First Name</label>
-        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" oninput="onNameInput();clearExtOnNameChange()"/>
+        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
       <div class="field" style="max-width:150px">
         <label>Spectra Ext</label>
@@ -1526,6 +1539,18 @@ function _rampUnlockMs(shiftForm, dateStr, c){
   const legacyWait = Math.min(720, Math.max(0, Number(c && c.waitMin) || 0));
   return base + legacyWait * 60000;
 }
+function _rampOpenMs(shiftForm, dateStr, c){
+  // Build 345 (Tomas): slots OPEN at a configurable clock time per shift —
+  // no longer welded to the 6:30 shift start. Opening EARLIER than the
+  // shift is the point (e.g. 5 PM claims for the 6:30 Noc), so pre-start
+  // times do NOT roll forward; only post-midnight Noc times (< 12:00)
+  // belong to the next calendar day (the house convention).
+  const dflt = shiftForm === 'Day' ? '06:30' : '18:30';
+  const oa = (c && typeof c.openAt === 'string' && /^\d{2}:\d{2}$/.test(c.openAt)) ? c.openAt : dflt;
+  let o = new Date(`${dateStr}T${oa}:00`).getTime();
+  if(shiftForm === 'Noc' && oa < '12:00') o += 86400000;
+  return o;
+}
 function rampAllowedCount(shiftForm, dateStr){
   const c = _rampCfg()[shiftForm];
   if(!c || !dateStr) return MAX_SLOTS;
@@ -1533,6 +1558,7 @@ function rampAllowedCount(shiftForm, dateStr){
   const aoRaw = Number(c.atOpen);
   const atOpen = Math.min(max, Number.isFinite(aoRaw) ? Math.max(0, aoRaw) : max);
   const addAfter = Math.max(0, Number(c.addAfter) || 0);
+  if(Date.now() < _rampOpenMs(shiftForm, dateStr, c)) return 0; // Build 345: before open, nothing is claimable
   const unlocked = Date.now() >= _rampUnlockMs(shiftForm, dateStr, c);
   return Math.min(max, atOpen + (unlocked ? addAfter : 0));
 }
@@ -1542,6 +1568,11 @@ function rampUnlockLabel(shiftForm, dateStr){
   return fmt12(`${String(u.getHours()).padStart(2,'0')}${String(u.getMinutes()).padStart(2,'0')}`);
 }
 function rampCheckBackLine(shiftForm, dateStr){
+  const c = _rampCfg()[shiftForm] || {};
+  if(Date.now() < _rampOpenMs(shiftForm, dateStr, c)){
+    const o = new Date(_rampOpenMs(shiftForm, dateStr, c));
+    return `Slots open at ${fmt12(`${String(o.getHours()).padStart(2,'0')}${String(o.getMinutes()).padStart(2,'0')}`)}`;
+  }
   return `Check back after ${rampUnlockLabel(shiftForm, dateStr)} to sign up for more break time`;
 }
 // Build 334: the Settings card repaints in place when limits arrive from
@@ -1567,7 +1598,7 @@ function initRampCard(){
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
+      opens <input type="time" id="${p}Opens" value="${cc.openAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.openAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem"> · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
@@ -1586,7 +1617,7 @@ function initRampCard(){
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
       <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
-      <span style="color:var(--muted)">never more than a full-timer's quota</span>
+      
     </div>`;
 }
 // Build 327: when the Units-per-Shift numbers change, the save asks when
@@ -1702,8 +1733,8 @@ async function saveRampCfg(btn){
   const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
   const tv = (id, dflt) => { const el = document.getElementById(id); return (el && /^\d{2}:\d{2}$/.test(el.value)) ? el.value : dflt; };
   const cfg = {
-    Day: { max: Math.max(1, v('rampDayMax')), atOpen: v('rampDayOpen'), unlockAt: tv('rampDayUnlock', '06:30'), addAfter: v('rampDayAdd') },
-    Noc: { max: Math.max(1, v('rampNocMax')), atOpen: v('rampNocOpen'), unlockAt: tv('rampNocUnlock', '18:30'), addAfter: v('rampNocAdd') },
+    Day: { max: Math.max(1, v('rampDayMax')), openAt: tv('rampDayOpens', '06:30'), atOpen: v('rampDayOpen'), unlockAt: tv('rampDayUnlock', '06:30'), addAfter: v('rampDayAdd') },
+    Noc: { max: Math.max(1, v('rampNocMax')), openAt: tv('rampNocOpens', '18:30'), atOpen: v('rampNocOpen'), unlockAt: tv('rampNocUnlock', '18:30'), addAfter: v('rampNocAdd') },
     otherTotal: Math.max(1, v('rampOtherTot'))
   };
   const old = btn ? btn.textContent : '';
@@ -1718,10 +1749,10 @@ async function saveRampCfg(btn){
   // when any team-size row wants more than exists.
   // Build 323 (Tomas): an unlock before the shift's start clock is an
   // input error, not a next-morning intent — refuse and say so.
-  const _startOf = { Day: '06:30', Noc: '18:30' };
+  // Build 345: the rule generalizes — the unlock can't precede the OPEN.
   for(const sh of ['Day', 'Noc']){
-    if(cfg[sh].unlockAt < _startOf[sh]){
-      toast(`⚠ ${sh} unlock can't be before the ${sh === 'Day' ? '6:30 AM' : '6:30 PM'} shift start — pick a later time.`, true);
+    if(cfg[sh].unlockAt < cfg[sh].openAt){
+      toast(`⚠ ${sh} unlock can't be before the ${fmt12(cfg[sh].openAt.replace(':', ''))} slot-open time — pick a later time.`, true);
       if(btn){ btn.disabled = false; btn.textContent = old; }
       return;
     }
@@ -2075,7 +2106,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-11-341'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-11-346'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7972,14 +8003,16 @@ async function _loadSlotsCore(silent=false){
       const isTaken= booking && !isMine;
       const isOtherShiftClaim = isTaken && (booking.IsOtherShift === 1 || booking.IsOtherShift === '1');
 
-      // Sign-up window: current shift always open; next shift visible but locked until start
-      const nowM_ = nowMin();
-      const isCurrentShift = shift === 'Day'
-        ? (nowM_ >= 6*60+30 || nowM_ < 6*60+30) // Day always accessible once selected
-        : (nowM_ >= 18*60+30 || nowM_ < getDayOverlapMax()); // Noc: active overnight or after 18:30
-      // Window open = can claim. For next-shift preview, locked until shift start
-      const shiftWindowOpen = staffWindowOpen(shift);
-      const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
+      // Build 346 (Tomas's catch): the window is PER-DATE — each viewed
+      // date's rows gate on that date's own configured open moment. The
+      // old staffWindowOpen was dateless AND Day's window never closed
+      // (m >= 6:30 with no upper bound), so tomorrow's slots rode today's
+      // window all evening. The 345 open-time dial is now the single truth
+      // the render obeys; hardcoded 6:30 labels retired.
+      const _winOpenMs = _rampOpenMs(_slotShift, _slotDate, (_rampCfg()[_slotShift] || {}));
+      const shiftWindowOpen = Date.now() >= _winOpenMs;
+      const _winD = new Date(_winOpenMs);
+      const openLabel = `Opens ${fmt12(`${String(_winD.getHours()).padStart(2,'0')}${String(_winD.getMinutes()).padStart(2,'0')}`)}`;
 
       const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
       let canClaim=false, lockReason='';
@@ -8080,7 +8113,8 @@ async function _loadSlotsCore(silent=false){
     // Populate cache for instant pending re-renders
     _slotRenderCache = {
       future, bMap, bnBreaks, nurseName, nurseExt: document.getElementById('nurseExt').value.trim(),
-      covering, oppCovering, shift, overlapRange
+      covering, oppCovering, shift, overlapRange,
+      viewDate: dateStr // Build 346: the mirror gates its window per-date too
     };
 
     // Start silent background refresh timer
@@ -8410,8 +8444,12 @@ function _renderSingleSlotRow(slot){
   const _rampAllow = rampAllowedCount(shift, _rampShiftDate(shift)); // Build 301
   const _rampMax = rampMaxFor(shift);
   const canClaimMore = (effectiveOwned + pendingClaimCount) < _rampAllow;
-  const shiftWindowOpen = staffWindowOpen(shift);
-  const openLabel = shift === 'Day' ? 'Opens 6:30 AM' : 'Opens 6:30 PM';
+  // Build 346: the mirror gates per-date on the configured open, same as
+  // the main loop.
+  const _mWinMs = _rampOpenMs(shift, _slotRenderCache.viewDate || _rampShiftDate(shift), (_rampCfg()[shift] || {}));
+  const shiftWindowOpen = Date.now() >= _mWinMs;
+  const _mWinD = new Date(_mWinMs);
+  const openLabel = `Opens ${fmt12(`${String(_mWinD.getHours()).padStart(2,'0')}${String(_mWinD.getMinutes()).padStart(2,'0')}`)}`;
   const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
   // Build 287 (streams): the mirror emits one row per stream — the core
   // loop's twin conversion. Same binding rules; callers' contract unchanged
@@ -12388,8 +12426,13 @@ async function saveAssign(){
         } catch(e){ /* fetch failed — proceed; the move itself must not be blocked by a read hiccup */ }
         const _have = new Set(existing.map(r => String(r.Id)));
         _editSource.ids.forEach(id => { if(!_have.has(String(id))) existing.push({ Id: id }); });
-        _srcOldRotKey = rotationKey(_editSource.name, _editSource.date, _editSource.shift);
       }
+      // Build 342 (Tomas's 5A-in-the-log catch): retire the source rotation
+      // on EVERY consumed edit, not just moves — a units-only edit left the
+      // old rotation alive, and the BN's Prod Log rendered stale units.
+      // The derive path rebuilds from the row; deleting when nothing
+      // changed is harmless.
+      _srcOldRotKey = rotationKey(_editSource.name, _editSource.date, _editSource.shift);
     }
     cancelEditMode(); // memory spent (or not applicable) — either way, one use only
 
