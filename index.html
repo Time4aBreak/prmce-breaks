@@ -2106,7 +2106,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-11-346'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-347'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8114,7 +8114,7 @@ async function _loadSlotsCore(silent=false){
     _slotRenderCache = {
       future, bMap, bnBreaks, nurseName, nurseExt: document.getElementById('nurseExt').value.trim(),
       covering, oppCovering, shift, overlapRange,
-      viewDate: dateStr // Build 346: the mirror gates its window per-date too
+      viewDate: dt // Build 347: the loader's date local is dt — 346 referenced a name that didn't exist (dateStr), crashing the render
     };
 
     // Start silent background refresh timer
