@@ -210,6 +210,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .cal-cell.past{color:#b9cccc}
   .cal-cell.cov{background:var(--cal-accent-lt);border:1.5px solid var(--cal-accent);color:var(--cal-accent);font-weight:800;cursor:pointer}
   .cal-cell.cov .cal-dot{width:4px;height:4px;border-radius:50%;background:var(--cal-accent);position:absolute;bottom:5px}
+  .cal-cell.cov.covpast{opacity:.5;background-image:linear-gradient(to top right, transparent 46%, var(--cal-accent) 47%, var(--cal-accent) 53%, transparent 54%)}
   .cal-cell.sel{outline:2px solid var(--cal-accent);outline-offset:1px}
   .cal-caption{font-size:.74rem;color:var(--muted);margin-top:11px;line-height:1.5;min-height:1.2em}
   /* Build 211: cap the calendar's width so 1fr cells don't balloon on
@@ -2109,7 +2110,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-351'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-352'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7117,7 +7118,7 @@ function renderCoverageCalendar(){
     const ds = `${monPrefix}-${String(day).padStart(2,'0')}`;
     const covered = cov[ds];
     const cls = ['cal-cell'];
-    if(covered) cls.push('cov');
+    if(covered){ cls.push('cov'); if(ds < todayStr) cls.push('covpast'); } // Build 352: past coverage keeps its highlight, slashed
     else if(ds < todayStr) cls.push('past');
     // Build 211: no 'today' ring — next to the coverage fills it read as a
     // selection/highlight state (Tomas). todayStr still drives 'past' above.
@@ -7251,7 +7252,14 @@ async function _loadSlotsCore(silent=false){
     // sequential version at 3.62s (Noc, 2 trips); Day's third fetch (opposite-
     // date bookings for overlap BN breaks) parallelizes identically. The
     // coverage-calendar repaint stays immediately after the data lands.
-    const schedFloor = oppDt < dt ? oppDt : dt;
+    // Build 352 (Tomas's catch): the calendar's coverage set rode this
+    // fetch's floor — a 349 preview to Aug 21 erased every highlight before
+    // the 21st. The floor now looks back 31 days regardless of what the
+    // list is previewing, so the calendar's month stays whole.
+    const _viewFloor = oppDt < dt ? oppDt : dt;
+    const _lb = new Date(Date.now() - 31 * 86400000);
+    const _lbStr = `${_lb.getFullYear()}-${String(_lb.getMonth() + 1).padStart(2, '0')}-${String(_lb.getDate()).padStart(2, '0')}`;
+    const schedFloor = _lbStr < _viewFloor ? _lbStr : _viewFloor;
     const [allSchedsRaw, allBookingsRaw, oppBookingsRaw] = await Promise.all([
       spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`),
       spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`).then(r => reconcileBookings(r)),
