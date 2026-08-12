@@ -2109,7 +2109,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-350'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-351'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5975,6 +5975,11 @@ function selectStaffShift(sh){
   _slotRenderCache = null;
   _otherSlotRenderCache = null;
   _slotLoadEpoch++; // Build 317: a shift switch is a world change too
+  // Build 351 (Tomas): the blur guard covers shift switches too — but only
+  // when a load will actually run (the wrapper early-returns without a
+  // unit, and a lock with no completing load would stick until the 5s
+  // fallback).
+  if(S.unit && (sh !== 'Other' || S.otherEndTime)) _setUnitButtonsLocked(true);
   // Build 294 (bug #5): blank the list SYNCHRONOUSLY — the outgoing view's
   // rows must not be tappable for even a frame while the new view loads
   // (the S7 first-attempt fumble: a stale standard row tapped under
@@ -6036,7 +6041,8 @@ function onOtherEndTimeChange(){
   _slotRenderCache = null;
   _otherSlotRenderCache = null;
   clearInterval(S.refreshTmr);
-  if(S.unit){ updateNameCardVisibility(); loadSlots(); }
+  _slotLoadEpoch++; // Build 351: an end-time change is a world change too
+  if(S.unit){ updateNameCardVisibility(); _setUnitButtonsLocked(true); loadSlots(); }
 }
 
 function updateNameCardState(){
