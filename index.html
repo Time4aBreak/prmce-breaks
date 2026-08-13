@@ -2111,7 +2111,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-359'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-13-361'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7474,16 +7474,20 @@ async function _loadSlotsCore(silent=false){
         const { limLast, limPassed } = _calcLimited();
         const _limTime2 = limLast ? fmt12(limLast) : null;
         if(limPassed){
-          banner.style.background = 'var(--red-lt)';
-          banner.style.borderColor = 'var(--red)';
-          banner.style.color = 'var(--red)';
-          // Build N+2: if the main BN that was supposed to cover this unit
-          // today is inactive (vs no BN ever scheduled), prefer the more
-          // context-rich wording. Same icon + upcoming info as before.
+          // Build 361 (Tomas's verdict, the whole family): red is the error
+          // voice — no-coverage is information (muted, 😒). The exception:
+          // a mid-shift LOSS (BN went unavailable) stays amber — a
+          // change-of-plans warning for nurses holding booked breaks.
           if(hasInactiveMain){
-            banner.innerHTML = `&#x26d4; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
+            banner.style.background = '#fff8e6';
+            banner.style.borderColor = '#e6a817';
+            banner.style.color = '#7a5200';
+            banner.innerHTML = `&#x26a0;&#xfe0f; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
           } else {
-            banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime2 ? `had Break Relief until ${_limTime2}` : 'has no Break Relief'}${_upcomingNote2}`;
+            banner.style.background = 'var(--bg-alt,#f5f5f5)';
+            banner.style.borderColor = 'var(--border)';
+            banner.style.color = 'var(--muted)';
+            banner.innerHTML = `😒 <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_limTime2 ? `had Break Relief until ${_limTime2}` : 'has no Break Relief'}${_upcomingNote2}`;
           }
         } else {
           setNameCardEnabled(true);
@@ -7554,12 +7558,12 @@ async function _loadSlotsCore(silent=false){
         const _upcoming = ''; // Build 318 (Tomas): upcoming-dates line retired — the calendar already shows them.
         if(_lastSlotPassed){
           setNameCardEnabled(false);
-          // Last overlap slot has passed — full red no coverage
+          // Build 361: overlap spent — muted status, not red alarm
           banner.style.display = 'block';
-          banner.style.background = 'var(--red-lt)';
-          banner.style.borderColor = 'var(--red)';
-          banner.style.color = 'var(--red)';
-          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_lastSlot ? `had Break Relief until ${fmt12(_lastSlot)}` : 'has no Break Relief'}${_upcoming}`;
+          banner.style.background = 'var(--bg-alt,#f5f5f5)';
+          banner.style.borderColor = 'var(--border)';
+          banner.style.color = 'var(--muted)';
+          banner.innerHTML = `😒 <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> ${_lastSlot ? `had Break Relief until ${fmt12(_lastSlot)}` : 'has no Break Relief'}${_upcoming}`;
         } else {
           // Still within overlap window — amber
           banner.style.display = 'block';
@@ -7587,15 +7591,18 @@ async function _loadSlotsCore(silent=false){
         // No coverage at all
         setNameCardEnabled(false);
         banner.style.display = 'block';
-        banner.style.background = 'var(--red-lt)';
-        banner.style.borderColor = 'var(--red)';
-        banner.style.color = 'var(--red)';
+        // Build 361: the whole none-family — muted 😒 for plain no-coverage,
+        // amber ⚠ for a mid-shift loss.
         if(hasInactiveMain){
-          // Build N+2: main BN scheduled today is inactive — say so explicitly
-          // instead of "has no Break Relief"
-          banner.innerHTML = `&#x26d4; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
+          banner.style.background = '#fff8e6';
+          banner.style.borderColor = '#e6a817';
+          banner.style.color = '#7a5200';
+          banner.innerHTML = `&#x26a0;&#xfe0f; Unfortunately, <strong>${escHTML(S.unit)}</strong>'s Break Nurse is currently not available.${_upcomingNote2}`;
         } else {
-          banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
+          banner.style.background = 'var(--bg-alt,#f5f5f5)';
+          banner.style.borderColor = 'var(--border)';
+          banner.style.color = 'var(--muted)';
+          banner.innerHTML = `😒 <strong>${escHTML(S.unit)} ${escHTML(shift)}</strong> has no Break Relief${_upcomingNote2}`;
         }
       } else {
         // Window not yet open but coverage exists today — switch from alarming
@@ -9175,10 +9182,10 @@ async function loadOtherSlots(silent=false){
       if(!dayCovering.length && !nocCovering.length){
         setNameCardEnabled(false);
         banner.style.display = 'block';
-        banner.style.background = 'var(--red-lt)';
-        banner.style.borderColor = 'var(--red)';
-        banner.style.color = 'var(--red)';
-        banner.innerHTML = `&#x26d4; <strong>${escHTML(S.unit)}</strong> has no Break Relief`;
+        banner.style.background = 'var(--bg-alt,#f5f5f5)';
+        banner.style.borderColor = 'var(--border)';
+        banner.style.color = 'var(--muted)';
+        banner.innerHTML = `😒 <strong>${escHTML(S.unit)}</strong> has no Break Relief`;
       }
       // states 2 & 3 painted after the gates run (so we know if slots remain)
     }
