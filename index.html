@@ -1619,8 +1619,21 @@ function initRampCard(){
         }
         const _cur = _vals.includes(cc.openAt) ? cc.openAt : _dflt;
         for(const _v of _vals) _opts += `<option value="${_v}"${_cur === _v ? ' selected' : ''}>${fmt12(_v.replace(':', ''))}</option>`;
-        return `<select id="${p}Opens" data-r="${_cur}" style="padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem">${_opts}</select>`;
-      })()} · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
+        return `<select id="${p}Opens" data-r="${_cur}" style="width:110px;padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem">${_opts}</select>`;
+      })()} · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} after ${(() => {
+        // Build 364 (Tomas): the unlock is a DURATION — 1–4 hours after
+        // open — not a clock. The save derives the stored clock time from
+        // open + hours, so out-of-order times are unconstructable (the old
+        // refusal retires) and the Noc midnight wrap is legal mid-shift.
+        const _o = (cc.openAt && /^\d\d:\d\d$/.test(cc.openAt)) ? cc.openAt : (label === 'Day' ? '06:30' : '18:30');
+        const _u = (cc.unlockAt && /^\d\d:\d\d$/.test(cc.unlockAt)) ? cc.unlockAt : _o;
+        const _mins = (hm) => Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3));
+        let _h = Math.round((((_mins(_u) - _mins(_o)) + 1440) % 1440) / 60);
+        if(!(_h >= 1 && _h <= 4)) _h = 2;
+        let _op = '';
+        for(const _n of [1, 2, 3, 4]) _op += `<option value="${_n}"${_h === _n ? ' selected' : ''}>${_n} hour${_n === 1 ? '' : 's'}</option>`;
+        return `<select id="${p}UnlockHrs" data-r="${_h}" style="width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">${_op}</select>`;
+      })()}
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
@@ -1750,13 +1763,18 @@ async function applyCoverageLimitsToUpcoming(){
   }
 }
 
+// Build 364: clock arithmetic for the derived unlock (open + hours, mod 24).
+const _addHours = (hm, h) => {
+  const t = (Number(hm.slice(0, 2)) * 60 + Number(hm.slice(3)) + h * 60) % 1440;
+  return `${String(Math.floor(t / 60)).padStart(2, '0')}:${String(t % 60).padStart(2, '0')}`;
+};
 async function saveRampCfg(btn){
   const _covBefore = JSON.stringify(_covCfg());
   const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
   const tv = (id, dflt) => { const el = document.getElementById(id); return (el && /^\d{2}:\d{2}$/.test(el.value)) ? el.value : dflt; };
   const cfg = {
-    Day: { max: Math.max(1, v('rampDayMax')), openAt: tv('rampDayOpens', '06:30'), atOpen: v('rampDayOpen'), unlockAt: tv('rampDayUnlock', '06:30'), addAfter: v('rampDayAdd') },
-    Noc: { max: Math.max(1, v('rampNocMax')), openAt: tv('rampNocOpens', '18:30'), atOpen: v('rampNocOpen'), unlockAt: tv('rampNocUnlock', '18:30'), addAfter: v('rampNocAdd') },
+    Day: { max: Math.max(1, v('rampDayMax')), openAt: tv('rampDayOpens', '06:30'), atOpen: v('rampDayOpen'), unlockAt: _addHours(tv('rampDayOpens', '06:30'), Number(document.getElementById('rampDayUnlockHrs')?.value || 2)), addAfter: v('rampDayAdd') },
+    Noc: { max: Math.max(1, v('rampNocMax')), openAt: tv('rampNocOpens', '18:30'), atOpen: v('rampNocOpen'), unlockAt: _addHours(tv('rampNocOpens', '18:30'), Number(document.getElementById('rampNocUnlockHrs')?.value || 2)), addAfter: v('rampNocAdd') },
     otherTotal: Math.max(1, v('rampOtherTot'))
   };
   const old = btn ? btn.textContent : '';
@@ -1783,11 +1801,9 @@ async function saveRampCfg(btn){
       if(btn){ btn.disabled = false; btn.textContent = 'Save limits'; }
       return;
     }
-    if(cfg[sh].unlockAt < cfg[sh].openAt){
-      toast(`⚠ ${sh} unlock can't be before the ${fmt12(cfg[sh].openAt.replace(':', ''))} slot-open time — pick a later time.`, true);
-      if(btn){ btn.disabled = false; btn.textContent = old; }
-      return;
-    }
+    // Build 364: the unlock<open refusal retired — the unlock derives from
+    // open + hours, so out-of-order times can no longer be constructed
+    // (the Noc midnight wrap is legal and the engine rollover handles it).
   }
   let _dry = '';
   ['Day','Noc'].forEach(sh => covCfg[sh].byTeam.forEach((u, i) => {
@@ -2138,7 +2154,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-363'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-13-364'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
