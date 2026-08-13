@@ -211,6 +211,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
   .cal-cell.cov{background:var(--cal-accent-lt);border:1.5px solid var(--cal-accent);color:var(--cal-accent);font-weight:800;cursor:pointer}
   .cal-cell.cov .cal-dot{width:4px;height:4px;border-radius:50%;background:var(--cal-accent);position:absolute;bottom:5px}
   .cal-cell.cov.covpast{opacity:.5;background-image:linear-gradient(to top right, transparent 46%, var(--cal-accent) 47%, var(--cal-accent) 53%, transparent 54%)}
+  .cal-cell.today{outline:2px dashed var(--cal-accent);outline-offset:-2px;border-radius:12px}
   .cal-cell.sel{outline:2px solid var(--cal-accent);outline-offset:1px}
   .cal-caption{font-size:.74rem;color:var(--muted);margin-top:11px;line-height:1.5;min-height:1.2em}
   /* Build 211: cap the calendar's width so 1fr cells don't balloon on
@@ -2110,7 +2111,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-352'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-353'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7057,9 +7058,15 @@ function calNav(delta){
 // unit/shift change, snaps back to the live view.
 const CAL_TAP_PREVIEW = true;
 function calPickDate(ds){
+  // Build 353: the reload fires only when the EFFECTIVE viewed date
+  // changes — tapping today selects it (caption) without a pointless
+  // reload flash, and the chip never offers "Back to today" from today.
+  const _home = staffShiftDate(S.shift);
+  const _before = _calSelectedDate || _home;
   _calSelectedDate = (_calSelectedDate === ds) ? null : ds;
+  const _after = _calSelectedDate || _home;
   renderCoverageCalendar();
-  if(CAL_TAP_PREVIEW){
+  if(CAL_TAP_PREVIEW && _before !== _after){
     _slotLoadEpoch++;
     _setUnitButtonsLocked(true);
     loadSlots();
@@ -7119,6 +7126,7 @@ function renderCoverageCalendar(){
     const covered = cov[ds];
     const cls = ['cal-cell'];
     if(covered){ cls.push('cov'); if(ds < todayStr) cls.push('covpast'); } // Build 352: past coverage keeps its highlight, slashed
+    if(ds === todayStr) cls.push('today'); // Build 353: you-are-here, dashed so it never reads as selection or coverage
     else if(ds < todayStr) cls.push('past');
     // Build 211: no 'today' ring — next to the coverage fills it read as a
     // selection/highlight state (Tomas). todayStr still drives 'past' above.
@@ -7237,7 +7245,7 @@ async function _loadSlotsCore(silent=false){
     const dt=((typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate) ? _calSelectedDate : staffShiftDate(S.shift)), shift=S.shift;
   { const _pv = document.getElementById('calPreviewBar');
     if(_pv){
-      const _on = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate);
+      const _on = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate && _calSelectedDate !== staffShiftDate(S.shift));
       _pv.style.display = _on ? '' : 'none';
       if(_on){ const _pd = document.getElementById('calPreviewDate'); if(_pd) _pd.textContent = _fmtDayShort(dt); }
     } }
@@ -7257,7 +7265,10 @@ async function _loadSlotsCore(silent=false){
     // the 21st. The floor now looks back 31 days regardless of what the
     // list is previewing, so the calendar's month stays whole.
     const _viewFloor = oppDt < dt ? oppDt : dt;
-    const _lb = new Date(Date.now() - 31 * 86400000);
+    // Build 353 (Tomas): the lookback reaches the FIRST of the previous
+    // month — a glance shows the whole consistent-coverage picture.
+    const _n = new Date();
+    const _lb = new Date(_n.getFullYear(), _n.getMonth() - 1, 1);
     const _lbStr = `${_lb.getFullYear()}-${String(_lb.getMonth() + 1).padStart(2, '0')}-${String(_lb.getDate()).padStart(2, '0')}`;
     const schedFloor = _lbStr < _viewFloor ? _lbStr : _viewFloor;
     const [allSchedsRaw, allBookingsRaw, oppBookingsRaw] = await Promise.all([
