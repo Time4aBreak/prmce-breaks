@@ -1545,11 +1545,13 @@ function _rampUnlockMs(shiftForm, dateStr, c){
   return base + legacyWait * 60000;
 }
 function _rampOpenMs(shiftForm, dateStr, c){
-  // Build 345 (Tomas): slots OPEN at a configurable clock time per shift —
-  // no longer welded to the 6:30 shift start. Opening EARLIER than the
-  // shift is the point (e.g. 5 PM claims for the 6:30 Noc), so pre-start
-  // times do NOT roll forward; only post-midnight Noc times (< 12:00)
-  // belong to the next calendar day (the house convention).
+  // Build 345 (Tomas): slots OPEN at a configurable clock time per shift.
+  // Build 362 (Tomas's policy correction): the open can never PRECEDE the
+  // staff shift start — a nurse can't claim breaks for a shift she hasn't
+  // started (the staff-side mirror of the BN narrow-only doctrine). The
+  // save validates this; here, pre-start times still don't roll forward
+  // (legacy values fail open to the default), and post-midnight Noc times
+  // (< 12:00) belong to the next calendar day — mid-shift, legal.
   const dflt = shiftForm === 'Day' ? '06:30' : '18:30';
   const oa = (c && typeof c.openAt === 'string' && /^\d{2}:\d{2}$/.test(c.openAt)) ? c.openAt : dflt;
   let o = new Date(`${dateStr}T${oa}:00`).getTime();
@@ -1587,8 +1589,8 @@ function refreshRampCardIfChanged(){
   const body = document.getElementById('rampCfgBody');
   if(!body || !body.offsetParent) return;                    // not visible
   if(body.contains(document.activeElement)) return;          // being edited
-  const inputs = [...body.querySelectorAll('input')];
-  if(inputs.some(i => i.dataset.r !== undefined && i.value !== i.dataset.r)) return; // unsaved edits
+  const inputs = [...body.querySelectorAll('input, select')];
+  if(inputs.some(i => i.dataset.r !== undefined && i.value !== i.dataset.r)) return; // unsaved edits (Build 363: selector below includes selects)
   const sig = JSON.stringify([_rampCfg(), _covCfg()]);
   if(sig === body.dataset.sig) return;                       // nothing new
   initRampCard();
@@ -1603,7 +1605,22 @@ function initRampCard(){
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      opens <input type="time" id="${p}Opens" value="${cc.openAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.openAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem"> · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
+      opens ${(() => {
+        // Build 363 (Tomas): the opens picker is a caged dropdown — shift
+        // start to +2¼h in 15-min steps (6:30–8:45), AM for Day / PM for
+        // Noc. 6:00/6:15 omitted: they'd violate the 362 shift-start
+        // floor. Out-of-range saved values display snapped to the start.
+        const _base = label === 'Day' ? 6 : 18;
+        const _dflt = label === 'Day' ? '06:30' : '18:30';
+        let _opts = '', _vals = [];
+        for(let _h = _base; _h <= _base + 2; _h++) for(const _m of ['00', '15', '30', '45']){
+          if(_h === _base && (_m === '00' || _m === '15')) continue;
+          _vals.push(`${String(_h).padStart(2, '0')}:${_m}`);
+        }
+        const _cur = _vals.includes(cc.openAt) ? cc.openAt : _dflt;
+        for(const _v of _vals) _opts += `<option value="${_v}"${_cur === _v ? ' selected' : ''}>${fmt12(_v.replace(':', ''))}</option>`;
+        return `<select id="${p}Opens" data-r="${_cur}" style="padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem">${_opts}</select>`;
+      })()} · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} at <input type="time" id="${p}Unlock" value="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" data-r="${cc.unlockAt || (label === 'Day' ? '06:30' : '18:30')}" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
@@ -1755,7 +1772,17 @@ async function saveRampCfg(btn){
   // Build 323 (Tomas): an unlock before the shift's start clock is an
   // input error, not a next-morning intent — refuse and say so.
   // Build 345: the rule generalizes — the unlock can't precede the OPEN.
+  // Build 362 (Tomas): and the OPEN can't precede the staff shift start —
+  // Day ≥ 6:30 AM; Noc ≥ 6:30 PM, where post-midnight times (< 12:00) are
+  // mid-shift and legal.
   for(const sh of ['Day', 'Noc']){
+    const _oa = cfg[sh].openAt;
+    const _tooEarly = sh === 'Day' ? (_oa < '06:30') : (_oa >= '12:00' && _oa < '18:30');
+    if(_tooEarly){
+      toast(`⚠ ${sh} slots can't open before the ${sh === 'Day' ? '6:30 AM' : '6:30 PM'} shift start — staff can't claim breaks before their shift begins.`, true);
+      if(btn){ btn.disabled = false; btn.textContent = 'Save limits'; }
+      return;
+    }
     if(cfg[sh].unlockAt < cfg[sh].openAt){
       toast(`⚠ ${sh} unlock can't be before the ${fmt12(cfg[sh].openAt.replace(':', ''))} slot-open time — pick a later time.`, true);
       if(btn){ btn.disabled = false; btn.textContent = old; }
@@ -2111,7 +2138,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-361'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-13-363'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5417,7 +5444,7 @@ function init(){
   };
   document.addEventListener('input', (ev) => {
     const t = ev.target;
-    if(!t || t.tagName !== 'INPUT') return;
+    if(!t || (t.tagName !== 'INPUT' && t.tagName !== 'SELECT')) return; // Build 363: the opens dropdowns count as edits
     const rb = document.getElementById('rampCfgBody');
     if(rb && rb.contains(t)){
       const dirty = [...rb.querySelectorAll('input')].some(i => i.dataset.r !== undefined && i.value !== i.dataset.r);
