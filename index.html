@@ -329,7 +329,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <span id="slotsLoader" style="display:none"><div class="spinner"></div></span>
       </div>
       <div id="calPreviewBar" style="display:none;background:#eaf0fb;border:1.5px solid #b9cdf0;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.85rem;color:#2a4d80">
-        📅 Viewing <strong id="calPreviewDate"></strong> — <button type="button" class="btn btn-ghost btn-sm" style="color:#2a4d80" onclick="clearCalPreview()">← Back to today</button>
+        📅 Viewing <strong id="calPreviewDate"></strong> — <button type="button" class="btn btn-ghost btn-sm" style="color:#2a4d80" onclick="clearCalPreview()" id="calPreviewBack">← Back to today</button>
       </div>
       <div id="slotsList"></div>
       <!-- Submit bar — shown when nurse has pending selections -->
@@ -2111,7 +2111,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-12-355'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-12-357'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7136,7 +7136,7 @@ function renderCoverageCalendar(){
     const covered = cov[ds];
     const cls = ['cal-cell'];
     if(covered){ cls.push('cov'); if(ds < todayStr) cls.push('covpast'); } // Build 352: past coverage keeps its highlight, slashed
-    if(ds === todayStr) cls.push('today'); // Build 353: you-are-here, dashed so it never reads as selection or coverage
+    if(ds === staffShiftDate(S.shift)) cls.push('today'); // Build 357: the teal ring anchors to HOME — the date the list shows when not previewing, and where 'Back to…' lands. After the evening advance that's tomorrow, agreeing with the list instead of fighting it (todayStr still drives 'past').
     else if(ds < todayStr) cls.push('past');
     // Build 211: no 'today' ring — next to the coverage fills it read as a
     // selection/highlight state (Tomas). todayStr still drives 'past' above.
@@ -7257,7 +7257,14 @@ async function _loadSlotsCore(silent=false){
     if(_pv){
       const _on = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate && _calSelectedDate !== staffShiftDate(S.shift));
       _pv.style.display = _on ? '' : 'none';
-      if(_on){ const _pd = document.getElementById('calPreviewDate'); if(_pd) _pd.textContent = _fmtDayShort(dt); }
+      if(_on){
+        const _pd = document.getElementById('calPreviewDate'); if(_pd) _pd.textContent = _fmtDayShort(dt);
+        // Build 356 (Tomas's catch): after the evening advance, "home" is
+        // tomorrow's shift — a button promising "today" would deliver the
+        // 13th. It names its true destination instead.
+        const _pb = document.getElementById('calPreviewBack');
+        if(_pb){ const _home = staffShiftDate(S.shift); _pb.textContent = (_home === today()) ? '← Back to today' : `← Back to ${_fmtDayShort(_home)}`; }
+      }
     } }
     const oppShift = shift === 'Day' ? 'Noc' : 'Day';
     const oppDt = shift === 'Day'
