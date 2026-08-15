@@ -1524,6 +1524,10 @@ function _rampShiftDate(shift){
 }
 function rampMaxFor(shiftForm){
   const c = _rampCfg()[shiftForm];
+  // Build 370: same read-time derivation as rampAllowedCount — the two
+  // readers can never disagree with each other or the card.
+  if(c && Number.isFinite(Number(c.atOpen)) && Number.isFinite(Number(c.addAfter)))
+    return Math.max(1, Number(c.atOpen) + Number(c.addAfter));
   return Math.max(1, Number(c && c.max) || MAX_SLOTS);
 }
 function rampOtherTotal(){
@@ -1561,7 +1565,13 @@ function _rampOpenMs(shiftForm, dateStr, c){
 function rampAllowedCount(shiftForm, dateStr){
   const c = _rampCfg()[shiftForm];
   if(!c || !dateStr) return MAX_SLOTS;
-  const max = Math.max(1, Number(c.max) || MAX_SLOTS);
+  // Build 370 (the consumer audit's first catch): max DERIVES at read —
+  // atOpen + addAfter — so a config saved before 367 can never cap below
+  // what the card displays. The stored max is vestigial, kept only as the
+  // fallback for ancient configs lacking the count fields.
+  const _dMax = (Number.isFinite(Number(c.atOpen)) && Number.isFinite(Number(c.addAfter)))
+    ? Math.max(1, Number(c.atOpen) + Number(c.addAfter)) : null;
+  const max = _dMax !== null ? _dMax : Math.max(1, Number(c.max) || MAX_SLOTS);
   const aoRaw = Number(c.atOpen);
   const atOpen = Math.min(max, Number.isFinite(aoRaw) ? Math.max(0, aoRaw) : max);
   const addAfter = Math.max(0, Number(c.addAfter) || 0);
@@ -2156,7 +2166,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-14-368'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-14-370'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8088,7 +8098,9 @@ async function _loadSlotsCore(silent=false){
     // limited by their total max and declared window ONLY — a float nurse
     // hours into her shift claims any side's slots regardless of that
     // side's open time. Rarity makes the hoard risk acceptable (his call,
-    // on the record). Do not "fix" the missing mirror.
+    // on the record). Do not "fix" the missing mirror. Build 369 extended
+    // the exemption to the STAGE and SUBMIT allowance gates (the 301-era
+    // checks) — the exemption spans all three layers.
     _slotStreams = {};
     _slotBookingsArr = bookings;
     const _pushStream = (s, sched) => {
@@ -8507,17 +8519,21 @@ function togglePending(slotTime, slotShift, bn, srcDt){
       toast('Enter your first name and a 5-digit Spectra extension', true);
       return;
     }
-    // Build 301: a shift's limits bind anyone claiming its slots, any tab;
-    // the Other view's total caps the sum across both arms. (Backstop —
-    // the render already locks rows; claimSlot re-checks at submit.)
-    const _formShift = slotShift || S.shift;
-    const _formDt = (S.shift === 'Other' && srcDt) ? srcDt : _rampShiftDate(_formShift);
-    const _stagedForm = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === _formShift).length;
-    const _allowForm = rampAllowedCount(_formShift, _formDt);
-    if(_stagedForm >= _allowForm){
-      const _mx = rampMaxFor(_formShift);
-      toast(_allowForm < _mx ? rampCheckBackLine(_formShift, _formDt) : `Max ${_mx} slots per shift.`, true);
-      return;
+    // Build 301's law ("a shift's limits bind anyone claiming its slots,
+    // any tab") was OVERTURNED for the Other view by Build 369 (Tomas's
+    // policy, see the 368 lockstep exemption): Other nurses are bound by
+    // their total max and declared window ONLY — no per-shift phase or
+    // open-time gate, at render, stage, or submit.
+    if(S.shift !== 'Other'){
+      const _formShift = slotShift || S.shift;
+      const _formDt = _rampShiftDate(_formShift);
+      const _stagedForm = [...S.pendingClaims].filter(c => _parseClaimKey(c).shift === _formShift).length;
+      const _allowForm = rampAllowedCount(_formShift, _formDt);
+      if(_stagedForm >= _allowForm){
+        const _mx = rampMaxFor(_formShift);
+        toast(_allowForm < _mx ? rampCheckBackLine(_formShift, _formDt) : `Max ${_mx} slots per shift.`, true);
+        return;
+      }
     }
     if(S.shift === 'Other' && S.pendingClaims.size >= rampOtherTotal()){
       toast(`Max ${rampOtherTotal()} slots total on the Other view.`, true);
@@ -9691,15 +9707,18 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       b.NurseName === name && b.Unit === _unit && b.ShiftType === slotShift && isStaffBooking(b)
     );
     // Build 301: submit-time re-check against the LIVE allowance — even a
-    // config change mid-staging can't be raced. Unit-scoped count semantics
-    // preserved from the original check.
-    const _rcDt = (typeof srcDt === 'string' && srcDt) ? srcDt : _rampShiftDate(slotShift);
-    const _rcAllow = rampAllowedCount(slotShift, _rcDt);
-    const _rcMax = rampMaxFor(slotShift);
-    if(staffMine.length >= _rcAllow){
-      const _rcLine = _rcAllow < _rcMax ? rampCheckBackLine(slotShift, _rcDt) : `Max ${_rcMax} slots per shift.`;
-      if(!silent) toast(_rcLine, true);
-      return _rcAllow < _rcMax ? _rcLine : `Max ${_rcMax} reached`;
+    // config change mid-staging can't be raced. Build 369: the Other view
+    // is exempt (Tomas's policy — total max + window only; see the 368
+    // lockstep exemption).
+    if(S.shift !== 'Other'){
+      const _rcDt = (typeof srcDt === 'string' && srcDt) ? srcDt : _rampShiftDate(slotShift);
+      const _rcAllow = rampAllowedCount(slotShift, _rcDt);
+      const _rcMax = rampMaxFor(slotShift);
+      if(staffMine.length >= _rcAllow){
+        const _rcLine = _rcAllow < _rcMax ? rampCheckBackLine(slotShift, _rcDt) : `Max ${_rcMax} slots per shift.`;
+        if(!silent) toast(_rcLine, true);
+        return _rcAllow < _rcMax ? _rcLine : `Max ${_rcMax} reached`;
+      }
     }
 
     // Race condition check — from pre-fetched data.
