@@ -1603,9 +1603,9 @@ function initRampCard(){
   body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
   { const el = document.getElementById('rampDirtyDot'); if(el) el.style.display = 'none'; } // Build 335: a fresh render is a saved state
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
-  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;font-size:.85rem">
+  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;overflow-x:auto;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      opens ${(() => {
+      allow ${num(p+'Open', cc.atOpen, 8)} slots at ${(() => {
         // Build 363 (Tomas): the opens picker is a caged dropdown — shift
         // start to +2¼h in 15-min steps (6:30–8:45), AM for Day / PM for
         // Noc. 6:00/6:15 omitted: they'd violate the 362 shift-start
@@ -1620,7 +1620,7 @@ function initRampCard(){
         const _cur = _vals.includes(cc.openAt) ? cc.openAt : _dflt;
         for(const _v of _vals) _opts += `<option value="${_v}"${_cur === _v ? ' selected' : ''}>${fmt12(_v.replace(':', ''))}</option>`;
         return `<select id="${p}Opens" data-r="${_cur}" style="width:110px;padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem">${_opts}</select>`;
-      })()} · max ${num(p+'Max', cc.max, 8)} · at open ${num(p+'Open', cc.atOpen, 8)} · extra +${num(p+'Add', cc.addAfter, 8)} after ${(() => {
+      })()} and ${num(p+'Add', cc.addAfter, 8)} extra slots after ${(() => {
         // Build 364 (Tomas): the unlock is a DURATION — 1–4 hours after
         // open — not a clock. The save derives the stored clock time from
         // open + hours, so out-of-order times are unconstructable (the old
@@ -1633,22 +1633,22 @@ function initRampCard(){
         let _op = '';
         for(const _n of [1, 2, 3, 4]) _op += `<option value="${_n}"${_h === _n ? ' selected' : ''}>${_n} hour${_n === 1 ? '' : 's'}</option>`;
         return `<select id="${p}UnlockHrs" data-r="${_h}" style="width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">${_op}</select>`;
-      })()}
+      })()} <span style="color:var(--muted)">= max</span> <strong id="${p}MaxOut">${(Number(cc.atOpen) || 0) + (Number(cc.addAfter) || 0)}</strong>
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      <span style="color:var(--muted)">when</span> 1&nbsp;BN&nbsp;→ ${num(p+'T1', bt[0], 6)} · 2&nbsp;→ ${num(p+'T2', bt[1], 6)} · 3&nbsp;→ ${num(p+'T3', bt[2], 6)} · 4+&nbsp;→ ${num(p+'T4', bt[3], 6)} <span style="color:var(--muted)">units each</span>
+      1&nbsp;BN: ${num(p+'T1', bt[0], 6)} · 2&nbsp;BNs: ${num(p+'T2', bt[1], 6)} · 3&nbsp;BNs: ${num(p+'T3', bt[2], 6)} · 4+&nbsp;BNs: ${num(p+'T4', bt[3], 6)} <span style="color:var(--muted)">units each</span>
     </div>`;
   const hdr = (t, s, top) => `<div style="${top ? 'border-top:1px solid var(--border);padding-top:10px;' : ''}font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:2px">${t}</div><div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">${s}</div>`;
   body.innerHTML =
-    hdr('BREAK SLOT LIMITS', "How many break slots each nurse can claim per shift.", false) +
+    hdr('BREAK SLOT LIMITS', '', false) +
     row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
       <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
     </div>
-    ${hdr('UNITS PER SHIFT', 'How many units each break nurse is dealt, by team size.', true)}` +
+    ${hdr('UNITS PER SHIFT', '', true)}` +
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
       <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
@@ -1773,8 +1773,8 @@ async function saveRampCfg(btn){
   const v = id => { const el = document.getElementById(id); const n = el ? parseInt(el.value, 10) : 0; return Number.isFinite(n) ? Math.max(0, n) : 0; };
   const tv = (id, dflt) => { const el = document.getElementById(id); return (el && /^\d{2}:\d{2}$/.test(el.value)) ? el.value : dflt; };
   const cfg = {
-    Day: { max: Math.max(1, v('rampDayMax')), openAt: tv('rampDayOpens', '06:30'), atOpen: v('rampDayOpen'), unlockAt: _addHours(tv('rampDayOpens', '06:30'), Number(document.getElementById('rampDayUnlockHrs')?.value || 2)), addAfter: v('rampDayAdd') },
-    Noc: { max: Math.max(1, v('rampNocMax')), openAt: tv('rampNocOpens', '18:30'), atOpen: v('rampNocOpen'), unlockAt: _addHours(tv('rampNocOpens', '18:30'), Number(document.getElementById('rampNocUnlockHrs')?.value || 2)), addAfter: v('rampNocAdd') },
+    Day: { max: Math.max(1, v('rampDayOpen') + v('rampDayAdd')), openAt: tv('rampDayOpens', '06:30'), atOpen: v('rampDayOpen'), unlockAt: _addHours(tv('rampDayOpens', '06:30'), Number(document.getElementById('rampDayUnlockHrs')?.value || 2)), addAfter: v('rampDayAdd') },
+    Noc: { max: Math.max(1, v('rampNocOpen') + v('rampNocAdd')), openAt: tv('rampNocOpens', '18:30'), atOpen: v('rampNocOpen'), unlockAt: _addHours(tv('rampNocOpens', '18:30'), Number(document.getElementById('rampNocUnlockHrs')?.value || 2)), addAfter: v('rampNocAdd') },
     otherTotal: Math.max(1, v('rampOtherTot'))
   };
   const old = btn ? btn.textContent : '';
@@ -1804,6 +1804,8 @@ async function saveRampCfg(btn){
     // Build 364: the unlock<open refusal retired — the unlock derives from
     // open + hours, so out-of-order times can no longer be constructed
     // (the Noc midnight wrap is legal and the engine rollover handles it).
+    // Build 367: the 366 coherence refusals retire — max is DERIVED
+    // (at-open + extras), so incoherent counts are unconstructable.
   }
   let _dry = '';
   ['Day','Noc'].forEach(sh => covCfg[sh].byTeam.forEach((u, i) => {
@@ -2154,7 +2156,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-365'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-13-367'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5466,6 +5468,11 @@ function init(){
       const dirty = [...rb.querySelectorAll('input')].some(i => i.dataset.r !== undefined && i.value !== i.dataset.r);
       const el = document.getElementById('rampDirtyDot');
       if(el) el.style.display = dirty ? '' : 'none';
+      // Build 367: the "= max N" readouts recompute as you type.
+      for(const _p of ['rampDay', 'rampNoc']){
+        const _mo = document.getElementById(_p + 'MaxOut');
+        if(_mo) _mo.textContent = (Number(document.getElementById(_p + 'Open')?.value) || 0) + (Number(document.getElementById(_p + 'Add')?.value) || 0);
+      }
       return;
     }
     if(['pw1','pw2','bnpw1','bnpw2'].includes(t.id)) window._pwDirtyCheck();
