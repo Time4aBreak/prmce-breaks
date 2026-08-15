@@ -2156,7 +2156,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-367'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-14-368'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8082,6 +8082,13 @@ async function _loadSlotsCore(silent=false){
     // filter · window-aware rotations · bnStart gate · streams · cross-form
     // overlap fold · 3C per-slot closure). Any gate added to this assembly
     // must be mirrored there, and vice versa.
+    // ── DELIBERATE EXEMPTION (Build 368, Tomas's policy): the shift-open
+    // window gate (346's _winOpenMs / rampAllowedCount pre-open zero) is
+    // NOT mirrored to loadOtherSlots and MUST NOT be. Other nurses are
+    // limited by their total max and declared window ONLY — a float nurse
+    // hours into her shift claims any side's slots regardless of that
+    // side's open time. Rarity makes the hoard risk acceptable (his call,
+    // on the record). Do not "fix" the missing mirror.
     _slotStreams = {};
     _slotBookingsArr = bookings;
     const _pushStream = (s, sched) => {
