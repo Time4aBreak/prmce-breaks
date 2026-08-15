@@ -2166,7 +2166,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-14-370'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-14-371'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7929,7 +7929,7 @@ async function _loadSlotsCore(silent=false){
     const allBNDisplay = [...new Set([...mainBNNames, ...oppBNNamesList])].join(', ') || bnNames;
     const bnCount = [...new Set([...mainBNNames, ...oppBNNamesList])].length;
     const bnLabel = bnCount > 1 ? 'Break nurses' : 'Break nurse';
-    meta.textContent=`${allBNDisplay ? `${bnLabel} for ${S.unit}: ${allBNDisplay}` : `${S.unit} ${shift}`}  ·  Slots are 15 min — claim up to 3 per shift`;
+    meta.textContent=`${allBNDisplay ? `${bnLabel} for ${S.unit}: ${allBNDisplay}` : `${S.unit} ${shift}`}  ·  Slots are 15 min — claim up to ${rampMaxFor(shift)} per shift`; // Build 371: was a hardcoded 3 predating configurable limits — the literal the identifier audit couldn't see
 
     // Filter slots: must be future, not hard-blocked, and if rotation exists, must be this unit's turn
     // Also respect each covering BN's start time — hide slots before they arrive
