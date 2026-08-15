@@ -1603,7 +1603,7 @@ function initRampCard(){
   body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
   { const el = document.getElementById('rampDirtyDot'); if(el) el.style.display = 'none'; } // Build 335: a fresh render is a saved state
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
-  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
+  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
       opens ${(() => {
         // Build 363 (Tomas): the opens picker is a caged dropdown — shift
@@ -2154,7 +2154,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-13-364'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-13-365'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
