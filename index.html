@@ -2166,7 +2166,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-16-372'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-18-373'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12697,12 +12697,22 @@ async function saveAssign(){
       const _byTarget = {};
       transfers.forEach(t => { if(t.targetBN) (_byTarget[t.targetBN] ||= []).push(t); });
       for(const [tbn, list] of Object.entries(_byTarget)){
-        // Build 249a: per-booking patches → one batchUpsert per target. The
-        // backend's upsert writes only the provided keys (partial update by
-        // Id, verified in the .gs), so this is the loop's exact semantics
-        // in one round trip.
-        try { await spBatchUpsert(LISTS.bookings, list.map(t => ({ Id: t.booking.Id, CreatedBy: tbn }))); }
-        catch(e){ console.warn(`CreatedBy batch patch failed for target ${tbn}:`, e.message); }
+        // Build 373 (G3, caught live 2026-08-18): 249a's batchUpsert sent FLAT
+        // records, but handleBatchUpsert requires the {matchFields, data}
+        // envelope — Object.keys(undefined) threw server-side and the fail-open
+        // catch swallowed it, so EVERY transfer pin since 249a silently failed
+        // (rotation half landed alone → Build 226 dropped the un-backed entries
+        // → the receiving BN never saw transferred breaks). Reverted to
+        // per-booking spPatch — the proven Keep-pin shape (12800) — and the
+        // failure is now surfaced: a pin-less transfer is invisible to the
+        // target, which is a missed break, not a log line.
+        try {
+          for(const t of list){ await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: tbn }); }
+        }
+        catch(e){
+          console.warn(`CreatedBy pin failed for target ${tbn}:`, e.message);
+          toast(`Break transfer to ${bnDisplayName(tbn)} may be incomplete — please redo it from Edit`, true);
+        }
         try {
           const targetRot = loadRotation(tbn, dt, shift) || {};
           list.forEach(t => { targetRot[String(t.booking.SlotTime).padStart(4,'0')] = t.booking.Unit; });
