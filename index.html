@@ -2166,7 +2166,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-14-371'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-16-372'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7432,7 +7432,7 @@ async function _loadSlotsCore(silent=false){
       try { return JSON.parse(s.Units||'[]').includes(S.unit) && s.Status !== 'inactive'; } catch { return false; }
     });
     // oppCovering only counts as coverage if the overlap window is currently relevant:
-    // Day staff in morning overlap (6:30-8:00 AM) or Noc staff in evening overlap (6:30-8:00 PM)
+    // Day staff in morning overlap (6:30-8:00 AM; 8:15 weekends — getDayOverlapMax) or Noc staff in evening overlap (6:30-8:00 PM)
     const _nowMBanner = nowMin();
     // Noc sign-up window: 6:30 PM → 6:30 AM. Closed during daytime (6:30 AM – 6:30 PM).
     // Day sign-up window: 6:30 AM → 6:30 PM. Closed after 6:30 PM.
@@ -8003,7 +8003,7 @@ async function _loadSlotsCore(silent=false){
       if(shift === 'Noc' && sortKey(s,'Noc') >= sortKey(fromMin(getDayOverlapMax()),'Noc')) return false;
       // Overlap slots: only show the overlap that applies to THIS shift's staff
       // Noc staff see EVENING overlap (6:30-8:00 PM) — Day BN covers their arrival
-      // Day staff see MORNING overlap (6:30-8:00 AM) — Noc BN covers their arrival
+      // Day staff see MORNING overlap (6:30-8:00 AM; 8:15 weekends) — Noc BN covers their arrival
       // Exclude wrong-direction overlap: Noc staff don't see morning overlap, Day don't see evening
       const _isOverlap = isOverlapSlot(s, shift);
       if(!_isOverlap && isOverlapSlot(s, shift === 'Day' ? 'Noc' : 'Day')) return false;
@@ -8066,7 +8066,12 @@ async function _loadSlotsCore(silent=false){
       // muted (not red — no-coverage is information, not an emergency),
       // his wording, no misleading until-time.
       if(!hasAnyRotation && (covering.length || (typeof oppCovering !== 'undefined' && oppCovering && oppCovering.length))){
-        if(banner){
+        // Build 372 (G1): the amber "Break Nurse currently not available" voice
+        // outranks the muted no-relief line. This gate was stomping it whenever any
+        // opp-shift row merely mentioned the unit (witnessed live: 5A muted vs 6A
+        // amber, same inactive row, Aug 16). Banner write skips when hasInactiveMain;
+        // meta + the empty list keep their honest lines beneath the surviving amber.
+        if(banner && !hasInactiveMain){
           banner.style.display = 'block';
           banner.style.background = 'var(--bg-alt,#f5f5f5)';
           banner.style.borderColor = 'var(--border)';
@@ -9767,7 +9772,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     }
 
     // Build 204: overlap-slot cross-date lock — the hard guarantee behind the
-    // build-203 visible fold. An overlap slot (6:30–8:00 AM / 6:30–8:00 PM) is
+    // build-203 visible fold. An overlap slot (6:30–8:00 AM, 8:15 weekends / 6:30–8:00 PM) is
     // ONE physical slot covered by the opposite shift's BN, but can be stored
     // under either date/shift depending on the claiming tab (a 7:35 Other claim
     // lands Noc-date; a 7:35 Day claim lands Day-date). The same-shift "taken"
