@@ -2166,7 +2166,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-18-373'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-19-374'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12693,6 +12693,7 @@ async function saveAssign(){
     // unit reads limited-coverage on Sign Up afterward (loadSlots' pinned-
     // bookings branch) — honestly uncovered for NEW sign-ups. Rotation
     // writes batched per target; saveRotation's past-preservation applies.
+    let _finalWarn = ''; // Build 374: warnings fold into the FINAL toast (single-element toast, last write wins — Build 304's race)
     if(transfers.length){
       const _byTarget = {};
       transfers.forEach(t => { if(t.targetBN) (_byTarget[t.targetBN] ||= []).push(t); });
@@ -12707,11 +12708,16 @@ async function saveAssign(){
         // failure is now surfaced: a pin-less transfer is invisible to the
         // target, which is a missed break, not a log line.
         try {
-          for(const t of list){ await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: tbn }); }
+          // Build 374: CoveredBy rides the pin — the giving-BN stamp every
+          // consumer binds by (bnOwns 2064, BN-log streams, Coverage filter).
+          // A transfer changes who GIVES; the stamp must follow (witnessed 3×
+          // on the Aug-18 fixture: target log "Unclaimed", Coverage
+          // misattributed to source, source log kept the booked rows).
+          for(const t of list){ await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: tbn, CoveredBy: tbn }); }
         }
         catch(e){
           console.warn(`CreatedBy pin failed for target ${tbn}:`, e.message);
-          toast(`Break transfer to ${bnDisplayName(tbn)} may be incomplete — please redo it from Edit`, true);
+          _finalWarn = `Break transfer to ${bnDisplayName(tbn)} may be incomplete — please redo it from Edit`;
         }
         try {
           const targetRot = loadRotation(tbn, dt, shift) || {};
@@ -12762,27 +12768,31 @@ async function saveAssign(){
     // cached rotation and overlays past slots, regardless of caller.
     // No explicit overlay code needed here.
     try {
+      // Build 374 (G5 ROOT): the "Build 258: 249c completed" call referenced
+      // _postScheds/_postBookings that were declared ONLY inside the ELSE
+      // block — block-scoped consts in a SIBLING branch. Every save for a BN
+      // holding a default template threw ReferenceError here; the catch's
+      // error toast was then clobbered by the success toast (Build 304's
+      // single-element race, repaired this build), so the failure was
+      // invisible and no rotation was ever built → null rotations for every
+      // Manual-Assign BN with a template (witnessed: Tomas, Aug 17 + 18 —
+      // Sign-Up-orphaned bookings on the units-add). Post-write truth is now
+      // HOISTED and shared, and recalculateRotation runs UNCONDITIONALLY:
+      // applyDefaultToShift seeds the BN's own break bookings and never built
+      // the unit rotation, so the old if/ELSE left template-BNs rotation-less
+      // even without the crash.
+      const _delIds = new Set(existing.map(r => String(r.Id)));
+      const _cxIds = new Set(bookingsToCancel.map(b => String(b.Id)));
+      const _xfer = {};
+      transfers.forEach(t => { if(t.targetBN) _xfer[String(t.booking.Id)] = t.targetBN; });
+      const _postScheds = allScheds.filter(r => !_delIds.has(String(r.Id))).concat(_createdRow ? [_createdRow] : []);
+      const _postBookings = shiftBookings
+        .filter(b => !_cxIds.has(String(b.Id)))
+        .map(b => _xfer[String(b.Id)] ? Object.assign({}, b, { CreatedBy: _xfer[String(b.Id)], CoveredBy: _xfer[String(b.Id)] }) : b);
       if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(nurse, dt, shift, bnDef, false, null, { scheds: _postScheds, bookings: _postBookings }); // Build 258: 249c completed
-      } else {
-        // Build 250 (249b): feed the recalc POST-WRITE truth constructed from
-        // exactly what this save just did — allScheds minus the deleted rows
-        // plus the created row (server-returned, Id included); bookings minus
-        // cancels with transfers re-attributed. The recalc's own name-scoped
-        // filters run INSIDE recalculateRotation on these lists, identical to
-        // its server queries — zero fetches on this branch. The template
-        // branch above (applyDefaultToShift) is deliberately NOT preloaded:
-        // its seed chain is separate surgery (249c if ever).
-        const _delIds = new Set(existing.map(r => String(r.Id)));
-        const _cxIds = new Set(bookingsToCancel.map(b => String(b.Id)));
-        const _xfer = {};
-        transfers.forEach(t => { if(t.targetBN) _xfer[String(t.booking.Id)] = t.targetBN; });
-        const _postScheds = allScheds.filter(r => !_delIds.has(String(r.Id))).concat(_createdRow ? [_createdRow] : []);
-        const _postBookings = shiftBookings
-          .filter(b => !_cxIds.has(String(b.Id)))
-          .map(b => _xfer[String(b.Id)] ? Object.assign({}, b, { CreatedBy: _xfer[String(b.Id)] }) : b);
-        await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds, bookings: _postBookings });
+        await applyDefaultToShift(nurse, dt, shift, bnDef, false, null, { scheds: _postScheds, bookings: _postBookings });
       }
+      await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds, bookings: _postBookings });
       // Build 141 (2026-05-27): Apply Keep overrides after recompute.
       // The user chose to keep specific slots on units that are NO LONGER
       // in this BN's BNSchedule.Units. The rotation cache holds those
@@ -12813,9 +12823,11 @@ async function saveAssign(){
         }
         await saveRotation(nurse, dt, shift, rot);
       }
-    } catch(e){ toast(`Couldn't save the rotation — ${(e && e.message) || e || 'unknown error'}`, true); }
+    } catch(e){ console.warn('rotation save failed:', e && e.message); _finalWarn = `Couldn't save the rotation — ${(e && e.message) || e || 'unknown error'}`; }
     hideBusy();
-    toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
+    // Build 374: single final toast — warnings outrank celebration; no clobber.
+    if(_finalWarn) toast(_finalWarn, true);
+    else toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
     _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
     loadAssignments((await _tailScheds) || undefined); // Build 252: prefetched during the tail
     notifyProdLogChanged(nurse);
