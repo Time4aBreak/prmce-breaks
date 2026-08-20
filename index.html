@@ -712,6 +712,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           </div>
         </div>
         <div id="importRowsWrap">
+          <div id="f2MirrorWrap" style="display:none;margin-bottom:12px"></div>
           <div id="importRestoreBanner" style="display:none;padding:10px 12px;background:var(--teal-lt);border-radius:8px;font-size:.82rem;color:var(--teal-dk);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <span id="importRestoreMsg"></span>
             <button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button>
@@ -2166,7 +2167,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-19-374'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-20-375'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9964,7 +9965,8 @@ async function manageSlotAction(action){
 // ═══════════════════════════════════════════════════════
 // Build 307: manual partial shifts.
 let _aPartial = false;
-function setAPartial(on){
+function setAPartial(on, _byUser = true){
+  if(_byUser) window._aPartialTouched = true; // Build 375: manual taps opt out of the mid-shift default
   _aPartial = !!on;
   const f = document.getElementById('aFull'), p = document.getElementById('aPart');
   if(f) f.classList.toggle('active', !on);
@@ -12792,7 +12794,13 @@ async function saveAssign(){
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(nurse, dt, shift, bnDef, false, null, { scheds: _postScheds, bookings: _postBookings });
       }
-      await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds, bookings: _postBookings });
+      // Build 375 (374.1): bookings preload REMOVED from this call only — the
+      // stale list predates applyDefaultToShift's seeding, so the dealer never
+      // saw fresh template breaks and future rotations dealt onto them,
+      // violating the rotate-around contract (Tomas, Thu 8/20). Fetch-fresh
+      // matches the nine sibling seed→recompute pairs; the scheds preload
+      // stays (it kills the created-row read-after-write race).
+      await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds });
       // Build 141 (2026-05-27): Apply Keep overrides after recompute.
       // The user chose to keep specific slots on units that are NO LONGER
       // in this BN's BNSchedule.Units. The rotation cache holds those
@@ -15266,6 +15274,94 @@ function suggestedSlotCount(units, date, shift){
 }
 
 // Imported entries management
+// ── Build 375 (F2): the Kronos mirror + "Extraction Matches Schedule" gate ──
+// The extraction's one unguarded failure is the AI READ: a nurse never seen
+// isn't in the batch, and no downstream check can know (the 7/09 one-BN miss).
+// The mirror renders the batch AS THE PAPER IS SHAPED — nurses as rows in
+// "Last, First" order, the week's dates as columns, each cell the shift
+// window — so an empty cell under a filled block on the posted schedule is
+// the miss made visible in a side-by-side glance. Save All stays locked
+// until the admin taps the acknowledgment; ANY batch change (fingerprint
+// mismatch) silently re-locks it, so the ack can never go stale.
+let _f2AckedFp = null;
+function _f2ReviewEntries(){
+  const entries = getImportedEntries();
+  const rev = entries.filter(e => !e.saved && !e.discarded);
+  return rev.length ? rev : entries;
+}
+function _f2Fp(){
+  try {
+    return JSON.stringify(_f2ReviewEntries().map(e => [e.name, e.date, e.shift,
+      String(e.startTime||''), String(e.hours||''), (e.units||[]).slice().sort()])
+      .sort((a,b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
+  } catch(err){ return 'fp-error'; }
+}
+function _f2CellHtml(e){
+  const h = Number(e.hours || 0);
+  const partial = h > 0 && h < 12;
+  const st = partial ? String(e.startTime||'').replace(/[:.]/g,'').padStart(4,'0') : (e.shift==='Day' ? '0800' : '2000');
+  const end = partial ? addMinHHMM(st, Math.round(h*60)) : (e.shift==='Day' ? '2030' : '0830');
+  const col = e.shift==='Day' ? 'var(--day)' : 'var(--teal-dk)';
+  return `<div style="border-left:3px solid ${col};background:var(--bg);border-radius:4px;padding:2px 6px;margin:1px 0;font-size:.7rem;white-space:nowrap">`
+    + `${fmt12(st)}–${fmt12(end)}${partial ? ` <span style="color:#bf360c">⏱ ${h}h</span>` : ''}`
+    + ` <span style="color:${col};font-weight:700">${e.shift}</span></div>`;
+}
+function renderF2Mirror(){
+  const host = document.getElementById('f2MirrorWrap');
+  if(!host) return;
+  const use = _f2ReviewEntries();
+  if(!use.length){ host.style.display='none'; host.innerHTML=''; _f2PaintSaveButtons(); return; }
+  // Sunday-keyed weeks spanning the batch (the Kronos grid runs Sun–Sat).
+  const sunKey = ds => { const d = new Date(ds+'T12:00:00'); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); };
+  const byWeek = {};
+  use.forEach(e => { (byWeek[sunKey(e.date)] ||= []).push(e); });
+  const names = [...new Set(use.map(e => e.name))].sort((a,b) => a.localeCompare(b));
+  let html = '';
+  Object.keys(byWeek).sort().forEach(sun => {
+    const wk = byWeek[sun];
+    const days = [...Array(7)].map((_,i) => { const d = new Date(sun+'T12:00:00'); d.setDate(d.getDate()+i); return d.toISOString().slice(0,10); });
+    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+    html += `<div style="overflow-x:auto;margin-bottom:8px"><table style="border-collapse:collapse;width:100%;font-size:.72rem">`
+      + `<tr><th style="text-align:left;padding:4px 6px;border-bottom:1.5px solid var(--border)">Nurse</th>`
+      + days.map((d,i) => `<th style="padding:4px 6px;border-bottom:1.5px solid var(--border);white-space:nowrap">${dow[i]} ${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</th>`).join('') + `</tr>`;
+    names.forEach(n => {
+      const mine = wk.filter(e => e.name === n);
+      if(!mine.length) return; // nurse not in this week
+      html += `<tr><td style="padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600">${escHTML(n)}</td>`
+        + days.map(d => { const cells = mine.filter(e => e.date === d);
+            return `<td style="padding:2px 4px;border-bottom:1px solid var(--border);border-left:1px dashed var(--border);vertical-align:top;min-width:86px">${cells.map(_f2CellHtml).join('') || ''}</td>`; }).join('')
+        + `</tr>`;
+    });
+    html += `</table></div>`;
+  });
+  const acked = _f2AckedFp === _f2Fp();
+  html += `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`
+    + `<button class="btn btn-sm" onclick="f2Ack()" style="background:${acked ? 'var(--green)' : 'var(--teal)'};color:#fff;font-weight:700">✓ Extraction Matches Schedule</button>`
+    + `<span style="font-size:.75rem;color:${acked ? 'var(--green)' : 'var(--muted)'}">${acked
+        ? 'Acknowledged — Save All unlocked.'
+        : 'Hold this mirror beside the posted schedule; when the pattern matches, tap to unlock Save All.'}</span></div>`;
+  host.innerHTML = html; host.style.display = '';
+  _f2PaintSaveButtons();
+}
+function _f2PaintSaveButtons(){
+  const locked = _f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp();
+  document.querySelectorAll('.accept-all-btn').forEach(b => {
+    b.style.opacity = locked ? '.45' : '';
+    b.title = locked ? 'Confirm the extraction mirror first' : '';
+  });
+}
+function f2Ack(){ _f2AckedFp = _f2Fp(); renderF2Mirror(); }
+// Re-render on every batch paint: one observer on the rows host replaces a
+// dozen fragile call-site hooks — extraction, re-suggest, clears, restores
+// all rewrite #importRows, and the mirror + lock state follow automatically.
+(function(){
+  const arm = () => { const h = document.getElementById('importRows');
+    if(!h) return setTimeout(arm, 800);
+    new MutationObserver(() => { try { renderF2Mirror(); } catch(e){} }).observe(h, { childList:true });
+    try { renderF2Mirror(); } catch(e){} };
+  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', arm) : arm();
+})();
+
 function renderImportedEntriesSummary(){
   const el = document.getElementById('importedEntriesSummary');
   if (!el) return;
@@ -15657,6 +15753,16 @@ function _showImportGate(){
 
 // Accept all & save — saves every row that has units selected
 async function acceptAllAndSave(){
+  // Build 375 (F2 gate): Save All is locked until the admin has acknowledged
+  // the CURRENT batch against the posted schedule. The fingerprint re-derives
+  // here, so any change since the ✓ tap — re-extract, rename, unit edit,
+  // discard — re-locks automatically. The mirror re-renders on refusal so
+  // the reviewer lands on a fresh picture, not a stale one.
+  if(_f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp()){
+    try { renderF2Mirror(); } catch(e){}
+    toast('Compare the mirror to the posted schedule, then tap "✓ Extraction Matches Schedule" to unlock Save All', true);
+    return;
+  }
   const btns = document.querySelectorAll('.accept-all-btn');
   const status = document.getElementById('acceptAllStatus');
   // Helper: update phase indicator. Status div is positioned below the import
@@ -17305,6 +17411,9 @@ function clearStagedActions(){
 async function submitStagedActions(){
   if(_prodLogStaged.size === 0) return;
   const total = _prodLogStaged.size;
+  // Build 375: note break edits BEFORE the queue drains — feeds the
+  // future-shift rotate-around recompute at the tail.
+  const _hadBreakEdit = [..._prodLogStaged.values()].some(v => v.action === 'add_break' || v.action === 'remove_break');
   const submit = _prodLogSubmitBtn();
   if(submit){ submit.disabled = true; submit.textContent = 'Submitting…'; }
   // Build 139 (2026-05-27): Capture BN context at submit time + busy overlay.
@@ -17486,6 +17595,18 @@ async function submitStagedActions(){
   loadBNConfirm();
   loadSummary();
   if(S.unit) loadSlots(true);
+  // Build 375 (rotate-around contract, Tomas Thu 8/20): a self-added or
+  // self-removed break on a NON-ACTIVE (future) shift must reach the dealer —
+  // the flush was the one break-creating path that never recomputed, so a
+  // future rotation kept dealing units onto fresh breaks. Current shifts stay
+  // pure overlay per the design contract (no reshuffle mid-shift), matching
+  // the 3826 isActive idiom exactly.
+  if(_hadBreakEdit){
+    const _bDt = BNS.date || today();
+    const _isActive = (typeof shiftDate === 'function') && shiftDate(BNS.shift) === _bDt
+      && (typeof staffWindowOpen === 'function') && staffWindowOpen(BNS.shift);
+    if(!_isActive) recalculateRotation(BNS.name, _bDt, BNS.shift).catch(() => {});
+  }
 }
 
 // Check queued actions against current backend state. For any queue entry
@@ -20611,6 +20732,34 @@ async function onAssignContextChange(){
   update3CToggle();
   updateAdminUnitGrid();
   await refreshAssignmentForCurrentInputs();
+  // Build 375 (Option A, Tomas Thu 8/20): a Manual Assign targeting the
+  // CURRENTLY-ACTIVE shift defaults to a truthful partial window — start =
+  // now (next slot boundary), end = shift end — because a Full assignment
+  // created mid-shift backfills phantom "offered, unclaimed" slots into
+  // hours before the assignment existed (the dealer knows windows, not
+  // clocks). Full remains one deliberate tap away for legitimate
+  // retroactive entry. Applies only when the admin hasn't touched the
+  // toggle this form session and no existing assignment is loaded.
+  try {
+    const dEl = document.getElementById('aDate');
+    const dt = dEl && dEl.value;
+    const sh = (typeof _aShift !== 'undefined') ? _aShift
+      : (document.getElementById('aNoc') && document.getElementById('aNoc').classList.contains('active') ? 'Noc' : 'Day');
+    const active = dt && (typeof shiftDate === 'function') && shiftDate(sh) === dt
+      && (typeof staffWindowOpen === 'function') && staffWindowOpen(sh);
+    const blankNurse = !document.getElementById('aNurse').value
+      && !((document.getElementById('aNurseText').value || '').trim());
+    if(active && blankNurse && !window._aPartialTouched){
+      const now = new Date();
+      let m = now.getHours()*60 + now.getMinutes();
+      m = Math.ceil(m/5)*5; // next 5-min boundary
+      const hh = String(Math.floor((m/60))%24).padStart(2,'0'), mm = String(m%60).padStart(2,'0');
+      setAPartial(true, false);
+      const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
+      if(s && !s.dataset.userSet) s.value = `${hh}:${mm}`;
+      if(e && !e.dataset.userSet) e.value = sh === 'Day' ? '20:30' : '08:30';
+    }
+  } catch(err){ /* default is a courtesy; never block the form */ }
 }
 
 function toggleBNList(){
