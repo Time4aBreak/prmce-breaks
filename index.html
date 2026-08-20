@@ -2167,7 +2167,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-20-375'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-08-20-376'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14561,6 +14561,7 @@ function loadLastBatch(){
 
 function clearLastBatch(){
   localStorage.removeItem(LAST_BATCH_KEY);
+  window._f2Batch = null; // Build 376: mirror scope dies with the batch
 }
 
 // Called on admin load — check if there's a restorable batch
@@ -14982,6 +14983,7 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
+  window._f2Batch = entries; // Build 376: the mirror mirrors exactly the cards' batch
   // The try-catch is intentional: surfaces unhandled errors as toasts via the
   // catch block at the bottom. Without it, async failures here would swallow
   // silently and present as "nothing happened after extraction" — a class of
@@ -15285,9 +15287,17 @@ function suggestedSlotCount(units, date, shift){
 // mismatch) silently re-locks it, so the ack can never go stale.
 let _f2AckedFp = null;
 function _f2ReviewEntries(){
-  const entries = getImportedEntries();
-  const rev = entries.filter(e => !e.saved && !e.discarded);
-  return rev.length ? rev : entries;
+  // Build 376 (first-witness fix): the mirror drinks from the CARDS' batch,
+  // not the cumulative imported-record archive — 375 rendered the whole
+  // history (witnessed live: March→July week-tables on a one-week import;
+  // no per-entry committed flag exists, importEntries is the archive by
+  // design). Source of truth = renderImportRows' live argument, falling
+  // back to the persisted last batch (the restore path); empty when neither
+  // exists, which correctly hides the mirror pre-extraction and post-clear.
+  const b = (typeof window._f2Batch !== 'undefined' && window._f2Batch) || loadLastBatch();
+  if(Array.isArray(b)) return b;
+  if(b && Array.isArray(b.entries)) return b.entries;
+  return [];
 }
 function _f2Fp(){
   try {
