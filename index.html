@@ -2168,7 +2168,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-01-377'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-378'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15355,9 +15355,14 @@ function _f2CellHtml(e){
   const st = partial ? String(e.startTime||'').replace(/[:.]/g,'').padStart(4,'0') : (e.shift==='Day' ? '0800' : '2000');
   const end = partial ? addMinHHMM(st, Math.round(h*60)) : (e.shift==='Day' ? '2030' : '0830');
   const col = e.shift==='Day' ? 'var(--day)' : 'var(--teal-dk)';
-  return `<div style="border-left:3px solid ${col};background:var(--bg);border-radius:4px;padding:2px 6px;margin:1px 0;font-size:.7rem;white-space:nowrap">`
-    + `${fmt12(st)}–${fmt12(end)}${partial ? ` <span style="color:#bf360c">⏱ ${h}h</span>` : ''}`
-    + ` <span style="color:${col};font-weight:700">${e.shift}</span></div>`;
+  // Build 378: the paper speaks 24-hour ("20:00 - 08:30 [12.50]") — matching
+  // it is truer to verbatim AND ~30% narrower, which matters because a
+  // horizontally-scrolling mirror defeats absence-visibility outright: an
+  // off-screen filled cell reads identical to a miss (Tomas, Sep 2).
+  const t24 = v => `${v.slice(0,2)}:${v.slice(2)}`;
+  return `<div style="border-left:3px solid ${col};background:var(--bg);border-radius:4px;padding:1px 4px;margin:1px 0;font-size:.66rem;white-space:nowrap">`
+    + `${t24(st)}–${t24(end)}${partial ? ` <span style="color:#bf360c">⏱${h}h</span>` : ''}`
+    + ` <span style="color:${col};font-weight:700">${e.shift==='Day'?'D':'N'}</span></div>`;
 }
 function renderF2Mirror(){
   const host = document.getElementById('f2MirrorWrap');
@@ -15382,7 +15387,7 @@ function renderF2Mirror(){
       if(!mine.length) return; // nurse not in this week
       html += `<tr><td style="padding:4px 6px;border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600">${escHTML(n)}</td>`
         + days.map(d => { const cells = mine.filter(e => e.date === d);
-            return `<td style="padding:2px 4px;border-bottom:1px solid var(--border);border-left:1px dashed var(--border);vertical-align:top;min-width:86px">${cells.map(_f2CellHtml).join('') || ''}</td>`; }).join('')
+            return `<td style="padding:1px 2px;border-bottom:1px solid var(--border);border-left:1px dashed var(--border);vertical-align:top">${cells.map(_f2CellHtml).join('') || ''}</td>`; }).join('')
         + `</tr>`;
     });
     html += `</table></div>`;
