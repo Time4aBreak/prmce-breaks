@@ -76,6 +76,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .unit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:8px}
 .unit-btn{padding:10px 4px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);font-family:'DM Mono',monospace;font-size:.875rem;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
 .unit-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-lt)}
+.unit-btn.cov{background:var(--cal-accent-lt,var(--bg));border-color:var(--cal-accent,var(--border));color:var(--cal-accent,var(--muted));font-weight:800} /* Build 377: covered = the calendar's own fill+border */
 .unit-btn.active{background:var(--teal);border-color:var(--teal);color:white;font-weight:700}
 
 /* ── Shift badge ── */
@@ -2167,7 +2168,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-08-20-376'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-01-377'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5264,6 +5265,38 @@ function update3CToggle(){
 // Set by loadSlots/loadAssignments after fetching schedules, read by buildStaffUnitGrid.
 let _3CManuallyAssigned = false;
 
+// ── Build 377: unit-pill coverage indicator (Tomas, Sep 1) ──
+// Covered pills take the calendar's exact fill+border language so "tinted =
+// covered" reads identically across both surfaces; a nurse sees where
+// sign-up is possible BEFORE tapping into a "no Break Relief" dead end.
+// Semantics locked with Tomas: reflects the CURRENTLY-VIEWED date+shift
+// (home or calendar preview — the loadSlots derivation verbatim); main
+// coverage only (active rows incl. supplementals, inactive excluded — the
+// calendar-dot predicate); Day/Noc only (Other clears tints); closed units
+// never collide (this picker hides them entirely). Idle-repaint caveat,
+// same family as the rest of the app: refreshes on navigation and grid
+// rebuilds, not on pure clock ticks.
+let _covPillMemo = { key: null, at: 0, set: null };
+async function decorateUnitGridCoverage(){
+  try {
+    const ug = document.getElementById('unitGrid');
+    if(!ug) return;
+    if(S.shift === 'Other'){ ug.querySelectorAll('.unit-btn.cov').forEach(b => b.classList.remove('cov')); return; }
+    const shift = S.shift;
+    const dt = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate) ? _calSelectedDate : staffShiftDate(shift);
+    const key = `${dt}|${shift}`;
+    let covered = (_covPillMemo.key === key && Date.now() - _covPillMemo.at < 5000) ? _covPillMemo.set : null;
+    if(!covered){
+      const sch = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
+      covered = new Set();
+      sch.filter(r => (r.ShiftDate||'').slice(0,10) === dt && r.ShiftType === shift && r.Status !== 'inactive')
+         .forEach(r => { STAFF_UNITS.forEach(u => { if(!covered.has(u) && unitCoveredBy(r, u, dt, shift)) covered.add(u); }); });
+      _covPillMemo = { key, at: Date.now(), set: covered };
+    }
+    ug.querySelectorAll('.unit-btn').forEach(b => b.classList.toggle('cov', covered.has(b.textContent.trim())));
+  } catch(e){ /* decoration is a courtesy; never break the grid */ }
+}
+
 function buildStaffUnitGrid(){
   const ug = document.getElementById('unitGrid');
   if(!ug) return;
@@ -5289,6 +5322,7 @@ function buildStaffUnitGrid(){
     if(btn) btn.classList.add('active');
     else { S.unit = null; } // unit was hidden — reset
   }
+  decorateUnitGridCoverage(); // Build 377: tint follows every rebuild
 }
 
 // Build 325: repaint the picker only when the open-set actually changed —
@@ -7166,6 +7200,15 @@ function renderCoverageCalendar(){
   const noc = S.shift === 'Noc';
   card.style.setProperty('--cal-accent', noc ? '#3b6cb7' : '#d97706');
   card.style.setProperty('--cal-accent-lt', noc ? '#eaf0fb' : '#fef3e2');
+  // Build 377: the unit pills speak the calendar's language — the same
+  // accent variables mirrored onto the grid, and the coverage decorator
+  // re-runs here because this renderer fires on exactly every view change.
+  const _ug377 = document.getElementById('unitGrid');
+  if(_ug377){
+    _ug377.style.setProperty('--cal-accent', noc ? '#3b6cb7' : '#d97706');
+    _ug377.style.setProperty('--cal-accent-lt', noc ? '#eaf0fb' : '#fef3e2');
+  }
+  decorateUnitGridCoverage();
 
   // Covered date -> Set(first names) for this unit+shift
   const cov = {};
