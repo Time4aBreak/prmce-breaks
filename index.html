@@ -2168,7 +2168,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-02-379'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-381'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15344,8 +15344,19 @@ function _f2ReviewEntries(){
 }
 function _f2Fp(){
   try {
-    return JSON.stringify(_f2ReviewEntries().map(e => [e.name, e.date, e.shift,
-      String(e.startTime||''), String(e.hours||''), (e.units||[]).slice().sort()])
+    // Build 381 (Tomas, Sep 2 — the boundary): the ack attests EXTRACTION
+    // FIDELITY — the fields the paper can verify: name, date, shift, window.
+    // UNITS ARE DELIBERATELY EXCLUDED: they aren't on the paper, assigning
+    // them is the review's ordinary bulk work ("several changes, one save"),
+    // and unit edits invalidate nothing the ✓ attested to. (380 briefly
+    // fingerprinted units; wrong boundary, reverted. Units keep their own
+    // guards: the no-units Save All predicate, count chips, closed-unit
+    // blocks.) Shift/name/date/window edits DO re-lock — those change what
+    // the mirror shows against the paper.
+    const list = (typeof _currentImportEntries !== 'undefined' && Array.isArray(_currentImportEntries) && _currentImportEntries.length)
+      ? _currentImportEntries : _f2ReviewEntries();
+    return JSON.stringify(list.map(e => [e.name, e.date, e.shift,
+      String(e.startTime||''), String(e.hours||'')])
       .sort((a,b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
   } catch(err){ return 'fp-error'; }
 }
@@ -15421,7 +15432,12 @@ function f2Ack(){ _f2AckedFp = _f2Fp(); renderF2Mirror(); }
 (function(){
   const arm = () => { const h = document.getElementById('importRows');
     if(!h) return setTimeout(arm, 800);
-    new MutationObserver(() => { try { renderF2Mirror(); } catch(e){} }).observe(h, { childList:true });
+    // Build 380: childList-only slept through in-card mutations (chip class
+    // toggles) — subtree+attributes now fire it, debounced; the mirror is a
+    // SIBLING of #importRows so its own repaints can't loop the observer.
+    let _f2T = null;
+    new MutationObserver(() => { clearTimeout(_f2T); _f2T = setTimeout(() => { try { renderF2Mirror(); } catch(e){} }, 150); })
+      .observe(h, { childList:true, subtree:true, attributes:true, attributeFilter:['class'] });
     try { renderF2Mirror(); } catch(e){} };
   document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', arm) : arm();
 })();
