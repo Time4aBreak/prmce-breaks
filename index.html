@@ -2168,7 +2168,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-02-381'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-382'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14828,6 +14828,7 @@ async function restoreLastImport(){
           <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" onclick="clearImportSel(${i})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px" onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
+          <button style="background:none;border:none;color:#c0392b;font-size:.7rem;cursor:pointer;margin-left:4px" onclick="discardImportEntry(${i})">🗑 Discard</button>
         </div>
       </div>
       <div id="unitgrid-${i}" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:5px;margin-bottom:10px">
@@ -15342,6 +15343,68 @@ function _f2ReviewEntries(){
   if(b && Array.isArray(b.entries)) return b.entries;
   return [];
 }
+// ── Build 382 (Option C, Tomas Sep 2): the correction verbs ──
+// Detection without correction is half a guard — witnessed live within hours
+// of the pick: the mirror caught a phantom Tue 4/7 shift for Jhaiz on its
+// first real-artifact run, and 381 had no verb to remove it. Two verbs:
+// per-card Discard (no confirm; Add is the undo) and the add bar under the
+// mirror (the 7/09 missing-nurse case fixed IN-flow). Both mutate the batch,
+// so mirror, fingerprint, cards, Σ chips, and Save All inherit automatically.
+function _382Rekey(removedIdx){
+  // importUnitSel is an index-keyed OBJECT; a splice in the entries array
+  // shifts every index above the removal — the map must shift in lockstep or
+  // every later card wears its neighbor's units.
+  const next = {};
+  Object.keys(importUnitSel).forEach(k => {
+    const n = Number(k);
+    if(n < removedIdx) next[n] = importUnitSel[k];
+    else if(n > removedIdx) next[n - 1] = importUnitSel[k];
+  });
+  Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+  Object.assign(importUnitSel, next);
+}
+async function discardImportEntry(i){
+  try {
+    if(typeof _currentImportEntries === 'undefined' || !Array.isArray(_currentImportEntries) || !_currentImportEntries[i]) return;
+    const e = _currentImportEntries[i];
+    _currentImportEntries.splice(i, 1);
+    _382Rekey(i);
+    saveLastBatch(_currentImportEntries);
+    toast(`Discarded ${bnDisplayName(e.name)} · ${e.date} ${e.shift} — "+ Add missed shift" is the undo`);
+    await renderImportRows(_currentImportEntries, true);
+  } catch(err){ console.warn('discard failed:', err && err.message); }
+}
+function _382ResolvePreview(){
+  const t = document.getElementById('f2AddName');
+  const p = document.getElementById('f2AddResolved');
+  if(!t || !p) return;
+  const raw = (t.value || '').trim();
+  if(!raw){ p.textContent = ''; return; }
+  const c = (typeof canonicalizeBNName === 'function') ? canonicalizeBNName(raw) : null;
+  p.textContent = c ? `→ will add: ${c}` : `→ will add as typed: "${raw}"`;
+}
+async function f2AddMissedShift(){
+  try {
+    if(typeof _currentImportEntries === 'undefined' || !Array.isArray(_currentImportEntries)){ toast('Extract a batch first', true); return; }
+    const t = document.getElementById('f2AddName'), d = document.getElementById('f2AddDate'), sh = document.getElementById('f2AddShift');
+    const raw = t && (t.value || '').trim(), date = d && d.value;
+    if(!raw || !date){ toast('Name and date are required to add a missed shift', true); return; }
+    const name = ((typeof canonicalizeBNName === 'function') && canonicalizeBNName(raw)) || raw;
+    const st = document.getElementById('f2AddStart'), en = document.getElementById('f2AddEnd');
+    let startTime = '', hours = '';
+    if(st && en && st.value && en.value){
+      const toM = v => { const [h,m] = v.split(':').map(Number); return h*60 + m; };
+      let mins = toM(en.value) - toM(st.value); if(mins <= 0) mins += 1440;
+      startTime = st.value.replace(':',''); hours = String(Math.round(mins/6)/10);
+    }
+    _currentImportEntries.push({ name, date, shift: sh ? sh.value : 'Day', startTime, hours, units: [] });
+    saveLastBatch(_currentImportEntries);
+    toast(`Added ${bnDisplayName(name)} · ${date} — assign units on its card below`);
+    if(t) t.value = ''; _382ResolvePreview();
+    await renderImportRows(_currentImportEntries, true);
+  } catch(err){ console.warn('add missed shift failed:', err && err.message); }
+}
+
 function _f2Fp(){
   try {
     // Build 381 (Tomas, Sep 2 — the boundary): the ack attests EXTRACTION
@@ -15415,7 +15478,24 @@ function renderF2Mirror(){
     + `<span style="font-size:.75rem;color:${acked ? 'var(--green)' : 'var(--muted)'}">${acked
         ? 'Acknowledged — Save All unlocked.'
         : 'Hold this mirror beside the posted schedule; when the pattern matches, tap to unlock Save All.'}</span></div>`;
+  // Build 382: the add bar — sits exactly where the reviewer stands when a
+  // hole is found. Values preserved across observer-driven re-renders so a
+  // half-typed form never gets wiped by an unrelated card repaint.
+  html += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:.75rem">`
+    + `<span style="font-weight:700">+ Add missed shift:</span>`
+    + `<input id="f2AddName" list="f2AddRoster" placeholder="Nurse" style="width:150px;font-size:.75rem;padding:3px 6px" oninput="_382ResolvePreview()">`
+    + `<datalist id="f2AddRoster">${((typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames : []).map(n => `<option value="${escHTML(n)}">`).join('')}</datalist>`
+    + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px">`
+    + `<select id="f2AddShift" style="font-size:.75rem;padding:3px 6px"><option>Day</option><option>Noc</option></select>`
+    + `<input id="f2AddStart" type="time" title="optional partial start" style="font-size:.72rem;padding:2px 4px">`
+    + `<span style="color:var(--muted)">–</span>`
+    + `<input id="f2AddEnd" type="time" title="optional partial end" style="font-size:.72rem;padding:2px 4px">`
+    + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
+    + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
+  const _keep = ['f2AddName','f2AddDate','f2AddShift','f2AddStart','f2AddEnd'].map(id => [id, (document.getElementById(id) || {}).value]);
   host.innerHTML = html; host.style.display = '';
+  _keep.forEach(([id, v]) => { const el = document.getElementById(id); if(el && v) el.value = v; });
+  _382ResolvePreview();
   _f2PaintSaveButtons();
 }
 function _f2PaintSaveButtons(){
