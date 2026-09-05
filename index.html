@@ -638,6 +638,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <div id="rptRotationBody" style="overflow-x:auto"></div>
     </div>
 
+    <div class="card" id="rptTallyCard" style="display:none"></div>
     <div class="card" id="rptSelfCareCard" style="display:none">
       <div class="card-label">🧑‍⚕️ Break-Nurse Self-Care</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
@@ -2168,7 +2169,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-02-382'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-384'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19603,12 +19604,150 @@ function copyRptSnapshot(btn){
 }
 
 // ── Orchestrator (name + gate preserved: the tab hook calls this) ──────
+// ── Build 383: BREAK TALLY (card 5) — the Break_RN_Stats workbook, automated ──
+// Fifteen months of hand-tallying replaced by one range query. Mirrors the
+// workbook's OWN shape (Tomas, Sep 2): date rows x the 14 units in app order,
+// DAYS and NOCS blocks, Total/week bands on the Sunday–Saturday week, a
+// day-of-week average grid, and row tint = BN headcount (the sheet's
+// 3/2/1-RN fill legend, automated from BNSchedule main rows).
+// COUNTING RULE B (Tomas's pick): a break counts only when CONFIRMED TAKEN
+// (isConfirmed) — continuity with the paper's meaning. Not-Taken excluded.
+// Unresolved past slots are excluded but COUNTED in the mandatory footnote:
+// under rule B an unconfirmed break reads as zero, so the footnote makes a
+// low tally explainable and meters confirmation discipline in one line.
+function _rptTally(scheds, bookings, from, to){
+  const units = _rptUnits();
+  const dates = [];
+  for(let d = new Date(from + 'T12:00:00'); ; d.setDate(d.getDate() + 1)){
+    const ds = d.toISOString().slice(0, 10);
+    if(ds > to) break;
+    dates.push(ds);
+  }
+  const key = (ds, sh) => ds + '|' + sh;
+  const counts = {}; const unresolved = { Day: 0, Noc: 0 };
+  const nowMs = Date.now();
+  bookings.forEach(b => {
+    if(isBNBreak(b)) return;
+    const ds = (b.SlotDate || '').slice(0, 10);
+    const sh = b.ShiftType === 'Noc' ? 'Noc' : 'Day';
+    if(!units.includes(b.Unit)) return;
+    if(isConfirmed(b)){
+      const k = key(ds, sh);
+      (counts[k] ||= {});
+      counts[k][b.Unit] = (counts[k][b.Unit] || 0) + 1;
+    } else if(!isNotTaken(b)){
+      try { if(+slotDateTime(ds, b.SlotTime, b.ShiftType) < nowMs) unresolved[sh]++; } catch(e){}
+    }
+  });
+  const heads = {};
+  scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
+    const k = key((x.ShiftDate || '').slice(0, 10), x.ShiftType);
+    heads[k] = (heads[k] || 0) + 1;
+  });
+  return { units, dates, counts, heads, unresolved };
+}
+function _rptTallyTable(T, shift){
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const tint = n => n >= 3 ? '#eaf6ea' : n === 2 ? '#fef7e6' : n === 1 ? '#fdecec' : 'transparent';
+  let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.7rem">`
+    + `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">${shift === 'Day' ? 'DAYS' : 'NOCS'}</th>`
+    + T.units.map(u => `<th style="padding:3px 4px;border-bottom:1.5px solid var(--border)">${u}</th>`).join('')
+    + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Total</th></tr>`;
+  let weekTotals = {}; let weekSum = 0; let anyWeekRow = false;
+  const flushWeek = () => {
+    if(!anyWeekRow) return;
+    html += `<tr style="font-weight:700;background:var(--bg-alt)"><td style="padding:3px 5px">Total/week</td>`
+      + T.units.map(u => `<td style="text-align:center;padding:3px 4px">${weekTotals[u] || ''}</td>`).join('')
+      + `<td style="text-align:center;padding:3px 5px">${weekSum || ''}</td></tr>`;
+    weekTotals = {}; weekSum = 0; anyWeekRow = false;
+  };
+  T.dates.forEach(ds => {
+    const d = new Date(ds + 'T12:00:00'); const dow = d.getDay();
+    const row = T.counts[ds + '|' + shift] || {};
+    const rowTotal = T.units.reduce((a, u) => a + (row[u] || 0), 0);
+    const hc = T.heads[ds + '|' + shift] || 0;
+    html += `<tr style="background:${tint(hc)}" title="${hc} BN${hc === 1 ? '' : 's'} scheduled">`
+      + `<td style="padding:2px 5px;white-space:nowrap">${DOW[dow]} ${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}</td>`
+      + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; return `<td style="text-align:center;padding:2px 4px">${v || ''}</td>`; }).join('')
+      + `<td style="text-align:center;padding:2px 5px;font-weight:600">${rowTotal || ''}</td></tr>`;
+    weekSum += rowTotal; anyWeekRow = true;
+    if(dow === 6) flushWeek();
+  });
+  flushWeek();
+  const dowAgg = {};
+  T.dates.forEach(ds => {
+    const dw = new Date(ds + 'T12:00:00').getDay();
+    const row = T.counts[ds + '|' + shift] || {};
+    (dowAgg[dw] ||= { n: 0, u: {} });
+    dowAgg[dw].n++;
+    T.units.forEach(u => dowAgg[dw].u[u] = (dowAgg[dw].u[u] || 0) + (row[u] || 0));
+  });
+  html += `<tr><td colspan="${T.units.length + 2}" style="padding:4px 5px;font-weight:700;border-top:1.5px solid var(--border)">${shift === 'Day' ? 'Daily' : 'Nightly'} Average by Day of Week</td></tr>`;
+  [0,1,2,3,4,5,6].forEach(dw => {
+    const a = dowAgg[dw];
+    if(!a || !a.n) return;
+    html += `<tr><td style="padding:2px 5px">${DOW[dw]}</td>`
+      + T.units.map(u => { const s2 = (a.u[u] / a.n).toFixed(1); const disp = s2.endsWith('.0') ? s2.slice(0, -2) : s2; return `<td style="text-align:center;padding:2px 4px;color:var(--muted)">${disp === '0' ? '' : disp}</td>`; }).join('')
+      + `<td></td></tr>`;
+  });
+  html += `</table></div>`;
+  // Build 384 (383.1, Tomas's B — the rule December's "With 3 RNs:" blocks
+  // hand-computed): average confirmed breaks per day AT each staffing level.
+  // The tint's analytic payoff: does a third BN actually move the number?
+  const byHc = {};
+  T.dates.forEach(ds => {
+    const hc = T.heads[ds + '|' + shift] || 0;
+    if(!hc) return; // uncovered days say nothing about staffing productivity
+    const row = T.counts[ds + '|' + shift] || {};
+    const tot = T.units.reduce((a, u) => a + (row[u] || 0), 0);
+    const b = hc >= 3 ? '3+' : String(hc);
+    (byHc[b] ||= { n: 0, sum: 0 });
+    byHc[b].n++; byHc[b].sum += tot;
+  });
+  const hcLine = ['3+','2','1'].filter(b => byHc[b] && byHc[b].n)
+    .map(b => `${b} RN${b === '1' ? '' : 's'} → <b>${(byHc[b].sum / byHc[b].n).toFixed(1)}</b>/day <span style="color:var(--muted)">(${byHc[b].n}d)</span>`)
+    .join(' &nbsp;·&nbsp; ');
+  if(hcLine) html += `<div style="font-size:.72rem;margin:6px 0 0"><b>Avg by staffing:</b> ${hcLine}</div>`;
+  html += `<div style="font-size:.72rem;color:var(--muted);margin:4px 0 10px">${T.unresolved[shift]} slot${T.unresolved[shift] === 1 ? '' : 's'} unresolved in range — excluded from the tally; resolve in the Prod Log.</div>`;
+  return html;
+}
+function _rptRenderTally(T, rangeLabel){
+  const card = document.getElementById('rptTallyCard');
+  if(!card) return;
+  const total = { Day: 0, Noc: 0 };
+  Object.entries(T.counts).forEach(([k, row]) => { const sh = k.split('|')[1]; Object.values(row).forEach(v => total[sh] += v); });
+  card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
+    + `<h3 style="margin:0">📊 Break Tally</h3>`
+    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button></div>`
+    + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks · row tint = BNs scheduled <span style="background:#eaf6ea;padding:0 6px;border-radius:3px">3+</span> <span style="background:#fef7e6;padding:0 6px;border-radius:3px">2</span> <span style="background:#fdecec;padding:0 6px;border-radius:3px">1</span></div>`
+    + _rptTallyTable(T, 'Day') + _rptTallyTable(T, 'Noc');
+  card.style.display = 'block';
+  window._rptTallyData = T;
+}
+function rptTallyCSV(){
+  const T = window._rptTallyData;
+  if(!T) return;
+  const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const rows = [['Date','DOW','Shift'].concat(T.units).concat(['Total'])];
+  T.dates.forEach(ds => ['Day','Noc'].forEach(sh => {
+    const row = T.counts[ds + '|' + sh] || {};
+    const tot = T.units.reduce((a, u) => a + (row[u] || 0), 0);
+    rows.push([ds, DOW[new Date(ds + 'T12:00:00').getDay()], sh].concat(T.units.map(u => row[u] || 0)).concat([tot]));
+  }));
+  const csv = rows.map(r => r.join(',')).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }));
+  a.download = 'break_tally_' + T.dates[0] + '_' + T.dates[T.dates.length - 1] + '.csv';
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 async function loadReports(){
   if(!RPT.unlocked) return;
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
   const status = document.getElementById('rptStatus');
-  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard']
+  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard','rptTallyCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
   status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
@@ -19637,6 +19776,7 @@ async function loadReports(){
     _rptRenderDelivered(del);
     const rotOk = _rptRenderRotation(_rptRotation(scheds));
     _rptRenderSelfCare(_rptSelfCare(scheds, bookings));
+    _rptRenderTally(_rptTally(scheds, bookings, from, to), fmtDateRange(from, to)); // Build 383
     _rptRenderSnapshot(fmtDateRange(from, to), cov, del, rotOk,
       _rptCoverageExtras(scheds, futureRows, from, to));
   } catch(e){
