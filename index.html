@@ -639,6 +639,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
 
     <div class="card" id="rptTallyCard" style="display:none"></div>
+    <div class="card" id="rptVsCard" style="display:none"></div>
     <div class="card" id="rptSelfCareCard" style="display:none">
       <div class="card-label">🧑‍⚕️ Break-Nurse Self-Care</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
@@ -2169,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-02-384'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-385'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19742,12 +19743,88 @@ function rptTallyCSV(){
   URL.revokeObjectURL(a.href);
 }
 
+// ── Build 385: DAY vs NIGHT (card 6) — the Break Tracker, automated ──
+// Tomas's competition template (never hand-filled; launches automated).
+// FAIR SCORE = confirmed breaks ÷ shift-equivalents, where a full shift = 1
+// and a partial = Hours/12 — the FTE normalization that keeps a 3-BN day
+// from auto-beating a 1-BN night. Breaks follow rule B (same as the tally).
+// Daily winners when the range fits a month; monthly blocks + range champion
+// always.
+function _rptVs(scheds, T){
+  const eq = {}; // date|shift -> shift-equivalents
+  scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
+    const k = (x.ShiftDate || '').slice(0, 10) + '|' + x.ShiftType;
+    const h = Number(x.Hours);
+    eq[k] = (eq[k] || 0) + ((h > 0 && h < 12) ? h / 12 : 1);
+  });
+  const days = [];
+  T.dates.forEach(ds => {
+    const row = sh => T.counts[ds + '|' + sh] || {};
+    const br = sh => T.units.reduce((a, u) => a + (row(sh)[u] || 0), 0);
+    const d = { ds, day: { br: br('Day'), eq: eq[ds + '|Day'] || 0 }, noc: { br: br('Noc'), eq: eq[ds + '|Noc'] || 0 } };
+    d.day.score = d.day.eq ? d.day.br / d.day.eq : null;
+    d.noc.score = d.noc.eq ? d.noc.br / d.noc.eq : null;
+    d.winner = (d.day.score === null && d.noc.score === null) ? null
+      : (d.day.score === null) ? 'Night' : (d.noc.score === null) ? 'Day'
+      : d.day.score > d.noc.score ? 'Day' : d.noc.score > d.day.score ? 'Night' : 'Tie';
+    days.push(d);
+  });
+  const months = {};
+  days.forEach(d => {
+    const m = d.ds.slice(0, 7);
+    (months[m] ||= { day: { br: 0, eq: 0, won: 0, logged: 0 }, noc: { br: 0, eq: 0, won: 0, logged: 0 }, tie: 0 });
+    const M = months[m];
+    if(d.day.eq){ M.day.br += d.day.br; M.day.eq += d.day.eq; M.day.logged++; }
+    if(d.noc.eq){ M.noc.br += d.noc.br; M.noc.eq += d.noc.eq; M.noc.logged++; }
+    if(d.winner === 'Day') M.day.won++; else if(d.winner === 'Night') M.noc.won++; else if(d.winner === 'Tie') M.tie++;
+  });
+  return { days, months };
+}
+function _rptRenderVs(V, rangeLabel){
+  const card = document.getElementById('rptVsCard');
+  if(!card) return;
+  const f1 = n => n === null ? '—' : n.toFixed(2);
+  const f2 = n => n.toFixed(1);
+  let html = `<h3 style="margin:0 0 6px">⚔️ Day vs Night</h3>`
+    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">Fair score = confirmed breaks ÷ shift-equivalents (full = 1, partial = hrs/12) — ${rangeLabel}</div>`;
+  if(V.days.length <= 35){
+    html += `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.72rem">`
+      + `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">Date</th>`
+      + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">☀️ br · eq · score</th>`
+      + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">🌙 br · eq · score</th>`
+      + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Winner</th></tr>`;
+    V.days.forEach(d => {
+      if(d.winner === null && !d.day.br && !d.noc.br) return;
+      html += `<tr><td style="padding:2px 5px;white-space:nowrap">${Number(d.ds.slice(5,7))}/${Number(d.ds.slice(8,10))}</td>`
+        + `<td style="text-align:center;padding:2px 5px">${d.day.br} · ${f2(d.day.eq)} · <b>${f1(d.day.score)}</b></td>`
+        + `<td style="text-align:center;padding:2px 5px">${d.noc.br} · ${f2(d.noc.eq)} · <b>${f1(d.noc.score)}</b></td>`
+        + `<td style="text-align:center;padding:2px 5px">${d.winner === 'Day' ? '☀️ Day' : d.winner === 'Night' ? '🌙 Night' : d.winner === 'Tie' ? '🤝 Tie' : ''}</td></tr>`;
+    });
+    html += `</table></div>`;
+  }
+  Object.keys(V.months).sort().forEach(m => {
+    const M = V.months[m];
+    const dScore = M.day.eq ? M.day.br / M.day.eq : null;
+    const nScore = M.noc.eq ? M.noc.br / M.noc.eq : null;
+    const win = (dScore === null && nScore === null) ? '—'
+      : (dScore === null) ? '🌙 Night' : (nScore === null) ? '☀️ Day'
+      : dScore > nScore ? '☀️ Day' : nScore > dScore ? '🌙 Night' : '🤝 Tie';
+    const mName = new Date(m + '-15T12:00:00').toLocaleString('en-US', { month: 'long', year: 'numeric' });
+    html += `<div style="margin-top:10px;padding:8px 10px;background:var(--bg-alt);border-radius:8px;font-size:.75rem">`
+      + `<b>${mName}</b> — Winner: <b>${win}</b><br>`
+      + `☀️ ${M.day.br} breaks · ${f2(M.day.eq)} shift-eq · fair <b>${f1(dScore)}</b> · ${M.day.won} day${M.day.won === 1 ? '' : 's'} won<br>`
+      + `🌙 ${M.noc.br} breaks · ${f2(M.noc.eq)} shift-eq · fair <b>${f1(nScore)}</b> · ${M.noc.won} day${M.noc.won === 1 ? '' : 's'} won${M.tie ? ` · ${M.tie} tie${M.tie === 1 ? '' : 's'}` : ''}</div>`;
+  });
+  card.innerHTML = html;
+  card.style.display = 'block';
+}
+
 async function loadReports(){
   if(!RPT.unlocked) return;
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
   const status = document.getElementById('rptStatus');
-  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard','rptTallyCard']
+  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard','rptTallyCard','rptVsCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
   status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
@@ -19776,7 +19853,9 @@ async function loadReports(){
     _rptRenderDelivered(del);
     const rotOk = _rptRenderRotation(_rptRotation(scheds));
     _rptRenderSelfCare(_rptSelfCare(scheds, bookings));
-    _rptRenderTally(_rptTally(scheds, bookings, from, to), fmtDateRange(from, to)); // Build 383
+    const T383 = _rptTally(scheds, bookings, from, to); // Build 383
+    _rptRenderTally(T383, fmtDateRange(from, to));
+    _rptRenderVs(_rptVs(scheds, T383), fmtDateRange(from, to)); // Build 385
     _rptRenderSnapshot(fmtDateRange(from, to), cov, del, rotOk,
       _rptCoverageExtras(scheds, futureRows, from, to));
   } catch(e){
