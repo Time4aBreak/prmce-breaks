@@ -2170,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-02-385'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-02-387'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19655,11 +19655,14 @@ function _rptTallyTable(T, shift){
     + T.units.map(u => `<th style="padding:3px 4px;border-bottom:1.5px solid var(--border)">${u}</th>`).join('')
     + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Total</th></tr>`;
   let weekTotals = {}; let weekSum = 0; let anyWeekRow = false;
+  const rangeTotals = {}; let rangeSum = 0; let weekCount = 0; // Build 387
   const flushWeek = () => {
     if(!anyWeekRow) return;
     html += `<tr style="font-weight:700;background:var(--bg-alt)"><td style="padding:3px 5px">Total/week</td>`
       + T.units.map(u => `<td style="text-align:center;padding:3px 4px">${weekTotals[u] || ''}</td>`).join('')
       + `<td style="text-align:center;padding:3px 5px">${weekSum || ''}</td></tr>`;
+    T.units.forEach(u => rangeTotals[u] = (rangeTotals[u] || 0) + (weekTotals[u] || 0));
+    rangeSum += weekSum; weekCount++;
     weekTotals = {}; weekSum = 0; anyWeekRow = false;
   };
   T.dates.forEach(ds => {
@@ -19675,6 +19678,13 @@ function _rptTallyTable(T, shift){
     if(dow === 6) flushWeek();
   });
   flushWeek();
+  // Build 387 (piece 2): the workbook's per-unit "Weekly Avg" row — each
+  // unit's range total averaged over the weeks in range.
+  if(weekCount > 1){
+    html += `<tr style="font-weight:700;border-top:1.5px solid var(--border)"><td style="padding:3px 5px">Weekly Avg</td>`
+      + T.units.map(u => { const a = (rangeTotals[u] || 0) / weekCount; const d = a.toFixed(1); return `<td style="text-align:center;padding:3px 4px;color:var(--teal-dk)">${a ? (d.endsWith('.0') ? d.slice(0, -2) : d) : ''}</td>`; }).join('')
+      + `<td style="text-align:center;padding:3px 5px;color:var(--teal-dk)">${(rangeSum / weekCount).toFixed(1)}</td></tr>`;
+  }
   const dowAgg = {};
   T.dates.forEach(ds => {
     const dw = new Date(ds + 'T12:00:00').getDay();
@@ -19750,7 +19760,7 @@ function rptTallyCSV(){
 // from auto-beating a 1-BN night. Breaks follow rule B (same as the tally).
 // Daily winners when the range fits a month; monthly blocks + range champion
 // always.
-function _rptVs(scheds, T){
+function _rptVs(scheds, T, bookings){
   const eq = {}; // date|shift -> shift-equivalents
   scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
     const k = (x.ShiftDate || '').slice(0, 10) + '|' + x.ShiftType;
@@ -19778,7 +19788,24 @@ function _rptVs(scheds, T){
     if(d.noc.eq){ M.noc.br += d.noc.br; M.noc.eq += d.noc.eq; M.noc.logged++; }
     if(d.winner === 'Day') M.day.won++; else if(d.winner === 'Night') M.noc.won++; else if(d.winner === 'Tie') M.tie++;
   });
-  return { days, months };
+  // Build 387 (piece 1): per-BN production — the Sept named-nurse block and
+  // June's "Average Per BRN", by the same fair math: confirmed breaks
+  // (CoveredBy, reliable post-374) over the BN's own shift-equivalents.
+  const perBN = {};
+  (bookings || []).forEach(b => {
+    if(isBNBreak(b) || !isConfirmed(b)) return;
+    const who = b.CoveredBy || '(unattributed)';
+    (perBN[who] ||= { br: 0, eq: 0 });
+    perBN[who].br++;
+  });
+  scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
+    const who = x.BreakNurseName;
+    if(!who) return;
+    (perBN[who] ||= { br: 0, eq: 0 });
+    const h = Number(x.Hours);
+    perBN[who].eq += (h > 0 && h < 12) ? h / 12 : 1;
+  });
+  return { days, months, perBN };
 }
 function _rptRenderVs(V, rangeLabel){
   const card = document.getElementById('rptVsCard');
@@ -19815,6 +19842,45 @@ function _rptRenderVs(V, rangeLabel){
       + `☀️ ${M.day.br} breaks · ${f2(M.day.eq)} shift-eq · fair <b>${f1(dScore)}</b> · ${M.day.won} day${M.day.won === 1 ? '' : 's'} won<br>`
       + `🌙 ${M.noc.br} breaks · ${f2(M.noc.eq)} shift-eq · fair <b>${f1(nScore)}</b> · ${M.noc.won} day${M.noc.won === 1 ? '' : 's'} won${M.tie ? ` · ${M.tie} tie${M.tie === 1 ? '' : 's'}` : ''}</div>`;
   });
+  // Build 387 (piece 3): the range champion — Winner of the Year when the
+  // range spans one; months won decides, overall fair score breaks ties.
+  const mKeys = Object.keys(V.months);
+  if(mKeys.length > 1){
+    let dWon = 0, nWon = 0, ties = 0, dBr = 0, dEq = 0, nBr = 0, nEq = 0;
+    mKeys.forEach(m => {
+      const M = V.months[m];
+      dBr += M.day.br; dEq += M.day.eq; nBr += M.noc.br; nEq += M.noc.eq;
+      const dS = M.day.eq ? M.day.br / M.day.eq : null;
+      const nS = M.noc.eq ? M.noc.br / M.noc.eq : null;
+      if(dS === null && nS === null) return;
+      if(nS === null || (dS !== null && dS > nS)) dWon++;
+      else if(dS === null || nS > dS) nWon++;
+      else ties++;
+    });
+    const dF = dEq ? dBr / dEq : 0, nF = nEq ? nBr / nEq : 0;
+    const champ = dWon > nWon ? '☀️ Day' : nWon > dWon ? '🌙 Night' : dF > nF ? '☀️ Day (fair-score tiebreak)' : nF > dF ? '🌙 Night (fair-score tiebreak)' : '🤝 Dead heat';
+    html += `<div style="margin-top:10px;padding:10px 12px;background:var(--teal-lt);border:1.5px solid var(--teal);border-radius:8px;font-size:.8rem">`
+      + `🏆 <b>Range Champion: ${champ}</b><br>`
+      + `<span style="font-size:.73rem">Months won — Day: ${dWon} · Night: ${nWon}${ties ? ` · Tie: ${ties}` : ''} &nbsp;·&nbsp; overall fair — ☀️ ${dF.toFixed(2)} vs 🌙 ${nF.toFixed(2)}</span></div>`;
+  }
+  // Build 387 (piece 1): the per-BN table.
+  const names = Object.keys(V.perBN || {}).filter(n => V.perBN[n].br || V.perBN[n].eq)
+    .sort((a, b) => V.perBN[b].br - V.perBN[a].br);
+  if(names.length){
+    html += `<div style="margin-top:12px;font-weight:700;font-size:.78rem">Per Break Nurse</div>`
+      + `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.72rem;min-width:340px">`
+      + `<tr><th style="text-align:left;padding:3px 6px;border-bottom:1.5px solid var(--border)">BN</th>`
+      + `<th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">Breaks</th>`
+      + `<th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">Shift-eq</th>`
+      + `<th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">Avg/shift</th></tr>`
+      + names.map(n => { const P = V.perBN[n];
+          const disp = n === '(unattributed)' ? n : (typeof bnDisplayName === 'function' ? bnDisplayName(n) : n);
+          return `<tr><td style="padding:2px 6px;white-space:nowrap" title="${escHTML(n)}">${escHTML(disp)}</td>`
+            + `<td style="text-align:center;padding:2px 6px">${P.br}</td>`
+            + `<td style="text-align:center;padding:2px 6px">${P.eq ? P.eq.toFixed(1) : '—'}</td>`
+            + `<td style="text-align:center;padding:2px 6px;font-weight:600">${P.eq ? (P.br / P.eq).toFixed(2) : '—'}</td></tr>`; }).join('')
+      + `</table></div>`;
+  }
   card.innerHTML = html;
   card.style.display = 'block';
 }
@@ -19852,12 +19918,13 @@ async function loadReports(){
     _rptRenderCoverageExtras(_rptCoverageExtras(scheds, futureRows, from, to));
     _rptRenderDelivered(del);
     const rotOk = _rptRenderRotation(_rptRotation(scheds));
-    _rptRenderSelfCare(_rptSelfCare(scheds, bookings));
+    // Build 386 (Tomas, Sep 2): Self-Care and Summary Snapshot cards RETIRED —
+    // render calls removed; divs stay permanently display:none and the pure
+    // functions remain inert for easy restoration if ever wanted.
     const T383 = _rptTally(scheds, bookings, from, to); // Build 383
     _rptRenderTally(T383, fmtDateRange(from, to));
-    _rptRenderVs(_rptVs(scheds, T383), fmtDateRange(from, to)); // Build 385
-    _rptRenderSnapshot(fmtDateRange(from, to), cov, del, rotOk,
-      _rptCoverageExtras(scheds, futureRows, from, to));
+    _rptRenderVs(_rptVs(scheds, T383, bookings), fmtDateRange(from, to)); // Builds 385+387
+
   } catch(e){
     const isTimeout = /timeout/i.test(e.message || '');
     status.innerHTML = `<div class="empty" style="color:var(--red)">${isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : e.message}<br><br>
