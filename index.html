@@ -2170,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-391'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-392'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20629,10 +20629,12 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     rows.push({ bn, allowedWings, quota: uPerNurse, picked: [], history: getNurseWingHistory(bn, shift) });
   });
 
-  // Build 388: pure-D rows deal from the curated templates and skip the
-  // scoring matrix entirely (quota-full picked = the passes skip them);
-  // short sets (closed units) top up through the normal matrix. A-wing and
-  // solo BOTH-wing rows keep the legacy engine untouched.
+  // Build 388 + 392: pure-D rows deal from the curated templates; the
+  // matrix passes below run ONLY over non-template rows (392 — Pass A's
+  // clone-and-copy-back was silently WIPING these picks: 0/11 template
+  // matches on the first real week). Template slots mask out of everyone
+  // else's passes via their real colIdx in takenCols. Short sets (closed
+  // units) deliberately stay short. A-wing rows keep the legacy engine.
   const _wdRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'D');
   if(_wdRows.length){
     const _wdSets = _dealWingDTemplates(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse);
@@ -20640,7 +20642,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
       _wdRows.forEach(r => {
         (_wdSets[r.bn] || []).forEach(u => {
           const pe = dPool.find(pp => pp.slot === u);
-          r.picked.push({ colIdx: -1, slot: u, cost: 0, wing: 'D',
+          r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'D',
             units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
         });
         r._templateDealt = true;
@@ -20676,17 +20678,24 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
          + w.proximityPenalty * cProx;
   }
 
-  // First-pick pass: each row picks one slot. Quota set to 1 temporarily.
-  const firstPickRows = rows.map(r => ({ ...r, quota: 1, picked: [] }));
+  // Build 392: matrix rows = non-template rows ONLY. The old code cloned
+  // EVERY row with picked:[] and copied back wholesale — the line that
+  // erased the 388 templates.
+  const _mxRows = rows.filter(r => !r._templateDealt);
   const candidateCols = poolAvail;
-  const firstCost = firstPickRows.map(r => candidateCols.map(slotEntry => {
+  const _tplTaken = new Set();
+  rows.forEach(r => { if(r._templateDealt) r.picked.forEach(pp => { if(pp.colIdx >= 0) _tplTaken.add(pp.colIdx); }); });
+  // First-pick pass: each matrix row picks one slot. Quota set to 1 temporarily.
+  const firstPickRows = _mxRows.map(r => ({ ...r, quota: 1, picked: [] }));
+  const firstCost = firstPickRows.map(r => candidateCols.map((slotEntry, j) => {
+    if(_tplTaken.has(j)) return Infinity;
     if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
     return _composeCost(r.bn, slotEntry, r.history, []);
   }));
   _solveAssignment(firstPickRows, candidateCols, firstCost);
 
-  // Copy first picks back to main rows
-  rows.forEach((r, i) => {
+  // Copy first picks back to their matrix rows (template rows untouched)
+  _mxRows.forEach((r, i) => {
     r.picked = firstPickRows[i].picked.slice();
   });
 
@@ -20697,17 +20706,17 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   for(let q = 1; q < uPerNurse; q++){
     const takenCols = new Set();
     rows.forEach(r => r.picked.forEach(p => takenCols.add(p.colIdx)));
-    const passRows = rows.map(r => ({ ...r, quota: 1, picked: [] }));
+    const passRows = _mxRows.map(r => ({ ...r, quota: 1, picked: [] })); // Build 392: non-template rows only
     const passCost = passRows.map((r, i) => candidateCols.map((slotEntry, j) => {
       if(takenCols.has(j)) return Infinity;
       if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
       // Acuity hard-cap: if this BN already has a High slot picked, no more High allowed.
-      const alreadyHasHigh = rows[i].picked.some(p => p.tier === 'High');
+      const alreadyHasHigh = _mxRows[i].picked.some(p => p.tier === 'High');
       if(alreadyHasHigh && slotEntry.tier === 'High') return Infinity;
-      return _composeCost(r.bn, slotEntry, r.history, rows[i].picked);
+      return _composeCost(r.bn, slotEntry, r.history, _mxRows[i].picked);
     }));
     _solveAssignment(passRows, candidateCols, passCost);
-    rows.forEach((r, i) => {
+    _mxRows.forEach((r, i) => {
       passRows[i].picked.forEach(p => r.picked.push(p));
     });
   }
