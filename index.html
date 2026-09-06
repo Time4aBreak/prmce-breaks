@@ -741,14 +741,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
       <div id="assignFormBody" style="margin-top:12px;display:none">
 
-        <div class="row" style="margin-bottom:12px">
+        <div class="row" style="margin-bottom:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
           <div class="field">
             <label>Date</label>
             <input type="date" id="aDate" onchange="onAssignContextChange()"/>
-            <label style="margin-left:10px;font-size:.82rem;white-space:nowrap">BNs tonight:
-              <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
-                style="width:56px;padding:6px;border:1px solid var(--border);border-radius:8px;text-align:center"
-                onchange="_aExpectedChanged(this.value)"/></label>
           </div>
           <div class="field">
             <label>Shift</label>
@@ -756,6 +752,12 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
               <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
               <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
             </div>
+          </div>
+          <div class="field" style="min-width:110px">
+            <label>BNs this shift</label>
+            <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
+              style="width:72px;padding:8px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
+              onchange="_aExpectedChanged(this.value)"/>
           </div>
         </div>
         <div class="row" style="margin-bottom:12px">
@@ -2174,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-395'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-397'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13054,6 +13056,41 @@ let _loadAssignInFlight = false;
 let _loadAssignQueued = false;
 let _pulseAssignKey = null; // {name,date,shift,until} — set by saveAssign, consumed by the next successful render
 
+// Build 397: the Re-price verb — one deliberate tap re-suggests every
+// full-shift BN of a FUTURE (date, shift) at the current rate through one
+// batch deal. Guarded by the exact future-only idiom the automatic engine
+// lives by (7092). Writes are spPatch on stable Ids — the deliberate
+// engine-change signature — followed by per-BN rotation recomputes.
+// suppressHistory: this is a correction, not a new dealing night.
+async function repriceShift(date, shift){
+  const startMs = +slotDateTime(date, shift === 'Day' ? '0800' : '2000', shift);
+  if(!(startMs > Date.now())){
+    toast('Re-price is future-shifts only — a running or past shift keeps its sets.', true);
+    return;
+  }
+  const sch = await spGet(LISTS.schedule, `ShiftDate ge '${date}'`);
+  const rows = sch.filter(r => (r.ShiftDate || '').slice(0, 10) === date && r.ShiftType === shift
+    && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1');
+  const mains = rows.filter(r => { const h = Number(r.Hours || 0); return !(r.StartTime && h > 0 && h < 12); });
+  if(!mains.length){ toast('No full-shift assignments to re-price on that shift.'); return; }
+  const rate = unitsPerNurse(shift, rows.length);
+  if(!await customConfirm(`Re-suggest all ${mains.length} full-shift ${shift} BN${mains.length === 1 ? '' : 's'} on ${date} at the current rate (${rate} each)? Their unit sets will be re-dealt.`, 'Re-price', 'Cancel')) return;
+  try {
+    const names = mains.map(r => r.BreakNurseName);
+    const sugg = await suggestAssignments(names, shift, date, {}, null, null, true, rows.length);
+    let done = 0;
+    for(const r of mains){
+      const units = (sugg && sugg[r.BreakNurseName]) || [];
+      if(!units.length) continue;
+      await spPatch(LISTS.schedule, r.Id, { Units: JSON.stringify(units) });
+      try { await recalculateRotation(r.BreakNurseName, date, shift); } catch(e){}
+      done++;
+    }
+    toast(`⚖ Re-priced ${done} ${shift} assignment${done === 1 ? '' : 's'} on ${date}.`);
+    loadAssignments();
+  } catch(e){ toast('Re-price failed: ' + ((e && e.message) || e), true); }
+}
+
 async function loadAssignments(preloadedScheds){
   // Build 240 (Finding 10): coalesce — one load in flight; extra calls
   // collapse into a single trailing rerun (fresh fetch, never a stale
@@ -13128,8 +13165,26 @@ async function _loadAssignmentsCore(preloadedScheds){
     const renderDateBlock = (date, items) => {
       const d = new Date(date + 'T12:00:00');
       const label = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
+      // Build 397: the ⚖ mismatch badge + Re-price verb. The Units-Per-Shift
+      // table is promoted from dealing-time rule to VISIBLE invariant: any
+      // future date-shift whose stored full-shift set sizes disagree with
+      // unitsPerNurse(shift, headcount) wears the badge, and one deliberate
+      // tap re-prices it. Active/past shifts never badge (Tomas's law; the
+      // 7092 future-only idiom). Partials keep their windows — excluded from
+      // the size check, counted in headcount.
+      const _rp397 = ['Day','Noc'].map(sh => {
+        const act = items.filter(x => x.ShiftType === sh && x.Status !== 'inactive' && String(x.IsSupplemental) !== '1');
+        const mains = act.filter(x => { const h = Number(x.Hours || 0); return !(x.StartTime && h > 0 && h < 12); });
+        if(!mains.length) return '';
+        const startMs = +slotDateTime(date, sh === 'Day' ? '0800' : '2000', sh);
+        if(!(startMs > Date.now())) return '';
+        const rate = unitsPerNurse(sh, act.length);
+        const sizes = mains.map(x => { try { return [...new Set(JSON.parse(x.Units || '[]'))].length; } catch(e){ return 0; } });
+        if(!sizes.some(z => z !== rate)) return '';
+        return `<button class="btn btn-ghost btn-sm" style="font-size:.68rem;padding:2px 8px;margin-left:8px;text-transform:none;letter-spacing:0;color:#b45309;border-color:#f5c883" onclick="repriceShift('${date}','${sh}')">⚖ ${sh} ${sizes.join('·')} → ${rate} each · Re-price</button>`;
+      }).join('');
       return `<div style="margin-bottom:14px">
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}</div>
+        <div style="display:flex;align-items:center;flex-wrap:wrap;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}${_rp397}</div>
         ${items.map(s => {
           let units=[]; try{ units=[...new Set(JSON.parse(s.Units||'[]'))]; }catch{}
           const icon=shiftIcon(s.ShiftType, 14, s.ShiftDate);
