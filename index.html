@@ -623,7 +623,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div class="card" id="rptDeliveredCard" style="display:none">
       <div class="card-label">☕ Breaks Delivered</div>
       <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        Staff breaks claimed per covered shift, unit by unit — coverage on paper vs breaks in hand.
+        Staff breaks claimed per covered shift, unit by unit — coverage on paper vs breaks in hand. Counts claims regardless of confirmation; the Break Tally below counts confirmed-Taken only.
       </div>
       <div id="rptDeliveredCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptDeliveredBody" style="overflow-x:auto"></div>
@@ -2170,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-03-388'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-03-389'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14598,14 +14598,48 @@ function expandSuggestionUnits(slots){
 
 function saveLastBatch(entries){
   try { localStorage.setItem(LAST_BATCH_KEY, JSON.stringify(entries)); } catch{}
+  saveImportSide();
+}
+// Build 389 (polish 6/8/9 root): the batch persisted but its RESOLUTIONS and
+// the human's declared count never did — restores woke amnesiac (Σ 36/0) and
+// re-flagged confirmed shifts. The side key carries both; the F2 observer's
+// debounced repaint calls this on every chip tap.
+function saveImportSide(){
+  try {
+    let exp = null; try { exp = _impExpectedGet(); } catch(e){}
+    localStorage.setItem(LAST_BATCH_KEY + ':side', JSON.stringify({ sel: importUnitSel, expected: exp }));
+  } catch(e){}
+}
+function hydrateImportSide(){
+  try {
+    const side = JSON.parse(localStorage.getItem(LAST_BATCH_KEY + ':side') || 'null');
+    if(!side) return;
+    if(side.sel && Object.keys(importUnitSel).length === 0){
+      Object.entries(side.sel).forEach(([k, v]) => { if(Array.isArray(v)) importUnitSel[k] = v; });
+    }
+    if(side.expected){
+      try { _impExpectedSet(side.expected); } catch(e){}
+      const f = document.getElementById('impExpectedCount');
+      if(f && !f.value) f.value = side.expected;
+    }
+  } catch(e){}
 }
 
+// Build 389 (polish 6/9): THE canonical resolution predicate — a flagged
+// entry is unresolved until THE HUMAN'S HAND writes its selection map.
+// Card badge/CTA, the 🔍 chip, and the Save-All guard all read this one
+// truth, which also cures the restore desync at its face (the root cure is
+// the side-persistence below: selections + declared count survive sessions).
+function _entryUnresolved(e, i){
+  return !!(e && e.isFlagged && (importUnitSel[i] === undefined || importUnitSel[i].length === 0));
+}
 function loadLastBatch(){
   try { return JSON.parse(localStorage.getItem(LAST_BATCH_KEY) || 'null'); } catch { return null; }
 }
 
 function clearLastBatch(){
   localStorage.removeItem(LAST_BATCH_KEY);
+  try { localStorage.removeItem(LAST_BATCH_KEY + ':side'); } catch(e){}
   window._f2Batch = null; // Build 376: mirror scope dies with the batch
 }
 
@@ -14628,7 +14662,7 @@ function _renderImportCountChips(){
     const full = String(e.name || '?');
     if(!byName[full]) byName[full] = { n: 0, firstIdx: i, unresolved: 0, disp: bnDisplayName(full) };
     byName[full].n++;
-    if(e.isFlagged && (importUnitSel[i] || []).length === 0) byName[full].unresolved++;
+    if(_entryUnresolved(e, i)) byName[full].unresolved++; // Build 389: the canonical predicate
   });
   const names = Object.keys(byName).sort((a,b) => byName[a].disp.localeCompare(byName[b].disp));
   if(!names.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
@@ -14829,7 +14863,7 @@ async function restoreLastImport(){
         <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
           <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" onclick="clearImportSel(${i})">Clear</button>
-          <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px" onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
+          ${_entryUnresolved(e, i) ? '' : `<button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px" onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>`}
           <button style="background:none;border:none;color:#c0392b;font-size:.7rem;cursor:pointer;margin-left:4px" onclick="discardImportEntry(${i})">🗑 Discard</button>
         </div>
       </div>
@@ -14882,7 +14916,7 @@ function _buildImportRowsHTML(batch){
     if(e.isDiscarded) return ''; // skip — user dismissed
 
     const suggested = importUnitSel[i] || [];
-    const isFlaggedUnresolved = e.isFlagged && suggested.length === 0;
+    const isFlaggedUnresolved = _entryUnresolved(e, i); // Build 389: one predicate everywhere
 
     // For target-unit calculation, count active BNs on this date+shift —
     // exclude partials, discarded, AND flagged (until they resolve, they're
@@ -14906,7 +14940,7 @@ function _buildImportRowsHTML(batch){
 
     // Action row depends on flagged-unresolved status.
     const actionRow = isFlaggedUnresolved
-      ? `<button class="btn btn-success btn-sm" onclick="suggestFlaggedRow(${i})">✨ Suggest units</button>
+      ? `<button class="btn btn-success btn-sm" onclick="suggestFlaggedRow(${i})">✓ Confirm shift</button>
          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>`
       : `<button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
          <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
@@ -15029,6 +15063,27 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
+  // Build 389 (polish 1): cards sort by name+date+shift IN PLACE with the
+  // index-keyed selection map re-keyed in lockstep — flagged and added cards
+  // stop hiding at the tail (the displacement defeated the 🔍 navigator
+  // twice in one week). Stable and idempotent per render.
+  if(Array.isArray(entries) && entries.length > 1){
+    const order = entries.map((e, i) => i).sort((a, b) => {
+      const A = entries[a], B = entries[b];
+      return (A.name || '').localeCompare(B.name || '')
+        || (A.date || '').localeCompare(B.date || '')
+        || (A.shift || '').localeCompare(B.shift || '');
+    });
+    const changed = order.some((oi, ni) => oi !== ni);
+    if(changed){
+      const sortedEntries = order.map(oi => entries[oi]);
+      entries.length = 0; entries.push(...sortedEntries);
+      const newSel = {};
+      order.forEach((oi, ni) => { if(importUnitSel[oi] !== undefined) newSel[ni] = importUnitSel[oi]; });
+      Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+      Object.assign(importUnitSel, newSel);
+    }
+  }
   window._f2Batch = entries; // Build 376: the mirror mirrors exactly the cards' batch
   // The try-catch is intentional: surfaces unhandled errors as toasts via the
   // catch block at the bottom. Without it, async failures here would swallow
@@ -15340,7 +15395,7 @@ function _f2ReviewEntries(){
   // design). Source of truth = renderImportRows' live argument, falling
   // back to the persisted last batch (the restore path); empty when neither
   // exists, which correctly hides the mirror pre-extraction and post-clear.
-  const b = (typeof window._f2Batch !== 'undefined' && window._f2Batch) || loadLastBatch();
+  const b = (typeof window._f2Batch !== 'undefined' && window._f2Batch) || (() => { const lb = loadLastBatch(); if(lb) hydrateImportSide(); return lb; })();
   if(Array.isArray(b)) return b;
   if(b && Array.isArray(b.entries)) return b.entries;
   return [];
@@ -15487,13 +15542,14 @@ function renderF2Mirror(){
     + `<span style="font-weight:700">+ Add missed shift:</span>`
     + `<input id="f2AddName" list="f2AddRoster" placeholder="Nurse" style="width:150px;font-size:.75rem;padding:3px 6px" oninput="_382ResolvePreview()">`
     + `<datalist id="f2AddRoster">${((typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames : []).map(n => `<option value="${escHTML(n)}">`).join('')}</datalist>`
-    + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px">`
-    + `<select id="f2AddShift" style="font-size:.75rem;padding:3px 6px"><option>Day</option><option>Noc</option></select>`
+    + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:150px">`
+    + `<select id="f2AddShift" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option></select>`
     + `<input id="f2AddStart" type="time" title="optional partial start" style="font-size:.72rem;padding:2px 4px">`
     + `<span style="color:var(--muted)">–</span>`
     + `<input id="f2AddEnd" type="time" title="optional partial end" style="font-size:.72rem;padding:2px 4px">`
     + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
     + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
+  saveImportSide(); // Build 389: every observed batch mutation persists the resolutions
   const _keep = ['f2AddName','f2AddDate','f2AddShift','f2AddStart','f2AddEnd'].map(id => [id, (document.getElementById(id) || {}).value]);
   host.innerHTML = html; host.style.display = '';
   _keep.forEach(([id, v]) => { const el = document.getElementById(id); if(el && v) el.value = v; });
@@ -15925,6 +15981,10 @@ async function acceptAllAndSave(){
     toast('Compare the mirror to the posted schedule, then tap "✓ Extraction Matches Schedule" to unlock Save All', true);
     return;
   }
+  // Build 389 (polish 3): the app's biggest write gets a one-tap seatbelt —
+  // born of the mis-tap that committed 35 April rows through a ragged bar.
+  const _n389 = _f2ReviewEntries().length;
+  if(_n389 && !confirm(`Save ${_n389} staged assignment${_n389 === 1 ? '' : 's'} to the live schedule?`)) return;
   const btns = document.querySelectorAll('.accept-all-btn');
   const status = document.getElementById('acceptAllStatus');
   // Helper: update phase indicator. Status div is positioned below the import
@@ -19777,6 +19837,7 @@ function _rptVs(scheds, T, bookings){
     d.winner = (d.day.score === null && d.noc.score === null) ? null
       : (d.day.score === null) ? 'Night' : (d.noc.score === null) ? 'Day'
       : d.day.score > d.noc.score ? 'Day' : d.noc.score > d.day.score ? 'Night' : 'Tie';
+    d.walkover = d.winner && d.winner !== 'Tie' && (d.day.score === null || d.noc.score === null); // Build 389: showing up beat absent
     days.push(d);
   });
   const months = {};
@@ -19825,7 +19886,7 @@ function _rptRenderVs(V, rangeLabel){
       html += `<tr><td style="padding:2px 5px;white-space:nowrap">${Number(d.ds.slice(5,7))}/${Number(d.ds.slice(8,10))}</td>`
         + `<td style="text-align:center;padding:2px 5px">${d.day.br} · ${f2(d.day.eq)} · <b>${f1(d.day.score)}</b></td>`
         + `<td style="text-align:center;padding:2px 5px">${d.noc.br} · ${f2(d.noc.eq)} · <b>${f1(d.noc.score)}</b></td>`
-        + `<td style="text-align:center;padding:2px 5px">${d.winner === 'Day' ? '☀️ Day' : d.winner === 'Night' ? '🌙 Night' : d.winner === 'Tie' ? '🤝 Tie' : ''}</td></tr>`;
+        + `<td style="text-align:center;padding:2px 5px">${d.winner === 'Day' ? '☀️ Day' : d.winner === 'Night' ? '🌙 Night' : d.winner === 'Tie' ? '🤝 Tie' : ''}${d.walkover ? ' <span style="color:var(--muted)" title="opponent fielded nobody">🚶</span>' : ''}</td></tr>`;
     });
     html += `</table></div>`;
   }
