@@ -2174,7 +2174,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-394'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-395'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20698,6 +20698,27 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   const _dExpected394 = expectedTotal
     ? (_teamN394 === 1 ? 1 : (_teamN394 === 3 ? 2 : Math.round(_teamN394 / 2)))
     : null;
+  // Build 395 (Tomas's witness catch): deal #2's SOLO wing pick was still
+  // need-driven and could land on the wing its locked teammate already
+  // holds — the claim then found every partition set taken and returned
+  // empty, and 392's exclusion starved the row from the matrix: a hard
+  // zero. Under a declaration, the wing is FORCED COMPLEMENTARY: locked
+  // teammates consume their expected wing's share; a lone dealt nurse gets
+  // whichever wing still owes headcount.
+  if(expectedTotal && rows.length === 1 && _lockedBNs.length){
+    const _dcor395 = ['6N','7N','8N','8S','9N','9S','10N','10S'];
+    let dLocked = 0, aLocked = 0;
+    _lockedBNs.forEach(b => {
+      const us = _locked[b] || [];
+      if(!us.length) return;
+      if(us.every(u => _dcor395.includes(u))) dLocked++;
+      else aLocked++;
+    });
+    const remD = (_dExpected394 || 0) - dLocked;
+    const remA = (_teamN394 - (_dExpected394 || 0)) - aLocked;
+    if(remD > 0 && remA <= 0) rows[0].allowedWings = ['D'];
+    else if(remA > 0 && remD <= 0) rows[0].allowedWings = ['A'];
+  }
   const _wdRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'D');
   if(_wdRows.length){
     const _wdSets = (expectedTotal
@@ -20712,7 +20733,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
           r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'D',
             units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
         });
-        r._templateDealt = true;
+        if(r.picked.length) r._templateDealt = true; // Build 395: empty grant → the matrix deals it
       });
     }
   }
@@ -20733,7 +20754,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
           r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'A',
             units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
         });
-        r._templateDealt = true;
+        if(r.picked.length) r._templateDealt = true; // Build 395: empty grant → the matrix deals it
       });
     }
   }
