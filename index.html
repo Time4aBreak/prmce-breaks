@@ -167,7 +167,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .divider{height:1px;background:var(--border);margin:14px 0}
 
 /* ── Toast ── */
-.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:normal;max-width:min(92vw,560px);text-align:center;line-height:1.45;pointer-events:none}
+.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(calc(100% + 32px));background:#1a1a2e;color:white;padding:11px 26px;border-radius:99px;font-size:.875rem;font-weight:600;box-shadow:0 4px 24px rgba(0,0,0,.35);transition:transform .3s cubic-bezier(.34,1.56,.64,1);z-index:999;white-space:normal;max-width:min(92vw,560px);text-align:center;line-height:1.45;pointer-events:none}
 .toast.show{transform:translateX(-50%) translateY(0)}
 .toast.err{background:#1a1a2e}
 
@@ -2170,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-03-389'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-391'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14202,7 +14202,29 @@ async function _extractPass(scanMode){
     if(typeof e.name === 'string') e.name = e.name.trim().replace(/\s+/g, ' ');
     if(e.date != null){
       const dm = String(e.date).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if(dm) e.date = `${dm[1]}-${dm[2].padStart(2, '0')}-${dm[3].padStart(2, '0')}`;
+      if(dm){
+        // Build 391: YEAR-SNAP — the screenshot shows no year, and the model
+        // twice completed these dates to 2025 (its training-era prior),
+        // re-deriving every DOW and slipping a year-old batch past every
+        // guard with perfect internal consistency; only the Save confirm's
+        // human pause caught it. Month+day are faithful; the year is a
+        // guess — so any year putting the date >200 days from today is
+        // overridden by whichever of last/this/next year lands nearest.
+        // (200-day threshold leaves deliberate historical test imports,
+        // like the April artifact, untouched.)
+        let yy = parseInt(dm[1], 10);
+        const mm = dm[2].padStart(2, '0'), dd = dm[3].padStart(2, '0');
+        const nowMs = Date.now(), thisY = new Date().getFullYear();
+        if(Math.abs(new Date(`${yy}-${mm}-${dd}T12:00:00`) - nowMs) > 200 * 86400e3){
+          let best = yy, bestD = Infinity;
+          [thisY - 1, thisY, thisY + 1].forEach(cy => {
+            const dist = Math.abs(new Date(`${cy}-${mm}-${dd}T12:00:00`) - nowMs);
+            if(dist < bestD){ bestD = dist; best = cy; }
+          });
+          yy = best;
+        }
+        e.date = `${yy}-${mm}-${dd}`;
+      }
     }
     if(typeof e.shift === 'string'){
       const s = e.shift.trim().toLowerCase();
@@ -14278,7 +14300,11 @@ async function runImport(){
 
     if(!passA && !passB){
       const msg = (settled[0].reason && settled[0].reason.message) || 'both extraction passes failed';
-      toast('Extraction error: ' + msg, true);
+      // Build 390: the raw API voice ("...base64.media_type...") confused more
+      // than it explained — translate the common cause, keep the rest verbatim.
+      toast(/media_type|image\.source/i.test(msg)
+        ? 'That file type could not be read — use a PNG or JPG screenshot.'
+        : 'Extraction error: ' + msg, true);
       btn.style.display = 'inline'; spin.style.display = 'none';
       return;
     }
@@ -15506,13 +15532,23 @@ function renderF2Mirror(){
   use.forEach(e => { (byWeek[sunKey(e.date)] ||= []).push(e); });
   const names = [...new Set(use.map(e => e.name))].sort((a,b) => a.localeCompare(b));
   let html = '';
+  // Build 391: date-sanity banner — a batch far from today should SCREAM
+  // before any review effort is spent, not whisper at the save dialog.
+  {
+    const nowMs = Date.now();
+    const far = use.filter(e => { const t = new Date((e.date || '') + 'T12:00:00');
+      return isFinite(t) && (nowMs - t > 21 * 86400e3 || t - nowMs > 60 * 86400e3); });
+    if(far.length){
+      html += `<div style="background:#fdecec;border:1.5px solid #c0392b;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:.8rem;color:#7f1d1d"><b>⚠ Check the dates:</b> ${far.length} of ${use.length} entries are far from today (e.g. ${far[0].date}). If the year looks wrong, re-screenshot and re-extract before saving.</div>`;
+    }
+  }
   Object.keys(byWeek).sort().forEach(sun => {
     const wk = byWeek[sun];
     const days = [...Array(7)].map((_,i) => { const d = new Date(sun+'T12:00:00'); d.setDate(d.getDate()+i); return d.toISOString().slice(0,10); });
     const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     html += `<div style="overflow-x:auto;margin-bottom:8px"><table style="border-collapse:collapse;width:100%;font-size:.72rem">`
       + `<tr><th style="text-align:left;padding:4px 6px;border-bottom:1.5px solid var(--border)">Nurse</th>`
-      + days.map((d,i) => `<th style="padding:4px 6px;border-bottom:1.5px solid var(--border);white-space:nowrap">${dow[i]} ${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</th>`).join('') + `</tr>`;
+      + days.map((d,i) => { const yTag = d.slice(0,4) !== String(new Date().getFullYear()) ? `/${d.slice(2,4)}` : ''; return `<th style="padding:4px 6px;border-bottom:1.5px solid var(--border);white-space:nowrap${yTag ? ';color:#bf360c' : ''}">${dow[i]} ${Number(d.slice(5,7))}/${Number(d.slice(8,10))}${yTag}</th>`; }).join('') + `</tr>`;
     names.forEach(n => {
       const mine = wk.filter(e => e.name === n);
       if(!mine.length) return; // nurse not in this week
