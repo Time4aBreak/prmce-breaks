@@ -745,6 +745,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <div class="field">
             <label>Date</label>
             <input type="date" id="aDate" onchange="onAssignContextChange()"/>
+            <label style="margin-left:10px;font-size:.82rem;white-space:nowrap">BNs tonight:
+              <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
+                style="width:56px;padding:6px;border:1px solid var(--border);border-radius:8px;text-align:center"
+                onchange="_aExpectedChanged(this.value)"/></label>
           </div>
           <div class="field">
             <label>Shift</label>
@@ -2170,7 +2174,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-393'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-394'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12488,7 +12492,8 @@ async function suggestUnitsForManualAssign(btn){
       toast(`Suggested ${slots.length} unit${slots.length !== 1 ? 's' : ''} for the ${hrs}h partial`);
       return;
     }
-    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked, true);
+    const _expN394 = parseInt((document.getElementById('aExpectedBNs') || {}).value, 10) || null;
+    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked, true, _expN394);
     const slots = result[nurse] || [];
     if(!slots.length){
       toast('Suggester returned no units for this BN', true);
@@ -20542,7 +20547,28 @@ function _dealWingDTemplates(namesInOrder, dPoolSlots, dateSeed, quota){
     ['6N','7N','8N','8S','9N','9S','10N','10S']);
 }
 
-async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false){
+// Build 394: _claimWingTemplateSets — the sequential-convergence dealer.
+// The date's partition is a pure function of (seed, expectedWingCount,
+// quota); a nurse dealt ALONE takes the first set no locked teammate holds,
+// so one-at-a-time form deals arrive at exactly the sets a single batch
+// deal would have produced. Batch deals route here too (locked empty,
+// names fill the partition) — one dealer, both cadences.
+function _claimWingTemplateSets(names, poolSlots, seed, quota, cycles, corridor, expectedWingCount, lockedUnits){
+  const cyc = cycles[`${Math.max(1, expectedWingCount)}|${quota}`];
+  if(!cyc) return null;
+  const open = new Set(poolSlots.map(pp => pp.slot));
+  const partition = cyc[seed % cyc.length];
+  const free = partition.filter(set =>
+    !set.some(u => (u === 'C_PAIR' ? ['3C','4C'] : [u]).some(x => lockedUnits && lockedUnits.has(x))));
+  if(!free.length) return null;
+  const out = {};
+  names.forEach((nm, i) => {
+    const set = free[i % free.length] || [];
+    out[nm] = set.filter(u => open.has(u));
+  });
+  return out;
+}
+async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false, expectedTotal=null){
   if(!nurses.length) return {};
   // Build 300 (bug #6): locked-assignments overlay. When teammates already
   // HOLD saved units, deal the remaining nurse(s) AROUND them — never slice
@@ -20571,7 +20597,10 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     console.warn('Could not load coverage history — suggestions may not reflect current distribution:', e.message);
     counts = {};
   }
-  const uPerNurse = unitsPerNurse(shift, nurses.length);
+  // Build 394: quota derives from the DECLARED team when one exists — the
+  // first sequential deal no longer believes the team is just itself.
+  const _teamN394 = Math.max((nurses || []).length, expectedTotal || 0);
+  const uPerNurse = unitsPerNurse(shift, _teamN394);
   const dateSeed  = date.split('-').reduce((a,b) => a + parseInt(b), 0);
   const targetDateMs = Date.parse(date);
 
@@ -20662,9 +20691,20 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   // matches on the first real week). Template slots mask out of everyone
   // else's passes via their real colIdx in takenCols. Short sets (closed
   // units) deliberately stay short. A-wing rows keep the legacy engine.
+  // Build 394: when a headcount is declared, the expected wing split is the
+  // STABLE pure rule (3→2D, else round(N/2)) — the need-gap adjustment is
+  // deliberately suspended so every sequential deal derives the SAME
+  // partition regardless of dealing order. Convergence beats optimality.
+  const _dExpected394 = expectedTotal
+    ? (_teamN394 === 1 ? 1 : (_teamN394 === 3 ? 2 : Math.round(_teamN394 / 2)))
+    : null;
   const _wdRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'D');
   if(_wdRows.length){
-    const _wdSets = _dealWingDTemplates(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse);
+    const _wdSets = (expectedTotal
+        ? _claimWingTemplateSets(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse,
+            WING_D_CYCLES, null, Math.max(_wdRows.length, _dExpected394), _lockedUnits)
+        : null)
+      || _dealWingDTemplates(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse);
     if(_wdSets){
       _wdRows.forEach(r => {
         (_wdSets[r.bn] || []).forEach(u => {
@@ -20680,7 +20720,12 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   // curated cycles, C_PAIR as the atom (its pick's units carry 3C+4C).
   const _waRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'A');
   if(_waRows.length){
-    const _waSets = _dealWingTemplates(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse, WING_A_CYCLES, WING_A_CORRIDOR);
+    const _aExpected394 = expectedTotal ? Math.max(_waRows.length, _teamN394 - (_dExpected394 || 0)) : null;
+    const _waSets = (expectedTotal
+        ? _claimWingTemplateSets(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse,
+            WING_A_CYCLES, null, _aExpected394, _lockedUnits)
+        : null)
+      || _dealWingTemplates(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse, WING_A_CYCLES, WING_A_CORRIDOR);
     if(_waSets){
       _waRows.forEach(r => {
         (_waSets[r.bn] || []).forEach(u => {
@@ -21437,6 +21482,39 @@ async function onAssignContextChange(){
       if(e && !e.dataset.userSet) e.value = sh === 'Day' ? '20:30' : '08:30';
     }
   } catch(err){ /* default is a courtesy; never block the form */ }
+  // Build 394 (THE KEYSTONE — Tomas's "BNs tonight"): pre-fill the declared
+  // headcount for this (date, shift) from synced state, falling back to the
+  // count of existing active main assignments, falling back to 1. The
+  // declaration is what lets SEQUENTIAL manual deals converge to the batch
+  // answer — quota and the cycle key derive from N, not from the team seen
+  // so far (the 4-vs-3 team-size-at-deal-time bug dies here).
+  try {
+    const dEl2 = document.getElementById('aDate');
+    const dt2 = dEl2 && dEl2.value;
+    const sh2 = (typeof _aShift !== 'undefined') ? _aShift
+      : (document.getElementById('aNoc') && document.getElementById('aNoc').classList.contains('active') ? 'Noc' : 'Day');
+    const nEl = document.getElementById('aExpectedBNs');
+    if(dt2 && nEl){
+      window._aExpectedKey = `bnExpected_${dt2}_${sh2}`;
+      let v = null;
+      try { v = await getState(window._aExpectedKey); } catch(e){}
+      if(v == null){
+        try {
+          const _sch = await spGet(LISTS.schedule, `ShiftDate ge '${dt2}'`);
+          const _cnt = _sch.filter(r => (r.ShiftDate || '').slice(0, 10) === dt2
+            && r.ShiftType === sh2 && r.Status !== 'inactive'
+            && String(r.IsSupplemental) !== '1').length;
+          v = _cnt || 1;
+        } catch(e){ v = 1; }
+      }
+      nEl.value = v;
+    }
+  } catch(err){ /* the field is a courtesy too */ }
+}
+function _aExpectedChanged(val){
+  const n = parseInt(val, 10);
+  if(!isFinite(n) || n < 1 || !window._aExpectedKey) return;
+  setState(window._aExpectedKey, n).catch(() => {});
 }
 
 function toggleBNList(){
