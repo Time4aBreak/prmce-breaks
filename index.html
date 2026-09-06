@@ -2170,7 +2170,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-392'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-04-393'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20485,9 +20485,36 @@ const WING_D_CYCLES = {
            [['8N','8S'],['9N','9S'],['10N','10S']] ],
   '4|2': [ [['6N','7N'],['8N','8S'],['9N','9S'],['10N','10S']] ],
 };
-function _dealWingDTemplates(namesInOrder, dPoolSlots, dateSeed, quota){
-  const open = new Set(dPoolSlots.map(pp => pp.slot));
-  const cycle = WING_D_CYCLES[`${namesInOrder.length}|${quota}`];
+// ── Build 393: WING A/C TEMPLATES (Tomas's geography, Sep 4 pre-dawn) ──
+// The A tower stacks 3A→7A vertically; the C annex (3C ground, 4C atop)
+// bolts to the tower's BASE by hallways at floors 3 and 4 — and 3C+4C
+// already travel as the C_PAIR atom, so the wing is a SIX-SLOT corridor:
+// [C_PAIR, 3A, 4A, 5A, 6A, 7A], with C_PAIR adjacent to 3A and 4A only.
+// The base-to-top haul (C↔6A/7A) is this wing's "10S lesson": never pair.
+// Every cycle below covers each slot an EQUAL number of days:
+//  '1|2': 3-cycle {C,3A}{4A,5A}{6A,7A} — each slot 1/3.
+//  '1|3': the halving — base block {C,3A,4A} / top {5A,6A,7A} — each 1/2.
+//  '1|4': 3-cycle, each slot 2/3; includes ONE dual-cluster set
+//         {C,3A,6A,7A} (base pair + top pair, one elevator transition) —
+//         strict-contiguity has no perfect cycle here; two tight clusters
+//         beat a span-4 stretch.
+//  '2|2': the TWO-TRIANGLE 3-cycle — base C·3A·4A, top 5A·6A·7A (the
+//         span-2 edge {5A,7A} legalized by D's own rule); each slot 2/3.
+//         Walk-1-only pairs provably cannot balance (7A strands).
+//  '2|3' and '3|2': full-coverage single partitions — no darkness, no
+//         rotation needed; set→nurse order rotates by arrival order.
+const WING_A_CYCLES = {
+  '1|2': [ [['C_PAIR','3A']], [['4A','5A']], [['6A','7A']] ],
+  '1|3': [ [['C_PAIR','3A','4A']], [['5A','6A','7A']] ],
+  '1|4': [ [['C_PAIR','3A','4A','5A']], [['4A','5A','6A','7A']], [['C_PAIR','3A','6A','7A']] ],
+  '2|2': [ [['C_PAIR','3A'],['5A','6A']], [['3A','4A'],['6A','7A']], [['C_PAIR','4A'],['5A','7A']] ],
+  '2|3': [ [['C_PAIR','3A','4A'],['5A','6A','7A']] ],
+  '3|2': [ [['C_PAIR','3A'],['4A','5A'],['6A','7A']] ],
+};
+const WING_A_CORRIDOR = ['C_PAIR','3A','4A','5A','6A','7A'];
+function _dealWingTemplates(namesInOrder, poolSlots, dateSeed, quota, cycles, corridor){
+  const open = new Set(poolSlots.map(pp => pp.slot));
+  const cycle = cycles[`${namesInOrder.length}|${quota}`];
   const out = {};
   if(cycle){
     const partition = cycle[dateSeed % cycle.length];
@@ -20497,22 +20524,22 @@ function _dealWingDTemplates(namesInOrder, dPoolSlots, dateSeed, quota){
     });
     return out;
   }
-  // Fallback slider for uncurated (count|quota) combos: contiguous windows
-  // over the open corridor, seed-offset start, packed left to right.
-  // Known mild middle bias — acceptable only for combos that never occur in
-  // practice; curate on first real sighting.
-  const corridor = ['6N','7N','8N','8S','9N','9S','10N','10S'].filter(u => open.has(u));
-  if(!corridor.length) return null;
-  let off = dateSeed % Math.max(1, corridor.length);
+  const cor = corridor.filter(u => open.has(u));
+  if(!cor.length) return null;
+  let off = dateSeed % Math.max(1, cor.length);
   namesInOrder.forEach(nm => {
     const set = [];
-    for(let i = 0; i < quota && i < corridor.length; i++){
-      set.push(corridor[(off + i) % corridor.length]);
+    for(let i = 0; i < quota && i < cor.length; i++){
+      set.push(cor[(off + i) % cor.length]);
     }
     out[nm] = set;
-    off = (off + quota) % corridor.length;
+    off = (off + quota) % cor.length;
   });
   return out;
+}
+function _dealWingDTemplates(namesInOrder, dPoolSlots, dateSeed, quota){
+  return _dealWingTemplates(namesInOrder, dPoolSlots, dateSeed, quota, WING_D_CYCLES,
+    ['6N','7N','8N','8S','9N','9S','10N','10S']);
 }
 
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false){
@@ -20643,6 +20670,22 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
         (_wdSets[r.bn] || []).forEach(u => {
           const pe = dPool.find(pp => pp.slot === u);
           r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'D',
+            units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
+        });
+        r._templateDealt = true;
+      });
+    }
+  }
+  // Build 393: the same treatment for pure-A rows — the A/C corridor's
+  // curated cycles, C_PAIR as the atom (its pick's units carry 3C+4C).
+  const _waRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'A');
+  if(_waRows.length){
+    const _waSets = _dealWingTemplates(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse, WING_A_CYCLES, WING_A_CORRIDOR);
+    if(_waSets){
+      _waRows.forEach(r => {
+        (_waSets[r.bn] || []).forEach(u => {
+          const pe = aPool.find(pp => pp.slot === u);
+          r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'A',
             units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
         });
         r._templateDealt = true;
