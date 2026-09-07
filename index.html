@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-04-397'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-399'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13062,19 +13062,28 @@ let _pulseAssignKey = null; // {name,date,shift,until} — set by saveAssign, co
 // lives by (7092). Writes are spPatch on stable Ids — the deliberate
 // engine-change signature — followed by per-BN rotation recomputes.
 // suppressHistory: this is a correction, not a new dealing night.
-async function repriceShift(date, shift){
+async function repriceShift(date, shift, btn){
+  // Build 398 (Tomas, first live tap): the run spans many GAS round-trips —
+  // several seconds of dead air invited double-taps. The badge borrows the
+  // house pattern (the Edit button's disable-and-relabel): guarded at entry,
+  // phase-labeled, restored on any early exit; success ends in a re-render
+  // that replaces it.
+  const _origText = btn ? btn.textContent : '';
+  const _restore = () => { if(btn){ btn.disabled = false; btn.textContent = _origText; } };
+  if(btn){ btn.disabled = true; btn.textContent = '⚖ Working…'; }
   const startMs = +slotDateTime(date, shift === 'Day' ? '0800' : '2000', shift);
   if(!(startMs > Date.now())){
     toast('Re-price is future-shifts only — a running or past shift keeps its sets.', true);
-    return;
+    _restore(); return;
   }
   const sch = await spGet(LISTS.schedule, `ShiftDate ge '${date}'`);
   const rows = sch.filter(r => (r.ShiftDate || '').slice(0, 10) === date && r.ShiftType === shift
     && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1');
   const mains = rows.filter(r => { const h = Number(r.Hours || 0); return !(r.StartTime && h > 0 && h < 12); });
-  if(!mains.length){ toast('No full-shift assignments to re-price on that shift.'); return; }
+  if(!mains.length){ toast('No full-shift assignments to re-price on that shift.'); _restore(); return; }
   const rate = unitsPerNurse(shift, rows.length);
-  if(!await customConfirm(`Re-suggest all ${mains.length} full-shift ${shift} BN${mains.length === 1 ? '' : 's'} on ${date} at the current rate (${rate} each)? Their unit sets will be re-dealt.`, 'Re-price', 'Cancel')) return;
+  if(!await customConfirm(`Re-deal all ${mains.length} full-shift ${shift} BN${mains.length === 1 ? '' : 's'} on ${date} so each has ${rate} unit${rate === 1 ? '' : 's'}?`, 'Rebalance', 'Cancel')){ _restore(); return; }
+  if(btn) btn.textContent = '⚖ Rebalancing…';
   try {
     const names = mains.map(r => r.BreakNurseName);
     const sugg = await suggestAssignments(names, shift, date, {}, null, null, true, rows.length);
@@ -13086,9 +13095,9 @@ async function repriceShift(date, shift){
       try { await recalculateRotation(r.BreakNurseName, date, shift); } catch(e){}
       done++;
     }
-    toast(`⚖ Re-priced ${done} ${shift} assignment${done === 1 ? '' : 's'} on ${date}.`);
+    toast(`⚖ Rebalanced ${done} ${shift} assignment${done === 1 ? '' : 's'} on ${date}.`);
     loadAssignments();
-  } catch(e){ toast('Re-price failed: ' + ((e && e.message) || e), true); }
+  } catch(e){ toast('Re-price failed: ' + ((e && e.message) || e), true); _restore(); }
 }
 
 async function loadAssignments(preloadedScheds){
@@ -13179,9 +13188,21 @@ async function _loadAssignmentsCore(preloadedScheds){
         const startMs = +slotDateTime(date, sh === 'Day' ? '0800' : '2000', sh);
         if(!(startMs > Date.now())) return '';
         const rate = unitsPerNurse(sh, act.length);
-        const sizes = mains.map(x => { try { return [...new Set(JSON.parse(x.Units || '[]'))].length; } catch(e){ return 0; } });
-        if(!sizes.some(z => z !== rate)) return '';
-        return `<button class="btn btn-ghost btn-sm" style="font-size:.68rem;padding:2px 8px;margin-left:8px;text-transform:none;letter-spacing:0;color:#b45309;border-color:#f5c883" onclick="repriceShift('${date}','${sh}')">⚖ ${sh} ${sizes.join('·')} → ${rate} each · Re-price</button>`;
+        const withSizes = mains.map(x => { let z = 0; try { z = [...new Set(JSON.parse(x.Units || '[]'))].length; } catch(e){}
+          return { nm: firstName(x.BreakNurseName), sz: z }; });
+        const devs = withSizes.filter(w => w.sz !== rate);
+        if(!devs.length) return '';
+        // Build 399 (Tomas's A): the deviation is NAMED, not encoded — say who
+        // is off and what the settings say, the way a charge nurse would.
+        const un = n => `${n} unit${n === 1 ? '' : 's'}`;
+        const msg = devs.length === 1
+          ? `${devs[0].nm} has ${un(devs[0].sz)} — settings say ${rate} each`
+          : devs.length === 2
+            ? `${devs[0].nm} ${devs[0].sz}, ${devs[1].nm} ${devs[1].sz} — settings say ${rate} each`
+            : (devs.length === withSizes.length
+                ? `all ${withSizes.length} BNs off settings (${rate} each)`
+                : `${devs.length} of ${withSizes.length} BNs off settings (${rate} each)`);
+        return `<button class="btn btn-ghost btn-sm" style="font-size:.68rem;padding:2px 8px;margin-left:8px;text-transform:none;letter-spacing:0;color:#b45309;border-color:#f5c883" onclick="repriceShift('${date}','${sh}',this)">⚖ ${sh}: ${msg} · Rebalance</button>`;
       }).join('');
       return `<div style="margin-bottom:14px">
         <div style="display:flex;align-items:center;flex-wrap:wrap;font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);margin-bottom:6px;border-bottom:1px solid var(--border);padding-bottom:4px">${label}${_rp397}</div>
