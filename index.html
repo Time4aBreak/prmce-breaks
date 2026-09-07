@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-07-405'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-07-406'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4830,7 +4830,15 @@ async function promptReopenCoverage(unit, reopenAt, subContext){
   // it, so the reopened half just starts counting again. There's nothing for
   // the picker to place; placing a loose half would corrupt the pair. Skip them.
   // (If a shift has no pair-holder, cover it by assigning the pair via Edit.)
-  if(unit === '3C' || unit === '4C' || unit === 'C_PAIR') return;
+  // Build 406 (read #2): 184 ASSUMED the pair is stored whole. True for
+  // import-dealt rows; false for form-dealt rows pre-406 (Suggest stripped
+  // closed 3C) and for hand-picks (nobody taps the grayed 3C chip) — those
+  // hold 4C alone, and a mid-shift 3C reopen stranded 3C silently. Now the
+  // per-shift 'covered' check below decides (a stored 'C_PAIR' token counts),
+  // and when the picker IS needed for a pair half, the other half's holders
+  // are the candidates so the pair lands whole, never split across two BNs.
+  if(unit === 'C_PAIR') return;
+  const _pairOther = unit === '3C' ? '4C' : (unit === '4C' ? '3C' : null);
   const floor = activeShiftFloor();
   const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${floor}'`).catch(() => []);
   const core = scheds.filter(s =>
@@ -4856,16 +4864,20 @@ async function promptReopenCoverage(unit, reopenAt, subContext){
     // Already covered on this shift? (shouldn't happen on reopen; guard anyway)
     const covered = rows.some(s => {
       let u = []; try { u = JSON.parse(s.Units || '[]'); } catch(e){}
-      return u.includes(unit);
+      return u.includes(unit) || (_pairOther && u.includes('C_PAIR'));
     });
     if(covered) continue;
 
     // Same-wing candidates on this shift, fewest-units-first (most spare on top).
-    const cands = rows.map(s => {
+    let cands = rows.map(s => {
       let u = []; try { u = JSON.parse(s.Units || '[]'); } catch(e){}
       return { bnName: s.BreakNurseName, schedId: s.Id, bnUnits: u };
     }).filter(c => c.bnUnits.some(u => getUnitWing(u) === unitWing))
       .sort((a, b) => a.bnUnits.length - b.bnUnits.length);
+    if(_pairOther){ // Build 406: pair half → the other half's holder(s) first
+      const holders = cands.filter(c => c.bnUnits.includes(_pairOther));
+      if(holders.length) cands = holders;
+    }
 
     const subHere = (subContext || []).filter(e => e.date === date && e.shift === shift);
 
@@ -12501,9 +12513,14 @@ async function suggestUnitsForManualAssign(btn){
       toast('Suggester returned no units for this BN', true);
       return;
     }
-    // Expand C_PAIR → ['3C','4C'] for grid display + filter closed units.
-    const expanded = expandSuggestionUnits(slots);
-    const filtered = filterClosedUnits(expanded, dt, shift);
+    // Build 406 (read #2, the 3C pool divergence): store the pair WHOLE like
+    // the import path — a Suggest that deals the pair keeps 3C even while
+    // it's closed ("intent preserved", 20692); closure applies at read via
+    // expandCPair. The dealer never emits any other closed unit (pool filter
+    // 20693), so the old filterClosedUnits here only ever stripped 3C — and
+    // that broke Build 184's "stored whole" assumption on mid-shift reopen.
+    // The grayed 3C chip lights after Suggest: honest intent, not a bug.
+    const filtered = expandSuggestionUnits(slots);
 
     // Replace current selections + repaint grid
     S.aUnits = filtered;
