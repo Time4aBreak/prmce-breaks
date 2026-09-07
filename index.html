@@ -2179,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-07-408'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-07-409'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15166,21 +15166,38 @@ async function suggestFlaggedRow(i){
       });
     }
   });
-  // How many units this BN should cover.
-  let count;
+  // How many units this BN should cover, and who deals them.
+  if(!_stagingWHBatch) _stagingWHBatch = {}; // Build 234: flagged re-pick joins the staging batch
+  let count, slots;
   if(e.isPartial){
     count = e.partialUnitCount || 1;
+    slots = await _pickPartialSlots(e.shift, e.date, count, overlay);
+    // Persist for fairness feedback (same as partial path).
+    await _savePartialWingHistory(e.name, e.shift, e.date, slots, _stagingWHBatch);
   } else {
-    const activeBNs = _currentImportEntries.filter(x =>
-      x.date === e.date && x.shift === e.shift && !x.isDiscarded && !x.isPartial
-    );
-    count = unitsPerNurse(e.shift, Math.max(1, activeBNs.length));
+    // Build 409 (Tomas, Jhaiz Apr 8 = 10N+4A+5A): a confirmed FULL shift used
+    // to be dealt by the partial picker — N least-covered units site-wide,
+    // no wing lock, no pair, no fairness. Once the flag is cleared the shift
+    // is as real as its peers, so it gets the dealer: this nurse alone, the
+    // date's other full cards LOCKED (the form's sequential-deal shape,
+    // 12499), team size declared so 395 forces the complementary wing. The
+    // dealer persists wing history into the staging batch itself.
+    const peers = [];
+    _currentImportEntries.forEach((x, j) => {
+      if(j !== i && x.date === e.date && x.shift === e.shift && !x.isDiscarded && !x.isPartial) peers.push(j);
+    });
+    const locked = {};
+    peers.forEach(j => {
+      const u = importUnitSel[j] || [];
+      if(u.length) locked[_currentImportEntries[j].name] = [...new Set(u)];
+    });
+    const teamN = peers.length + 1;
+    count = unitsPerNurse(e.shift, teamN);
+    const result = await suggestAssignments([e.name], e.shift, e.date, overlay, _stagingWHBatch,
+      Object.keys(locked).length ? locked : null, false, teamN);
+    slots = (result && result[e.name]) || [];
   }
-  const slots = await _pickPartialSlots(e.shift, e.date, count, overlay);
   importUnitSel[i] = expandSuggestionUnits(slots);
-  // Persist for fairness feedback (same as partial path).
-  if(!_stagingWHBatch) _stagingWHBatch = {}; // Build 234: flagged re-pick joins the staging batch
-      await _savePartialWingHistory(e.name, e.shift, e.date, slots, _stagingWHBatch);
   // Re-render — flagged status visually persists but Save button now appears.
   const wrap = document.getElementById('importRows');
   if(wrap){
