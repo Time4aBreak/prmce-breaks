@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-403'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-404'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13077,9 +13077,14 @@ async function repriceShift(date, shift, btn){
   const _origText = btn ? btn.textContent : '';
   const _restore = () => { _schedulePollHoldUntil = 0; if(btn){ btn.disabled = false; btn.textContent = _origText; } };
   if(btn){ btn.disabled = true; btn.textContent = '⚖ Working…'; }
-  const startMs = +slotDateTime(date, shift === 'Day' ? '0800' : '2000', shift);
+  // Build 404 (Tomas): "future" = before the shift's slots OPEN to staff
+  // (Break Slot Limits openAt, 1561), not BN shift start. Between openAt
+  // and 08:00/20:00 real claims already exist on the units; a silent
+  // re-deal there can strand them (Edit routes them through the modal,
+  // this path never could). Follows the setting if the open ever moves.
+  const startMs = _rampOpenMs(shift, date, (_rampCfg()[shift] || {}));
   if(!(startMs > Date.now())){
-    toast('Re-price is future-shifts only — a running or past shift keeps its sets.', true);
+    toast('Rebalance is only for shifts whose slots haven\'t opened to staff yet — use Edit once claims can exist.', true);
     _restore(); return;
   }
   const sch = await spGet(LISTS.schedule, `ShiftDate ge '${date}'`);
@@ -13203,7 +13208,7 @@ async function _loadAssignmentsCore(preloadedScheds){
         const act = items.filter(x => x.ShiftType === sh && x.Status !== 'inactive' && String(x.IsSupplemental) !== '1');
         const mains = act.filter(x => { const h = Number(x.Hours || 0); return !(x.StartTime && h > 0 && h < 12); });
         if(!mains.length) return '';
-        const startMs = +slotDateTime(date, sh === 'Day' ? '0800' : '2000', sh);
+        const startMs = _rampOpenMs(sh, date, (_rampCfg()[sh] || {})); // Build 404: badge and Rebalance share one gate — the shift's staff open time
         if(!(startMs > Date.now())) return '';
         const rate = unitsPerNurse(sh, act.length);
         const withSizes = mains.map(x => { let z = 0; try {
