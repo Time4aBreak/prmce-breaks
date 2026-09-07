@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-399'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-400'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13188,7 +13188,13 @@ async function _loadAssignmentsCore(preloadedScheds){
         const startMs = +slotDateTime(date, sh === 'Day' ? '0800' : '2000', sh);
         if(!(startMs > Date.now())) return '';
         const rate = unitsPerNurse(sh, act.length);
-        const withSizes = mains.map(x => { let z = 0; try { z = [...new Set(JSON.parse(x.Units || '[]'))].length; } catch(e){}
+        const withSizes = mains.map(x => { let z = 0; try {
+            const us = [...new Set(JSON.parse(x.Units || '[]'))];
+            // Build 400 (Tomas's catch): count SLOTS, not units — 3C+4C is ONE
+            // dealt slot (C_PAIR) wearing two chips; raw unit counting badged
+            // every pair-carrier as one over, crying wolf on correct deals.
+            z = us.filter(u => u !== '3C' && u !== '4C').length + ((us.includes('3C') || us.includes('4C')) ? 1 : 0);
+          } catch(e){}
           return { nm: firstName(x.BreakNurseName), sz: z }; });
         const devs = withSizes.filter(w => w.sz !== rate);
         if(!devs.length) return '';
