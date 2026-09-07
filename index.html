@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-400'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-401'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13089,7 +13089,11 @@ async function repriceShift(date, shift, btn){
     const sugg = await suggestAssignments(names, shift, date, {}, null, null, true, rows.length);
     let done = 0;
     for(const r of mains){
-      const units = (sugg && sugg[r.BreakNurseName]) || [];
+      // Build 401: expand the C_PAIR slot token before the Units write — the
+      // storage invariant every other writer honors (7013). 397 wrote the
+      // raw dealer output; readers tolerate the token, the card tag and Edit
+      // prefill don't.
+      const units = expandSuggestionUnits((sugg && sugg[r.BreakNurseName]) || []);
       if(!units.length) continue;
       await spPatch(LISTS.schedule, r.Id, { Units: JSON.stringify(units) });
       try { await recalculateRotation(r.BreakNurseName, date, shift); } catch(e){}
