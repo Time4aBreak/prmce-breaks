@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-402'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-403'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13090,6 +13090,12 @@ async function repriceShift(date, shift, btn){
   const rate = unitsPerNurse(shift, rows.length);
   if(!await customConfirm(`Re-deal all ${mains.length} full-shift ${shift} BN${mains.length === 1 ? '' : 's'} on ${date} so each has ${rate} unit${rate === 1 ? '' : 's'}?`, 'Rebalance', 'Cancel')){ _restore(); return; }
   if(btn) btn.textContent = '⚖ Rebalancing…';
+  // Build 403 (Tomas: a GENERAL tap guard, not just the chip's): the write
+  // window — deal, N patches, N rotation recomputes — sits under Save's
+  // house-wide busy overlay (14121), so no Edit or second chip can
+  // interleave writes with the in-flight patches. Write phase only: the
+  // pre-confirm read writes nothing and the confirm dialog blocks on its own.
+  showBusy(`⚖ Rebalancing ${mains.length} ${shift} assignment${mains.length === 1 ? '' : 's'} on ${date}…`);
   try {
     const names = mains.map(r => r.BreakNurseName);
     const sugg = await suggestAssignments(names, shift, date, {}, null, null, true, rows.length);
@@ -13105,10 +13111,11 @@ async function repriceShift(date, shift, btn){
       try { await recalculateRotation(r.BreakNurseName, date, shift); } catch(e){}
       done++;
     }
+    hideBusy();
     toast(`⚖ Rebalanced ${done} ${shift} assignment${done === 1 ? '' : 's'} on ${date}.`);
     _schedulePollHoldUntil = 0;
     loadAssignments();
-  } catch(e){ toast('Re-price failed: ' + ((e && e.message) || e), true); _restore(); }
+  } catch(e){ hideBusy(); toast('Re-price failed: ' + ((e && e.message) || e), true); _restore(); }
 }
 
 async function loadAssignments(preloadedScheds){
