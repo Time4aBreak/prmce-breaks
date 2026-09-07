@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-401'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-06-402'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13068,8 +13068,14 @@ async function repriceShift(date, shift, btn){
   // house pattern (the Edit button's disable-and-relabel): guarded at entry,
   // phase-labeled, restored on any early exit; success ends in a re-render
   // that replaces it.
+  // Build 402 (Tomas's C, first live tap on 398): the poller re-renders the
+  // list on its first tick after activation and again when our own patches
+  // bump the revision — each rebuild replaced the guarded button with a
+  // fresh enabled one. Borrow Save's quiet window (Build 240, 12533):
+  // held at entry, released by _restore on every early exit and on success.
+  _schedulePollHoldUntil = Date.now() + 60000;
   const _origText = btn ? btn.textContent : '';
-  const _restore = () => { if(btn){ btn.disabled = false; btn.textContent = _origText; } };
+  const _restore = () => { _schedulePollHoldUntil = 0; if(btn){ btn.disabled = false; btn.textContent = _origText; } };
   if(btn){ btn.disabled = true; btn.textContent = '⚖ Working…'; }
   const startMs = +slotDateTime(date, shift === 'Day' ? '0800' : '2000', shift);
   if(!(startMs > Date.now())){
@@ -13100,6 +13106,7 @@ async function repriceShift(date, shift, btn){
       done++;
     }
     toast(`⚖ Rebalanced ${done} ${shift} assignment${done === 1 ? '' : 's'} on ${date}.`);
+    _schedulePollHoldUntil = 0;
     loadAssignments();
   } catch(e){ toast('Re-price failed: ' + ((e && e.message) || e), true); _restore(); }
 }
