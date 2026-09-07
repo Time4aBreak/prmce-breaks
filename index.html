@@ -2176,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-06-404'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-07-405'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15563,6 +15563,19 @@ async function discardImportEntry(i){
     _currentImportEntries.splice(i, 1);
     _382Rekey(i);
     saveLastBatch(_currentImportEntries);
+    // Build 405 (the ghost desync, Sep 4): the forced re-render below skips
+    // renderImportRows' archive replacement (gated by !forceReplace), so the
+    // dedup re-merged the discarded shift back into bnImportedEntries —
+    // cards 27, history 28. Drop it from the archive here by key, the same
+    // sync the shift toggle already does (15437). Save All was never affected
+    // (reads _currentImportEntries); the week summary, the Portal's shift
+    // guess, and the Manual-Assign 'scheduled' group were.
+    const _k = x => `${x.name}|${x.date}|${x.shift}`;
+    const _before = importEntries.length;
+    importEntries = importEntries.filter(x => _k(x) !== _k(e));
+    if(importEntries.length !== _before){
+      localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
+    }
     toast(`Discarded ${bnDisplayName(e.name)} · ${e.date} ${e.shift} — "+ Add missed shift" is the undo`);
     await renderImportRows(_currentImportEntries, true);
   } catch(err){ console.warn('discard failed:', err && err.message); }
