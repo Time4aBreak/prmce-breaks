@@ -787,7 +787,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:7px;gap:8px;flex-wrap:wrap">
             <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase">Units to Cover</label>
-            <button type="button" class="btn btn-ghost btn-sm" id="aSuggestBtn" onclick="suggestUnitsForManualAssign(this)" style="font-size:.72rem;padding:4px 10px">✨ Suggest</button>
+            <div style="display:flex;gap:6px">
+              <button type="button" class="btn btn-ghost btn-sm" id="aClearBtn" onclick="resetManualCard()" style="font-size:.72rem;padding:4px 10px">✕ Clear</button>
+              <button type="button" class="btn btn-ghost btn-sm" id="aSuggestBtn" onclick="suggestUnitsForManualAssign(this)" style="font-size:.72rem;padding:4px 10px">✨ Suggest</button>
+            </div>
           </div>
           <div class="unit-check-grid" id="aUnits"></div>
         </div>
@@ -797,7 +800,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
         <div id="editActionRow" style="display:none;gap:8px;margin-bottom:8px">
           <button type="button" class="btn btn-ghost btn-sm" style="flex:1;color:var(--red)" onclick="this.disabled=true;const _l=this.textContent;this.textContent='Checking…';removeAssignmentFromEdit().finally(()=>{this.disabled=false;this.textContent=_l})">🗑 Remove from this shift</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode()">✕ Cancel edit</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode();resetManualCard()">✕ Cancel edit</button>
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
@@ -2176,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-07-406'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-07-407'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10104,6 +10107,20 @@ function cancelEditMode(){
   _editSource = null;
   updateEditModeBar();
 }
+// Build 407 (Tomas, Sep 7): the card had no reset outside Edit mode — after a
+// Suggest it was tap-every-chip-off or reload, and ✕ Cancel edit left the BN
+// and lit chips behind. One helper = Save's own post-write 'clean card'
+// (units + chips + BN cleared; date, shift, partial, headcount KEPT for the
+// batch workflow). Called by the new ✕ Clear button, by ✕ Cancel edit, and
+// after a Remove-from-edit. NOT folded into cancelEditMode — saveAssign
+// calls that mid-save (12688) and must keep the card until its own reset.
+function resetManualCard(){
+  S.aUnits = [];
+  S.editingAssignId = null;
+  const t = document.getElementById('aNurseText'); if(t) t.value = '';
+  const n = document.getElementById('aNurse'); if(n) n.value = '';
+  document.querySelectorAll('.uc').forEach(c => c.classList.remove('on'));
+}
 // Build 309: plain removal — mirrors editAssign's consolidation (all the
 // BN's rows for that date+shift die together), guards booked breaks like
 // the 295 move, retires the dealt rotation, and scrubs the date's
@@ -10153,7 +10170,7 @@ async function removeAssignmentFromEdit(){
     return;
   }
   const removed = await removeAssignment(_editSource.ids[0]);
-  if(removed) cancelEditMode();
+  if(removed){ cancelEditMode(); resetManualCard(); } // Build 407: the row is gone — the card shouldn't still show it
 }
 
 async function editAssign(id){
@@ -12819,17 +12836,13 @@ async function saveAssign(){
     const _tailScheds = spGet(LISTS.schedule, _assignListFilter()).catch(() => null);
     try { await _savePartialWingHistory(nurse, shift, dt, units); }
     catch(e){ console.warn('Wing history write failed (non-fatal):', e); }
-    S.aUnits=[];
-    S.editingAssignId = null;
-    document.getElementById('aNurseText').value = '';
     // Build 137 (2026-05-27): Reset BN dropdown after save so the card
     // shows a clean BN selection for the next assignment. Date + shift
     // are intentionally preserved (batch workflow: BN assigns multiple
     // nurses to the same shift in sequence). Without this reset, the
     // dropdown still shows the just-saved BN, and any later field change
     // triggers _loadExistingAssignmentFor which reloads their units.
-    document.getElementById('aNurse').value = '';
-    document.querySelectorAll('.uc').forEach(c=>c.classList.remove('on'));
+    resetManualCard(); // Build 407: the same reset the ✕ Clear button runs
     // Auto-apply BN default template and calculate rotation — await so slots load after rotation is ready
     // Warm BN default from BNState before using it
     await warmDefaultTemplate(nurse, shift);
