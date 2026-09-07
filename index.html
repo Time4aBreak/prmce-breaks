@@ -2179,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-07-407'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-07-408'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21649,6 +21649,15 @@ async function onAssignContextChange(){
       const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
       if(s && !s.dataset.userSet) s.value = `${hh}:${mm}`;
       if(e && !e.dataset.userSet) e.value = sh === 'Day' ? '20:30' : '08:30';
+    } else if(!window._aPartialTouched && (typeof _aPartial !== 'undefined') && _aPartial
+              && !(typeof _editSource !== 'undefined' && _editSource)){
+      // Build 408 (Tomas, Sep 7): WITHDRAW the courtesy when its condition
+      // stops holding. The card opens on today + the running shift, so 375
+      // flipped it to Partial + now on load — and picking any other date or
+      // shift carried that Partial (and the stale start time) along, since
+      // nothing ever reverted it. Only the untouched, unloaded case reverts;
+      // a tapped toggle or a loaded row is left exactly as the user has it.
+      setAPartial(false, false);
     }
   } catch(err){ /* default is a courtesy; never block the form */ }
   // Build 394 (THE KEYSTONE — Tomas's "BNs tonight"): pre-fill the declared
