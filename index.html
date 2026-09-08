@@ -2179,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-412'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-413'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19638,17 +19638,25 @@ function _rptRotation(scheds){
   const rows = scheds.filter(s => _rptActive(s) && !_rptIsSupp(s)
     && (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
   const grid = {}, nights = {}, wingA = {};
+  // Build 413: the two lab yardsticks Reports couldn't show — shifts where a BN
+  // held two High units, and how far each assignment spans in floors.
+  const twoHigh = {}, spanSum = {}, spanN = {}, split = {};
   const aSet = new Set([...WING_A, ...WING_C_PAIR]);
   rows.forEach(s => {
     const bn = s.BreakNurseName; if(!bn) return;
     nights[bn] = (nights[bn] || 0) + 1;
     grid[bn] = grid[bn] || {};
-    _rptRowUnits(s).forEach(u => {
+    const us = _rptRowUnits(s);
+    us.forEach(u => {
       grid[bn][u] = (grid[bn][u] || 0) + 1;
       if(aSet.has(u)) wingA[bn] = (wingA[bn] || 0) + 1;
     });
+    if(us.filter(u => UNIT_TIER[u] === 'High').length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1;
+    const fl = us.map(u => WING_FLOOR[u]).filter(Number.isFinite);
+    if(fl.length){ spanSum[bn] = (spanSum[bn] || 0) + (Math.max(...fl) - Math.min(...fl)); spanN[bn] = (spanN[bn] || 0) + 1; }
+    if(new Set(us.map(u => getUnitWing(u))).size > 1) split[bn] = (split[bn] || 0) + 1;
   });
-  return { grid, nights, wingA };
+  return { grid, nights, wingA, twoHigh, spanSum, spanN, split };
 }
 
 function _rptRenderRotation(rot){
@@ -19681,7 +19689,7 @@ function _rptRenderRotation(rot){
         Object.values(rot.grid[bn] || {}).reduce((a,c) => a + c, 0) || 0) : 0;
       return `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(bn))}</strong>
-        <div style="font-size:.66rem;color:var(--muted)">${rot.nights[bn]} shifts · A-wing ${aPct}%</div></td>
+        <div style="font-size:.66rem;color:var(--muted)">${rot.nights[bn]} shifts · A-wing ${aPct}% · two-High ${rot.twoHigh[bn] || 0} · span ${rot.spanN[bn] ? (rot.spanSum[bn] / rot.spanN[bn]).toFixed(1) : '—'}${rot.split[bn] ? ` · split-wing ${rot.split[bn]}` : ''}</div></td>
       ${units.map(u => { const c = rot.grid[bn] && rot.grid[bn][u] || 0;
         return `<td style="${td};color:${c ? 'var(--text)' : 'var(--border)'}">${c || '·'}</td>`; }).join('')}
     </tr>`; }).join('')}
