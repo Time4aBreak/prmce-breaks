@@ -609,9 +609,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <div class="card" id="rptCovScoreCard" style="display:none">
       <div class="card-label">🛡️ Unit Coverage</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        For each unit: shifts with its own break nurse, shifts with only an absorber, and shifts with nobody.
-      </div>
       <div id="rptCovScoreCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptCovScoreBody" style="overflow-x:auto"></div>
       <div id="rptCovHolesPast" style="font-size:.85rem;margin-top:10px;line-height:1.5"></div>
@@ -622,18 +619,12 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <div class="card" id="rptDeliveredCard" style="display:none">
       <div class="card-label">☕ Breaks Delivered</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        Staff breaks claimed per covered shift, unit by unit — coverage on paper vs breaks in hand. Counts claims regardless of confirmation; the Break Tally below counts confirmed-Taken only.
-      </div>
       <div id="rptDeliveredCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptDeliveredBody" style="overflow-x:auto"></div>
     </div>
 
     <div class="card" id="rptRotationCard" style="display:none">
       <div class="card-label">🔄 Rotation Grid</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        Shifts each break nurse was assigned each unit (main assignments only — absorber pickups excluded).
-      </div>
       <div id="rptRotationCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
       <div id="rptRotationBody" style="overflow-x:auto"></div>
     </div>
@@ -1679,7 +1670,7 @@ function initRampCard(){
       
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-top:8px">
-      <strong style="width:52px">Walk</strong> a BN's units may stretch across up to ${num('covMaxSpan', cov.maxSpan, 4)} floors
+      <strong style="width:76px">Floor Span</strong> a BN's units may stretch across up to ${num('covMaxSpan', cov.maxSpan, 4)} floors
       <span style="color:var(--muted)">the dealer still takes the nearest shape whenever coverage is equal</span>
     </div>`;
 }
@@ -2185,7 +2176,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-419'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-421'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19988,10 +19979,13 @@ function _rptTally(scheds, bookings, from, to){
 function _rptTallyTable(T, shift){
   const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const tint = n => n >= 3 ? '#eaf6ea' : n === 2 ? '#fef7e6' : n === 1 ? '#fdecec' : 'transparent';
-  let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.7rem">`
-    + `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">${shift === 'Day' ? 'DAYS' : 'NOCS'}</th>`
+  // Build 420 (Tomas): the unit-name header is re-listed after every 4th week so
+  // long ranges stay readable (a sticky row can't pin to the page from inside
+  // the horizontal-scroll wrapper).
+  const headerRow = `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">${shift === 'Day' ? 'DAYS' : 'NOCS'}</th>`
     + T.units.map(u => `<th style="padding:3px 4px;border-bottom:1.5px solid var(--border)">${u}</th>`).join('')
     + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Total</th></tr>`;
+  let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.7rem">` + headerRow;
   let weekTotals = {}; let weekSum = 0; let anyWeekRow = false;
   const rangeTotals = {}; let rangeSum = 0; let weekCount = 0; // Build 387
   const flushWeek = () => {
@@ -20002,6 +19996,7 @@ function _rptTallyTable(T, shift){
     T.units.forEach(u => rangeTotals[u] = (rangeTotals[u] || 0) + (weekTotals[u] || 0));
     rangeSum += weekSum; weekCount++;
     weekTotals = {}; weekSum = 0; anyWeekRow = false;
+    if(weekCount % 4 === 0) html += headerRow; // Build 420
   };
   T.dates.forEach(ds => {
     const d = new Date(ds + 'T12:00:00'); const dow = d.getDay();
@@ -20464,6 +20459,7 @@ function nurseWingCount(nurseName, shift, wing){
 // both roster shapes, walking BELOW the old 2-floor budget (0.92 vs 0.94), and
 // 6N's starvation on three-BN Days gone without a per-unit exception.
 const _dealMaxSpan = () => { try { return _covCfg().maxSpan || 4; } catch(e){ return 4; } };
+const _DEAL_WALK_COST = 0.5;   // Build 421: coverage-days per floor of stretch (see the score below)
 const _DEAL_CAP_SHIFTS = ['Day'];            // "no two High units in one set" applies here
 const _DEAL_FLOOR = s => WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0;
 
@@ -20527,10 +20523,16 @@ function _dealSite({ names, pool, quota, shift, seed }){
       if(!dParts.length || !aParts.length) continue;
       for(const dp of dParts) for(const ap of aParts){
         const all = [...dp, ...ap];
-        const dark = darkness(all.flat());
         // Build 419: nearness is the tie-break — among equally dark arrangements,
         // the shortest total walk wins (before the even-split preference).
         const walk = all.reduce((acc, st) => { const f = st.map(e => _DEAL_FLOOR(e.slot)); return acc + (Math.max(...f) - Math.min(...f)); }, 0);
+        // Build 421: a walk PREFERENCE on top — each floor a set stretches costs
+        // half a coverage-day, so a nearer shape beats a slightly darker one and a
+        // unit a full day darker still wins. Real 19-week roster: Noc gapped sets
+        // 37 → 12 and walk 1.56 → 1.36 at spread 2 unchanged; Day neutral (its
+        // gaps are cap-forced — 6N/8N/8S exists because 6N/7N can't). A constant,
+        // not a setting: 1 day/floor starves 6N again (spread 10).
+        const dark = darkness(all.flat()) + _DEAL_WALK_COST * walk;
         const balance = Math.abs(dc - n / 2);
         const key = _dealHash(all.map(st => st.map(e => e.slot).join('+')).join('|'), seed) % 9973;
         // a cap-honoring arrangement always beats a forced one
