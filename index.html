@@ -2179,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-413'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-417'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14459,8 +14459,20 @@ async function runImport(){
     }
 
     let entries, warnings;
+    // Build 416 (Tomas, 6/21 week: Deepi's Thu/Fri/Sat each extracted TWICE,
+    // unflagged — 7 cards for 3 shifts): consensus matched keys ACROSS the two
+    // passes but never collapsed a key repeated WITHIN one pass, so a model
+    // stutter rode in as agreeing twins. One key = one entry, first read wins.
+    const keyOf = e => `${String(e.name || '').trim().replace(/\s+/g, ' ').toLowerCase()}|${e.date}|${e.shift}`;
+    const _uniqByKey = (arr, label) => {
+      const seen = new Set(); let dropped = 0;
+      const out = arr.filter(e => { const k = keyOf(e); if(seen.has(k)){ dropped++; return false; } seen.add(k); return true; });
+      if(dropped) console.warn(`[extraction] ${label}: ${dropped} duplicate read(s) collapsed`);
+      return out;
+    };
+    if(passA) passA.entries = _uniqByKey(passA.entries, 'row-read');
+    if(passB) passB.entries = _uniqByKey(passB.entries, 'column-read');
     if(passA && passB){
-      const keyOf = e => `${String(e.name || '').trim().replace(/\s+/g, ' ').toLowerCase()}|${e.date}|${e.shift}`;
       const keysA = new Set(passA.entries.map(keyOf));
       const mapB = new Map(passB.entries.map(e => [keyOf(e), e]));
       entries = passA.entries.map(e => {
@@ -15240,6 +15252,14 @@ function discardFlaggedRow(i){
   }
   e.isDiscarded = true;
   importUnitSel[i] = [];
+  // Build 415: drop it from the history archive too — 405 gave the mirror's
+  // splice-discard this sync; the card's mark-discard never had it (Leo Jun 9).
+  try {
+    const _k = x => `${x.name}|${x.date}|${x.shift}`;
+    const _before = importEntries.length;
+    importEntries = importEntries.filter(x => _k(x) !== _k(e));
+    if(importEntries.length !== _before){ localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{}); }
+  } catch(err){}
   const wrap = document.getElementById('importRows');
   if(wrap){
     wrap.innerHTML = _buildImportRowsHTML(_currentImportEntries);
@@ -15588,9 +15608,14 @@ function _f2ReviewEntries(){
   // back to the persisted last batch (the restore path); empty when neither
   // exists, which correctly hides the mirror pre-extraction and post-clear.
   const b = (typeof window._f2Batch !== 'undefined' && window._f2Batch) || (() => { const lb = loadLastBatch(); if(lb) hydrateImportSide(); return lb; })();
-  if(Array.isArray(b)) return b;
-  if(b && Array.isArray(b.entries)) return b.entries;
-  return [];
+  // Build 415 (Tomas, 06/07 week): a card ✕ Discard MARKS isDiscarded (the
+  // mirror's discard splices) — the mirror kept showing the discarded shift
+  // because this returned the batch unfiltered. The gate (_impGateEntries)
+  // already filters; now the mirror, its Σ chips and its fingerprint agree
+  // with the cards. The fingerprint moving on a discard re-asks for the ✓
+  // acknowledgment — correct, the picture being confirmed changed.
+  const arr = Array.isArray(b) ? b : (b && Array.isArray(b.entries) ? b.entries : []);
+  return arr.filter(e => e && !e.isDiscarded);
 }
 // ── Build 382 (Option C, Tomas Sep 2): the correction verbs ──
 // Detection without correction is half a guard — witnessed live within hours
@@ -15653,13 +15678,19 @@ async function f2AddMissedShift(){
     if(!raw || !date){ toast('Name and date are required to add a missed shift', true); return; }
     const name = ((typeof canonicalizeBNName === 'function') && canonicalizeBNName(raw)) || raw;
     const st = document.getElementById('f2AddStart'), en = document.getElementById('f2AddEnd');
-    let startTime = '', hours = '';
-    if(st && en && st.value && en.value){
+    let startTime = '', hours = '', shift = sh ? sh.value : 'Day';
+    if(shift === 'Partial'){
+      // Build 417: a partial needs both clocks; its shift follows the extractor's
+      // own vote (start hour 8–19 → Day, else Noc, ~14388) so the card, the
+      // mirror cell and the save all classify it the same way.
+      if(!(st && en && st.value && en.value)){ toast('A partial shift needs both a start and an end time', true); return; }
       const toM = v => { const [h,m] = v.split(':').map(Number); return h*60 + m; };
       let mins = toM(en.value) - toM(st.value); if(mins <= 0) mins += 1440;
       startTime = st.value.replace(':',''); hours = String(Math.round(mins/6)/10);
+      const h0 = parseInt(startTime.slice(0, 2), 10);
+      shift = (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc';
     }
-    _currentImportEntries.push({ name, date, shift: sh ? sh.value : 'Day', startTime, hours, units: [] });
+    _currentImportEntries.push({ name, date, shift, startTime, hours, units: [] });
     saveLastBatch(_currentImportEntries);
     toast(`Added ${bnDisplayName(name)} · ${date} — assign units on its card below`);
     if(t) t.value = ''; _382ResolvePreview();
@@ -15758,18 +15789,26 @@ function renderF2Mirror(){
     + `<input id="f2AddName" list="f2AddRoster" placeholder="Nurse" style="width:150px;font-size:.75rem;padding:3px 6px" oninput="_382ResolvePreview()">`
     + `<datalist id="f2AddRoster">${((typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames : []).map(n => `<option value="${escHTML(n)}">`).join('')}</datalist>`
     + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:150px">`
-    + `<select id="f2AddShift" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option></select>`
-    + `<input id="f2AddStart" type="time" title="optional partial start" style="font-size:.72rem;padding:2px 4px">`
+    + `<select id="f2AddShift" onchange="_f2AddShiftChanged()" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option><option>Partial</option></select>`
+    + `<span id="f2AddClocks" style="display:none;align-items:center;gap:6px">`
+    + `<input id="f2AddStart" type="time" title="partial start" style="font-size:.72rem;padding:2px 4px">`
     + `<span style="color:var(--muted)">–</span>`
-    + `<input id="f2AddEnd" type="time" title="optional partial end" style="font-size:.72rem;padding:2px 4px">`
+    + `<input id="f2AddEnd" type="time" title="partial end" style="font-size:.72rem;padding:2px 4px"></span>`
     + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
     + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
   saveImportSide(); // Build 389: every observed batch mutation persists the resolutions
   const _keep = ['f2AddName','f2AddDate','f2AddShift','f2AddStart','f2AddEnd'].map(id => [id, (document.getElementById(id) || {}).value]);
   host.innerHTML = html; host.style.display = '';
   _keep.forEach(([id, v]) => { const el = document.getElementById(id); if(el && v) el.value = v; });
+  _f2AddShiftChanged();
   _382ResolvePreview();
   _f2PaintSaveButtons();
+}
+// Build 417 (Tomas, the 7/09 Leo add): Day / Noc mean the BN's full shift
+// (08:00–20:30 / 20:00–08:30) and need no clocks; only Partial shows them.
+function _f2AddShiftChanged(){
+  const sel = document.getElementById('f2AddShift'), clocks = document.getElementById('f2AddClocks');
+  if(sel && clocks) clocks.style.display = sel.value === 'Partial' ? 'inline-flex' : 'none';
 }
 function _f2PaintSaveButtons(){
   const locked = _f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp();
@@ -16198,7 +16237,11 @@ async function acceptAllAndSave(){
   }
   // Build 389 (polish 3): the app's biggest write gets a one-tap seatbelt —
   // born of the mis-tap that committed 35 April rows through a ragged bar.
-  const _n389 = _f2ReviewEntries().length;
+  // Build 414 (Tomas, first real week on 413): the dialog said 31, the save wrote
+  // 30 — the batch still HOLDS a card ✕ Discard marked (isDiscarded; the mirror's
+  // discard splices, the card's marks). Count what the save loop below will
+  // actually write: not discarded, and holding units.
+  const _n389 = _currentImportEntries.filter((e, i) => !e.isDiscarded && (importUnitSel[i] || []).length > 0).length;
   if(_n389 && !confirm(`Save ${_n389} staged assignment${_n389 === 1 ? '' : 's'} to the live schedule?`)) return;
   const btns = document.querySelectorAll('.accept-all-btn');
   const status = document.getElementById('acceptAllStatus');
