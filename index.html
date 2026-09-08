@@ -1495,7 +1495,7 @@ const RAMP_DEFAULTS = { Day:{max:3,atOpen:3,unlockAt:'06:30',addAfter:0}, Noc:{m
 // Build 303: coverage sizing — how many units each BN is dealt, by team
 // size (index = team size - 1; last entry catches 4+), plus the partials
 // formula. Defaults reproduce the legacy table exactly.
-const COV_DEFAULTS = { Day:{byTeam:[3,3,2,2]}, Noc:{byTeam:[3,3,3,3]}, partial:{units:1, perHours:4} };
+const COV_DEFAULTS = { Day:{byTeam:[3,3,2,2]}, Noc:{byTeam:[3,3,3,3]}, partial:{units:1, perHours:4}, maxSpan:4 }; // Build 419: maxSpan = floors a BN's units may stretch across (Tomas: 4, as a setting)
 function _covCfg(){
   try {
     const raw = syncedLS.get('coverageConfig');
@@ -1508,7 +1508,8 @@ function _covCfg(){
       partial: {
         units: Math.max(1, Number(c.partial && c.partial.units) || 1),
         perHours: Math.max(1, Number(c.partial && c.partial.perHours) || 4)
-      }
+      },
+      maxSpan: Math.min(4, Math.max(1, Number(c.maxSpan) || COV_DEFAULTS.maxSpan))
     };
   } catch(e){ return COV_DEFAULTS; }
 }
@@ -1676,6 +1677,10 @@ function initRampCard(){
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
       <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
       
+    </div>
+    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-top:8px">
+      <strong style="width:52px">Walk</strong> a BN's units may stretch across up to ${num('covMaxSpan', cov.maxSpan, 4)} floors
+      <span style="color:var(--muted)">the dealer still takes the nearest shape whenever coverage is equal</span>
     </div>`;
 }
 // Build 327: when the Units-per-Shift numbers change, the save asks when
@@ -1806,7 +1811,8 @@ async function saveRampCfg(btn){
   const covCfg = {
     Day: { byTeam: [cv('covDayT1',3), cv('covDayT2',3), cv('covDayT3',2), cv('covDayT4',2)] },
     Noc: { byTeam: [cv('covNocT1',3), cv('covNocT2',3), cv('covNocT3',3), cv('covNocT4',3)] },
-    partial: { units: cv('covPartUnits',1), perHours: cv('covPartHours',4) }
+    partial: { units: cv('covPartUnits',1), perHours: cv('covPartHours',4) },
+    maxSpan: Math.min(4, cv('covMaxSpan', 4))
   };
   // Pool-dry hint: the house holds ~14 dealable slots — warn (non-blocking)
   // when any team-size row wants more than exists.
@@ -2179,7 +2185,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-417'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-419'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13199,6 +13205,11 @@ async function _loadAssignmentsCore(preloadedScheds){
 
     // BN multi-select filter (client-side). Empty set = show all.
     // Server-side OData would need OR-chains; small datasets make this trivial.
+    // Build 418 (Tomas, Oct 7 Noc filtered to Jhaiz): the ⚖ badge must size
+    // the team from the WHOLE date-shift, not the rows the filter left on
+    // screen — one visible BN of two read as a solo owed 4 units.
+    const _byDateAll = {};
+    scheds.forEach(s => { (_byDateAll[s.ShiftDate] ||= []).push(s); });
     if(_selectedBNs.size > 0){
       scheds = scheds.filter(s => _selectedBNs.has(s.BreakNurseName));
     }
@@ -13235,7 +13246,8 @@ async function _loadAssignmentsCore(preloadedScheds){
       // 7092 future-only idiom). Partials keep their windows — excluded from
       // the size check, counted in headcount.
       const _rp397 = ['Day','Noc'].map(sh => {
-        const act = items.filter(x => x.ShiftType === sh && x.Status !== 'inactive' && String(x.IsSupplemental) !== '1');
+        const _full = _byDateAll[date] || items; // Build 418: unfiltered rows for this date
+        const act = _full.filter(x => x.ShiftType === sh && x.Status !== 'inactive' && String(x.IsSupplemental) !== '1');
         const mains = act.filter(x => { const h = Number(x.Hours || 0); return !(x.StartTime && h > 0 && h < 12); });
         if(!mains.length) return '';
         const startMs = _rampOpenMs(sh, date, (_rampCfg()[sh] || {})); // Build 404: badge and Rebalance share one gate — the shift's staff open time
@@ -20447,7 +20459,11 @@ function nurseWingCount(nurseName, shift, wing){
 //
 // Acuity tiers' ONLY remaining job is the Day cap. UNIT_TIER stays as the
 // cap's source (a Settings card can replace it later) and for display.
-const _DEAL_SPAN = { 1:0, 2:1, 3:2, 4:3 };   // walk budget: max floor span by set size
+// Build 419 (Tomas): ONE ceiling for every set size, from Settings (default 4 =
+// the whole D corridor). Lab: ceiling 4 + nearness tie-break → unit spread 0 on
+// both roster shapes, walking BELOW the old 2-floor budget (0.92 vs 0.94), and
+// 6N's starvation on three-BN Days gone without a per-unit exception.
+const _dealMaxSpan = () => { try { return _covCfg().maxSpan || 4; } catch(e){ return 4; } };
 const _DEAL_CAP_SHIFTS = ['Day'];            // "no two High units in one set" applies here
 const _DEAL_FLOOR = s => WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0;
 
@@ -20498,7 +20514,7 @@ function _dealSite({ names, pool, quota, shift, seed }){
   const capOk = st => !capOn || st.filter(e => e.tier === 'High').length <= 1;
 
   for(let relax = 0; relax <= 2; relax++){
-    const span = (_DEAL_SPAN[quota] !== undefined ? _DEAL_SPAN[quota] : quota - 1) + relax;
+    const span = _dealMaxSpan() + relax;
     const dAll = _dealSets(dPool, quota, span), aAll = _dealSets(aPool, quota, span);
     const dCap = dAll.filter(capOk), aCap = aAll.filter(capOk);
     let best = null, forcedCap = false;
@@ -20512,11 +20528,14 @@ function _dealSite({ names, pool, quota, shift, seed }){
       for(const dp of dParts) for(const ap of aParts){
         const all = [...dp, ...ap];
         const dark = darkness(all.flat());
+        // Build 419: nearness is the tie-break — among equally dark arrangements,
+        // the shortest total walk wins (before the even-split preference).
+        const walk = all.reduce((acc, st) => { const f = st.map(e => _DEAL_FLOOR(e.slot)); return acc + (Math.max(...f) - Math.min(...f)); }, 0);
         const balance = Math.abs(dc - n / 2);
         const key = _dealHash(all.map(st => st.map(e => e.slot).join('+')).join('|'), seed) % 9973;
         // a cap-honoring arrangement always beats a forced one
-        if(!best || (best.forced && !forced) || (best.forced === forced && (dark < best.dark || (dark === best.dark && (balance < best.balance || (balance === best.balance && key < best.key)))))){
-          best = { dark, balance, key, forced, picks: {}, split: { D: dN, A: aN } };
+        if(!best || (best.forced && !forced) || (best.forced === forced && (dark < best.dark || (dark === best.dark && (walk < best.walk || (walk === best.walk && (balance < best.balance || (balance === best.balance && key < best.key)))))))){
+          best = { dark, walk, balance, key, forced, picks: {}, split: { D: dN, A: aN } };
           dN.forEach((nm, i) => best.picks[nm] = dp[i]);
           aN.forEach((nm, i) => best.picks[nm] = ap[i]);
         }
