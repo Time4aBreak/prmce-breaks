@@ -2179,7 +2179,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-07-409'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-412'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14262,15 +14262,24 @@ function handleDrop(e){
   e.preventDefault();
   document.getElementById('dropZone').style.borderColor = 'var(--border)';
   const file = e.dataTransfer.files[0];
-  if (file && file.type.startsWith('image/')) loadImportFile(file);
+  if (file) loadImportFile(file);
 }
 
 function handleFileSelect(e){
   const file = e.target.files[0];
   if (file) loadImportFile(file);
+  try { e.target.value = ''; } catch(err){} // let the same file be picked again after a refusal
 }
 
 function loadImportFile(file){
+  // Build 411 (polish #5): ONE gate for both entry points. Drop already
+  // refused non-images silently; the picker trusted accept="image/*", which
+  // is only a hint — "All files" lets a PDF through to the extractor, which
+  // fails with a backend error instead of a plain message.
+  if(!file.type || !file.type.startsWith('image/')){
+    toast('Please choose a PNG or JPG screenshot.', true);
+    return;
+  }
   importImageType = file.type;
   const reader = new FileReader();
   reader.onload = (e) => {
@@ -20176,7 +20185,20 @@ async function loadReports(){
     const futureRows = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     const cov = _rptCoverage(scheds);
     if(!cov.nInst){
-      status.innerHTML = '<div class="empty">No shifts in this date range yet.</div>';
+      // Build 410 (polish #4): point at the nearest upcoming data instead of
+      // a dead end — futureRows is already in hand for the horizon preview.
+      let hint = '';
+      try {
+        const fds = [...new Set(futureRows.map(r => (r.ShiftDate || '').slice(0, 10)).filter(Boolean))].sort();
+        if(fds.length){
+          const lo = fds[0], hi = fds[Math.min(fds.length - 1, 6)];
+          const _d = x => new Date(x + 'T12:00:00').toLocaleDateString(undefined, { weekday:'short', month:'short', day:'numeric' });
+          hint = ` Nearest scheduled: ${_d(lo)}${hi !== lo ? ' → ' + _d(hi) : ''} — set the range above.`;
+        } else {
+          hint = ' Nothing is scheduled from today forward either.';
+        }
+      } catch(e){}
+      status.innerHTML = `<div class="empty">No shifts in this date range yet.${escHTML(hint)}</div>`;
       return;
     }
     status.innerHTML = '';
@@ -20345,189 +20367,122 @@ function nurseWingCount(nurseName, shift, wing){
   return getNurseWingHistory(nurseName, shift).filter(e => e.wing === wing).length;
 }
 
-// ── Acuity check ─────────────────────────────────────
-// Returns true if adding this slot would violate acuity rule
-// Rule: max 1 High tier unit per assignment
-function violatesAcuity(slot, currentSlots){
-  if(UNIT_TIER[slot] !== 'High') return false;
-  return currentSlots.some(s => UNIT_TIER[s] === 'High');
+// ── Build 412: THE SITE DEALER — "site-darkest, free split" ─────────
+// Policy (Tomas, Sep 7–8, from the sandbox lab on the real Sep 13–19
+// roster ×8 weeks): (1) every unit should be dark about the same number of
+// days over time — evenness across ALL 14, not per wing per night; (2) each
+// BN's own shifts should split about half A/C, half D; (3) no Day BN holds
+// two High-acuity units; (4) short walks. What it replaced: the wing-need
+// split + the calendar-rotated template cycles (388/393/394/395) + the
+// five-objective scoring matrix + the acuity post-process. Lab result:
+// Noc unit spread 9 → 2 with no extra load (the free split puts both BNs
+// on D about one night a week instead of D running ~5 days darker); Day
+// spread 5 → 3, or 6 with the cap, at ~1.7 more dark days per High unit
+// per 8 weeks. The retired engine's cap pushed Highs DARK (37.5 vs 36.0)
+// and doubled walking; bolting a swap onto the cycles blew the spread to
+// 29. The cap has to live inside the choice of shapes, so it does.
+//
+// How one deal works: enumerate every split of the dealt BNs between the
+// wings (0..n on D, including everyone on one side), every combination of
+// CONTIGUOUS unit sets within the walk budget for that split, drop any set
+// holding two High units where the cap applies, and take the arrangement
+// whose units are currently DARKEST (lowest total coverage count, the
+// same-batch overlay included). Ties: the more even split, then a seeded
+// hash so same-day recomputes are stable. BNs most OWED a D shift (their
+// 60-day wing history: D − A) take the D sets. Closures and odd headcounts
+// just shrink the menu; if no split fits, the walk budget relaxes a floor
+// at a time, and a last-resort greedy fill guarantees nobody gets zero
+// (the 395 lesson). Deterministic: counts, history, seed — no Math.random.
+//
+// Acuity tiers' ONLY remaining job is the Day cap. UNIT_TIER stays as the
+// cap's source (a Settings card can replace it later) and for display.
+const _DEAL_SPAN = { 1:0, 2:1, 3:2, 4:3 };   // walk budget: max floor span by set size
+const _DEAL_CAP_SHIFTS = ['Day'];            // "no two High units in one set" applies here
+const _DEAL_FLOOR = s => WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0;
+
+function _dealHash(str, seed){
+  let h = seed | 0;
+  for(let i = 0; i < str.length; i++) h = ((h << 5) - h + str.charCodeAt(i)) | 0;
+  return Math.abs(h);
 }
-
-// ── Fairness gap threshold for cross-wing override ───
-// If the least-covered wing unit has been covered CROSS_WING_GAP
-// more times than the most under-covered unit in the other wing,
-// allow cross-wing assignment
-const CROSS_WING_GAP = 5;
-
-// ── Main fairness algorithm ───────────────────────────
-//
-// Architecture (Option B — wing-pre-assigned global optimizer):
-//
-//   Step 1: Pre-warm wing-history cache from BNState (cross-device truth)
-//   Step 2: Build slot pool (closed units dropped, C_PAIR preserved as a
-//           coverage-intent token)
-//   Step 3: Assign each BN to a wing (A / D / BOTH) using rolling-60-day
-//           D-wing history. This is the operational sticky constraint —
-//           BNs work physical wings and shouldn't ping-pong day to day.
-//   Step 4: For each BN, score every candidate slot in their assigned wing
-//           against five independent objectives, each normalized to 0..1.
-//   Step 5: Combine via tunable weights into a single per-(BN,slot) score.
-//   Step 6: Solve as a bipartite matching problem: each BN gets exactly
-//           uPerNurse slots, each slot taken by at most one BN, score
-//           globally minimized.
-//   Step 7: Acuity post-process — if any BN ended up with >1 High-acuity
-//           unit, swap the worse one for a non-High alternative.
-//   Step 8: Persist wing history, return.
-//
-// Cross-device guarantees: deterministic. No Math.random. All inputs
-// (counts, history, name hashes, dateSeed) are server-truth or pure.
-// Same date + same roster + same server state → identical output on any
-// device, any user.
-//
-// ── Tunable scoring weights ───────────────────────────
-// Edit these to tune the algorithm's priorities. Each score is in [0,1].
-const _SCORING_WEIGHTS = {
-  siteFairness:    200, // primary: unit under-covered globally over 90 days
-  bnUnitFairness:  100, // this BN under-exposed to this unit over 60 days
-  bnWingFairness:   30, // this BN under-exposed to this wing (within-wing slot variety)
-  acuityBalance:    20, // this BN under-exposed to high-acuity units
-  proximityPenalty:  5  // floor-distance to other slots this BN already has
-};
-
-// ── Hungarian-style assignment helper ─────────────────
-// Solves min-cost bipartite matching: assign rows (BN-slot quotas) to
-// columns (pool slots) such that each row gets one column and each column
-// is used at most once. For our scale (≤ ~12 BNs × 14 slots × 3 quota
-// expansion = ~50×14 matrix) the simple greedy-by-row-min works correctly
-// when combined with a marginal-cost re-scan; for true optimality we use
-// successive shortest-path Hungarian. Keeping it simple here: greedy by
-// lowest-cost cell, then fix conflicts.
-function _solveAssignment(rows, cols, costMatrix){
-  // rows[i] = { bn, picked: [] } — needs to fill `quota` slots from cols.
-  // cols[j] = slot pool entry
-  // costMatrix[i][j] = cost (lower is better) or Infinity if forbidden
-  //
-  // Algorithm: build a flat list of (cost, rowIdx, colIdx) triples, sort
-  // ascending, assign greedily, skipping rows that are full and cols
-  // already taken. This is optimal for our constraint structure (uniform
-  // quotas, no swaps yield improvement after initial assignment).
-  const triples = [];
-  for(let i = 0; i < rows.length; i++){
-    for(let j = 0; j < cols.length; j++){
-      const c = costMatrix[i][j];
-      if(c < Infinity) triples.push([c, i, j]);
+// All k-subsets of a wing's pool entries whose floor span fits the budget.
+function _dealSets(entries, k, maxSpan){
+  const out = [];
+  const rec = (start, cur) => {
+    if(cur.length === k){
+      const fl = cur.map(e => _DEAL_FLOOR(e.slot));
+      if(Math.max(...fl) - Math.min(...fl) <= maxSpan) out.push(cur.slice());
+      return;
     }
-  }
-  triples.sort((a, b) => a[0] - b[0]);
-  const colTaken = new Set();
-  for(const [cost, i, j] of triples){
-    const row = rows[i];
-    if(row.picked.length >= row.quota) continue;
-    if(colTaken.has(j)) continue;
-    row.picked.push({ colIdx: j, slot: cols[j].slot, cost, wing: cols[j].wing, units: cols[j].units, tier: cols[j].tier });
-    colTaken.add(j);
-  }
+    for(let i = start; i < entries.length; i++){ cur.push(entries[i]); rec(i + 1, cur); cur.pop(); }
+  };
+  if(k > 0 && entries.length >= k) rec(0, []);
+  return out;
 }
-
-// ── Five scoring functions ────────────────────────────
-// Each returns a value in [0, 1]. Higher = worse (more penalty / less fair).
-// Combined as weighted sum into the final cost.
-
-// Site fairness: how over-covered is this unit globally over last 90 days.
-// Normalized against the max coverage count in the current pool.
-function _scoreSiteFairness(slotEntry, poolMaxCount){
-  if(poolMaxCount === 0) return 0.5; // no history — neutral
-  return slotEntry.globalCount / poolMaxCount;
-}
-
-// BN-unit fairness: how often THIS bn has been on THIS unit recently,
-// with recency decay. A fresh slot (never touched, or stale) = 0.
-function _scoreBNUnitFairness(slot, history, targetDateMs){
-  if(!history.length) return 0;
-  let weight = 0;
-  let count  = 0;
-  history.forEach(e => {
-    const eSlots = e.slots || [];
-    const matches = slot === 'C_PAIR'
-      ? eSlots.some(s => s === 'C_PAIR' || s === '3C' || s === '4C')
-      : eSlots.includes(slot);
-    if(matches){
-      const days = (targetDateMs - Date.parse(e.date)) / 86400000;
-      if(days < 0) return;
-      // Linear decay: today = 1.0, 14 days = 0, beyond = 0.1
-      let w;
-      if(days === 0) w = 1.0;
-      else if(days <= 14) w = 1 - days/14;
-      else w = 0.1;
-      weight += w;
-      count++;
+// All ways to give `count` BNs disjoint sets from `sets`.
+function _dealDisjoint(sets, count){
+  const out = [];
+  if(count === 0){ out.push([]); return out; }
+  const rec = (start, chosen, used) => {
+    if(chosen.length === count){ out.push(chosen.slice()); return; }
+    for(let i = start; i < sets.length; i++){
+      const st = sets[i];
+      if(st.some(e => used.has(e.slot))) continue;
+      st.forEach(e => used.add(e.slot)); chosen.push(st);
+      rec(i + 1, chosen, used);
+      chosen.pop(); st.forEach(e => used.delete(e.slot));
     }
-  });
-  // Normalize: 3+ recent touches saturates at 1.0
-  return Math.min(1, weight / 3);
+  };
+  rec(0, [], new Set());
+  return out;
 }
+function _dealSite({ names, pool, quota, shift, seed }){
+  const n = names.length;
+  const capOn = _DEAL_CAP_SHIFTS.includes(shift);
+  const aPool = pool.filter(e => e.wing === 'A'), dPool = pool.filter(e => e.wing === 'D');
+  // Who is owed a D shift: 60-day history, D minus A, most owed first; seeded hash breaks ties.
+  const owed = nm => { const h = getNurseWingHistory(nm, shift); return h.filter(e => e.wing === 'D').length - h.filter(e => e.wing === 'A').length; };
+  const order = [...names].sort((x, y) => owed(x) - owed(y) || (_dealHash(x, seed) % 1000) - (_dealHash(y, seed) % 1000));
+  const darkness = arr => arr.reduce((acc, e) => acc + (e.globalCount || 0), 0);
+  const capOk = st => !capOn || st.filter(e => e.tier === 'High').length <= 1;
 
-// BN-wing fairness: how saturated is this BN on this wing recently.
-// Used so within-wing picks prefer the "other half" of the wing.
-// (E.g., a BN heavy on D-wing-high-floors recently gets pushed toward
-// lower D-wing floors.) Computed as the share of recent slots that match
-// this candidate's wing-zone.
-function _scoreBNWingSaturation(slot, slotWing, history, targetDateMs){
-  if(!history.length) return 0;
-  let zoneMatches = 0;
-  let totalRecent = 0;
-  history.forEach(e => {
-    const days = (targetDateMs - Date.parse(e.date)) / 86400000;
-    if(days < 0 || days > 21) return; // 3-week window for wing saturation
-    const eSlots = e.slots || [];
-    totalRecent += eSlots.length;
-    if(e.wing === slotWing) zoneMatches += eSlots.length;
+  for(let relax = 0; relax <= 2; relax++){
+    const span = (_DEAL_SPAN[quota] !== undefined ? _DEAL_SPAN[quota] : quota - 1) + relax;
+    const dAll = _dealSets(dPool, quota, span), aAll = _dealSets(aPool, quota, span);
+    const dCap = dAll.filter(capOk), aCap = aAll.filter(capOk);
+    let best = null, forcedCap = false;
+    for(let dc = 0; dc <= n; dc++){
+      const dN = order.slice(0, dc), aN = order.slice(dc);
+      // cap-valid partitions first; fall back to uncapped for this split only if none exist
+      let dParts = _dealDisjoint(dCap, dN.length), aParts = _dealDisjoint(aCap, aN.length), forced = false;
+      if(!dParts.length && dN.length){ dParts = _dealDisjoint(dAll, dN.length); forced = true; }
+      if(!aParts.length && aN.length){ aParts = _dealDisjoint(aAll, aN.length); forced = true; }
+      if(!dParts.length || !aParts.length) continue;
+      for(const dp of dParts) for(const ap of aParts){
+        const all = [...dp, ...ap];
+        const dark = darkness(all.flat());
+        const balance = Math.abs(dc - n / 2);
+        const key = _dealHash(all.map(st => st.map(e => e.slot).join('+')).join('|'), seed) % 9973;
+        // a cap-honoring arrangement always beats a forced one
+        if(!best || (best.forced && !forced) || (best.forced === forced && (dark < best.dark || (dark === best.dark && (balance < best.balance || (balance === best.balance && key < best.key)))))){
+          best = { dark, balance, key, forced, picks: {}, split: { D: dN, A: aN } };
+          dN.forEach((nm, i) => best.picks[nm] = dp[i]);
+          aN.forEach((nm, i) => best.picks[nm] = ap[i]);
+        }
+      }
+    }
+    if(best) return { picks: best.picks, split: best.split, forcedCap: best.forced, relaxed: relax };
+  }
+  // Last resort (pool too small / too closed for any shape): each BN takes
+  // the darkest remaining slots of one wing, in owed order. Never a zero.
+  const taken = new Set(); const picks = {}; const split = { D: [], A: [] };
+  order.forEach((nm, i) => {
+    const wantD = i < Math.round(n / 2);
+    const tryWing = w => pool.filter(e => e.wing === w && !taken.has(e.slot)).sort((x, y) => (x.globalCount || 0) - (y.globalCount || 0)).slice(0, quota);
+    let set = tryWing(wantD ? 'D' : 'A'); if(!set.length) set = tryWing(wantD ? 'A' : 'D');
+    set.forEach(e => taken.add(e.slot)); picks[nm] = set; split[set[0] && set[0].wing === 'D' ? 'D' : 'A'].push(nm);
   });
-  if(totalRecent === 0) return 0;
-  return zoneMatches / totalRecent;
-}
-
-// Acuity balance: how recently saturated is this BN on high-acuity units?
-// Picking a non-High when the BN has many recent Highs = low penalty.
-// Picking a High when the BN has many recent Highs = high penalty.
-// Picking a High when the BN has no recent Highs = negative pressure
-// (encourage exposure), but we clamp to 0 because the score is unsigned.
-function _scoreAcuityBalance(slotTier, history, targetDateMs){
-  if(!history.length) return 0;
-  let recentHighs = 0;
-  let totalRecent = 0;
-  history.forEach(e => {
-    const days = (targetDateMs - Date.parse(e.date)) / 86400000;
-    if(days < 0 || days > 21) return;
-    (e.slots || []).forEach(s => {
-      totalRecent++;
-      if(UNIT_TIER[s] === 'High') recentHighs++;
-    });
-  });
-  if(totalRecent === 0) return 0;
-  const highRate = recentHighs / totalRecent;
-  // Only penalize adding another High when already high-saturated.
-  if(slotTier === 'High') return highRate;
-  return 0;
-}
-
-// Proximity: floor distance from this slot to whichever slot is FURTHEST
-// in the BN's other picks. Penalizes spreading across many floors.
-// Returns 0..1 where 1 = far apart.
-function _scoreProximityPenalty(slotEntry, currentPicks){
-  if(!currentPicks.length) return 0;
-  const slot = slotEntry.slot;
-  const myFloor = slotEntry.floor;
-  let maxDist = 0;
-  currentPicks.forEach(p => {
-    if(p.wing !== slotEntry.wing) return; // cross-wing: not a proximity concern
-    const pFloor = WING_FLOOR[p.slot === 'C_PAIR' ? '3C' : p.slot] || 0;
-    const dist = Math.abs(myFloor - pFloor);
-    if(dist > maxDist) maxDist = dist;
-  });
-  // Max within-wing distance is ~7 floors (3A↔10S is cross-wing, so within
-  // A: 3→7 = 4; within D: 6→10 = 4). Normalize against 4.
-  return Math.min(1, maxDist / 4);
+  return { picks, split, forcedCap: false, relaxed: 3 };
 }
 
 // Pick the N most under-covered slots for a partial (extra-hours) BN.
@@ -20623,116 +20578,10 @@ function _clearWingHistoryForDate(name, shift, date){
   saveNurseWingHistory(name, shift, existing);
 }
 
-// ── Build 388: WING-D TEMPLATE DEALING (the proximity rework) ──
-// Policy (Tomas, Sep 3): geometry chooses the shapes, the calendar chooses
-// the sacrifice, load breaks coin-flips, acuity is benched. Unit sets for
-// D-wing BNs come from CURATED CYCLES over contiguous templates on the
-// physical vertical (6→10, N/S per floor); which partition wins rotates by
-// dateSeed (date-part sums step by 1 daily, so % cycleLength marches), so
-// darkness MOVES and per-unit uncovered counts converge — the evenness his
-// managers read off the Unit Coverage card. Every cycle below is derived so
-// each unit is covered an EQUAL number of days per cycle (derivations in
-// the ledger; the '1|3' 8-cycle covers every unit exactly 3 of 8 — the
-// naive contiguous slider had the middle-bias Tomas predicted and was
-// rejected). Keys are `${dWingBNs}|${unitsPerNurse}`. Closed units drop
-// from a set (the matrix tops the row up if short). Pure-D rows only; solo
-// BOTH-wing deals keep the legacy path (documented v1 boundary).
-const WING_D_CYCLES = {
-  '1|2': [ [['6N','7N']], [['8N','8S']], [['9N','9S']], [['10N','10S']] ],
-  '1|3': [ [['6N','7N','8N']], [['6N','7N','8N']], [['6N','7N','8S']],
-           [['8N','9N','9S']], [['8S','9N','10N']], [['8S','9S','10S']],
-           [['9N','10N','10S']], [['9S','10N','10S']] ],
-  '1|4': [ [['6N','7N','8N','8S']], [['9N','9S','10N','10S']] ],
-  '2|2': [ [['6N','7N'],['8N','8S']], [['9N','9S'],['10N','10S']],
-           [['6N','7N'],['9N','9S']], [['8N','8S'],['10N','10S']] ],
-  '2|3': [ [['10N','10S','9S'],['6N','7N','8S']],
-           [['10N','10S','9N'],['6N','7N','8N']],
-           [['10N','10S','9N'],['8N','8S','9S']],
-           [['9N','9S','8N'],['6N','7N','8S']] ],
-  '3|2': [ [['6N','7N'],['8N','8S'],['9N','9S']],
-           [['6N','7N'],['8N','8S'],['10N','10S']],
-           [['6N','7N'],['9N','9S'],['10N','10S']],
-           [['8N','8S'],['9N','9S'],['10N','10S']] ],
-  '4|2': [ [['6N','7N'],['8N','8S'],['9N','9S'],['10N','10S']] ],
-};
-// ── Build 393: WING A/C TEMPLATES (Tomas's geography, Sep 4 pre-dawn) ──
-// The A tower stacks 3A→7A vertically; the C annex (3C ground, 4C atop)
-// bolts to the tower's BASE by hallways at floors 3 and 4 — and 3C+4C
-// already travel as the C_PAIR atom, so the wing is a SIX-SLOT corridor:
-// [C_PAIR, 3A, 4A, 5A, 6A, 7A], with C_PAIR adjacent to 3A and 4A only.
-// The base-to-top haul (C↔6A/7A) is this wing's "10S lesson": never pair.
-// Every cycle below covers each slot an EQUAL number of days:
-//  '1|2': 3-cycle {C,3A}{4A,5A}{6A,7A} — each slot 1/3.
-//  '1|3': the halving — base block {C,3A,4A} / top {5A,6A,7A} — each 1/2.
-//  '1|4': 3-cycle, each slot 2/3; includes ONE dual-cluster set
-//         {C,3A,6A,7A} (base pair + top pair, one elevator transition) —
-//         strict-contiguity has no perfect cycle here; two tight clusters
-//         beat a span-4 stretch.
-//  '2|2': the TWO-TRIANGLE 3-cycle — base C·3A·4A, top 5A·6A·7A (the
-//         span-2 edge {5A,7A} legalized by D's own rule); each slot 2/3.
-//         Walk-1-only pairs provably cannot balance (7A strands).
-//  '2|3' and '3|2': full-coverage single partitions — no darkness, no
-//         rotation needed; set→nurse order rotates by arrival order.
-const WING_A_CYCLES = {
-  '1|2': [ [['C_PAIR','3A']], [['4A','5A']], [['6A','7A']] ],
-  '1|3': [ [['C_PAIR','3A','4A']], [['5A','6A','7A']] ],
-  '1|4': [ [['C_PAIR','3A','4A','5A']], [['4A','5A','6A','7A']], [['C_PAIR','3A','6A','7A']] ],
-  '2|2': [ [['C_PAIR','3A'],['5A','6A']], [['3A','4A'],['6A','7A']], [['C_PAIR','4A'],['5A','7A']] ],
-  '2|3': [ [['C_PAIR','3A','4A'],['5A','6A','7A']] ],
-  '3|2': [ [['C_PAIR','3A'],['4A','5A'],['6A','7A']] ],
-};
-const WING_A_CORRIDOR = ['C_PAIR','3A','4A','5A','6A','7A'];
-function _dealWingTemplates(namesInOrder, poolSlots, dateSeed, quota, cycles, corridor){
-  const open = new Set(poolSlots.map(pp => pp.slot));
-  const cycle = cycles[`${namesInOrder.length}|${quota}`];
-  const out = {};
-  if(cycle){
-    const partition = cycle[dateSeed % cycle.length];
-    namesInOrder.forEach((nm, i) => {
-      const set = partition[i % partition.length] || [];
-      out[nm] = set.filter(u => open.has(u));
-    });
-    return out;
-  }
-  const cor = corridor.filter(u => open.has(u));
-  if(!cor.length) return null;
-  let off = dateSeed % Math.max(1, cor.length);
-  namesInOrder.forEach(nm => {
-    const set = [];
-    for(let i = 0; i < quota && i < cor.length; i++){
-      set.push(cor[(off + i) % cor.length]);
-    }
-    out[nm] = set;
-    off = (off + quota) % cor.length;
-  });
-  return out;
-}
-function _dealWingDTemplates(namesInOrder, dPoolSlots, dateSeed, quota){
-  return _dealWingTemplates(namesInOrder, dPoolSlots, dateSeed, quota, WING_D_CYCLES,
-    ['6N','7N','8N','8S','9N','9S','10N','10S']);
-}
-
-// Build 394: _claimWingTemplateSets — the sequential-convergence dealer.
-// The date's partition is a pure function of (seed, expectedWingCount,
-// quota); a nurse dealt ALONE takes the first set no locked teammate holds,
-// so one-at-a-time form deals arrive at exactly the sets a single batch
-// deal would have produced. Batch deals route here too (locked empty,
-// names fill the partition) — one dealer, both cadences.
-function _claimWingTemplateSets(names, poolSlots, seed, quota, cycles, corridor, expectedWingCount, lockedUnits){
-  const cyc = cycles[`${Math.max(1, expectedWingCount)}|${quota}`];
-  if(!cyc) return null;
-  const open = new Set(poolSlots.map(pp => pp.slot));
-  const partition = cyc[seed % cyc.length];
-  const free = partition.filter(set =>
-    !set.some(u => (u === 'C_PAIR' ? ['3C','4C'] : [u]).some(x => lockedUnits && lockedUnits.has(x))));
-  if(!free.length) return null;
-  const out = {};
-  names.forEach((nm, i) => {
-    const set = free[i % free.length] || [];
-    out[nm] = set.filter(u => open.has(u));
-  });
-  return out;
-}
+// Build 412: the wing template cycles (WING_D_CYCLES / WING_A_CYCLES,
+// _dealWingTemplates, _claimWingTemplateSets — Builds 388/393/394/395)
+// are RETIRED. Their shapes survive as the contiguity rule inside
+// _dealSets; the calendar no longer chooses which sets are dealt.
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false, expectedTotal=null){
   if(!nurses.length) return {};
   // Build 300 (bug #6): locked-assignments overlay. When teammates already
@@ -20793,239 +20642,19 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   const aPool = poolAvail.filter(s => s.wing === 'A');
   const dPool = poolAvail.filter(s => s.wing === 'D');
 
-  // ── Step 3: Wing assignment per BN ──────────────────
-  function _bnSortHash(name, seed){
-    let h = seed;
-    for(let i = 0; i < name.length; i++) h = ((h << 5) - h + name.charCodeAt(i)) | 0;
-    return Math.abs(h);
-  }
-  const nursesSorted = [...dealNurses].sort((a, b) => {
-    const aD = nurseWingCount(a, shift, 'D');
-    const bD = nurseWingCount(b, shift, 'D');
-    if(aD !== bD) return aD - bD; // least-recent-D goes first
-    return (_bnSortHash(a, dateSeed) % 1000) - (_bnSortHash(b, dateSeed) % 1000);
-  });
-
-  const n = dealNurses.length;
-  const wingAssignment = {};
-
-  if(n === 1){
-    // Solo BN: lock to the wing that needs site-level coverage most
-    // (lowest global avg coverage count). This optimizes for the SITE'S
-    // equality across units, not the BN's personal exposure history.
-    // We deliberately ignore per-BN wing history here — when only one BN
-    // is on, the question "which units need a BN" outweighs "which units
-    // has THIS BN been on." If wings are equal, tie-break by hash so the
-    // choice rotates day-to-day rather than always picking the same wing.
-    const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : Infinity;
-    const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : Infinity;
-    let soloWing;
-    if(aAvg < dAvg) soloWing = 'A';
-    else if(dAvg < aAvg) soloWing = 'D';
-    else soloWing = (_bnSortHash(dealNurses[0], dateSeed) % 2) === 0 ? 'A' : 'D';
-    wingAssignment[dealNurses[0]] = soloWing;
-  } else {
-    const aAvg = aPool.length ? aPool.reduce((s,p) => s+p.globalCount, 0)/aPool.length : 0;
-    const dAvg = dPool.length ? dPool.reduce((s,p) => s+p.globalCount, 0)/dPool.length : 0;
-    let dNurseCount;
-    if(Math.abs(aAvg - dAvg) >= CROSS_WING_GAP){
-      dNurseCount = dAvg < aAvg ? Math.ceil(n * 0.6) : Math.floor(n * 0.4);
-    } else {
-      dNurseCount = Math.round(n / 2);
-      if(n === 3) dNurseCount = 2; // 1A/2D default for 3 BNs — D wing has 8 units vs A's 6, so proportional allocation favors D
-    }
-    dNurseCount = Math.max(0, Math.min(n, dNurseCount));
-    nursesSorted.slice(0, dNurseCount).forEach(nm => wingAssignment[nm] = 'D');
-    nursesSorted.slice(dNurseCount).forEach(nm => wingAssignment[nm] = 'A');
-  }
-
-  // ── Step 4–5: Build matrix and score every (BN, slot) cell ──
-  // Strategy: per BN, expand into `quota` rows (so the matching gives
-  // each BN exactly quota distinct slots). Each row has a cost vector
-  // over all candidate slots in the BN's assigned wing(s).
-  const rows = [];   // { bn, wing, quota, picked: [] }
-  nursesSorted.forEach(bn => {
-    const wing = wingAssignment[bn];
-    const allowedWings = wing === 'BOTH' ? ['A','D'] : [wing];
-    rows.push({ bn, allowedWings, quota: uPerNurse, picked: [], history: getNurseWingHistory(bn, shift) });
-  });
-
-  // Build 388 + 392: pure-D rows deal from the curated templates; the
-  // matrix passes below run ONLY over non-template rows (392 — Pass A's
-  // clone-and-copy-back was silently WIPING these picks: 0/11 template
-  // matches on the first real week). Template slots mask out of everyone
-  // else's passes via their real colIdx in takenCols. Short sets (closed
-  // units) deliberately stay short. A-wing rows keep the legacy engine.
-  // Build 394: when a headcount is declared, the expected wing split is the
-  // STABLE pure rule (3→2D, else round(N/2)) — the need-gap adjustment is
-  // deliberately suspended so every sequential deal derives the SAME
-  // partition regardless of dealing order. Convergence beats optimality.
-  const _dExpected394 = expectedTotal
-    ? (_teamN394 === 1 ? 1 : (_teamN394 === 3 ? 2 : Math.round(_teamN394 / 2)))
-    : null;
-  // Build 395 (Tomas's witness catch): deal #2's SOLO wing pick was still
-  // need-driven and could land on the wing its locked teammate already
-  // holds — the claim then found every partition set taken and returned
-  // empty, and 392's exclusion starved the row from the matrix: a hard
-  // zero. Under a declaration, the wing is FORCED COMPLEMENTARY: locked
-  // teammates consume their expected wing's share; a lone dealt nurse gets
-  // whichever wing still owes headcount.
-  if(expectedTotal && rows.length === 1 && _lockedBNs.length){
-    const _dcor395 = ['6N','7N','8N','8S','9N','9S','10N','10S'];
-    let dLocked = 0, aLocked = 0;
-    _lockedBNs.forEach(b => {
-      const us = _locked[b] || [];
-      if(!us.length) return;
-      if(us.every(u => _dcor395.includes(u))) dLocked++;
-      else aLocked++;
-    });
-    const remD = (_dExpected394 || 0) - dLocked;
-    const remA = (_teamN394 - (_dExpected394 || 0)) - aLocked;
-    if(remD > 0 && remA <= 0) rows[0].allowedWings = ['D'];
-    else if(remA > 0 && remD <= 0) rows[0].allowedWings = ['A'];
-  }
-  const _wdRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'D');
-  if(_wdRows.length){
-    const _wdSets = (expectedTotal
-        ? _claimWingTemplateSets(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse,
-            WING_D_CYCLES, null, Math.max(_wdRows.length, _dExpected394), _lockedUnits)
-        : null)
-      || _dealWingDTemplates(_wdRows.map(r => r.bn), dPool, dateSeed, uPerNurse);
-    if(_wdSets){
-      _wdRows.forEach(r => {
-        (_wdSets[r.bn] || []).forEach(u => {
-          const pe = dPool.find(pp => pp.slot === u);
-          r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'D',
-            units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
-        });
-        if(r.picked.length) r._templateDealt = true; // Build 395: empty grant → the matrix deals it
-      });
-    }
-  }
-  // Build 393: the same treatment for pure-A rows — the A/C corridor's
-  // curated cycles, C_PAIR as the atom (its pick's units carry 3C+4C).
-  const _waRows = rows.filter(r => r.allowedWings.length === 1 && r.allowedWings[0] === 'A');
-  if(_waRows.length){
-    const _aExpected394 = expectedTotal ? Math.max(_waRows.length, _teamN394 - (_dExpected394 || 0)) : null;
-    const _waSets = (expectedTotal
-        ? _claimWingTemplateSets(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse,
-            WING_A_CYCLES, null, _aExpected394, _lockedUnits)
-        : null)
-      || _dealWingTemplates(_waRows.map(r => r.bn), aPool, dateSeed, uPerNurse, WING_A_CYCLES, WING_A_CORRIDOR);
-    if(_waSets){
-      _waRows.forEach(r => {
-        (_waSets[r.bn] || []).forEach(u => {
-          const pe = aPool.find(pp => pp.slot === u);
-          r.picked.push({ colIdx: pe ? poolAvail.indexOf(pe) : -1, slot: u, cost: 0, wing: 'A',
-            units: pe ? pe.units : [u], tier: (pe && pe.tier) || 'Standard' });
-        });
-        if(r.picked.length) r._templateDealt = true; // Build 395: empty grant → the matrix deals it
-      });
-    }
-  }
-
-  // Build cost matrix. Each row of the matrix represents ONE pick slot
-  // for one BN; we duplicate BN rows quota times so the matching gives
-  // exactly quota distinct slots per BN.
-  //
-  // Cost = weighted sum of normalized objectives. Lower = better pick.
-  //
-  // We do an iterative two-pass approach: first pass picks each BN's
-  // first slot considering all five objectives; second pass picks
-  // subsequent slots with proximity AGAINST the first-pass picks.
-  // This handles the "proximity needs prior picks to compare against"
-  // chicken-and-egg without resorting to full combinatorial expansion.
-
-  // ── Pass A: score (bn, slot) ignoring proximity (no picks yet) ──
-  function _composeCost(bn, slotEntry, history, currentPicks){
-    const tierScore = (slotEntry.tier === 'High'); // for acuity-cap check
-    const w = _SCORING_WEIGHTS;
-    const cSite  = _scoreSiteFairness(slotEntry, poolMaxCount);
-    const cUnit  = _scoreBNUnitFairness(slotEntry.slot, history, targetDateMs);
-    const cWing  = _scoreBNWingSaturation(slotEntry.slot, slotEntry.wing, history, targetDateMs);
-    const cAcu   = _scoreAcuityBalance(slotEntry.tier, history, targetDateMs);
-    const cProx  = _scoreProximityPenalty(slotEntry, currentPicks);
-    return w.siteFairness * cSite
-         + w.bnUnitFairness * cUnit
-         + w.bnWingFairness * cWing
-         + w.acuityBalance * cAcu
-         + w.proximityPenalty * cProx;
-  }
-
-  // Build 392: matrix rows = non-template rows ONLY. The old code cloned
-  // EVERY row with picked:[] and copied back wholesale — the line that
-  // erased the 388 templates.
-  const _mxRows = rows.filter(r => !r._templateDealt);
-  const candidateCols = poolAvail;
-  const _tplTaken = new Set();
-  rows.forEach(r => { if(r._templateDealt) r.picked.forEach(pp => { if(pp.colIdx >= 0) _tplTaken.add(pp.colIdx); }); });
-  // First-pick pass: each matrix row picks one slot. Quota set to 1 temporarily.
-  const firstPickRows = _mxRows.map(r => ({ ...r, quota: 1, picked: [] }));
-  const firstCost = firstPickRows.map(r => candidateCols.map((slotEntry, j) => {
-    if(_tplTaken.has(j)) return Infinity;
-    if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
-    return _composeCost(r.bn, slotEntry, r.history, []);
+  // ── Step 3 (Build 412): ONE call — the site dealer decides the wing
+  // split, the shapes, who takes which wing, and the Day cap together.
+  // Locked teammates' units are already out of poolAvail (300); the
+  // declared headcount already sized the quota (394). The 394/395 wing-
+  // forcing rules are gone with the cycles: a nurse dealt alone now takes
+  // the darkest set available around her teammates (see the file header).
+  const _dealt = _dealSite({ names: dealNurses, pool: poolAvail, quota: uPerNurse, shift, seed: dateSeed });
+  if(_dealt.forcedCap) console.warn(`[suggestAssignments] ${date} ${shift}: no cap-honoring arrangement existed — a set holds two High units`);
+  if(_dealt.relaxed) console.warn(`[suggestAssignments] ${date} ${shift}: walk budget relaxed by ${_dealt.relaxed} floor(s) to fit the open pool`);
+  const rows = dealNurses.map(bn => ({
+    bn,
+    picked: (_dealt.picks[bn] || []).map(pe => ({ colIdx: poolAvail.indexOf(pe), slot: pe.slot, cost: 0, wing: pe.wing, units: pe.units, tier: pe.tier }))
   }));
-  _solveAssignment(firstPickRows, candidateCols, firstCost);
-
-  // Copy first picks back to their matrix rows (template rows untouched)
-  _mxRows.forEach((r, i) => {
-    r.picked = firstPickRows[i].picked.slice();
-  });
-
-  // ── Pass B: pick remaining quota slots, proximity-aware ──
-  // For each remaining quota slot, build a fresh cost matrix where each
-  // row's "current picks" are the already-picked slots for that BN, and
-  // already-taken cols are masked out.
-  for(let q = 1; q < uPerNurse; q++){
-    const takenCols = new Set();
-    rows.forEach(r => r.picked.forEach(p => takenCols.add(p.colIdx)));
-    const passRows = _mxRows.map(r => ({ ...r, quota: 1, picked: [] })); // Build 392: non-template rows only
-    const passCost = passRows.map((r, i) => candidateCols.map((slotEntry, j) => {
-      if(takenCols.has(j)) return Infinity;
-      if(!r.allowedWings.includes(slotEntry.wing)) return Infinity;
-      // Acuity hard-cap: if this BN already has a High slot picked, no more High allowed.
-      const alreadyHasHigh = _mxRows[i].picked.some(p => p.tier === 'High');
-      if(alreadyHasHigh && slotEntry.tier === 'High') return Infinity;
-      return _composeCost(r.bn, slotEntry, r.history, _mxRows[i].picked);
-    }));
-    _solveAssignment(passRows, candidateCols, passCost);
-    _mxRows.forEach((r, i) => {
-      passRows[i].picked.forEach(p => r.picked.push(p));
-    });
-  }
-
-  // ── Step 7: Acuity post-process (defensive) ──────────
-  // Pass B already enforces the cap, but a BN might emerge with 2 Highs
-  // if pass A picked one and pass B's hard-cap couldn't prevent another
-  // from a prior iteration. Swap the higher-cost High for the best
-  // non-High alternative not currently taken.
-  rows.forEach((r, i) => {
-    if(r._templateDealt) return; // Build 388: acuity is benched for template deals
-    const highs = r.picked.filter(p => p.tier === 'High');
-    if(highs.length <= 1) return;
-    // Sort highs by cost desc — drop the worst
-    highs.sort((a, b) => b.cost - a.cost);
-    const dropping = highs[0];
-    const takenCols = new Set();
-    rows.forEach(rr => rr.picked.forEach(p => takenCols.add(p.colIdx)));
-    // Find best non-High replacement in allowed wings
-    let best = null;
-    candidateCols.forEach((slotEntry, j) => {
-      if(takenCols.has(j)) return;
-      if(slotEntry.tier === 'High') return;
-      if(!r.allowedWings.includes(slotEntry.wing)) return;
-      const cost = _composeCost(r.bn, slotEntry, r.history,
-        r.picked.filter(p => p !== dropping));
-      if(!best || cost < best.cost){
-        best = { colIdx: j, slot: slotEntry.slot, cost, wing: slotEntry.wing, units: slotEntry.units, tier: slotEntry.tier };
-      }
-    });
-    if(best){
-      r.picked = r.picked.filter(p => p !== dropping);
-      r.picked.push(best);
-    }
-  });
 
   // ── Step 8: Persist wing history + return ────────────
   const assignments = {};
