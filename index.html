@@ -2204,7 +2204,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-423'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-424'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13792,13 +13792,16 @@ async function warmShiftDefaults(){
   if(typeof renderImportedNamesList === 'function') renderImportedNamesList();
 }
 async function setShiftDefault(fullName, shift){
-  await syncedLS.refresh('bnShiftDefaults');
-  const saved = syncedLS.get('bnShiftDefaults') || {};
-  if(shift === 'Noc') saved[fullName] = 'Noc'; else delete saved[fullName];
-  BN_SHIFT_DEFAULTS = { ...saved };
+  // Build 424: NO refresh-before-merge here — a second tap refreshed from the
+  // server while the first tap's write was still in flight and merged the
+  // pre-tap map back in, undoing it (Tomas: "switching one name switches
+  // others"). The in-memory map is the session's truth; each tap writes the
+  // whole map and waits for it. Cross-device stays the unconditional pull on load.
+  if(shift === 'Noc') BN_SHIFT_DEFAULTS[fullName] = 'Noc'; else delete BN_SHIFT_DEFAULTS[fullName];
+  const saved = { ...BN_SHIFT_DEFAULTS };
   localStorage.setItem('bnShiftDefaults', JSON.stringify(saved));
-  setState('bnShiftDefaults', saved).catch(() => {});
   renderImportedNamesList();
+  try { await setState('bnShiftDefaults', saved); } catch(e){ toast('Default shift didn\'t sync — it will retry on the next change', true); }
 }
 async function warmPreferredNames(){
   // Build 158 (2026-05-30): cross-device propagation fix. Previously this used
