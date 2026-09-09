@@ -662,6 +662,34 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
   <!-- Admin panel (hidden until unlocked) -->
   <div id="adminPanel" style="display:none">
 
+    <!-- Weekly Schedule (Build 423): tap-to-enter input beside the extractor.
+         Produces the same batch the extractor does; cards, Suggest All and Save All
+         are unchanged downstream. -->
+    <div class="card" id="weeklyGridCard">
+      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleWeeklyGrid()">
+        <div class="card-label" style="margin:0">🗓 Weekly Schedule</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span id="wgCount" style="font-size:.75rem;color:var(--muted)"></span>
+          <span id="wgChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
+        </div>
+      </div>
+      <div id="wgBody" style="display:none;margin-top:12px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+          <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(-1)" title="Previous week">‹</button>
+          <input type="date" id="wgWeekPick" onchange="wgSetWeek(this.value)" style="font-size:.9rem;padding:6px 8px;width:auto"/>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(1)" title="Next week">›</button>
+          <span id="wgWeekLabel" style="font-weight:700;font-size:.95rem"></span>
+          <span style="flex:1"></span>
+          <button type="button" class="btn btn-ghost btn-sm" onclick="wgClearWeek()">✕ Clear week</button>
+        </div>
+        <div id="wgGrid" style="overflow-x:auto"></div>
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
+          <span style="font-size:.76rem;color:var(--muted);line-height:1.4">Tap a cell for the nurse's default shift · tap it again to change the shift, make it partial, or clear it. Defaults live on the Break Nurses card in Settings.</span>
+          <button type="button" id="wgReviewBtn" class="btn btn-primary" onclick="wgReview()" disabled>✨ Suggest &amp; Review</button>
+        </div>
+      </div>
+    </div>
+
     <!-- Import Schedule -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
@@ -698,7 +726,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <div id="importResults" style="display:none;margin-top:14px">
         <div id="importReplacementNotice" style="display:none;background:var(--day-lt);border:1.5px solid var(--day);border-radius:8px;padding:10px 14px;font-size:.82rem;color:var(--day);font-weight:500;margin-bottom:10px;line-height:1.5"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer" onclick="toggleExtractedRows()">
-          <div style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Extracted — Review &amp; Assign Units</div>
+          <div id="importResultsTitle" style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Extracted — Review &amp; Assign Units</div>
           <div style="display:flex;align-items:center;gap:8px">
             <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();resuggestAll()" style="font-size:.72rem">↺ Re-suggest All</button>
             <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Assignments</button>
@@ -893,14 +921,14 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <!-- Break Nurses (from imported schedule) — collapsible, bottom of admin -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleBNList()">
-        <div class="card-label" style="margin:0">Break Nurses (from imported schedule)</div>
+        <div class="card-label" style="margin:0">Break Nurses</div>
         <div style="display:flex;align-items:center;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="event.stopPropagation();toggleManualName()">+ Add manually</button>
           <span id="bnListChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
         </div>
       </div>
       <div id="bnListBody" style="display:none;margin-top:10px">
-        <div id="importedNamesList"><div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div></div>
+        <div id="importedNamesList"><div class="empty" style="padding:10px 0">No break nurses yet — use + Add manually, or import a schedule.</div></div>
         <div id="manualNameRow" style="display:none;margin-top:10px">
           <div style="display:flex;flex-direction:column;gap:6px">
             <div class="row" style="gap:6px">
@@ -2176,7 +2204,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-421'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-423'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5487,6 +5515,7 @@ function init(){
 
   // Warm user-saved preferred names
   warmPreferredNames().catch(()=>{});
+  warmShiftDefaults().catch(()=>{}); // Build 422
 
   // Warm per-unit open/closed status (chunk 1: data layer only — no
   // render or rotation wiring yet, so this is a no-op visually).
@@ -13624,6 +13653,7 @@ async function clearSimData(){
       // Passwords included — the server-side BNState clear resets them to
       // defaults regardless, so local copies must follow.
       k === 'rampConfig' || k === 'coverageConfig' || k === 'bnImportGateLog' ||
+      k === 'bnShiftDefaults' || // Build 422
       k === 'portalPw_admin' || k === 'portalPw_bn' || k === 'bnAdminPw' || k === 'bnBnPw'
     ).forEach(k => localStorage.removeItem(k));
   };
@@ -13747,6 +13777,29 @@ try {
   if(saved && typeof saved === 'object') Object.assign(PREFERRED_NAMES, saved);
 } catch {}
 
+// Build 422 (Tomas, the grid's roster half): per-nurse DEFAULT SHIFT — what a
+// tap on the Weekly Schedule grid gives that nurse. Same persistence shape as
+// preferred names: synced map 'bnShiftDefaults', unconditional pull on load,
+// refresh-before-merge on write. Absent = Day.
+let BN_SHIFT_DEFAULTS = {};
+try { const _sd = syncedLS.get('bnShiftDefaults'); if(_sd && typeof _sd === 'object') Object.assign(BN_SHIFT_DEFAULTS, _sd); } catch {}
+function bnShiftDefault(name){ return BN_SHIFT_DEFAULTS[name] === 'Noc' ? 'Noc' : 'Day'; }
+async function warmShiftDefaults(){
+  try {
+    const saved = await getState('bnShiftDefaults');
+    if(saved && typeof saved === 'object'){ BN_SHIFT_DEFAULTS = { ...saved }; localStorage.setItem('bnShiftDefaults', JSON.stringify(saved)); }
+  } catch(e){}
+  if(typeof renderImportedNamesList === 'function') renderImportedNamesList();
+}
+async function setShiftDefault(fullName, shift){
+  await syncedLS.refresh('bnShiftDefaults');
+  const saved = syncedLS.get('bnShiftDefaults') || {};
+  if(shift === 'Noc') saved[fullName] = 'Noc'; else delete saved[fullName];
+  BN_SHIFT_DEFAULTS = { ...saved };
+  localStorage.setItem('bnShiftDefaults', JSON.stringify(saved));
+  setState('bnShiftDefaults', saved).catch(() => {});
+  renderImportedNamesList();
+}
 async function warmPreferredNames(){
   // Build 158 (2026-05-30): cross-device propagation fix. Previously this used
   // syncedLS.warm(), which only pulls from BNState when the device has NO local
@@ -14722,6 +14775,7 @@ async function runImport(){
     if(_expFld) _expFld.value = '';
     _impGateAcks = new Set();
 
+    { const t = document.getElementById('importResultsTitle'); if(t) t.textContent = 'Extracted — Review & Assign Units'; } // Build 423
     renderImportRows(entries);
 
   } catch(e) {
@@ -20891,11 +20945,169 @@ async function _populateNurseDropdownCore(){
   if (prev && (combined.includes(prev) || others.includes(prev))) sel.value = prev;
 }
 
+// ═══ Build 423: WEEKLY SCHEDULE GRID (Tomas's B, tap model A) ═══════════════
+// A second input beside the extractor. State: the week's Sunday + a cell map
+// name|date → {shift, startTime, hours}. Drafts persist per device per week;
+// a week with no draft prefills from the history archive (so a saved week can
+// be edited by re-entering it). "Suggest & Review" hands renderImportRows the
+// same entry shape the extractor produces, then self-acknowledges the mirror
+// (a human typed it — there is no machine reading to verify) and sets the
+// expected count to the batch size so the Σ gate reads green.
+let _wgWeek = null;          // 'YYYY-MM-DD' of the Sunday
+let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours}
+const _WG_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+function _wgSunday(ds){ const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); }
+function _wgAddDays(ds, n){ const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() + n); return localDate(d); }
+function _wgDates(){ return Array.from({ length: 7 }, (_, i) => _wgAddDays(_wgWeek, i)); }
+function _wgDraftKey(){ return `bnWeeklyGrid_${_wgWeek}`; }
+function _wgSaveDraft(){ try { localStorage.setItem(_wgDraftKey(), JSON.stringify(_wgCells)); } catch(e){} }
+function _wgRosterNames(){
+  const names = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames.slice() : [];
+  return names.sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
+}
+function toggleWeeklyGrid(){
+  const body = document.getElementById('wgBody'), chev = document.getElementById('wgChevron');
+  const open = body.style.display === 'none';
+  body.style.display = open ? 'block' : 'none'; chev.textContent = open ? '▲' : '▼';
+  if(open && !_wgWeek) wgSetWeek(_wgAddDays(localDate(new Date()), 7)); // default: next week
+}
+function wgSetWeek(ds){
+  if(!ds) return;
+  _wgWeek = _wgSunday(ds);
+  document.getElementById('wgWeekPick').value = _wgWeek;
+  let draft = null; try { draft = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); } catch(e){}
+  if(draft && typeof draft === 'object'){ _wgCells = draft; }
+  else {
+    // prefill from the archive so an already-entered week can be edited
+    _wgCells = {};
+    const end = _wgAddDays(_wgWeek, 6);
+    try {
+      getImportedEntries().filter(e => e.date >= _wgWeek && e.date <= end).forEach(e => {
+        _wgCells[`${e.name}|${e.date}`] = { shift: e.shift, startTime: e.startTime || '', hours: e.hours || '' };
+      });
+    } catch(e){}
+  }
+  wgRender();
+}
+function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
+function wgClearWeek(){
+  if(!Object.keys(_wgCells).length) return;
+  if(!confirm('Clear every shift on this week\'s grid? (Nothing saved to the schedule is touched.)')) return;
+  _wgCells = {}; _wgSaveDraft(); wgRender();
+}
+function _wgCellLabel(c){
+  if(!c) return '';
+  const h = Number(c.hours || 0);
+  if(c.startTime && h > 0 && h < 12){
+    const st = String(c.startTime).padStart(4, '0');
+    const end = (() => { const m = parseInt(st.slice(0,2),10)*60 + parseInt(st.slice(2),10) + Math.round(h*60); const mm = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; })();
+    return `⏱ ${st.slice(0,2)}:${st.slice(2)}–${end} · ${h}h`;
+  }
+  return c.shift === 'Noc' ? '🌙 Noc' : '☀️ Day';
+}
+function wgRender(){
+  const host = document.getElementById('wgGrid'); if(!host || !_wgWeek) return;
+  const dates = _wgDates(); const names = _wgRosterNames();
+  const end = dates[6];
+  document.getElementById('wgWeekLabel').textContent = `${_WG_DOW[0]} ${Number(_wgWeek.slice(5,7))}/${Number(_wgWeek.slice(8,10))} – ${_WG_DOW[6]} ${Number(end.slice(5,7))}/${Number(end.slice(8,10))}`;
+  if(!names.length){ host.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses on the roster yet — add them on the Break Nurses card in Settings.</div>'; return; }
+  const cell = (n, d) => {
+    const c = _wgCells[`${n}|${d}`];
+    const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
+    const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1';
+    const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
+    const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
+    const esc = n.replace(/'/g, "\\'");
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:4px 6px;line-height:1.25">${c ? _wgCellLabel(c) : '<span style="opacity:.35">+</span>'}</button>`;
+  };
+  const today = localDate(new Date());
+  host.innerHTML = `<div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
+    + `<div></div>` + dates.map((d, i) => `<div style="text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:${d === today ? 'var(--teal)' : 'var(--muted)'}">${_WG_DOW[i]}<br><span style="font-weight:500">${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</span></div>`).join('')
+    + names.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
+    + `</div>`;
+  const count = Object.keys(_wgCells).length;
+  document.getElementById('wgCount').textContent = count ? `${count} shift${count === 1 ? '' : 's'}` : '';
+  const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !count;
+}
+function wgTap(name, date){
+  const key = `${name}|${date}`;
+  if(!_wgCells[key]){ _wgCells[key] = { shift: bnShiftDefault(name), startTime: '', hours: '' }; _wgSaveDraft(); wgRender(); return; }
+  _wgChooser(name, date);
+}
+function _wgChooser(name, date){
+  const key = `${name}|${date}`; const cur = _wgCells[key] || {};
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
+  const d = new Date(date + 'T12:00:00');
+  const isPart = cur.startTime && Number(cur.hours) > 0 && Number(cur.hours) < 12;
+  const st = isPart ? `${String(cur.startTime).padStart(4,'0').slice(0,2)}:${String(cur.startTime).padStart(4,'0').slice(2)}` : '';
+  const en = isPart ? (() => { const m = parseInt(st.slice(0,2),10)*60 + parseInt(st.slice(3),10) + Math.round(Number(cur.hours)*60); const mm = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; })() : '';
+  wrap.innerHTML = `
+    <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+      <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${_WG_DOW[d.getDay()]} ${Number(date.slice(5,7))}/${Number(date.slice(8,10))} · now ${escHTML(_wgCellLabel(cur) || 'empty')}</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button type="button" class="btn ${!isPart && cur.shift === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcDay">☀️ Day</button>
+        <button type="button" class="btn ${!isPart && cur.shift === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcNoc">🌙 Noc</button>
+      </div>
+      <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
+        <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="time" id="wgcStart" value="${st}" style="font-size:.85rem;padding:6px"/><span style="color:var(--muted)">–</span><input type="time" id="wgcEnd" value="${en}" style="font-size:.85rem;padding:6px"/>
+          <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">Clear</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="wgcCancel" style="flex:1">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  const set = c => { if(c) _wgCells[key] = c; else delete _wgCells[key]; _wgSaveDraft(); wgRender(); close(); };
+  wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
+  wrap.querySelector('#wgcNoc').onclick = () => set({ shift: 'Noc', startTime: '', hours: '' });
+  wrap.querySelector('#wgcPart').onclick = () => {
+    const a = wrap.querySelector('#wgcStart').value, b = wrap.querySelector('#wgcEnd').value;
+    if(!a || !b){ toast('A partial needs both a start and an end time', true); return; }
+    const toM = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
+    let mins = toM(b) - toM(a); if(mins <= 0) mins += 1440;
+    const hours = Math.round(mins / 6) / 10;
+    if(hours >= 12){ toast('That is a full shift — use Day or Noc', true); return; }
+    const h0 = parseInt(a.slice(0, 2), 10);
+    set({ shift: (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc', startTime: a.replace(':', ''), hours: String(hours) }); // the extractor's start-hour rule
+  };
+  wrap.querySelector('#wgcClear').onclick = () => set(null);
+  wrap.querySelector('#wgcCancel').onclick = close;
+  wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
+}
+async function wgReview(){
+  const keys = Object.keys(_wgCells); if(!keys.length) return;
+  const entries = keys.map(k => {
+    const [name, date] = k.split('|'); const c = _wgCells[k];
+    const e = { name, date, shift: c.shift, startTime: c.startTime || '', hours: c.hours || '', units: [], _source: 'grid' };
+    const h = Number(c.hours || 0);
+    if(c.startTime && h > 0 && h < 12){
+      e.isPartial = true;
+      const _pc = _covCfg().partial;
+      const _covMax = Math.max(...(_covCfg()[e.shift === 'Day' ? 'Day' : 'Noc'].byTeam));
+      e.partialUnitCount = Math.min(Math.max(1, Math.ceil(h / _pc.perHours) * _pc.units), Math.max(1, _covMax));
+    }
+    return e;
+  }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
+  _impExpectedSet(entries.length);
+  _impGateAcks = new Set();
+  const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Weekly Schedule — Review & Assign Units';
+  await renderImportRows(entries);
+  try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
+  const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+}
+
 function renderImportedNamesList(){
   const el = document.getElementById('importedNamesList');
   if (!el) return;
   if (!importedNames.length){
-    el.innerHTML = '<div class="empty" style="padding:10px 0">Import a UKG schedule above to populate names automatically.</div>';
+    el.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses yet — use + Add manually, or import a schedule.</div>';
     renderBNFilter();
     return;
   }
@@ -20907,6 +21119,10 @@ function renderImportedNamesList(){
       <input type="text" value="${pref}" placeholder="Preferred name" autocomplete="off"
         onblur="setPreferredName('${esc}', this.value); renderImportedNamesList();"
         style="padding:6px 8px;font-size:.85rem;width:130px"/>
+      <span class="toggle" title="Default shift — what a tap on the Weekly Schedule grid gives this nurse" style="font-size:.78rem">
+        <span class="toggle-opt${bnShiftDefault(n) === 'Day' ? ' active' : ''}" onclick="setShiftDefault('${esc}', 'Day')">☀️ Day</span>
+        <span class="toggle-opt${bnShiftDefault(n) === 'Noc' ? ' active' : ''}" onclick="setShiftDefault('${esc}', 'Noc')">🌙 Noc</span>
+      </span>
       <button class="btn btn-danger btn-sm" onclick="removeImportedName('${esc}')">Remove</button>
     </div>`;
   }).join('');
