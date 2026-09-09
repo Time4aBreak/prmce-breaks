@@ -2207,7 +2207,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-09-428'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-09-429'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5334,6 +5334,10 @@ async function decorateUnitGridCoverage(){
     if(!ug) return;
     if(S.shift === 'Other'){ ug.querySelectorAll('.unit-btn.cov').forEach(b => b.classList.remove('cov')); return; }
     const shift = S.shift;
+    // Build 429: the .cov paint uses the calendar's accent variables, which only
+    // the calendar render set on the grid (after a unit tap) — on a fresh load
+    // the class landed but only the bold survived. Set them here too, shift-aware.
+    { const noc = shift === 'Noc'; ug.style.setProperty('--cal-accent', noc ? '#3b6cb7' : '#d97706'); ug.style.setProperty('--cal-accent-lt', noc ? '#eaf0fb' : '#fef3e2'); }
     const dt = (typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate) ? _calSelectedDate : staffShiftDate(shift);
     const key = `${dt}|${shift}`;
     let covered = (_covPillMemo.key === key && Date.now() - _covPillMemo.at < 5000) ? _covPillMemo.set : null;
