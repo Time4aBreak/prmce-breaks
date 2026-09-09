@@ -1646,9 +1646,12 @@ function initRampCard(){
   body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
   { const el = document.getElementById('rampDirtyDot'); if(el) el.style.display = 'none'; } // Build 335: a fresh render is a saved state
   const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
-  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:nowrap;white-space:nowrap;overflow-x:auto;margin-bottom:8px;font-size:.85rem">
+  // Build 425 (Tomas, phone view): the row WRAPS in readable pieces instead of
+  // scrolling sideways inside itself — each phrase stays whole, the row breaks
+  // between phrases.
+  const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
       <strong style="width:44px">${label}</strong>
-      allow ${num(p+'Open', cc.atOpen, 8)} slots at ${(() => {
+      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">allow ${num(p+'Open', cc.atOpen, 8)} slots at ${(() => {
         // Build 363 (Tomas): the opens picker is a caged dropdown — shift
         // start to +2¼h in 15-min steps (6:30–8:45), AM for Day / PM for
         // Noc. 6:00/6:15 omitted: they'd violate the 362 shift-start
@@ -1663,7 +1666,7 @@ function initRampCard(){
         const _cur = _vals.includes(cc.openAt) ? cc.openAt : _dflt;
         for(const _v of _vals) _opts += `<option value="${_v}"${_cur === _v ? ' selected' : ''}>${fmt12(_v.replace(':', ''))}</option>`;
         return `<select id="${p}Opens" data-r="${_cur}" style="width:110px;padding:4px 6px;border:1px solid var(--border);border-radius:8px;font-size:.82rem">${_opts}</select>`;
-      })()} and ${num(p+'Add', cc.addAfter, 8)} extra slots after ${(() => {
+      })()}</span> <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">and ${num(p+'Add', cc.addAfter, 8)} extra slots after ${(() => {
         // Build 364 (Tomas): the unlock is a DURATION — 1–4 hours after
         // open — not a clock. The save derives the stored clock time from
         // open + hours, so out-of-order times are unconstructable (the old
@@ -1676,7 +1679,7 @@ function initRampCard(){
         let _op = '';
         for(const _n of [1, 2, 3, 4]) _op += `<option value="${_n}"${_h === _n ? ' selected' : ''}>${_n} hour${_n === 1 ? '' : 's'}</option>`;
         return `<select id="${p}UnlockHrs" data-r="${_h}" style="width:110px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">${_op}</select>`;
-      })()} <span style="color:var(--muted)">= max</span> <strong id="${p}MaxOut">${(Number(cc.atOpen) || 0) + (Number(cc.addAfter) || 0)}</strong>
+      })()}</span> <span style="white-space:nowrap"><span style="color:var(--muted)">= max</span> <strong id="${p}MaxOut">${(Number(cc.atOpen) || 0) + (Number(cc.addAfter) || 0)}</strong></span>
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
@@ -2204,7 +2207,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-424'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-08-427'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15796,6 +15799,11 @@ function renderF2Mirror(){
   if(!host) return;
   const use = _f2ReviewEntries();
   if(!use.length){ host.style.display='none'; host.innerHTML=''; _f2PaintSaveButtons(); return; }
+  // Build 427 (Tomas): a batch entered on the Weekly Schedule grid needs no
+  // mirror — it would be a picture of what was just tapped, and its ack is
+  // self-signed. Hide the whole block (mirror, ✓, add-missed-shift); the
+  // extractor's batches keep it, since a machine did that reading.
+  if(use.every(e => e._source === 'grid')){ host.style.display='none'; host.innerHTML=''; _f2PaintSaveButtons(); return; }
   // Sunday-keyed weeks spanning the batch (the Kronos grid runs Sun–Sat).
   const sunKey = ds => { const d = new Date(ds+'T12:00:00'); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); };
   const byWeek = {};
@@ -20972,7 +20980,16 @@ function toggleWeeklyGrid(){
   const body = document.getElementById('wgBody'), chev = document.getElementById('wgChevron');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none'; chev.textContent = open ? '▲' : '▼';
-  if(open && !_wgWeek) wgSetWeek(_wgAddDays(localDate(new Date()), 7)); // default: next week
+  if(open && !_wgWeek) wgSetWeek(_wgDefaultWeek());
+}
+// Build 426 (Tomas): open on the NEXT EMPTY WEEK — the Sunday after the latest
+// date in the history archive (every entered week is in it); next week if empty.
+function _wgDefaultWeek(){
+  let latest = '';
+  try { getImportedEntries().forEach(e => { if(e && e.date > latest) latest = e.date; }); } catch(e){}
+  const today = localDate(new Date());
+  if(!latest || latest < today) return _wgSunday(_wgAddDays(today, 7));
+  return _wgAddDays(_wgSunday(latest), 7);
 }
 function wgSetWeek(ds){
   if(!ds) return;
