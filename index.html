@@ -865,7 +865,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <!-- Unit Status -->
     <div class="card">
-      <div class="card-label" style="margin:0 0 4px">Unit Status</div>
+      <div class="card-label" style="margin:0 0 4px">Units to Cover</div>
       <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Tap a unit to open or close it. Closed units appear dimmed.</div>
       <div class="unit-grid" id="unitStatusGrid"></div>
       <div id="unitStatusScheduled" style="margin-top:12px;font-size:.82rem"></div>
@@ -876,6 +876,13 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <div style="display:flex;align-items:center;gap:8px;margin:0 0 4px"><div class="card-label" style="margin:0">Shift Limits</div><span id="rampDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
       <div id="rampCfgBody"></div>
       <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
+    </div>
+
+    <!-- High-acuity units (Build 430): the map + per-shift cap toggles -->
+    <div class="card">
+      <div class="card-label" style="margin:0 0 4px">High-Acuity Units</div>
+      <div id="acuityBody"></div>
+      <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveAcuityCfg(this)">Save acuity</button>
     </div>
 
     <!-- App version / push update -->
@@ -1497,10 +1504,11 @@ async function warmUnitStatuses(){
       syncedLS.warm('unitStatuses'),
       syncedLS.warm('unitSchedules'),
       syncedLS.refresh('rampConfig'), // Build 321: reload = current limits (warm never updates an existing key)
-      syncedLS.refresh('coverageConfig') // Build 321
+      syncedLS.refresh('coverageConfig'), // Build 321
+      syncedLS.refresh('acuityConfig') // Build 430
     ]);
     migrate3CIntoUnitStatuses();
-    try { initRampCard(); } catch(e){}
+    try { initRampCard(); initAcuityCard(); } catch(e){}
   } catch{}
 }
 
@@ -1531,6 +1539,57 @@ function _covCfg(){
       maxSpan: Math.min(4, Math.max(1, Number(c.maxSpan) || COV_DEFAULTS.maxSpan))
     };
   } catch(e){ return COV_DEFAULTS; }
+}
+// Build 430 (Tomas): the acuity map and the cap are SETTINGS. UNIT_TIER stays
+// only as the default map. cap.Day/cap.Noc = "no two High units in one set"
+// on that shift (Tomas: Day on, Noc off by default).
+const ACUITY_DEFAULTS = { high: ['5A','6N','7N','10S'], cap: { Day: true, Noc: false } };
+function _acuityCfg(){
+  try {
+    const raw = syncedLS.get('acuityConfig');
+    const c = raw ? (typeof raw === 'string' ? JSON.parse(raw) : raw) : null;
+    if(!c) return { high: ACUITY_DEFAULTS.high.slice(), cap: { ...ACUITY_DEFAULTS.cap } };
+    return {
+      high: Array.isArray(c.high) ? c.high.filter(u => UNITS.includes(u)) : ACUITY_DEFAULTS.high.slice(),
+      cap: { Day: (c.cap && c.cap.Day !== undefined) ? !!c.cap.Day : true, Noc: !!(c.cap && c.cap.Noc) }
+    };
+  } catch(e){ return { high: ACUITY_DEFAULTS.high.slice(), cap: { ...ACUITY_DEFAULTS.cap } }; }
+}
+function isHighUnit(u){ const h = _acuityCfg().high; return u === 'C_PAIR' ? (h.includes('3C') || h.includes('4C')) : h.includes(u); }
+function _acuityCapOn(shift){ return !!_acuityCfg().cap[shift]; }
+function initAcuityCard(){
+  const body = document.getElementById('acuityBody'); if(!body) return;
+  const c = _acuityCfg();
+  const chip = u => `<div class="uc${c.high.includes(u) ? ' on' : ''}" data-u="${u}" onclick="this.classList.toggle('on')" title="${c.high.includes(u) ? 'High — tap to make Standard' : 'tap to mark High'}">${u}</div>`;
+  const tog = sh => `<span class="toggle" style="font-size:.8rem"><span class="toggle-opt${c.cap[sh] ? ' active' : ''}" data-cap="${sh}" data-on="1" onclick="_acuitySetCap('${sh}',true)">On</span><span class="toggle-opt${c.cap[sh] ? '' : ' active'}" data-cap="${sh}" data-on="0" onclick="_acuitySetCap('${sh}',false)">Off</span></span>`;
+  body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tap the units where patients and staff require more of the break nurse. A capped shift never puts two of them on one BN.</div>
+    <div class="unit-grid" id="acuityGrid" style="margin-bottom:12px">${UNITS.map(chip).join('')}</div>
+    <div style="display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;font-size:.85rem">
+      <strong style="width:76px">Cap</strong>
+      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">☀️ Day ${tog('Day')}</span>
+      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">🌙 Noc ${tog('Noc')}</span>
+    </div>`;
+}
+function _acuitySetCap(sh, on){
+  document.querySelectorAll(`#acuityBody .toggle-opt[data-cap="${sh}"]`).forEach(el => el.classList.toggle('active', (el.dataset.on === '1') === on));
+}
+async function saveAcuityCfg(btn){
+  const before = JSON.stringify(_acuityCfg());
+  const high = [...document.querySelectorAll('#acuityGrid .uc.on')].map(el => el.dataset.u);
+  const capOf = sh => { const el = document.querySelector(`#acuityBody .toggle-opt[data-cap="${sh}"].active`); return !!(el && el.dataset.on === '1'); };
+  const cfg = { high, cap: { Day: capOf('Day'), Noc: capOf('Noc') } };
+  const old = btn ? btn.textContent : ''; if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await syncedLS.set('acuityConfig', cfg);
+    toast('✓ Acuity saved — new deals use it from now on');
+    if(before !== JSON.stringify(_acuityCfg())){
+      if(await customConfirm('Acuity settings changed. Apply them to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use the new settings for future scheduling only? Shifts that now break the cap will wear the ⚖ badge either way.', 'Re-deal upcoming', 'Keep as scheduled')){
+        await applyCoverageLimitsToUpcoming();
+      }
+      if(typeof loadAssignments === 'function') loadAssignments();
+    }
+  } catch(e){ toast(`Couldn't save acuity — ${(e && e.message) || e || 'unknown error'}`, true); }
+  finally { if(btn){ btn.disabled = false; btn.textContent = old; } initAcuityCard(); }
 }
 function _rampCfg(){
   try {
@@ -1637,6 +1696,7 @@ function refreshRampCardIfChanged(){
   const sig = JSON.stringify([_rampCfg(), _covCfg()]);
   if(sig === body.dataset.sig) return;                       // nothing new
   initRampCard();
+  initAcuityCard(); // Build 430
 }
 
 function initRampCard(){
@@ -2207,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-09-429'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-09-430'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5491,7 +5551,7 @@ function init(){
       if(date && shift && u !== 'C_PAIR'){
         const open = isUnitOpenForShiftEffective(u, date, shift);
         if(!open){
-          toast(`Please open ${u} in UNIT STATUS to assign`);
+          toast(`Please open ${u} in UNITS TO COVER to assign`);
           return;
         }
       }
@@ -5591,7 +5651,8 @@ function init(){
   setInterval(() => {
     Promise.all([
       syncedLS.refresh('rampConfig'),
-      syncedLS.refresh('coverageConfig')
+      syncedLS.refresh('coverageConfig'),
+      syncedLS.refresh('acuityConfig') // Build 430
     ]).then(() => refreshRampCardIfChanged()).catch(()=>{});
     // Build 325: unit statuses join the heartbeat, and the grid repaints
     // when the open-set changed.
@@ -5760,7 +5821,7 @@ function showSubTab(name, btn){
     // Build 305: the moved cards' renderers — all idempotent, all safe to
     // call on every entry.
     try { refreshUnitStatusGrid(); } catch(e){}
-    try { initRampCard(); } catch(e){}
+    try { initRampCard(); initAcuityCard(); } catch(e){}
     try { renderImportedNamesList(); } catch(e){}
     try { renderImportedEntriesSummary(); } catch(e){}
   }
@@ -13294,17 +13355,21 @@ async function _loadAssignmentsCore(preloadedScheds){
           } catch(e){}
           return { nm: firstName(x.BreakNurseName), sz: z }; });
         const devs = withSizes.filter(w => w.sz !== rate);
-        if(!devs.length) return '';
+        // Build 430: second check — a capped shift with a BN holding two High units
+        const capDevs = _acuityCapOn(sh) ? mains.map(x => { let hs = []; try { hs = [...new Set(JSON.parse(x.Units || '[]'))].filter(u => isHighUnit(u)); } catch(e){} return { nm: firstName(x.BreakNurseName), hs }; }).filter(w => w.hs.length >= 2) : [];
+        if(!devs.length && !capDevs.length) return '';
         // Build 399 (Tomas's A): the deviation is NAMED, not encoded — say who
         // is off and what the settings say, the way a charge nurse would.
         const un = n => `${n} unit${n === 1 ? '' : 's'}`;
-        const msg = devs.length === 1
+        const sizeMsg = !devs.length ? '' : devs.length === 1
           ? `${devs[0].nm} has ${un(devs[0].sz)} — settings say ${rate} each`
           : devs.length === 2
             ? `${devs[0].nm} ${devs[0].sz}, ${devs[1].nm} ${devs[1].sz} — settings say ${rate} each`
             : (devs.length === withSizes.length
                 ? `all ${withSizes.length} BNs off settings (${rate} each)`
                 : `${devs.length} of ${withSizes.length} BNs off settings (${rate} each)`);
+        const capMsg = capDevs.map(w => `${w.nm} holds ${w.hs.join(' + ')} — both High`).join(' · ');
+        const msg = [sizeMsg, capMsg].filter(Boolean).join(' · ');
         return `<button class="btn btn-ghost btn-sm" style="font-size:.68rem;padding:2px 8px;margin-left:8px;text-transform:none;letter-spacing:0;color:#b45309;border-color:#f5c883" onclick="repriceShift('${date}','${sh}',this)">⚖ ${sh}: ${msg} · Rebalance</button>`;
       }).join('');
       return `<div style="margin-bottom:14px">
@@ -13666,6 +13731,7 @@ async function clearSimData(){
       // defaults regardless, so local copies must follow.
       k === 'rampConfig' || k === 'coverageConfig' || k === 'bnImportGateLog' ||
       k === 'bnShiftDefaults' || // Build 422
+      k === 'acuityConfig' || // Build 430
       k === 'portalPw_admin' || k === 'portalPw_bn' || k === 'bnAdminPw' || k === 'bnBnPw'
     ).forEach(k => localStorage.removeItem(k));
   };
@@ -15620,7 +15686,7 @@ async function toggleIU(i, u, el){
     if(entry && u !== 'C_PAIR'){
       const open = isUnitOpenForShiftEffective(u, entry.date, entry.shift);
       if(!open){
-        toast(`Please open ${u} in UNIT STATUS to assign`);
+        toast(`Please open ${u} in UNITS TO COVER to assign`);
         return;
       }
     }
@@ -19771,7 +19837,7 @@ function _rptRotation(scheds){
       grid[bn][u] = (grid[bn][u] || 0) + 1;
       if(aSet.has(u)) wingA[bn] = (wingA[bn] || 0) + 1;
     });
-    if(us.filter(u => UNIT_TIER[u] === 'High').length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1;
+    if(us.filter(u => isHighUnit(u)).length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1; // Build 430: settings map
     const fl = us.map(u => WING_FLOOR[u]).filter(Number.isFinite);
     if(fl.length){ spanSum[bn] = (spanSum[bn] || 0) + (Math.max(...fl) - Math.min(...fl)); spanN[bn] = (spanN[bn] || 0) + 1; }
     if(new Set(us.map(u => getUnitWing(u))).size > 1) split[bn] = (split[bn] || 0) + 1;
@@ -20534,7 +20600,7 @@ function nurseWingCount(nurseName, shift, wing){
 // 6N's starvation on three-BN Days gone without a per-unit exception.
 const _dealMaxSpan = () => { try { return _covCfg().maxSpan || 4; } catch(e){ return 4; } };
 const _DEAL_WALK_COST = 0.5;   // Build 421: coverage-days per floor of stretch (see the score below)
-const _DEAL_CAP_SHIFTS = ['Day'];            // "no two High units in one set" applies here
+// Build 430: the cap is per-shift in Settings (_acuityCapOn), not a constant here.
 const _DEAL_FLOOR = s => WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0;
 
 function _dealHash(str, seed){
@@ -20575,7 +20641,7 @@ function _dealDisjoint(sets, count){
 }
 function _dealSite({ names, pool, quota, shift, seed }){
   const n = names.length;
-  const capOn = _DEAL_CAP_SHIFTS.includes(shift);
+  const capOn = _acuityCapOn(shift);
   const aPool = pool.filter(e => e.wing === 'A'), dPool = pool.filter(e => e.wing === 'D');
   // Who is owed a D shift: 60-day history, D minus A, most owed first; seeded hash breaks ties.
   const owed = nm => { const h = getNurseWingHistory(nm, shift); return h.filter(e => e.wing === 'D').length - h.filter(e => e.wing === 'A').length; };
@@ -20775,7 +20841,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
       units: s === 'C_PAIR' ? ['3C','4C'] : [s],
       globalCount: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0),
       wing: getWing(s),
-      tier: UNIT_TIER[s] || 'Standard',
+      tier: isHighUnit(s) ? 'High' : (UNIT_TIER[s] || 'Standard'), // Build 430: the map is a setting
       floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
     }));
 
