@@ -2207,7 +2207,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-08-427'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-09-428'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5504,6 +5504,11 @@ function init(){
 
   // Shift detection
   S.shift = detectShift();
+  // Build 428 (Tomas, Sign Up pills untinted on a fresh load): the grid was
+  // built — and decorated — above, BEFORE the shift was known, so the
+  // decorator cached an empty set and nothing re-ran it until a unit tap.
+  // Decorate again now that S.shift is set.
+  if(typeof decorateUnitGridCoverage === 'function') decorateUnitGridCoverage();
   // Build 264 (the restore's true front door — third placement, evidence-
   // led this time): pickUnit(u) is what a unit TAP runs, and it is the ONLY
   // shower of the two boot-hidden containers — shiftCard ("Current Shift")
