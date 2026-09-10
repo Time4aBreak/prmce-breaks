@@ -2266,7 +2266,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-10-432'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-10-433'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11423,14 +11423,20 @@ function buildAbsorptionContext(candidates, ctx){
 // Single-slot T+1 buffer rule: the slot after slotTime must be the shift's
 // last slot, the BN's own break, or unclaimed on the BN's responsible units.
 // Mirrors planAbsorption's passesT1BufferCheck. actx = buildAbsorptionContext output.
-function passesT1Buffer(bnName, slotTime, actx){
+function passesT1Buffer(bnName, slotTime, actx, runUnit){
   if(slotTime === actx.shiftLastSlot) return true;
   const nextSlot = fromMin(toMin(slotTime) + SLOT_IV);
   if(actx.bnBreakSets[bnName] && actx.bnBreakSets[bnName].has(nextSlot)) return true;
-  const respUnits = actx.bnResponsibleUnits[bnName] || new Set();
+  // Build 433 (Section D live, Tomas): the buffer asks "is she due SOMEWHERE ELSE
+  // at T+1?" It used to check only claims on units she owns, so a pending pick
+  // on a foreign unit (a transfer or an absorption pickup) never counted —
+  // 10N at 11:15 then 9S at 11:35 passed. Now ANY claim at T+1 fails it unless
+  // it's on the run's own unit (she stays put — consecutive singles on one
+  // floor by different nurses are one continuous stint, not a walk).
   const claimed = actx.bnClaimedByUnitSlot[bnName] || new Set();
-  for(const u of respUnits){
-    if(claimed.has(`${u}|${nextSlot}`)) return false;
+  const suffix = `|${nextSlot}`;
+  for(const c of claimed){
+    if(c.endsWith(suffix) && (!runUnit || c.slice(0, -suffix.length) !== runUnit)) return false;
   }
   return true;
 }
@@ -11445,7 +11451,7 @@ function bnCanTakeRun(bnName, run, actx){
   for(const b of run){
     if(!free.has(b.SlotTime)) return false;
   }
-  if(run.length === 1 && !passesT1Buffer(bnName, run[0].SlotTime, actx)) return false;
+  if(run.length === 1 && !passesT1Buffer(bnName, run[0].SlotTime, actx, run[0].Unit)) return false; // Build 433: pass the run's unit
   return true;
 }
 
