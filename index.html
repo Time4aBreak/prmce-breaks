@@ -846,7 +846,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <!-- Unit Status -->
     <div class="card">
       <div class="card-label" style="margin:0 0 4px">Units to Cover</div>
-      <div class="unit-grid" id="unitStatusGrid"></div>
+      <div id="unitStatusGrid"></div>
       <div id="unitStatusScheduled" style="margin-top:12px;font-size:.82rem"></div>
     </div>
 
@@ -1525,7 +1525,7 @@ function _covCfg(){
 // Build 430 (Tomas): the acuity map and the cap are SETTINGS. UNIT_TIER stays
 // only as the default map. cap.Day/cap.Noc = "no two High units in one set"
 // on that shift (Tomas: Day on, Noc off by default).
-const ACUITY_DEFAULTS = { high: ['5A','6N','7N','10S'], cap: { Day: true, Noc: false } };
+const ACUITY_DEFAULTS = { high: ['5A','7N','8N','10S'], cap: { Day: true, Noc: false } }; // Build 436: floor feedback — 6N out, 8N in
 function _acuityCfg(){
   try {
     const raw = syncedLS.get('acuityConfig');
@@ -1539,13 +1539,22 @@ function _acuityCfg(){
 }
 function isHighUnit(u){ const h = _acuityCfg().high; return u === 'C_PAIR' ? (h.includes('3C') || h.includes('4C')) : h.includes(u); }
 function _acuityCapOn(shift){ return !!_acuityCfg().cap[shift]; }
+// Build 436 (Tomas): unit chips in WING ROWS — A/C wing on the first row, D wing
+// starting the second — so the rows mean something instead of wrapping wherever
+// the width falls. Eight equal columns keep the two rows aligned.
+const _WING_ROW_A = ['3A','4A','5A','6A','7A','3C','4C'];
+const _WING_ROW_D = ['6N','7N','8N','8S','9N','9S','10N','10S'];
+function _wingRowsHtml(chip){
+  const row = us => `<div style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px">${us.map(chip).join('')}${'<div></div>'.repeat(8 - us.length)}</div>`;
+  return `<div style="display:flex;flex-direction:column;gap:8px">${row(_WING_ROW_A)}${row(_WING_ROW_D)}</div>`;
+}
 function initAcuityCard(){
   const body = document.getElementById('acuityBody'); if(!body) return;
   const c = _acuityCfg();
   const chip = u => `<div class="uc${c.high.includes(u) ? ' on' : ''}" data-u="${u}" onclick="this.classList.toggle('on')" title="${c.high.includes(u) ? 'High — tap to make Standard' : 'tap to mark High'}">${u}</div>`;
   const tog = sh => `<span class="toggle" style="font-size:.8rem"><span class="toggle-opt${c.cap[sh] ? ' active' : ''}" data-cap="${sh}" data-on="1" onclick="_acuitySetCap('${sh}',true)">On</span><span class="toggle-opt${c.cap[sh] ? '' : ' active'}" data-cap="${sh}" data-on="0" onclick="_acuitySetCap('${sh}',false)">Off</span></span>`;
   body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tap the units where patients and staff require more of the break nurse. A capped shift never puts two of them on one BN.</div>
-    <div class="unit-grid" id="acuityGrid" style="margin-bottom:12px">${UNITS.map(chip).join('')}</div>
+    <div id="acuityGrid" style="margin-bottom:12px">${_wingRowsHtml(chip)}</div>
     <div style="display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;font-size:.85rem">
       <strong style="width:76px">Cap</strong>
       <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">☀️ Day ${tog('Day')}</span>
@@ -1694,12 +1703,14 @@ function initRampCard(){
   const c = _rampCfg();
   body.dataset.sig = JSON.stringify([_rampCfg(), _covCfg()]); // Build 334: what this render is made of
   { const el = document.getElementById('rampDirtyDot'); if(el) el.style.display = 'none'; } // Build 335: a fresh render is a saved state
-  const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:64px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">`;
+  // Build 436 (Tomas): every number field the same width, value centered; labels one
+  // width so Day/Noc rows line up as a table.
+  const num = (id, val, mx) => `<input type="number" id="${id}" value="${val}" data-r="${val}" min="0" max="${mx}" style="width:58px;padding:6px 4px;border:1px solid var(--border);border-radius:8px;font-size:.85rem;text-align:center">`;
   // Build 425 (Tomas, phone view): the row WRAPS in readable pieces instead of
   // scrolling sideways inside itself — each phrase stays whole, the row breaks
   // between phrases.
   const row = (label, p, cc) => `<div style="display:flex;align-items:center;gap:6px 10px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
-      <strong style="width:44px">${label}</strong>
+      <strong style="width:76px">${label}</strong>
       <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">allow ${num(p+'Open', cc.atOpen, 8)} slots at ${(() => {
         // Build 363 (Tomas): the opens picker is a caged dropdown — shift
         // start to +2¼h in 15-min steps (6:30–8:45), AM for Day / PM for
@@ -1732,7 +1743,7 @@ function initRampCard(){
     </div>`;
   const cov = _covCfg();
   const covRow = (label, p, bt) => `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;font-size:.85rem">
-      <strong style="width:44px">${label}</strong>
+      <strong style="width:76px">${label}</strong>
       1&nbsp;BN: ${num(p+'T1', bt[0], 6)} · 2&nbsp;BNs: ${num(p+'T2', bt[1], 6)} · 3&nbsp;BNs: ${num(p+'T3', bt[2], 6)} · 4+&nbsp;BNs: ${num(p+'T4', bt[3], 6)} <span style="color:var(--muted)">units each</span>
     </div>`;
   const hdr = (t, s, top) => `<div style="${top ? 'border-top:1px solid var(--border);padding-top:10px;' : ''}font-weight:600;font-size:.8rem;letter-spacing:.03em;color:var(--muted);margin-bottom:2px">${t}</div><div style="font-size:.78rem;color:var(--muted);margin-bottom:10px">${s}</div>`;
@@ -1740,18 +1751,17 @@ function initRampCard(){
     hdr('BREAK SLOT LIMITS', '', false) +
     row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
-      <strong style="width:44px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
+      <strong style="width:76px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
       <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
     </div>
     ${hdr('UNITS PER SHIFT', '', true)}` +
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem">
-      <strong style="width:52px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
+      <strong style="width:76px">Partials</strong> assign ${num('covPartUnits', cov.partial.units, 4)} unit(s) per ${num('covPartHours', cov.partial.perHours, 12)} hours
       
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-top:8px">
-      <strong style="width:76px">Floor Span</strong> a BN's units may stretch across up to ${num('covMaxSpan', cov.maxSpan, 4)} floors
-      <span style="color:var(--muted)">within this ceiling the dealer prefers nearer shapes — a unit has to be about half a day darker to win a longer walk</span>
+      <strong style="width:76px">Floor Span</strong> ${num('covMaxSpan', cov.maxSpan, 4)} floors
     </div>`;
 }
 // Build 327: when the Units-per-Shift numbers change, the save asks when
@@ -2256,7 +2266,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-10-435'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-10-436'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3627,8 +3637,9 @@ function refreshUnitStatusGrid(){
   const grid = document.getElementById('unitStatusGrid');
   if(grid){
     const now = new Date();
-    grid.innerHTML = '';
-    UNITS.forEach(u => {
+    // Build 436: wing rows (see _wingRowsHtml) — placeholders, then real chips into them
+    grid.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`);
+    [..._WING_ROW_A, ..._WING_ROW_D].forEach(u => {
       const d = document.createElement('div');
       d.className = 'uc';
       d.textContent = u;
@@ -3636,7 +3647,7 @@ function refreshUnitStatusGrid(){
       const isOpen = isUnitOpenAt(u, now);
       if(!isOpen) d.style.opacity = '0.45';
       d.onclick = () => openUnitStatusModal(u);
-      grid.appendChild(d);
+      const cell = grid.querySelector(`[data-slot="${u}"]`); if(cell) cell.replaceWith(d); else grid.appendChild(d);
     });
   }
   // Render any scheduled future status changes
@@ -20410,9 +20421,10 @@ async function loadReports(){
 // Low:      no restriction
 const UNIT_TIER = {
   // High acuity
-  '5A':'High', '6N':'High', '7N':'High',
+  // Build 436: floor feedback (Tomas, Sep 10) — 6N is NOT High; 8N is.
+  '5A':'High', '6N':'Standard', '7N':'High',
   // Standard
-  '8N':'Standard', '8S':'Standard', '9N':'Standard',
+  '8N':'High', '8S':'Standard', '9N':'Standard',
   '9S':'Standard', '10N':'Standard', '10S':'High',
   'C_PAIR':'Low',
   // Low acuity
