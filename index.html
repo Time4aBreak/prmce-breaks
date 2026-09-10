@@ -866,7 +866,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <!-- Unit Status -->
     <div class="card">
       <div class="card-label" style="margin:0 0 4px">Units to Cover</div>
-      <div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">Tap a unit to open or close it. Closed units appear dimmed.</div>
       <div class="unit-grid" id="unitStatusGrid"></div>
       <div id="unitStatusScheduled" style="margin-top:12px;font-size:.82rem"></div>
     </div>
@@ -2267,7 +2266,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-09-431'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-10-432'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13368,7 +13367,10 @@ async function _loadAssignmentsCore(preloadedScheds){
             // Build 400 (Tomas's catch): count SLOTS, not units — 3C+4C is ONE
             // dealt slot (C_PAIR) wearing two chips; raw unit counting badged
             // every pair-carrier as one over, crying wolf on correct deals.
-            z = us.filter(u => u !== '3C' && u !== '4C').length + ((us.includes('3C') || us.includes('4C')) ? 1 : 0);
+            // Build 432: a pair with BOTH halves closed counts as ZERO slots, so rows
+            // dealt before the pool fix wear the chip and Rebalance cures them.
+            const _pairOpen = isUnitOpenForShift('3C', date, sh) || isUnitOpenForShift('4C', date, sh);
+            z = us.filter(u => u !== '3C' && u !== '4C').length + (((us.includes('3C') || us.includes('4C')) && _pairOpen) ? 1 : 0);
           } catch(e){}
           return { nm: firstName(x.BreakNurseName), sz: z }; });
         const devs = withSizes.filter(w => w.sz !== rate);
@@ -20692,8 +20694,13 @@ function _dealSite({ names, pool, quota, shift, seed }){
         const dark = darkness(all.flat()) + _DEAL_WALK_COST * walk;
         const balance = Math.abs(dc - n / 2);
         const key = _dealHash(all.map(st => st.map(e => e.slot).join('+')).join('|'), seed) % 9973;
-        // a cap-honoring arrangement always beats a forced one
-        if(!best || (best.forced && !forced) || (best.forced === forced && (dark < best.dark || (dark === best.dark && (walk < best.walk || (walk === best.walk && (balance < best.balance || (balance === best.balance && key < best.key)))))))){
+        // a cap-honoring arrangement always beats a forced one.
+        // Build 432: ties break on the EVEN SPLIT before the walk — with no history
+        // (a fresh sheet) every unit is equally dark, and D wins walks structurally
+        // (8N/8S, 9N/9S, 10N/10S share floors), which sent both BNs to D and left A
+        // dark. With real counts the tie is rare; on the 20-week roster the swap
+        // changed nothing.
+        if(!best || (best.forced && !forced) || (best.forced === forced && (dark < best.dark || (dark === best.dark && (balance < best.balance || (balance === best.balance && (walk < best.walk || (walk === best.walk && key < best.key)))))))){
           best = { dark, walk, balance, key, forced, picks: {}, split: { D: dN, A: aN } };
           dN.forEach((nm, i) => best.picks[nm] = dp[i]);
           aN.forEach((nm, i) => best.picks[nm] = ap[i]);
@@ -20850,7 +20857,10 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   // ── Step 2: Build slot pool ─────────────────────────
   const pool = ALL_COVERAGE_SLOTS
     .filter(s => {
-      if(s === 'C_PAIR') return true; // intent preserved regardless of closure
+      // Build 432 (Tomas, 4C closed with 3C already closed): the pair stays in
+      // the pool while EITHER half is open (intent preserved for the open
+      // half); with both closed it must not cost a slot of quota.
+      if(s === 'C_PAIR') return isUnitOpenForShift('3C', date, shift) || isUnitOpenForShift('4C', date, shift);
       return isUnitOpenForShift(s, date, shift);
     })
     .map(s => ({
