@@ -2267,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-09-430'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-09-431'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2816,11 +2816,19 @@ const syncedLS = {
   },
 
   async warmMany(keys){
-    const missing = keys.filter(k => k && localStorage.getItem(k) == null);
+    // Build 431 (Tomas: unit close/re-deal too slow): a key the server said
+    // doesn't exist stayed "missing" locally forever, so every deal re-warmed
+    // it — and a dozen absent wing-history keys (nurses with no history on a
+    // shift) tipped every warm onto the BULK path: the whole BNState sheet,
+    // once per date-shift. Remember absence for five minutes (cleared by any
+    // write to the key), so a re-deal warms once, not eighty-five times.
+    const _now = Date.now();
+    const missing = keys.filter(k => k && localStorage.getItem(k) == null && !(syncedLS._absent[k] && (_now - syncedLS._absent[k]) < 300000));
     if(!missing.length) return;
     // For small N, parallel single-key fetches are fine.
     if(missing.length <= 5){
       await Promise.all(missing.map(k => syncedLS.warm(k)));
+      missing.forEach(k => { if(localStorage.getItem(k) == null) syncedLS._absent[k] = Date.now(); }); // Build 431
       return;
     }
     // Build 111 (2026-05-25): for large N, bulk-fetch ALL of BNState in
@@ -2842,6 +2850,7 @@ const syncedLS = {
         }
       });
     } catch {}
+    missing.forEach(k => { if(localStorage.getItem(k) == null) syncedLS._absent[k] = Date.now(); }); // Build 431
   },
 
   // Force-refresh a single key from BNState, ignoring local cache. Returns
@@ -2926,7 +2935,9 @@ const syncedLS = {
     }
   },
 
+  _absent: {}, // Build 431: key → time the server last said it doesn't exist
   async set(key, value){
+    delete syncedLS._absent[key]; // Build 431
     localStorage.setItem(key, JSON.stringify(value));
     // Mirror to BNState. setState handles its own write lock + localStorage
     // sync, but we wrote localStorage above so the local cache is correct
@@ -4222,7 +4233,13 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       const bookingFilter = (unit === '3C' || unit === '4C')
         ? `(Unit eq '${unit}' or Unit eq 'C_PAIR') and SlotDate ge '${_bkFloor}'`
         : `Unit eq '${unit}' and SlotDate ge '${_bkFloor}'`;
-      const allBookings = await spGet(LISTS.bookings, bookingFilter);
+      // Build 431: both preview reads in flight together (they were sequential).
+      const _scheFloor431 = activeShiftFloor();
+      const _scheFrom431 = _scheFloor431 < todayStr ? _scheFloor431 : todayStr;
+      const [allBookings, _allScheds431] = await Promise.all([
+        spGet(LISTS.bookings, bookingFilter),
+        spGet(LISTS.schedule, `ShiftDate ge '${_scheFrom431}'`)
+      ]);
       affectedBookings = allBookings.filter(b => {
         if(isBNBreak(b)) return false;
         const slotDt = slotDateTime(b.SlotDate.slice(0,10), b.SlotTime, b.ShiftType);
@@ -4233,9 +4250,7 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       // include this unit (or C_PAIR for 3C/4C). Pull the floor back to
       // activeShiftFloor() so still-running Noc shifts (started yesterday-
       // calendar but ending after effectiveAt) aren't missed.
-      const _scheFloor = activeShiftFloor();
-      const _scheFromDate = _scheFloor < todayStr ? _scheFloor : todayStr;
-      const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFromDate}'`);
+      const allScheds = _allScheds431; // Build 431: fetched above, in parallel with the bookings
       const affectedScheds = allScheds.filter(s => {
         if(s.Status === 'inactive' || String(s.IsSupplemental) === '1') return false;
         let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
@@ -7216,10 +7231,12 @@ async function redealFutureShifts(fromTime, opts = {}){
   const wingHistoryBatch = {};
   const updates = [];
   const summary = [];
-  for(const key of Object.keys(byKey).sort()){
+  const _keys431 = Object.keys(byKey).sort(); let _done431 = 0;
+  for(const key of _keys431){
     const [date, shift] = key.split('|');
     const nurses = byKey[key];
     if(!nurses.length) continue;
+    try { showBusy(`Re-dealing ${++_done431} of ${_keys431.length} shifts…`); } catch(e){} // Build 431: a visible wait
     const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, wingHistoryBatch);
     let changed = 0;
     for(const s of schedByKey[key]){
