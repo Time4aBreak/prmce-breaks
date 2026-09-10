@@ -314,9 +314,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
     <div id="nameWindowHint" style="display:none;font-size:.8rem;color:var(--day);font-weight:500;margin-top:6px"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
-      <div style="font-size:.72rem;color:var(--muted)">
-        💡 Slots update every 10 seconds.
-      </div>
+      <div></div>
       <button class="btn btn-ghost btn-sm" style="font-size:.72rem;white-space:nowrap;margin-left:8px" onclick="clearNameExt()">✕ Clear</button>
     </div>
     <!-- Booking status after name+ext+unit entered -->
@@ -355,7 +353,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div class="pw-gate">
       <div style="font-size:2rem;margin-bottom:10px">🔐</div>
       <h2>Breakers Portal</h2>
-      <p>Enter your password to access the portal</p>
       <input type="password" id="portalPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockPortal()"/>
       <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockPortal()">Unlock</button>
@@ -521,11 +518,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     </div>
 
-    <div id="bnNoSched" style="display:none">
-      <div class="card">
-        <div class="empty">No assignments found for your name on this shift.<br><br>Check with your manager or try switching the shift above.</div>
-      </div>
-    </div>
 
     <div id="bnDefaultWrap" style="display:none">
       <div class="card">
@@ -534,7 +526,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <span id="bnDefaultSaved" style="font-size:.75rem;color:var(--green);display:none">✓ Saved</span>
         </div>
         <p style="font-size:.8rem;color:var(--muted);margin-bottom:12px;line-height:1.5">
-          Set your usual break times. This template will be auto-applied to all your upcoming shifts.
+          Select default break times to be applied to all upcoming shifts
         </p>
         <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           <button class="btn btn-ghost btn-sm" id="bnDefaultDayBtn" onclick="loadDefaultGrid('Day')"><span style="display:inline-flex;align-items:center;gap:3px" id="bnDayBtnLabel"><span id="bnDayIcon"></span> Day</span></button>
@@ -548,7 +540,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <button class="btn btn-ghost btn-sm" onclick="clearDefaultTemplate()">Clear Default</button>
         </div>
         <div id="bnApplyAllHint" style="font-size:.75rem;color:var(--muted);margin-top:6px;display:none">
-          You haven't set a default break schedule yet. Select your usual break times above to get started.
         </div>
       </div>
     </div>
@@ -566,7 +557,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div class="pw-gate">
       <div style="font-size:2rem;margin-bottom:10px">📊</div>
       <h2>Reports</h2>
-      <p>Enter your admin or break nurse password to access Analytics</p>
       <input type="password" id="rptPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockReports()"/>
       <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockReports()">Unlock</button>
@@ -631,15 +621,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <div class="card" id="rptTallyCard" style="display:none"></div>
     <div class="card" id="rptVsCard" style="display:none"></div>
-    <div class="card" id="rptSelfCareCard" style="display:none">
-      <div class="card-label">🧑‍⚕️ Break-Nurse Self-Care</div>
-      <div style="font-size:.75rem;color:var(--muted);margin-bottom:10px;line-height:1.4">
-        Own breaks logged per shift worked.
-      </div>
-      <div id="rptSelfCareCallout" style="font-size:.9rem;font-weight:600;margin-bottom:10px;line-height:1.45"></div>
-      <div id="rptSelfCareBody" style="overflow-x:auto"></div>
-    </div>
-
   </div><!-- /rptPanel -->
     </div><!-- /subtab-reports -->
 
@@ -684,7 +665,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
         <div id="wgGrid" style="overflow-x:auto"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
-          <span style="font-size:.76rem;color:var(--muted);line-height:1.4">Tap a cell for the nurse's default shift · tap it again to change the shift, make it partial, or clear it. Defaults live on the Break Nurses card in Settings.</span>
+          <span style="font-size:.76rem;color:var(--muted);line-height:1.4">Tap a cell once to schedule a shift. Tap again for more options.</span>
           <button type="button" id="wgReviewBtn" class="btn btn-primary" onclick="wgReview()" disabled>✨ Suggest &amp; Review</button>
         </div>
       </div>
@@ -704,8 +685,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         ondragleave="this.style.borderColor='var(--border)'"
         ondrop="handleDrop(event)">
         <div style="font-size:2rem;margin-bottom:6px">📅</div>
-        <div style="font-size:.875rem;font-weight:600;color:var(--teal-dk)">Add image of UKG PRO Break Relief Schedule per week here</div>
-        <div style="font-size:.75rem;color:var(--muted);margin-top:4px">PNG, JPG, or screenshot from any device</div>
+        <div style="font-size:.875rem;font-weight:600;color:var(--teal-dk)">Add image of UKG PRO Break Relief Schedule per week here (PNG or JPG)</div>
       </div>
       <input type="file" id="schedFile" accept="image/*" style="display:none" onchange="handleFileSelect(event)"/>
 
@@ -714,7 +694,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <!-- Build 218 (F2 checksum): declared BEFORE extraction so the count is
              a real pre-commitment, not anchored by the AI's own output. -->
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-          <label for="impExpectedCount" style="font-size:.82rem;font-weight:600;flex:1;min-width:200px">How many shifts are on this screenshot? <span style="font-weight:400;color:var(--muted)">(count the name boxes)</span></label>
+          <label for="impExpectedCount" style="font-size:.82rem;font-weight:600;flex:1;min-width:200px">Shifts scheduled this week: <span style="font-weight:400;color:var(--muted)"></span></label>
           <input id="impExpectedCount" type="number" min="1" inputmode="numeric" placeholder="e.g. 37" style="width:90px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;text-align:center"/>
         </div>
         <button class="btn btn-primary extract-action-btn" style="width:100%" onclick="runImport()">
@@ -773,7 +753,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             </div>
           </div>
           <div class="field" style="min-width:110px">
-            <label>BNs this shift</label>
+            <label>Break nurses this shift</label>
             <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
               style="width:72px;padding:8px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
               onchange="_aExpectedChanged(this.value)"/>
@@ -790,16 +770,16 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <div class="field" id="aPartTimes" style="display:none">
             <label>Start – Stop</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <input type="time" id="aPartStart" value="20:00" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <input type="time" id="aPartStart" value="20:00" oninput="this.dataset.userSet='1'" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
               <span style="color:var(--muted)">–</span>
-              <input type="time" id="aPartEnd" value="00:00" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <input type="time" id="aPartEnd" value="00:00" oninput="this.dataset.userSet='1'" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
             </div>
           </div>
         </div>
 
         <div style="margin-bottom:12px">
           <label style="font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;display:block;margin-bottom:5px">Break Nurse</label>
-          <select id="aNurse" onchange="syncNurseInput(this.value)" style="margin-bottom:6px"><option value="">— Select from imported schedule —</option></select>
+          <select id="aNurse" onchange="syncNurseInput(this.value)" style="margin-bottom:6px"><option value=""></option></select>
           <input type="text" id="aNurseText" placeholder="Or type a name manually" autocomplete="off" oninput="document.getElementById('aNurse').value=''" style="font-size:.875rem"/>
         </div>
 
@@ -874,7 +854,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div class="card">
       <div style="display:flex;align-items:center;gap:8px;margin:0 0 4px"><div class="card-label" style="margin:0">Shift Limits</div><span id="rampDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
       <div id="rampCfgBody"></div>
-      <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveRampCfg(this)">Save limits</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="saveRampCfg(this)">Save limits</button>
+        <button class="btn btn-ghost btn-sm" onclick="redealUpcomingNow(this)" title="Re-deal every shift from tomorrow forward under the current settings">↻ Re-deal upcoming</button>
+      </div>
     </div>
 
     <!-- High-acuity units (Build 430): the map + per-shift cap toggles -->
@@ -934,7 +917,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
       </div>
       <div id="bnListBody" style="display:none;margin-top:10px">
-        <div id="importedNamesList"><div class="empty" style="padding:10px 0">No break nurses yet — use + Add manually, or import a schedule.</div></div>
+        <div id="importedNamesList"><div class="empty" style="padding:10px 0">Add shifts on Schedule tab</div></div>
         <div id="manualNameRow" style="display:none;margin-top:10px">
           <div style="display:flex;flex-direction:column;gap:6px">
             <div class="row" style="gap:6px">
@@ -1010,7 +993,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 <div id="restoreModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;align-items:center;justify-content:center;padding:16px">
   <div style="background:var(--card);border-radius:16px;padding:22px;max-width:480px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2);max-height:90vh;display:flex;flex-direction:column">
     <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Restore Cancelled Breaks?</div>
-    <div style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Select which nurses to restore. Unselected slots will remain open.</div>
+    <div style="font-size:.8rem;color:var(--muted);margin-bottom:14px">Select which claims to restore. Unselected slots will remain open.</div>
     <div style="display:flex;gap:8px;margin-bottom:12px">
       <button class="btn btn-ghost btn-sm" onclick="restoreModalSelectAll(true)">✓ Restore All</button>
       <button class="btn btn-ghost btn-sm" onclick="restoreModalSelectAll(false)">✕ Cancel All</button>
@@ -1582,13 +1565,20 @@ async function saveAcuityCfg(btn){
     await syncedLS.set('acuityConfig', cfg);
     toast('✓ Acuity saved — new deals use it from now on');
     if(before !== JSON.stringify(_acuityCfg())){
-      if(await customConfirm('Acuity settings changed. Apply them to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use the new settings for future scheduling only? Shifts that now break the cap will wear the ⚖ badge either way.', 'Re-deal upcoming', 'Keep as scheduled')){
+      if(await customConfirm('Acuity settings changed. Apply them to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use the new settings for future scheduling only?', 'Re-deal upcoming', 'Keep as scheduled')){
         await applyCoverageLimitsToUpcoming();
       }
       if(typeof loadAssignments === 'function') loadAssignments();
     }
   } catch(e){ toast(`Couldn't save acuity — ${(e && e.message) || e || 'unknown error'}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } initAcuityCard(); }
+}
+// Build 435 (wording review #35): standalone Re-deal upcoming — the cure the
+// re-deal-failed toast points at, previously reachable only through the save questions.
+async function redealUpcomingNow(btn){
+  if(!await customConfirm('Re-deal every shift from tomorrow forward under the current settings? Assignments on those shifts will change.', 'Re-deal upcoming', 'Go back')) return;
+  const old = btn ? btn.textContent : ''; if(btn){ btn.disabled = true; btn.textContent = 'Re-dealing…'; }
+  try { await applyCoverageLimitsToUpcoming(); } finally { if(btn){ btn.disabled = false; btn.textContent = old; } }
 }
 function _rampCfg(){
   try {
@@ -1761,7 +1751,7 @@ function initRampCard(){
     </div>
     <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-top:8px">
       <strong style="width:76px">Floor Span</strong> a BN's units may stretch across up to ${num('covMaxSpan', cov.maxSpan, 4)} floors
-      <span style="color:var(--muted)">the dealer still takes the nearest shape whenever coverage is equal</span>
+      <span style="color:var(--muted)">within this ceiling the dealer prefers nearer shapes — a unit has to be about half a day darker to win a longer walk</span>
     </div>`;
 }
 // Build 327: when the Units-per-Shift numbers change, the save asks when
@@ -1907,7 +1897,7 @@ async function saveRampCfg(btn){
     const _oa = cfg[sh].openAt;
     const _tooEarly = sh === 'Day' ? (_oa < '06:30') : (_oa >= '12:00' && _oa < '18:30');
     if(_tooEarly){
-      toast(`⚠ ${sh} slots can't open before the ${sh === 'Day' ? '6:30 AM' : '6:30 PM'} shift start — staff can't claim breaks before their shift begins.`, true);
+      toast(`Open time must be after ${sh === 'Day' ? 'AM' : 'PM'} shift start at ${sh === 'Day' ? '06:30' : '18:30'}.`, true);
       if(btn){ btn.disabled = false; btn.textContent = 'Save limits'; }
       return;
     }
@@ -1919,7 +1909,7 @@ async function saveRampCfg(btn){
   }
   let _dry = '';
   ['Day','Noc'].forEach(sh => covCfg[sh].byTeam.forEach((u, i) => {
-    if((i + 1) * u > 14 && !_dry) _dry = `Heads up: ${sh} with ${i + 1} BNs at ${u} each wants ${(i + 1) * u} of ~14 open slots — some will come up short.`;
+    if((i + 1) * u > 14 && !_dry){ const _open = (() => { try { const td = localDate(new Date()); return ALL_COVERAGE_SLOTS.filter(x => x === 'C_PAIR' ? (isUnitOpenForShift('3C', td, sh) || isUnitOpenForShift('4C', td, sh)) : isUnitOpenForShift(x, td, sh)).length; } catch(e){ return 14; } })(); _dry = `Total units to be covered should be equal to or less than ${_open} — some break nurses will come up short.`; }
   }));
   try {
     await syncedLS.set('rampConfig', cfg);
@@ -2266,7 +2256,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-10-433'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-10-435'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3068,7 +3058,7 @@ function showSimBanner(){
   if (!SIM_MODE) return;
   const b = document.createElement('div');
   b.style.cssText = 'position:fixed;bottom:0;left:0;right:0;background:#e8a020;color:white;text-align:center;font-size:.75rem;font-weight:700;padding:4px;z-index:9999;letter-spacing:.06em';
-  b.textContent = '🧪 SIMULATION MODE — data is stored locally, not on SharePoint';
+  b.textContent = '🧪 Simulation Mode';
   document.body.appendChild(b);
 }
 
@@ -3746,7 +3736,7 @@ async function cancelScheduledUnitChangeUI(unit, effectiveAt){
     await redealFutureShifts(parseLocalIso(effectiveAt), { commit: true });
   } catch(e){
     console.warn('[cancelScheduledUnitChangeUI] future re-deal failed:', e.message);
-    toast('Future-shift re-deal failed — future assignments may be stale.', true);
+    toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
   }
   hideBusy();
   refreshUnitStatusGrid();
@@ -4653,7 +4643,7 @@ async function commitUnitChange(){
         await redealFutureShifts(pending.effectiveAt, { commit: true });
       } catch(e){
         console.warn('[commitUnitChange] future re-deal failed:', e.message);
-        toast('Future-shift re-deal failed — future assignments may be stale.', true);
+        toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
       }
 
       hideBusy();
@@ -4803,7 +4793,7 @@ async function commitUnitChange(){
         await redealFutureShifts(pending.effectiveAt, { commit: true });
       } catch(e){
         console.warn('[commitUnitChange] reopen future re-deal failed:', e.message);
-        toast('Future-shift re-deal failed — future assignments may be stale.', true);
+        toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
       }
       hideBusy();
 
@@ -8703,7 +8693,7 @@ function togglePending(slotTime, slotShift, bn, srcDt){
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
       document.getElementById('nameExtHint').style.display = 'block';
-      toast('Enter your first name and a 5-digit Spectra extension', true);
+      toast('Enter name and 5-digit extension', true);
       return;
     }
     // Build 301's law ("a shift's limits bind anyone claiming its slots,
@@ -9076,7 +9066,7 @@ function confirmTransferStaging(){
   const newExt   = document.getElementById('transferStagingExt').value.trim();
   const errEl    = document.getElementById('transferStagingErr');
   if(!newFirst || !/^\d{5}$/.test(newExt)){
-    errEl.textContent = 'Enter a first name and 5-digit extension.';
+    errEl.textContent = 'Enter name and 5-digit extension.';
     errEl.style.display = 'block';
     return;
   }
@@ -9084,7 +9074,7 @@ function confirmTransferStaging(){
   const myFirst = document.getElementById('nurseName').value.trim().toLowerCase();
   const myExt   = document.getElementById('nurseExt').value.trim();
   if(newFirst.toLowerCase() === myFirst && newExt === myExt){
-    errEl.textContent = "That's your own name and ext.";
+    errEl.textContent = 'Cannot transfer to self.';
     errEl.style.display = 'block';
     return;
   }
@@ -9128,7 +9118,7 @@ async function submitClaims(){
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
-    toast('Enter your first name and a 5-digit Spectra extension', true);
+    toast('Enter name and 5-digit extension', true);
     return;
   }
 
@@ -9832,7 +9822,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
-    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Enter your first name and a 5-digit Spectra extension', true); }
+    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Enter name and 5-digit extension', true); }
     return 'Name/ext missing';
   }
   document.getElementById('nameExtHint').style.display = 'none';
@@ -10066,7 +10056,7 @@ async function manageSlotAction(action){
     const newExt = document.getElementById('transferExt').value.trim();
     const errEl = document.getElementById('transferErr');
     if(!newName || !/^\d{5}$/.test(newExt)){
-      errEl.textContent = 'Enter a first name and 5-digit extension.';
+      errEl.textContent = 'Enter name and 5-digit extension.';
       errEl.style.display = 'block';
       return;
     }
@@ -10230,6 +10220,9 @@ function cancelEditMode(){
 // after a Remove-from-edit. NOT folded into cancelEditMode — saveAssign
 // calls that mid-save (12688) and must keep the card until its own reset.
 function resetManualCard(){
+  // Build 434: the partial time inputs' user-set marks clear with the card, so
+  // the 375 courtesy may fill them again for the next assignment.
+  ['aPartStart','aPartEnd'].forEach(id => { const el = document.getElementById(id); if(el) delete el.dataset.userSet; });
   S.aUnits = [];
   S.editingAssignId = null;
   const t = document.getElementById('aNurseText'); if(t) t.value = '';
@@ -10314,9 +10307,6 @@ async function editAssign(id){
       isStaffBooking(b) && units.includes(b.Unit) && isConfirmed(b)
     );
 
-    if(confirmed.length > 0){
-      if(!await customConfirm(`${confirmed.length} break${confirmed.length!==1?'s have':' has'} already been confirmed for this assignment. Editing units may affect coverage records.`,'Edit units anyway','Go back')) return;
-    }
 
     // Pre-fill the manual assignment form — consolidate ALL records for this BN/date/shift
     const allBNScheds = shiftScheds.filter(r => r.BreakNurseName === s.BreakNurseName);
@@ -12715,7 +12705,7 @@ async function saveAssign(){
       if(firstMatches.length > 1){
         toast(`"${typedRaw}" matches ${firstMatches.length} nurses (${firstMatches.map(firstName).join(', ')}). Be more specific or use the dropdown.`, true);
       } else {
-        toast(`"${typedRaw}" doesn't match any known nurse. Add to roster first or check spelling.`, true);
+        toast(`Is "${typedRaw}" a new break nurse? If so add to Break Nurses Roster in Settings`, true);
       }
       loadAssignments();
       return;
@@ -13950,8 +13940,10 @@ async function setPreferredName(fullName, preferred){
       delete PREFERRED_NAMES[fullName];
     }
   }
-  // Fire-and-forget — syncedLS.set surfaces its own toast on failure.
-  syncedLS.set('bnPreferredNames', saved).catch(()=>{});
+  // Build 434: AWAIT the write (was fire-and-forget) so the next blur's
+  // refresh-before-merge sees it landed — two quick edits could otherwise
+  // merge the pre-edit map back in (the 424 race, masked here by blur speed).
+  try { await syncedLS.set('bnPreferredNames', saved); } catch(e){ /* syncedLS.set surfaces its own toast */ }
 }
 
 // fmt24 removed — time formatting replaced by fmt12 throughout
@@ -15917,7 +15909,7 @@ function renderF2Mirror(){
     const far = use.filter(e => { const t = new Date((e.date || '') + 'T12:00:00');
       return isFinite(t) && (nowMs - t > 21 * 86400e3 || t - nowMs > 60 * 86400e3); });
     if(far.length){
-      html += `<div style="background:#fdecec;border:1.5px solid #c0392b;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:.8rem;color:#7f1d1d"><b>⚠ Check the dates:</b> ${far.length} of ${use.length} entries are far from today (e.g. ${far[0].date}). If the year looks wrong, re-screenshot and re-extract before saving.</div>`;
+      html += `<div style="background:#fdecec;border:1.5px solid #c0392b;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:.8rem;color:#7f1d1d"><b>⚠ Check the dates:</b> ${far.length} of ${use.length} entries are far from today (e.g. ${far[0].date}).</div>`;
     }
   }
   Object.keys(byWeek).sort().forEach(sun => {
@@ -15947,8 +15939,8 @@ function renderF2Mirror(){
   html += `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`
     + `<button class="btn btn-sm" onclick="f2Ack()" style="background:${acked ? 'var(--green)' : 'var(--teal)'};color:#fff;font-weight:700">✓ Extraction Matches Schedule</button>`
     + `<span style="font-size:.75rem;color:${acked ? 'var(--green)' : 'var(--muted)'}">${acked
-        ? 'Acknowledged — Save All unlocked.'
-        : 'Hold this mirror beside the posted schedule; when the pattern matches, tap to unlock Save All.'}</span></div>`;
+        ? ''
+        : 'Confirm the extraction matches to unlock Save All button'}</span></div>`;
   // Build 382: the add bar — sits exactly where the reviewer stands when a
   // hole is found. Values preserved across observer-driven re-renders so a
   // half-typed form never gets wiped by an unrelated card repaint.
@@ -16400,7 +16392,7 @@ async function acceptAllAndSave(){
   // the reviewer lands on a fresh picture, not a stale one.
   if(_f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp()){
     try { renderF2Mirror(); } catch(e){}
-    toast('Compare the mirror to the posted schedule, then tap "✓ Extraction Matches Schedule" to unlock Save All', true);
+    toast('Confirm the extraction matches to unlock Save All button', true);
     return;
   }
   // Build 389 (polish 3): the app's biggest write gets a one-tap seatbelt —
@@ -16789,7 +16781,7 @@ async function acceptAllAndSave(){
       if(verifyFailed){
         if(status) status.textContent = `⚠ Save could not be confirmed (${(e && e.message) || e || 'unknown error'}). Reload to check, or re-run SAVE ALL.`;
       } else if(missing.length === 0){
-        if(status) status.textContent = `✓ ${records.length} saved (recovered after a transport hiccup)`;
+        if(status) status.textContent = `✓ ${records.length} saved (confirmed by read-back)`;
       } else if(missing.length < records.length){
         if(status) status.textContent = `⚠ ${records.length - missing.length} of ${records.length} saved — ${missing.length} did NOT save`;
         toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
@@ -17142,7 +17134,6 @@ async function loadBNView(){
   updateApplyAllBtn();
 
   document.getElementById('bnShiftWrap').style.display = 'block';
-  document.getElementById('bnNoSched').style.display   = 'none';
 
   // Show "Finding shift…" while the pre-scan runs (in Prod Log space)
   const _bnCw = document.getElementById('bnConfirmWrap');
@@ -17567,6 +17558,19 @@ function trackCreate(record){
 // the new state immediately without waiting for the network round trip
 // + full refetch. reconcileBookings merges the patch into freshly fetched
 // rows by Id, overriding any stale fields the server hasn't yet returned.
+// Build 435 (wording review #68 — Tomas: "the record needs to reflect the actual
+// history"): every Taken / Not Taken write also stamps WHO covered it, unless a
+// transfer pin already did. Reports read CoveredBy first, so a later unit edit
+// changes the plan and never the record; the old "editing may affect coverage
+// records" dialog is gone with it.
+function _statusPatch(id, fields){
+  try {
+    const cache = (typeof _bnConfirmCache !== 'undefined' && _bnConfirmCache && _bnConfirmCache.allBookings) || [];
+    const b = cache.find(x => String(x.Id) === String(id));
+    if(typeof BNS !== 'undefined' && BNS.name && !(b && b.CoveredBy)) return { ...fields, CoveredBy: BNS.name };
+  } catch(e){}
+  return fields;
+}
 function trackPatch(id, fields){
   if(id == null || !fields) return;
   const key = String(id);
@@ -18082,9 +18086,9 @@ async function submitStagedActions(){
   for(const [id, info] of entries){
     try {
       if(info.action === 'confirmed'){
-        await spPatch(LISTS.bookings, id, { BreakStatus: 'confirmed', IsCompleted: 1 });
+        await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 }));
       } else if(info.action === 'not_taken'){
-        await spPatch(LISTS.bookings, id, { BreakStatus: 'not_taken', IsCompleted: 0 });
+        await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'not_taken', IsCompleted: 0 }));
       } else if(info.action === 'cancelled'){
         try {
           await spDel(LISTS.bookings, id);
@@ -19382,7 +19386,7 @@ async function cancelStaffBooking(id, nurseName, slotTime){
 
 async function setBreakStatus(id, status){
   try {
-    await spPatch(LISTS.bookings, id, { BreakStatus: status, IsCompleted: status === 'confirmed' ? 1 : 0 });
+    await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: status, IsCompleted: status === 'confirmed' ? 1 : 0 }));
     loadBNConfirm();
   } catch(e) { toast(e.message, true); }
 }
@@ -19559,7 +19563,7 @@ async function confirmAllBreaks(){
   // for rollback. No await — the function returns immediately after the
   // optimistic render.
   Promise.allSettled(
-    originals.map(({ id }) => spPatch(LISTS.bookings, id, { BreakStatus: 'confirmed', IsCompleted: 1 }))
+    originals.map(({ id }) => spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 })))
   ).then(results => {
     const failed = results
       .map((r, i) => r.status === 'rejected' ? originals[i] : null)
@@ -19607,7 +19611,7 @@ async function _confirmAllBreaksFallback(dt, shift){
     };
     const pending = allBookings.filter(b => bnCovers(b) && isPending(b));
     await Promise.all(pending.map(b =>
-      spPatch(LISTS.bookings, b.Id, { BreakStatus: 'confirmed', IsCompleted: 1 })
+      spPatch(LISTS.bookings, b.Id, _statusPatch(b.Id, { BreakStatus: 'confirmed', IsCompleted: 1 }))
     ));
     toast(`✓ ${pending.length} break${pending.length!==1?'s':''} confirmed`);
     loadBNConfirm();
@@ -19771,7 +19775,7 @@ function _rptRenderCoverage(cov){
   const worst = ranked[0];
   co.innerHTML = (!worst || worst[1].none === 0)
     ? `✅ Every open unit had break-nurse coverage on its tracked shifts.`
-    : `⚠️ <strong>${escHTML(worst[0])}</strong> had no coverage ${worst[1].none} of ${openN(worst[0])} shifts — most in the house.`;
+    : `⚠️ <strong>${escHTML(worst[0])}</strong> had no coverage ${worst[1].none} of ${openN(worst[0])} shifts.`;
   const rows = units.map(u => [u, cov.per[u]])
     .sort((a,b) => (b[1].none - a[1].none) || (b[1].absorbed - a[1].absorbed));
   const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
@@ -19893,7 +19897,7 @@ function _rptRenderRotation(rot){
     : `✅ No unit is concentrated on a single break nurse in this range.`;
   const td = 'padding:5px 7px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
   const th = 'padding:5px 7px;font-size:.66rem;color:var(--muted);text-align:center;font-family:\'DM Mono\',monospace';
-  body.innerHTML = `<table style="border-collapse:collapse">
+  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">Reading guide: D-wing share settles near <strong>57%</strong> (8 of 14 units), not 50% — so A-wing ≈ 43% is on target · two-High should be 0 on a capped shift · span = floors stretched per assignment.</div><table style="border-collapse:collapse">
     <tr><th style="${th};text-align:left">Nurse</th>${units.map(u => `<th style="${th}">${escHTML(u)}</th>`).join('')}</tr>
     ${bns.map(bn => {
       const aPct = rot.nights[bn] ? Math.round(100 * (rot.wingA[bn] || 0) /
@@ -19910,54 +19914,6 @@ function _rptRenderRotation(rot){
 }
 
 // ── Card 4: BN Self-Care ───────────────────────────────────────────────
-function _rptSelfCare(scheds, bookings){
-  const rows = scheds.filter(s => _rptActive(s)
-    && (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
-  const nights = {};
-  rows.forEach(s => { if(s.BreakNurseName) nights[s.BreakNurseName] = (nights[s.BreakNurseName] || 0) + 1; });
-  const own = {};
-  bookings.filter(b => isBNBreak(b) && String(b.IsCancelled) !== '1')
-    .forEach(b => own[b.NurseName] = (own[b.NurseName] || 0) + 1);
-  const per = Object.keys(nights).map(bn => ({
-    bn, nights: nights[bn], breaks: own[bn] || 0, avg: (own[bn] || 0) / nights[bn]
-  })).sort((a,b) => a.avg - b.avg);
-  const tot = per.reduce((a,p) => a + p.breaks, 0);
-  const totN = per.reduce((a,p) => a + p.nights, 0);
-  return { per, houseAvg: totN ? tot / totN : 0 };
-}
-
-function _rptRenderSelfCare(sc){
-  const co = document.getElementById('rptSelfCareCallout');
-  const body = document.getElementById('rptSelfCareBody');
-  const qual = sc.per.filter(p => p.nights >= 2);
-  if(!qual.length){
-    co.innerHTML = `Not enough shifts in range yet for a read on break-nurse self-care.`;
-  } else {
-    const low = qual[0];
-    const ties = qual.filter(p => p.avg === low.avg);
-    if(sc.houseAvg > 0 && low.avg < sc.houseAvg * 0.6){
-      // Build 292: naming one nurse out of a many-way tie was misleading
-      // (dual-running adoption skew). Ties get counted, not named.
-      co.innerHTML = ties.length > 1
-        ? `⚠️ ${ties.length} nurses are at ${low.avg.toFixed(1)} own breaks per shift — the norm this period is ${sc.houseAvg.toFixed(1)}.`
-        : `⚠️ <strong>${escHTML(bnDisplayName(low.bn))}</strong> logged ${low.breaks} own break${low.breaks === 1 ? '' : 's'} across ${low.nights} shifts (${low.avg.toFixed(1)}/shift) — the norm this period is ${sc.houseAvg.toFixed(1)}.`;
-    } else {
-      co.innerHTML = `✅ Break nurses are logging their own breaks — house norm ${sc.houseAvg.toFixed(1)} per shift.`;
-    }
-  }
-  const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
-  const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
-  body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
-    <tr><th style="${th};text-align:left">Nurse</th><th style="${th}">Shifts</th><th style="${th}">Own breaks</th><th style="${th}">Per shift</th></tr>
-    ${sc.per.map(p => `<tr style="border-top:1px solid var(--border)">
-      <td style="${td};text-align:left;font-weight:600;white-space:nowrap">${escHTML(bnDisplayName(p.bn))}</td>
-      <td style="${td};color:var(--muted)">${p.nights}</td>
-      <td style="${td}">${p.breaks}</td>
-      <td style="${td};font-weight:700;color:${(sc.houseAvg > 0 && p.avg < sc.houseAvg * 0.6) ? 'var(--red)' : 'var(--teal-dk)'}">${p.avg.toFixed(1)}</td>
-    </tr>`).join('')}
-  </table>`;
-  document.getElementById('rptSelfCareCard').style.display = 'block';
-}
 
 // ── Build 292: coverage extras — past holes, upcoming preview, closure
 // context, schedule horizon. All pure arithmetic over data loadReports
@@ -20389,7 +20345,7 @@ async function loadReports(){
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
   const status = document.getElementById('rptStatus');
-  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptSelfCareCard','rptTallyCard','rptVsCard']
+  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptTallyCard','rptVsCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
   status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
@@ -21056,7 +21012,7 @@ async function _populateNurseDropdownCore(){
     }
     sel.innerHTML = html;
   } else if (date) {
-    sel.innerHTML = '<option value="">No break nurses on roster — import schedule first</option>';
+    sel.innerHTML = '<option value="">No break nurses on roster — add them on the Break Nurses card in Settings</option>';
   } else {
     sel.innerHTML = '<option value="">— Select a date first —</option>';
   }
@@ -21120,7 +21076,7 @@ function wgSetWeek(ds){
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
 function wgClearWeek(){
   if(!Object.keys(_wgCells).length) return;
-  if(!confirm('Clear every shift on this week\'s grid? (Nothing saved to the schedule is touched.)')) return;
+  if(!confirm('Clear every shift on this week\'s grid?')) return;
   _wgCells = {}; _wgSaveDraft(); wgRender();
 }
 function _wgCellLabel(c){
@@ -21235,7 +21191,7 @@ function renderImportedNamesList(){
   const el = document.getElementById('importedNamesList');
   if (!el) return;
   if (!importedNames.length){
-    el.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses yet — use + Add manually, or import a schedule.</div>';
+    el.innerHTML = '<div class="empty" style="padding:10px 0">Add shifts on Schedule tab</div>';
     renderBNFilter();
     return;
   }
@@ -21330,7 +21286,7 @@ async function removeImportedName(name){
   if(upcoming.length === 0){
     const fn = firstName(name);
     if(!await customConfirm(
-      `Remove ${fn} from the roster? They have no upcoming assignments.`,
+      `Remove ${fn} from the roster? ${fn} has no upcoming assignments.`,
       'Remove', 'Cancel'
     )) return;
     importedNames = importedNames.filter(n => n !== name);
