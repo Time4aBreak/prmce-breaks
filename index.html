@@ -2267,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-11-438'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-11-439'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14446,6 +14446,18 @@ function handleFileSelect(e){
   try { e.target.value = ''; } catch(err){} // let the same file be picked again after a refusal
 }
 
+// Build 439 (Tomas): after a successful Save All the last screenshot is cleared —
+// image, preview, count — so the next import starts clean. The review cards are
+// NOT collapsed; they stay as the record of what was just saved.
+function _clearImportPreview(){
+  try {
+    importImageB64 = null; importImageType = null;
+    const img = document.getElementById('previewImg'); if(img) img.removeAttribute('src');
+    const pv = document.getElementById('importPreview'); if(pv) pv.style.display = 'none';
+    const f = document.getElementById('schedFile'); if(f) f.value = '';
+    const c = document.getElementById('impExpectedCount'); if(c) c.value = '';
+  } catch(e){}
+}
 function loadImportFile(file){
   // Build 411 (polish #5): ONE gate for both entry points. Drop already
   // refused non-images silently; the picker trusted accept="image/*", which
@@ -16710,6 +16722,7 @@ async function acceptAllAndSave(){
       toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
     } else {
       if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
+      _clearImportPreview(); // Build 439
     }
     // Save All success: hide the entire Extracted card. The batch is committed;
     // showing stale rows invites confusion and a tap of Save All on nothing.
@@ -16803,6 +16816,7 @@ async function acceptAllAndSave(){
         if(status) status.textContent = `⚠ Save could not be confirmed (${(e && e.message) || e || 'unknown error'}). Reload to check, or re-run SAVE ALL.`;
       } else if(missing.length === 0){
         if(status) status.textContent = `✓ ${records.length} saved (confirmed by read-back)`;
+        _clearImportPreview(); // Build 439
       } else if(missing.length < records.length){
         if(status) status.textContent = `⚠ ${records.length - missing.length} of ${records.length} saved — ${missing.length} did NOT save`;
         toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
