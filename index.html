@@ -659,9 +659,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(-1)" title="Previous week">‹</button>
           <input type="date" id="wgWeekPick" onchange="wgSetWeek(this.value)" style="font-size:.9rem;padding:6px 8px;width:auto"/>
           <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(1)" title="Next week">›</button>
-          <span id="wgWeekLabel" style="font-weight:700;font-size:.95rem"></span>
           <span style="flex:1"></span>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="wgClearWeek()">✕ Clear week</button>
+          <button type="button" id="wgClearBtn" class="btn btn-ghost btn-sm" onclick="wgClearWeek()">✕ Clear week</button>
         </div>
         <div id="wgGrid" style="overflow-x:auto"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
@@ -2268,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-10-437'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-11-438'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21097,7 +21096,20 @@ function wgSetWeek(ds){
   wgRender();
 }
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
+// Build 438 (Tomas): a saved week can't be "cleared" here — deleting saved shifts is
+// Edit → Remove on the Schedule cards. On a saved week the button REVERTS the grid
+// to what's on the schedule (drops the draft, re-prefills from the archive); on an
+// unsaved week it clears the grid as before.
+function _wgWeekIsSaved(){
+  try { const end = _wgAddDays(_wgWeek, 6); return getImportedEntries().some(e => e.date >= _wgWeek && e.date <= end); } catch(e){ return false; }
+}
 function wgClearWeek(){
+  if(_wgWeekIsSaved()){
+    if(!confirm('Discard your unsaved changes and show this week as it is on the schedule?')) return;
+    try { localStorage.removeItem(_wgDraftKey()); } catch(e){}
+    wgSetWeek(_wgWeek); // no draft → prefills from the archive
+    return;
+  }
   if(!Object.keys(_wgCells).length) return;
   if(!confirm('Clear every shift on this week\'s grid?')) return;
   _wgCells = {}; _wgSaveDraft(); wgRender();
@@ -21116,7 +21128,6 @@ function wgRender(){
   const host = document.getElementById('wgGrid'); if(!host || !_wgWeek) return;
   const dates = _wgDates(); const names = _wgRosterNames();
   const end = dates[6];
-  document.getElementById('wgWeekLabel').textContent = `${_WG_DOW[0]} ${Number(_wgWeek.slice(5,7))}/${Number(_wgWeek.slice(8,10))} – ${_WG_DOW[6]} ${Number(end.slice(5,7))}/${Number(end.slice(8,10))}`;
   if(!names.length){ host.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses on the roster yet — add them on the Break Nurses card in Settings.</div>'; return; }
   const cell = (n, d) => {
     const c = _wgCells[`${n}|${d}`];
@@ -21135,6 +21146,7 @@ function wgRender(){
   const count = Object.keys(_wgCells).length;
   document.getElementById('wgCount').textContent = count ? `${count} shift${count === 1 ? '' : 's'}` : '';
   const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !count;
+  const cb = document.getElementById('wgClearBtn'); if(cb) cb.textContent = _wgWeekIsSaved() ? '↺ Revert to saved' : '✕ Clear week'; // Build 438
 }
 function wgTap(name, date){
   const key = `${name}|${date}`;
