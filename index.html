@@ -648,7 +648,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
          are unchanged downstream. -->
     <div class="card" id="weeklyGridCard">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleWeeklyGrid()">
-        <div class="card-label" style="margin:0">🗓 Weekly Schedule</div>
+        <div class="card-label" style="margin:0">🗓 Manual Schedule</div>
         <div style="display:flex;align-items:center;gap:8px">
           <span id="wgCount" style="font-size:.75rem;color:var(--muted)"></span>
           <span id="wgChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
@@ -673,10 +673,11 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <!-- Import Schedule -->
     <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;cursor:pointer" onclick="toggleImportInput()">
         <div class="card-label" style="margin:0">📸 Import Schedule from UKG</div>
-        <span style="font-size:.7rem;color:var(--muted)">AI-powered</span>
+        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:.7rem;color:var(--muted)">AI-powered</span><span id="importChevron" style="font-size:.85rem;color:var(--muted)">▼</span></div>
       </div>
+      <div id="importInputBody" style="display:none">
 
 
       <div id="dropZone" onclick="document.getElementById('schedFile').click()"
@@ -702,6 +703,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <span id="importSpinner" style="display:none"><div class="spinner" style="border-top-color:white;width:16px;height:16px;display:inline-block"></div></span>
         </button>
       </div>
+      </div><!-- /importInputBody (Build 437: collapsed by default) -->
 
       <div id="importResults" style="display:none;margin-top:14px">
         <div id="importReplacementNotice" style="display:none;background:var(--day-lt);border:1.5px solid var(--day);border-radius:8px;padding:10px 14px;font-size:.82rem;color:var(--day);font-weight:500;margin-bottom:10px;line-height:1.5"></div>
@@ -735,7 +737,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <!-- Assign coverage — collapsible -->
     <div class="card" id="assignFormCard">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleAssignForm()">
-        <div class="card-label" style="margin:0">Assign Break Coverage Manually</div>
+        <div class="card-label" style="margin:0">Edit Assignment</div>
         <span id="assignChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
       </div>
       <div id="assignFormBody" style="margin-top:12px;display:none">
@@ -2266,7 +2268,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-10-436'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-10-437'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12124,6 +12126,15 @@ async function checkDuplicateExt(){
 }
 
 
+// Build 437 (Tomas): the import card's input half is collapsed by default; the
+// review cards below it stay visible whenever a batch exists (the grid uses them).
+function toggleImportInput(){
+  const body = document.getElementById('importInputBody'), chev = document.getElementById('importChevron');
+  if(!body) return;
+  const open = body.style.display !== 'none';
+  body.style.display = open ? 'none' : 'block';
+  if(chev) chev.textContent = open ? '▼' : '▲';
+}
 function toggleAssignForm(){
   const body = document.getElementById('assignFormBody');
   const chev = document.getElementById('assignChevron');
@@ -21193,7 +21204,7 @@ async function wgReview(){
   }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
   _impExpectedSet(entries.length);
   _impGateAcks = new Set();
-  const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Weekly Schedule — Review & Assign Units';
+  const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Manual Schedule — Review & Assign Units';
   await renderImportRows(entries);
   try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
@@ -21215,7 +21226,7 @@ function renderImportedNamesList(){
       <input type="text" value="${pref}" placeholder="Preferred name" autocomplete="off"
         onblur="setPreferredName('${esc}', this.value); renderImportedNamesList();"
         style="padding:6px 8px;font-size:.85rem;width:130px"/>
-      <span class="toggle" title="Default shift — what a tap on the Weekly Schedule grid gives this nurse" style="font-size:.78rem">
+      <span class="toggle" title="Default shift — what a tap on the Manual Schedule grid gives this nurse" style="font-size:.78rem">
         <span class="toggle-opt${bnShiftDefault(n) === 'Day' ? ' active' : ''}" onclick="setShiftDefault('${esc}', 'Day')">☀️ Day</span>
         <span class="toggle-opt${bnShiftDefault(n) === 'Noc' ? ' active' : ''}" onclick="setShiftDefault('${esc}', 'Noc')">🌙 Noc</span>
       </span>
