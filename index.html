@@ -2267,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-11-439'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-11-441'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20125,12 +20125,55 @@ function _rptTally(scheds, bookings, from, to){
       try { if(+slotDateTime(ds, b.SlotTime, b.ShiftType) < nowMs) unresolved[sh]++; } catch(e){}
     }
   });
-  const heads = {};
+  const heads = {}; const eq = {}; // Build 440: eq = shift-equivalents (full = 1, partial = hours/12)
   scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
     const k = key((x.ShiftDate || '').slice(0, 10), x.ShiftType);
     heads[k] = (heads[k] || 0) + 1;
+    const h = Number(x.Hours || 0); const isPart = x.StartTime && h > 0 && h < 12;
+    eq[k] = (eq[k] || 0) + (isPart ? Math.min(1, h / _SHIFT_EQ_HOURS) : 1); // Build 441: 11.25
   });
-  return { units, dates, counts, heads, unresolved };
+  return { units, dates, counts, heads, eq, unresolved };
+}
+// Build 440 (Tomas's manager's sheet): week-by-week Day | Noc side by side, sized in
+// shift-equivalents (full = 1, partial = hours/12) so a 4-hour pickup counts as a
+// third, not a whole. A week is COMPARABLE when the two sides ran within a quarter
+// of a shift of each other — the sheet's color-match, done by arithmetic — and the
+// per-equivalent column makes every week readable even when they didn't.
+// Build 441: shift-equivalent divisor = 11.25 PAID hours per 12-hour shift — the
+// convention of the manager's Break Tracker workbook (Avg/Shift = breaks ÷
+// (full + partial hrs ÷ 11.25)), so the app's numbers read the same as hers.
+const _SHIFT_EQ_HOURS = 11.25;
+function _rptTallyBand(T){
+  const sunKey = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return d.toISOString().slice(0, 10); };
+  const weeks = {};
+  T.dates.forEach(ds => {
+    const w = (weeks[sunKey(ds)] ||= { Day: { eq: 0, br: 0 }, Noc: { eq: 0, br: 0 } });
+    ['Day','Noc'].forEach(sh => {
+      const k = ds + '|' + sh;
+      w[sh].eq += T.eq[k] || 0;
+      w[sh].br += Object.values(T.counts[k] || {}).reduce((a, v) => a + v, 0);
+    });
+  });
+  const keys = Object.keys(weeks).sort();
+  if(!keys.length) return '';
+  const per = x => x.eq > 0 ? (x.br / x.eq).toFixed(1) : '—';
+  const fmtEq = v => v ? v.toFixed(2).replace(/\.?0+$/, '') : '—';
+  const th = 'padding:3px 6px;border-bottom:1.5px solid var(--border);font-size:.7rem;white-space:nowrap';
+  const td = 'padding:3px 6px;text-align:center;font-size:.72rem;white-space:nowrap';
+  let html = `<div style="overflow-x:auto;margin-bottom:12px"><table style="border-collapse:collapse;width:100%">`
+    + `<tr><th style="${th};text-align:left">Week</th><th style="${th}">☀️ shift-eq</th><th style="${th}">☀️ breaks</th><th style="${th}">☀️ per eq</th><th style="${th};border-left:2px solid var(--border)">🌙 shift-eq</th><th style="${th}">🌙 breaks</th><th style="${th}">🌙 per eq</th><th style="${th}">comparable</th><th style="${th}">winner</th></tr>`;
+  keys.forEach(k => {
+    const w = weeks[k];
+    const comparable = w.Day.eq > 0 && w.Noc.eq > 0 && Math.abs(w.Day.eq - w.Noc.eq) <= 0.25;
+    const delta = w.Day.br - w.Noc.br;
+    html += `<tr style="${comparable ? 'background:#e9f5f2' : ''}"><td style="${td};text-align:left">${Number(k.slice(5,7))}/${Number(k.slice(8,10))}</td>`
+      + `<td style="${td}">${fmtEq(w.Day.eq)}</td><td style="${td}">${w.Day.br || ''}</td><td style="${td};font-weight:600">${per(w.Day)}</td>`
+      + `<td style="${td};border-left:2px solid var(--border)">${fmtEq(w.Noc.eq)}</td><td style="${td}">${w.Noc.br || ''}</td><td style="${td};font-weight:600">${per(w.Noc)}</td>`
+      + `<td style="${td}">${comparable ? '✓ Δ ' + (delta > 0 ? '+' : '') + delta : ''}</td>`
+      + `<td style="${td};font-weight:600">${(w.Day.eq > 0 && w.Noc.eq > 0 && (w.Day.br + w.Noc.br) > 0) ? (w.Day.br / w.Day.eq > w.Noc.br / w.Noc.eq ? '☀️ Day' : w.Noc.br / w.Noc.eq > w.Day.br / w.Day.eq ? '🌙 Noc' : 'Tie') : ''}</td></tr>`;
+  });
+  html += `</table><div style="font-size:.68rem;color:var(--muted);margin-top:4px">shift-eq: full shift = 1, partial = hours ÷ 11.25 (paid hours) · comparable = both sides within ¼ shift-eq · Δ = Day − Noc confirmed breaks · winner = higher breaks per shift-eq</div></div>`;
+  return html;
 }
 function _rptTallyTable(T, shift){
   const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -20159,7 +20202,7 @@ function _rptTallyTable(T, shift){
     const row = T.counts[ds + '|' + shift] || {};
     const rowTotal = T.units.reduce((a, u) => a + (row[u] || 0), 0);
     const hc = T.heads[ds + '|' + shift] || 0;
-    html += `<tr style="background:${tint(hc)}" title="${hc} BN${hc === 1 ? '' : 's'} scheduled">`
+    html += `<tr title="${hc} BN${hc === 1 ? '' : 's'} scheduled">`
       + `<td style="padding:2px 5px;white-space:nowrap">${DOW[dow]} ${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}</td>`
       + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; return `<td style="text-align:center;padding:2px 4px">${v || ''}</td>`; }).join('')
       + `<td style="text-align:center;padding:2px 5px;font-weight:600">${rowTotal || ''}</td></tr>`;
@@ -20219,7 +20262,8 @@ function _rptRenderTally(T, rangeLabel){
   card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
     + `<h3 style="margin:0">📊 Break Tally</h3>`
     + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button></div>`
-    + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks · row tint = BNs scheduled <span style="background:#eaf6ea;padding:0 6px;border-radius:3px">3+</span> <span style="background:#fef7e6;padding:0 6px;border-radius:3px">2</span> <span style="background:#fdecec;padding:0 6px;border-radius:3px">1</span></div>`
+    + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks</div>`
+    + _rptTallyBand(T)
     + _rptTallyTable(T, 'Day') + _rptTallyTable(T, 'Noc');
   card.style.display = 'block';
   window._rptTallyData = T;
@@ -20254,7 +20298,7 @@ function _rptVs(scheds, T, bookings){
   scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
     const k = (x.ShiftDate || '').slice(0, 10) + '|' + x.ShiftType;
     const h = Number(x.Hours);
-    eq[k] = (eq[k] || 0) + ((h > 0 && h < 12) ? h / 12 : 1);
+    eq[k] = (eq[k] || 0) + ((h > 0 && h < 12) ? h / _SHIFT_EQ_HOURS : 1); // Build 441: 11.25
   });
   const days = [];
   T.dates.forEach(ds => {
@@ -20293,7 +20337,7 @@ function _rptVs(scheds, T, bookings){
     if(!who) return;
     (perBN[who] ||= { br: 0, eq: 0 });
     const h = Number(x.Hours);
-    perBN[who].eq += (h > 0 && h < 12) ? h / 12 : 1;
+    perBN[who].eq += (h > 0 && h < 12) ? h / _SHIFT_EQ_HOURS : 1; // Build 441: 11.25
   });
   return { days, months, perBN };
 }
@@ -20303,7 +20347,7 @@ function _rptRenderVs(V, rangeLabel){
   const f1 = n => n === null ? '—' : n.toFixed(2);
   const f2 = n => n.toFixed(1);
   let html = `<h3 style="margin:0 0 6px">⚔️ Day vs Night</h3>`
-    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">Fair score = confirmed breaks ÷ shift-equivalents (full = 1, partial = hrs/12) — ${rangeLabel}</div>`;
+    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">Fair score = confirmed breaks ÷ shift-equivalents (full = 1, partial = hrs ÷ 11.25) — ${rangeLabel}</div>`;
   if(V.days.length <= 35){
     html += `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.72rem">`
       + `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">Date</th>`
