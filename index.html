@@ -774,9 +774,9 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <div class="field" id="aPartTimes" style="display:none;flex:0 0 auto;min-width:0">
             <label>Start – Stop</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <input type="time" id="aPartStart" value="20:00" step="300" oninput="this.dataset.userSet='1';_aInferShift()" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <span id="aPartStartHost"></span>
               <span style="color:var(--muted)">–</span>
-              <input type="time" id="aPartEnd" value="00:00" step="300" oninput="this.dataset.userSet='1';_aInferShift()" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <span id="aPartEndHost"></span>
               <span id="aInferredShift" style="font-size:.8rem;font-weight:600;color:var(--muted);white-space:nowrap"></span>
             </div>
           </div>
@@ -2271,7 +2271,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-12-447'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-12-449'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5549,6 +5549,11 @@ function init(){
   buildStaffUnitGrid();
 
   // Admin unit check grid
+  // Build 448: the Edit card's clocks are five-minute pickers
+  { const sh = document.getElementById('aPartStartHost'), eh = document.getElementById('aPartEndHost');
+    if(sh) sh.innerHTML = _tpHtml('aPartStart', '20:00', 'oninput="_aInferShift()"');
+    if(eh) eh.innerHTML = _tpHtml('aPartEnd', '00:00', 'oninput="_aInferShift()"');
+    _tpSync('aPartStart'); _tpSync('aPartEnd'); }
   const ag = document.getElementById('aUnits');
   ag.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`); // Build 444: wing rows, as on Settings
   [..._WING_ROW_A, ..._WING_ROW_D].forEach(u=>{
@@ -10169,13 +10174,82 @@ function setAPartial(on, _byUser = true){
 function _aInferShift(){
   const st = document.getElementById('aPartStart'); const chip = document.getElementById('aInferredShift');
   if(!st || !/^\d{2}:\d{2}$/.test(st.value)){ if(chip) chip.textContent = ''; return; }
+  const hrs = _aPartialHours();
+  const inf = hrs > 0 ? inferPartialShift(st.value.replace(':', ''), hrs) : null;
   const h0 = parseInt(st.value.slice(0, 2), 10);
-  const sh = (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc';
+  const sh = inf ? inf.shift : ((h0 >= 8 && h0 < 20) ? 'Day' : 'Noc'); // Build 448: by grid overlap once both clocks are set
   if(S.aShift !== sh) setAShift(sh);
-  if(chip) chip.textContent = sh === 'Day' ? '→ ☀️ Day' : '→ 🌙 Noc';
+  if(chip) chip.textContent = (sh === 'Day' ? '→ ☀️ Day' : '→ 🌙 Noc') + ((inf && inf.dateDelta) ? ' (previous evening\'s row)' : '');
+}
+// ═══ Build 448: five-minute time pickers ═══════════════════════════════════
+// Chrome's drop-down ignores step="300" on <input type="time">, so every manual
+// clock is built from selects — hour · minute (fives) · AM/PM — feeding a hidden
+// input with the ORIGINAL id, so every reader (.value) and inline oninput handler
+// keeps working. _tpSync pushes a programmatic .value write back into the selects.
+function _tpHtml(id, value, extraAttrs){
+  const sel = 'padding:8px 6px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit';
+  const hrs = Array.from({ length: 12 }, (_, i) => i + 1).map(h => `<option value="${h}">${h}</option>`).join('');
+  const mins = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => `<option value="${m}">${m}</option>`).join('');
+  return `<span class="tp" id="tp-${id}" style="display:inline-flex;align-items:center;gap:4px">`
+    + `<select class="tp-h" onchange="_tpCompose('${id}')" style="${sel}"><option value=""></option>${hrs}</select>`
+    + `<span style="color:var(--muted)">:</span>`
+    + `<select class="tp-m" onchange="_tpCompose('${id}')" style="${sel}"><option value=""></option>${mins}</select>`
+    + `<select class="tp-ap" onchange="_tpCompose('${id}')" style="${sel}"><option value="AM">AM</option><option value="PM">PM</option></select>`
+    + `<input type="hidden" id="${id}" value="${value || ''}" ${extraAttrs || ''}></span>`
+    ;
+}
+function _tpCompose(id){
+  const wrap = document.getElementById('tp-' + id), hid = document.getElementById(id); if(!wrap || !hid) return;
+  const h = wrap.querySelector('.tp-h').value, m = wrap.querySelector('.tp-m').value, ap = wrap.querySelector('.tp-ap').value;
+  if(!h || !m){ hid.value = ''; return; }
+  let hh = parseInt(h, 10) % 12; if(ap === 'PM') hh += 12;
+  hid.value = `${String(hh).padStart(2, '0')}:${m}`;
+  hid.dataset.userSet = '1';
+  hid.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function _tpSync(id){
+  const wrap = document.getElementById('tp-' + id), hid = document.getElementById(id); if(!wrap || !hid) return;
+  const v = hid.value; const H = wrap.querySelector('.tp-h'), M = wrap.querySelector('.tp-m'), AP = wrap.querySelector('.tp-ap');
+  if(!/^\d{2}:\d{2}$/.test(v)){ H.value = ''; M.value = ''; return; }
+  let hh = parseInt(v.slice(0, 2), 10); const mm = String(Math.round(parseInt(v.slice(3), 10) / 5) * 5 % 60).padStart(2, '0');
+  AP.value = hh >= 12 ? 'PM' : 'AM'; hh = hh % 12; if(hh === 0) hh = 12;
+  H.value = String(hh); M.value = mm;
 }
 // Build 447: every manual clock steps in 5 minutes; typed odd minutes snap to the nearest 5.
 function _snap5(v){ if(!/^\d{2}:\d{2}$/.test(v)) return v; let m = parseInt(v.slice(0,2),10)*60 + parseInt(v.slice(3),10); m = Math.round(m / 5) * 5; m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; }
+// Build 448 (Tomas: "how can we avoid designating a partial as Day or Noc"): a
+// partial is a WINDOW; it lives on whichever grid holds more of its slots. The
+// stretch outside that grid is the other shift's full BNs' overlap anyway. A
+// Noc row that starts after midnight is dated by the previous evening (Noc rows
+// are dated by shift START), so the calendar date the nurse starts is shifted −1.
+function inferPartialShift(startHHMM, hours){
+  const st = String(startHHMM || '').replace(/\D/g, ''); if(!/^\d{4}$/.test(st) || !(hours > 0)) return null;
+  const count = sh => { const k0 = sortKey(st, sh), k1 = k0 + Math.round(hours * 60); return generateSlots(sh).filter(x => { const k = sortKey(x, sh); return k >= k0 && k < k1; }).length; };
+  const d = count('Day'), nn = count('Noc');
+  const shift = nn > d ? 'Noc' : 'Day';
+  const m = parseInt(st.slice(0, 2), 10) * 60 + parseInt(st.slice(2), 10);
+  return { shift, dateDelta: (shift === 'Noc' && m < 720) ? -1 : 0, daySlots: d, nocSlots: nn };
+}
+// Build 449 (Tomas: "if a BN picks up a partial the entire window must be assigned
+// coverage"): a window that straddles a shift boundary (8:30 PM or 8:30 AM) becomes
+// TWO rows, one per grid, same nurse, same units — so every slot in the window is
+// dealt on the grid it belongs to. Returns null when no split is needed or a half
+// would hold no slots. calDate = the calendar date the window STARTS.
+function splitStraddlingPartial(startHHMM, hours, calDate){
+  const st = String(startHHMM || '').replace(/\D/g, ''); if(!/^\d{4}$/.test(st) || !(hours > 0) || hours >= 12 || !calDate) return null;
+  const s0 = parseInt(st.slice(0, 2), 10) * 60 + parseInt(st.slice(2), 10), e0 = s0 + Math.round(hours * 60);
+  const cuts = [510, 1230, 510 + 1440, 1230 + 1440].filter(c => c > s0 && c < e0);
+  if(!cuts.length) return null;
+  const cut = cuts[0];
+  const mk = (a, b) => {
+    const dayOff = Math.floor(a / 1440), sm = a % 1440; const h = Math.round((b - a) / 0.6) / 100;
+    const hh = String(Math.floor(sm / 60)).padStart(2, '0') + String(sm % 60).padStart(2, '0');
+    const inf = inferPartialShift(hh, h); if(!inf || (inf.daySlots === 0 && inf.nocSlots === 0)) return null;
+    return { startTime: hh, hours: h, shift: inf.shift, date: _wgAddDays(calDate, dayOff + inf.dateDelta) };
+  };
+  const A = mk(s0, cut), B = mk(cut, e0);
+  return (A && B) ? [A, B] : null;
+}
 function _aPartialHours(){
   const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
   if(!s || !e || !/^\d{2}:\d{2}$/.test(s.value) || !/^\d{2}:\d{2}$/.test(e.value)) return 0;
@@ -10189,28 +10263,13 @@ function _aPartialHours(){
 // the refusal message. The 5–8 PM overlap trusts the toggle (both shifts
 // are on duty then).
 function _aPartialWindowError(shift){
+  // Build 448: the only refusal left — a window that touches no break slot on the
+  // grid it was placed on. Day/Noc mismatches and the 8:30 wrap-up are gone with
+  // the start-hour rule; placement is by overlap (see inferPartialShift).
   const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
   if(!s || !e || !/^\d{2}:\d{2}$/.test(s.value) || !/^\d{2}:\d{2}$/.test(e.value)) return '';
-  const m = v => parseInt(v.slice(0,2), 10) * 60 + parseInt(v.slice(3), 10);
-  const st = m(s.value), en = m(e.value);
-  const t12 = v => fmt12(v.replace(':', ''));
-  if(shift === 'Day'){
-    if(st < 360 || st >= 1200)
-      return `${t12(s.value)} is a Noc start — switch Shift to Noc, or fix the times.`;
-    if(en <= st)
-      return `Day partials can't cross midnight — check the stop time.`;
-    if(en > 1230)
-      return `Day shifts wrap up by 8:30 PM — set the stop time by then.`;
-  } else {
-    if(st >= 480 && st < 1020)
-      return `${t12(s.value)} is a Day start — switch Shift to Day, or fix the times.`;
-    // Build 314: a Noc row's window can't outlive the Noc grid (8:30 AM) —
-    // the tail would silently evaporate (a row belongs to ONE shift; the
-    // Day view never reads Noc rows). Cross-boundary coverage is two rows,
-    // and the message teaches the split.
-    if(en > 510 && en < 1020)
-      return `Noc partials end by 8:30 AM — save Noc ${t12(s.value)}–8:30 AM plus Day 8:30 AM–${t12(e.value)}.`;
-  }
+  const hrs = _aPartialHours(); const inf = inferPartialShift(s.value.replace(':', ''), hrs);
+  if(inf && inf.daySlots === 0 && inf.nocSlots === 0) return 'No break slots fall inside these times — check the start and stop.';
   return '';
 }
 
@@ -10360,11 +10419,12 @@ async function editAssign(id){
       const _hr = Number(s.Hours) || 0;
       if(/^\d{4}$/.test(_st) && _hr > 0 && _hr < 12){
         setAPartial(true);
+        if(s.ShiftType === 'Noc' && parseInt(_st, 10) < 1200){ const dEl = document.getElementById('aDate'); if(dEl && dEl.value) dEl.value = _wgAddDays(dEl.value, 1); } // Build 448
         const sEl = document.getElementById('aPartStart'), eEl = document.getElementById('aPartEnd');
-        if(sEl) sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`;
+        if(sEl){ sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`; _tpSync('aPartStart'); }
         if(eEl){
           const em = ((parseInt(_st.slice(0,2), 10) * 60 + parseInt(_st.slice(2), 10)) + Math.round(_hr * 60)) % 1440;
-          eEl.value = `${String(Math.floor(em / 60)).padStart(2,'0')}:${String(em % 60).padStart(2,'0')}`;
+          eEl.value = `${String(Math.floor(em / 60)).padStart(2,'0')}:${String(em % 60).padStart(2,'0')}`; _tpSync('aPartEnd');
         }
       } else setAPartial(false); }
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
@@ -12759,11 +12819,11 @@ async function saveAssign(){
   } else {
     nurse = dropdownVal;
   }
-  const dt=document.getElementById('aDate').value;
-  const shift=S.aShift;
+  let dt=document.getElementById('aDate').value;
+  let shift=S.aShift;
   const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
   // Build 307: partial shifts carry their times onto the row.
-  let _pStart = '', _pHours = 0;
+  let _pStart = '', _pHours = 0, _split2 = null;
   if(typeof _aPartial !== 'undefined' && _aPartial){
     _pHours = _aPartialHours();
     if(!_pHours){ toast('Enter the partial start and stop times.', true); loadAssignments(); return; }
@@ -12771,6 +12831,9 @@ async function saveAssign(){
     const _winErr = _aPartialWindowError(shift);
     if(_winErr){ toast(_winErr, true); loadAssignments(); return; }
     _pStart = document.getElementById('aPartStart').value.replace(':', '');
+    { const cal = dt; const halves = splitStraddlingPartial(_pStart, _pHours, cal); // Build 449
+      if(halves){ _pStart = halves[0].startTime; _pHours = halves[0].hours; shift = halves[0].shift; dt = halves[0].date; _split2 = halves[1]; }
+      else { const inf = inferPartialShift(_pStart, _pHours); if(inf && inf.dateDelta && dt) dt = _wgAddDays(dt, inf.dateDelta); } } // Build 448: the row is dated by shift start
   }
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
@@ -12999,6 +13062,15 @@ async function saveAssign(){
     // verified by scan). Fire the tail refresh's full-scope read NOW so it
     // overlaps the WH/warm/recalc tail instead of running after it. Fail-
     // open: on error the tail loadAssignments simply fetches itself.
+    // Build 449: the other half of a straddling partial — same nurse, same units, its own grid
+    if(_split2){
+      try {
+        await spPost(LISTS.schedule, { Title:`${nurse}-${_split2.date}-${_split2.shift}`, BreakNurseName:nurse, ShiftDate:_split2.date, ShiftType:_split2.shift, Units:JSON.stringify(units), StartTime:_split2.startTime, Hours:String(_split2.hours) });
+        try { await _savePartialWingHistory(nurse, _split2.shift, _split2.date, units); } catch(e){}
+        try { await recalculateRotation(nurse, _split2.date, _split2.shift); } catch(e){ console.warn('split-half rotation failed:', e && e.message); }
+        toast(`Window crosses ${_split2.shift === 'Noc' ? '8:30 PM' : '8:30 AM'} — saved as two rows (${shift} + ${_split2.shift}) on the same units`);
+      } catch(e){ toast(`Second half (${_split2.shift}) didn't save — ${(e && e.message) || e}`, true); }
+    }
     const _tailScheds = spGet(LISTS.schedule, _assignListFilter()).catch(() => null);
     try { await _savePartialWingHistory(nurse, shift, dt, units); }
     catch(e){ console.warn('Wing history write failed (non-fatal):', e); }
@@ -15067,7 +15139,7 @@ function _renderImportCountChips(){
   // with the flag palette + 🔍 so the hunt starts at the right cards.
   const byName = {};
   src.forEach((e, i) => {
-    if(!e || e.isDiscarded) return;
+    if(!e || e.isDiscarded || e._splitTail) return; // Build 449: a split pair is one shift on the screenshot
     const full = String(e.name || '?');
     if(!byName[full]) byName[full] = { n: 0, firstIdx: i, unresolved: 0, disp: bnDisplayName(full) };
     byName[full].n++;
@@ -15232,7 +15304,8 @@ async function restoreLastImport(){
       }
     }
     for(const pe of partials){
-      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      const _partner = pe._splitPartnerKey && allSuggestions[pe._splitPartnerKey]; // Build 449: same units on both halves
+      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
@@ -15497,6 +15570,28 @@ function discardFlaggedRow(i){
 }
 
 async function renderImportRows(entries, forceReplace = false){
+  // Build 449: a straddling partial becomes two entries (head on one grid, tail on
+  // the other). The tail carries no units of its own — it copies its head's at
+  // deal time — and doesn't count toward the Σ gate or the mirror.
+  if(Array.isArray(entries)){
+    const out = [];
+    entries.forEach(e => {
+      const hh = Number(e && e.hours || 0);
+      if(e && e.startTime && hh > 0 && hh < 12 && !e._splitHead && !e._splitTail){
+        const cal = (e.shift === 'Noc' && parseInt(e.startTime, 10) < 1200) ? _wgAddDays(e.date, 1) : e.date;
+        const halves = splitStraddlingPartial(e.startTime, hh, cal);
+        if(halves){
+          const size = h => { const _pc = _covCfg().partial; return Math.max(1, Math.ceil(h / _pc.perHours) * _pc.units); };
+          const head = Object.assign({}, e, { startTime: halves[0].startTime, hours: String(halves[0].hours), shift: halves[0].shift, date: halves[0].date, isPartial: true, partialUnitCount: size(halves[0].hours), _splitHead: true });
+          const tail = Object.assign({}, e, { units: [], startTime: halves[1].startTime, hours: String(halves[1].hours), shift: halves[1].shift, date: halves[1].date, isPartial: true, partialUnitCount: size(halves[1].hours), _splitTail: true });
+          head._splitPartnerKey = `${tail.name}|${tail.date}|${tail.shift}`; tail._splitPartnerKey = `${head.name}|${head.date}|${head.shift}`;
+          out.push(head, tail); return;
+        }
+      }
+      out.push(e);
+    });
+    if(out.length !== entries.length){ entries.length = 0; entries.push(...out); }
+  }
   // Build 389 (polish 1): cards sort by name+date+shift IN PLACE with the
   // index-keyed selection map re-keyed in lockstep — flagged and added cards
   // stop hiding at the tail (the displacement defeated the 🔍 navigator
@@ -15666,7 +15761,8 @@ async function renderImportRows(entries, forceReplace = false){
     }
     // Partials: pick top-N under-covered units (sees overlay from full BNs above)
     for(const pe of partials){
-      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      const _partner = pe._splitPartnerKey && allSuggestions[pe._splitPartnerKey]; // Build 449: same units on both halves
+      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
@@ -15896,7 +15992,7 @@ async function f2AddMissedShift(){
   try {
     if(typeof _currentImportEntries === 'undefined' || !Array.isArray(_currentImportEntries)){ toast('Extract a batch first', true); return; }
     const t = document.getElementById('f2AddName'), d = document.getElementById('f2AddDate'), sh = document.getElementById('f2AddShift');
-    const raw = t && (t.value || '').trim(), date = d && d.value;
+    const raw = t && (t.value || '').trim(); let date = d && d.value; // Build 448: date may shift for a post-midnight Noc partial
     if(!raw || !date){ toast('Name and date are required to add a missed shift', true); return; }
     const name = ((typeof canonicalizeBNName === 'function') && canonicalizeBNName(raw)) || raw;
     const st = document.getElementById('f2AddStart'), en = document.getElementById('f2AddEnd');
@@ -15909,8 +16005,9 @@ async function f2AddMissedShift(){
       const toM = v => { const [h,m] = v.split(':').map(Number); return h*60 + m; };
       let mins = toM(en.value) - toM(st.value); if(mins <= 0) mins += 1440;
       startTime = st.value.replace(':',''); hours = String(Math.round(mins/0.6)/100); // Build 446
-      const h0 = parseInt(startTime.slice(0, 2), 10);
-      shift = (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc';
+      const inf = inferPartialShift(startTime, Number(hours)); // Build 448: by grid overlap
+      shift = inf ? inf.shift : 'Day';
+      if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta);
     }
     _currentImportEntries.push({ name, date, shift, startTime, hours, units: [] });
     saveLastBatch(_currentImportEntries);
@@ -15966,7 +16063,7 @@ function renderF2Mirror(){
   // Sunday-keyed weeks spanning the batch (the Kronos grid runs Sun–Sat).
   const sunKey = ds => { const d = new Date(ds+'T12:00:00'); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); };
   const byWeek = {};
-  use.forEach(e => { (byWeek[sunKey(e.date)] ||= []).push(e); });
+  use.filter(e => !e._splitTail).forEach(e => { (byWeek[sunKey(e.date)] ||= []).push(e); }); // Build 449
   const names = [...new Set(use.map(e => e.name))].sort((a,b) => a.localeCompare(b));
   let html = '';
   // Build 391: date-sanity banner — a batch far from today should SCREAM
@@ -16018,9 +16115,9 @@ function renderF2Mirror(){
     + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:150px">`
     + `<select id="f2AddShift" onchange="_f2AddShiftChanged()" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option><option>Partial</option></select>`
     + `<span id="f2AddClocks" style="display:none;align-items:center;gap:6px">`
-    + `<input id="f2AddStart" type="time" step="300" title="partial start" style="font-size:.72rem;padding:2px 4px">`
+    + _tpHtml('f2AddStart', '')
     + `<span style="color:var(--muted)">–</span>`
-    + `<input id="f2AddEnd" type="time" step="300" title="partial end" style="font-size:.72rem;padding:2px 4px"></span>`
+    + _tpHtml('f2AddEnd', '') + `</span>`
     + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
     + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
   saveImportSide(); // Build 389: every observed batch mutation persists the resolutions
@@ -16196,7 +16293,8 @@ async function resuggestAll(){
       }
     }
     for(const pe of partials){
-      const slots = await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      const _partner = pe._splitPartnerKey && allSuggestions[pe._splitPartnerKey]; // Build 449: same units on both halves
+      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
@@ -21190,8 +21288,22 @@ function wgSetWeek(ds){
     _wgCells = {};
     const end = _wgAddDays(_wgWeek, 6);
     try {
-      getImportedEntries().filter(e => e.date >= _wgWeek && e.date <= end).forEach(e => {
-        _wgCells[`${e.name}|${e.date}`] = { shift: e.shift, startTime: e.startTime || '', hours: e.hours || '' };
+      const perCell = {};
+      getImportedEntries().forEach(e => {
+        let d = e.date; const hh = Number(e.hours || 0);
+        if(e.shift === 'Noc' && e.startTime && hh > 0 && hh < 12 && parseInt(e.startTime, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
+        if(d < _wgWeek || d > end) return;
+        (perCell[`${e.name}|${d}`] ||= []).push({ shift: e.shift, startTime: e.startTime || '', hours: e.hours || '' });
+      });
+      // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
+      Object.entries(perCell).forEach(([k, list]) => {
+        const parts = list.filter(c => c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12).sort((a, b) => a.startTime.localeCompare(b.startTime));
+        if(parts.length === 2){
+          const toM = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
+          const [A, B] = (toM(parts[0].startTime) + Math.round(Number(parts[0].hours) * 60)) % 1440 === toM(parts[1].startTime) ? [parts[0], parts[1]] : ((toM(parts[1].startTime) + Math.round(Number(parts[1].hours) * 60)) % 1440 === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
+          if(A){ _wgCells[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
+        }
+        _wgCells[k] = list[list.length - 1];
       });
     } catch(e){}
   }
@@ -21274,7 +21386,7 @@ function _wgChooser(name, date){
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <input type="time" id="wgcStart" value="${st}" step="300" style="font-size:.85rem;padding:6px"/><span style="color:var(--muted)">–</span><input type="time" id="wgcEnd" value="${en}" step="300" style="font-size:.85rem;padding:6px"/>
+          ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">–</span>${_tpHtml('wgcEnd', en)}
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
@@ -21284,6 +21396,7 @@ function _wgChooser(name, date){
       </div>
     </div>`;
   document.body.appendChild(wrap);
+  _tpSync('wgcStart'); _tpSync('wgcEnd'); // Build 448
   const close = () => wrap.remove();
   const set = c => { if(c) _wgCells[key] = c; else delete _wgCells[key]; _wgSaveDraft(); wgRender(); close(); };
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
@@ -21295,8 +21408,9 @@ function _wgChooser(name, date){
     let mins = toM(b) - toM(a); if(mins <= 0) mins += 1440;
     const hours = Math.round(mins / 0.6) / 100; // Build 446
     if(hours >= 12){ toast('That is a full shift — use Day or Noc', true); return; }
-    const h0 = parseInt(a.slice(0, 2), 10);
-    set({ shift: (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc', startTime: a.replace(':', ''), hours: String(hours) }); // the extractor's start-hour rule
+    const inf = inferPartialShift(a.replace(':', ''), hours); // Build 448: by grid overlap
+    if(inf && inf.daySlots === 0 && inf.nocSlots === 0){ toast('No break slots fall inside these times', true); return; }
+    set({ shift: inf ? inf.shift : 'Day', startTime: a.replace(':', ''), hours: String(hours) });
   };
   wrap.querySelector('#wgcClear').onclick = () => set(null);
   wrap.querySelector('#wgcCancel').onclick = close;
@@ -21305,7 +21419,8 @@ function _wgChooser(name, date){
 async function wgReview(){
   const keys = Object.keys(_wgCells); if(!keys.length) return;
   const entries = keys.map(k => {
-    const [name, date] = k.split('|'); const c = _wgCells[k];
+    const [name, cellDate] = k.split('|'); const c = _wgCells[k];
+    let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
     const e = { name, date, shift: c.shift, startTime: c.startTime || '', hours: c.hours || '', units: [], _source: 'grid' };
     const h = Number(c.hours || 0);
     if(c.startTime && h > 0 && h < 12){
@@ -21802,8 +21917,8 @@ async function onAssignContextChange(){
       const hh = String(Math.floor((m/60))%24).padStart(2,'0'), mm = String(m%60).padStart(2,'0');
       setAPartial(true, false);
       const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
-      if(s && !s.dataset.userSet) s.value = `${hh}:${mm}`;
-      if(e && !e.dataset.userSet) e.value = sh === 'Day' ? '20:30' : '08:30';
+      if(s && !s.dataset.userSet){ s.value = `${hh}:${mm}`; _tpSync('aPartStart'); }
+      if(e && !e.dataset.userSet){ e.value = sh === 'Day' ? '20:30' : '08:30'; _tpSync('aPartEnd'); }
     } else if(!window._aPartialTouched && (typeof _aPartial !== 'undefined') && _aPartial
               && !(typeof _editSource !== 'undefined' && _editSource)){
       // Build 408 (Tomas, Sep 7): WITHDRAW the courtesy when its condition
