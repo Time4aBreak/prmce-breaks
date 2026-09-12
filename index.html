@@ -741,34 +741,34 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
       <div id="assignFormBody" style="margin-top:12px;display:none">
 
-        <div class="row" style="margin-bottom:12px;display:flex;gap:14px;flex-wrap:wrap;align-items:flex-end">
-          <div class="field">
+        <!-- Build 444 (Tomas): the four context fields on one line, compact and level;
+             the Partial clocks join the line when Partial is on. -->
+        <div class="row" style="margin-bottom:12px;display:flex;gap:12px 18px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" style="flex:0 0 auto;min-width:0">
             <label>Date</label>
-            <input type="date" id="aDate" onchange="onAssignContextChange()"/>
+            <input type="date" id="aDate" onchange="onAssignContextChange()" style="width:auto"/>
           </div>
-          <div class="field">
+          <div class="field" style="flex:0 0 auto;min-width:0">
             <label>Shift</label>
             <div class="toggle-row">
-              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
-              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
+              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
+              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
             </div>
           </div>
-          <div class="field" style="min-width:110px">
+          <div class="field" style="flex:0 0 auto;min-width:0">
+            <label>Length</label>
+            <div class="toggle-row">
+              <div class="toggle-opt active" id="aFull" onclick="setAPartial(false)" style="padding:8px 14px">Full</div>
+              <div class="toggle-opt" id="aPart" onclick="setAPartial(true)" style="padding:8px 14px">Partial</div>
+            </div>
+          </div>
+          <div class="field" style="flex:0 0 auto;min-width:0">
             <label>Break nurses this shift</label>
             <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
-              style="width:72px;padding:8px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
+              style="width:64px;padding:8px 4px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
               onchange="_aExpectedChanged(this.value)"/>
           </div>
-        </div>
-        <div class="row" style="margin-bottom:12px">
-          <div class="field">
-            <label>Shift Length</label>
-            <div class="toggle-row">
-              <div class="toggle-opt active" id="aFull" onclick="setAPartial(false)">Full</div>
-              <div class="toggle-opt" id="aPart" onclick="setAPartial(true)">Partial</div>
-            </div>
-          </div>
-          <div class="field" id="aPartTimes" style="display:none">
+          <div class="field" id="aPartTimes" style="display:none;flex:0 0 auto;min-width:0">
             <label>Start – Stop</label>
             <div style="display:flex;gap:8px;align-items:center">
               <input type="time" id="aPartStart" value="20:00" oninput="this.dataset.userSet='1'" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
@@ -792,7 +792,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
               <button type="button" class="btn btn-ghost btn-sm" id="aSuggestBtn" onclick="suggestUnitsForManualAssign(this)" style="font-size:.72rem;padding:4px 10px">✨ Suggest</button>
             </div>
           </div>
-          <div class="unit-check-grid" id="aUnits"></div>
+          <div id="aUnits"></div>
         </div>
 
         <div id="editModeBar" style="display:none;background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:8px 12px;margin-bottom:8px;font-size:.82rem;color:#a06a00;line-height:1.5">
@@ -2267,7 +2267,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-11-441'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-12-444'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5546,7 +5546,8 @@ function init(){
 
   // Admin unit check grid
   const ag = document.getElementById('aUnits');
-  UNITS.forEach(u=>{
+  ag.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`); // Build 444: wing rows, as on Settings
+  [..._WING_ROW_A, ..._WING_ROW_D].forEach(u=>{
     const d=document.createElement('div');
     d.className='uc'; d.textContent=u; d.id=`au-${u}`;
     d.onclick=async ()=>{
@@ -5574,7 +5575,7 @@ function init(){
       S.aUnits.push(u);
       d.classList.add('on');
     };
-    ag.appendChild(d);
+    const cell = ag.querySelector(`[data-slot="${u}"]`); if(cell) cell.replaceWith(d); else ag.appendChild(d); // Build 444
   });
 
   // Summary unit filter
@@ -12245,7 +12246,11 @@ async function _loadSummaryInner(mySeq){
   const unit=S.summUnit;
   const bnFilter = document.getElementById('summBNFilter')?.value || 'All';
   const el=document.getElementById('summList');
-  el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
+  // Build 443 (Tomas): entering the tab fires loadSummary twice (the tab switch and
+  // the unlock/auto-shift path); the chain serializes them, but each repaint
+  // blanked the list to a spinner, so the tab visibly "loads again." Show the
+  // spinner only when there's nothing on screen yet; later loads replace in place.
+  if(!el.firstElementChild || el.querySelector('.spinner')) el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
 
   try{
     let filter=`SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`;
@@ -17831,6 +17836,10 @@ function _prodLogUpdateHeader(){
 // Stage an action on a booking. If the action is already staged, unstage it
 // (tap-to-toggle). If a different action is staged, switch to the new one.
 function stageBreakAction(id, action, nurseName, slotTime, unit){
+  // Build 442: no confirming a break before its time (see the row render).
+  if((action === 'confirmed' || action === 'not_taken') && slotTime){
+    try { const sh = BNS.shift; if(sh && sortKey(slotTime, sh) > nowKey(sh)){ toast(`${fmt12(slotTime)} hasn't happened yet`, true); return; } } catch(e){}
+  }
   // Keys in _prodLogStaged must match how lookups are done elsewhere.
   // b.Id comes back from Sheets as a string (Apps Script normalizeValue
   // coerces all cells to strings), but when the onclick handler inlines
@@ -19229,8 +19238,11 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             else if(stagedAction === 'cancelled') extraStyle = 'background:var(--red-lt);border:1.5px solid var(--red);opacity:.7';
 
             centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
-            actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px">✓ Taken</button>
-              <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}">✗ Not Taken</button>
+            // Build 442 (Tomas, Sep 11 live): a break can't be confirmed before it has
+            // happened — Taken / Not Taken stay inert until the slot's time arrives.
+            const _notYet = !isPast; const _gate = _notYet ? ' disabled title="' + fmt12(slot) + " hasn't happened yet\"" : '';
+            actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px${_notYet ? ';opacity:.45' : ''}"${_gate}>✓ Taken</button>
+              <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}${_notYet ? ';opacity:.45' : ''}"${_gate}>✗ Not Taken</button>
               <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`;
           }
         }
@@ -19573,8 +19585,11 @@ async function confirmAllBreaks(){
     return false;
   };
 
-  const pending = cache.allBookings.filter(b => bnCovers(b) && isPending(b));
-  if(!pending.length){ toast('No pending breaks to confirm'); return; }
+  const _all = cache.allBookings.filter(b => bnCovers(b) && isPending(b));
+  const pending = _all.filter(b => { try { return sortKey(b.SlotTime, b.ShiftType === 'Noc' ? 'Noc' : 'Day') <= nowKey(b.ShiftType === 'Noc' ? 'Noc' : 'Day'); } catch(e){ return true; } }); // Build 442: only breaks that have happened
+  const _skipped = _all.length - pending.length;
+  if(!pending.length){ toast(_skipped ? `${_skipped} pending break${_skipped === 1 ? " hasn't" : "s haven't"} happened yet — nothing to confirm` : 'No pending breaks to confirm'); return; }
+  if(_skipped) toast(`${_skipped} future break${_skipped === 1 ? '' : 's'} left pending — confirm after the time`);
 
   // Snapshot pre-state for rollback
   const originals = pending.map(b => ({
