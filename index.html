@@ -741,19 +741,13 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
       <div id="assignFormBody" style="margin-top:12px;display:none">
 
-        <!-- Build 444 (Tomas): the four context fields on one line, compact and level;
-             the Partial clocks join the line when Partial is on. -->
-        <div class="row" style="margin-bottom:12px;display:flex;gap:12px 18px;flex-wrap:wrap;align-items:flex-end">
+        <!-- Build 445 (Tomas): Date · Length · Break nurses on the first line. Second line:
+             Day/Noc when Full; the two clocks when Partial, with the shift INFERRED from
+             the start time (the extractor's rule: 8:00 AM to 8:00 PM = Day, else Noc). -->
+        <div class="row" style="margin-bottom:10px;display:flex;gap:12px 18px;flex-wrap:wrap;align-items:flex-end">
           <div class="field" style="flex:0 0 auto;min-width:0">
             <label>Date</label>
             <input type="date" id="aDate" onchange="onAssignContextChange()" style="width:auto"/>
-          </div>
-          <div class="field" style="flex:0 0 auto;min-width:0">
-            <label>Shift</label>
-            <div class="toggle-row">
-              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
-              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
-            </div>
           </div>
           <div class="field" style="flex:0 0 auto;min-width:0">
             <label>Length</label>
@@ -768,12 +762,22 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
               style="width:64px;padding:8px 4px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
               onchange="_aExpectedChanged(this.value)"/>
           </div>
+        </div>
+        <div class="row" style="margin-bottom:12px;display:flex;gap:12px 18px;flex-wrap:wrap;align-items:flex-end">
+          <div class="field" id="aShiftField" style="flex:0 0 auto;min-width:0">
+            <label>Shift</label>
+            <div class="toggle-row">
+              <div class="toggle-opt active" id="aDay" onclick="setAShift('Day')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aDayIcon"></span> Day</div>
+              <div class="toggle-opt"        id="aNoc" onclick="setAShift('Noc')" style="padding:8px 14px"><span class="shift-icon-wrap" id="aNocIcon"></span> Noc</div>
+            </div>
+          </div>
           <div class="field" id="aPartTimes" style="display:none;flex:0 0 auto;min-width:0">
             <label>Start – Stop</label>
             <div style="display:flex;gap:8px;align-items:center">
-              <input type="time" id="aPartStart" value="20:00" oninput="this.dataset.userSet='1'" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <input type="time" id="aPartStart" value="20:00" step="300" oninput="this.dataset.userSet='1';_aInferShift()" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
               <span style="color:var(--muted)">–</span>
-              <input type="time" id="aPartEnd" value="00:00" oninput="this.dataset.userSet='1'" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <input type="time" id="aPartEnd" value="00:00" step="300" oninput="this.dataset.userSet='1';_aInferShift()" style="padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem"/>
+              <span id="aInferredShift" style="font-size:.8rem;font-weight:600;color:var(--muted);white-space:nowrap"></span>
             </div>
           </div>
         </div>
@@ -2267,7 +2271,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-12-444'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-12-447'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10157,13 +10161,28 @@ function setAPartial(on, _byUser = true){
   if(p) p.classList.toggle('active', on);
   const t = document.getElementById('aPartTimes');
   if(t) t.style.display = on ? '' : 'none';
+  const sf = document.getElementById('aShiftField'); if(sf) sf.style.display = on ? 'none' : ''; // Build 445
+  if(on) _aInferShift();
 }
+// Build 445: a partial's shift follows its start time (8:00 AM to 8:00 PM = Day,
+// else Noc) — the same rule the extractor and the grid use — and is shown, not chosen.
+function _aInferShift(){
+  const st = document.getElementById('aPartStart'); const chip = document.getElementById('aInferredShift');
+  if(!st || !/^\d{2}:\d{2}$/.test(st.value)){ if(chip) chip.textContent = ''; return; }
+  const h0 = parseInt(st.value.slice(0, 2), 10);
+  const sh = (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc';
+  if(S.aShift !== sh) setAShift(sh);
+  if(chip) chip.textContent = sh === 'Day' ? '→ ☀️ Day' : '→ 🌙 Noc';
+}
+// Build 447: every manual clock steps in 5 minutes; typed odd minutes snap to the nearest 5.
+function _snap5(v){ if(!/^\d{2}:\d{2}$/.test(v)) return v; let m = parseInt(v.slice(0,2),10)*60 + parseInt(v.slice(3),10); m = Math.round(m / 5) * 5; m = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`; }
 function _aPartialHours(){
   const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
   if(!s || !e || !/^\d{2}:\d{2}$/.test(s.value) || !/^\d{2}:\d{2}$/.test(e.value)) return 0;
+  s.value = _snap5(s.value); e.value = _snap5(e.value); // Build 447
   const m = v => parseInt(v.slice(0,2), 10) * 60 + parseInt(v.slice(3), 10);
   const mins = (m(e.value) - m(s.value) + 1440) % 1440;
-  return Math.round(mins / 6) / 10; // hours, one decimal (cross-midnight safe)
+  return Math.round(mins / 0.6) / 100; // Build 446: two decimals, so 6:15–8:30 PM stores 2.25 and displays 8:30 (not 2.3 → 8:33)
 }
 // Build 308: a partial's window must belong to its shift — the same
 // boundary the extraction prompt lives by. Returns '' when valid, else
@@ -12756,6 +12775,16 @@ async function saveAssign(){
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
+  // Build 446 (Tomas: Anna's 2.25h partial saved with 3 units): the Edit card was the
+  // only path that didn't size a partial. Ask when the count disagrees with Settings.
+  if(typeof _aPartial !== 'undefined' && _aPartial && _pHours > 0){
+    const _pc = _covCfg().partial; const _covMax = Math.max(...(_covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam));
+    const _want = Math.min(Math.max(1, Math.ceil(_pHours / _pc.perHours) * _pc.units), Math.max(1, _covMax));
+    const _have = S.aUnits.length;
+    if(_have !== _want){
+      if(!await customConfirm(`A ${_pHours}-hour partial is sized at ${_want} unit${_want === 1 ? '' : 's'} by Settings (${_pc.units} per ${_pc.perHours} hours) — you picked ${_have}.`, 'Save anyway', 'Go back')){ return; }
+    }
+  }
   // Build 114 (2026-05-26): Confirm before saving for a past shift. Day
   // ends 20:30, Noc ends 08:30 next day. Backfill is allowed (e.g., to
   // record actual coverage after a missed extraction), but it's easy to
@@ -15879,7 +15908,7 @@ async function f2AddMissedShift(){
       if(!(st && en && st.value && en.value)){ toast('A partial shift needs both a start and an end time', true); return; }
       const toM = v => { const [h,m] = v.split(':').map(Number); return h*60 + m; };
       let mins = toM(en.value) - toM(st.value); if(mins <= 0) mins += 1440;
-      startTime = st.value.replace(':',''); hours = String(Math.round(mins/6)/10);
+      startTime = st.value.replace(':',''); hours = String(Math.round(mins/0.6)/100); // Build 446
       const h0 = parseInt(startTime.slice(0, 2), 10);
       shift = (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc';
     }
@@ -15989,9 +16018,9 @@ function renderF2Mirror(){
     + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:150px">`
     + `<select id="f2AddShift" onchange="_f2AddShiftChanged()" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option><option>Partial</option></select>`
     + `<span id="f2AddClocks" style="display:none;align-items:center;gap:6px">`
-    + `<input id="f2AddStart" type="time" title="partial start" style="font-size:.72rem;padding:2px 4px">`
+    + `<input id="f2AddStart" type="time" step="300" title="partial start" style="font-size:.72rem;padding:2px 4px">`
     + `<span style="color:var(--muted)">–</span>`
-    + `<input id="f2AddEnd" type="time" title="partial end" style="font-size:.72rem;padding:2px 4px"></span>`
+    + `<input id="f2AddEnd" type="time" step="300" title="partial end" style="font-size:.72rem;padding:2px 4px"></span>`
     + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
     + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
   saveImportSide(); // Build 389: every observed batch mutation persists the resolutions
@@ -21245,7 +21274,7 @@ function _wgChooser(name, date){
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <input type="time" id="wgcStart" value="${st}" style="font-size:.85rem;padding:6px"/><span style="color:var(--muted)">–</span><input type="time" id="wgcEnd" value="${en}" style="font-size:.85rem;padding:6px"/>
+          <input type="time" id="wgcStart" value="${st}" step="300" style="font-size:.85rem;padding:6px"/><span style="color:var(--muted)">–</span><input type="time" id="wgcEnd" value="${en}" step="300" style="font-size:.85rem;padding:6px"/>
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
@@ -21264,7 +21293,7 @@ function _wgChooser(name, date){
     if(!a || !b){ toast('A partial needs both a start and an end time', true); return; }
     const toM = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
     let mins = toM(b) - toM(a); if(mins <= 0) mins += 1440;
-    const hours = Math.round(mins / 6) / 10;
+    const hours = Math.round(mins / 0.6) / 100; // Build 446
     if(hours >= 12){ toast('That is a full shift — use Day or Noc', true); return; }
     const h0 = parseInt(a.slice(0, 2), 10);
     set({ shift: (h0 >= 8 && h0 < 20) ? 'Day' : 'Noc', startTime: a.replace(':', ''), hours: String(hours) }); // the extractor's start-hour rule
