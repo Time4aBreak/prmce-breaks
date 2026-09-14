@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-463'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-464'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20204,7 +20204,7 @@ function _rptRotation(scheds){
       grid[bn][u] = (grid[bn][u] || 0) + 1;
       if(aSet.has(u)) wingA[bn] = (wingA[bn] || 0) + 1;
     });
-    if(_acuityCapOn(r.ShiftType) && us.filter(u => isHighUnit(u)).length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1; // Build 430: settings map · 462: only on capped shifts (Noc two-High is by design)
+    if(_acuityCapOn(s.ShiftType) && us.filter(u => isHighUnit(u)).length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1; // Build 430: settings map · 462: only on capped shifts (Noc two-High is by design)
     const fl = us.map(u => WING_FLOOR[u]).filter(Number.isFinite);
     if(fl.length){ spanSum[bn] = (spanSum[bn] || 0) + (Math.max(...fl) - Math.min(...fl)); spanN[bn] = (spanN[bn] || 0) + 1; }
     if(new Set(us.map(u => getUnitWing(u))).size > 1) split[bn] = (split[bn] || 0) + 1;
