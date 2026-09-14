@@ -2278,7 +2278,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-13-452'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-13-453'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12582,7 +12582,10 @@ async function _loadSummaryInner(mySeq, ctx){
     // Populate BN filter dropdown
     const bnSel = document.getElementById('summBNFilter');
     if(bnSel){
-      const bnNames = [...new Set([...scheds,...oppScheds].map(s => s.BreakNurseName).filter(Boolean))].sort();
+      // Build 453: on the live board the dropdown is the UNION across the live shifts —
+      // the second load adds to the first instead of replacing it.
+      const _prev = (ctx && ctx.elId === 'summList2') ? [...bnSel.options].map(o => o.value).filter(v => v && v !== 'All') : [];
+      const bnNames = [...new Set([..._prev, ...[...scheds,...oppScheds].map(s => s.BreakNurseName).filter(Boolean)])].sort();
       const curVal = bnSel.value;
       bnSel.innerHTML = '<option value="All">All Break Nurses</option>' +
         bnNames.map(n => `<option value="${n}"${n===curVal?' selected':''}>${firstName(n)}</option>`).join('');
