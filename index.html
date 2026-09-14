@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-461'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-463'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20204,7 +20204,7 @@ function _rptRotation(scheds){
       grid[bn][u] = (grid[bn][u] || 0) + 1;
       if(aSet.has(u)) wingA[bn] = (wingA[bn] || 0) + 1;
     });
-    if(us.filter(u => isHighUnit(u)).length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1; // Build 430: settings map
+    if(_acuityCapOn(r.ShiftType) && us.filter(u => isHighUnit(u)).length >= 2) twoHigh[bn] = (twoHigh[bn] || 0) + 1; // Build 430: settings map · 462: only on capped shifts (Noc two-High is by design)
     const fl = us.map(u => WING_FLOOR[u]).filter(Number.isFinite);
     if(fl.length){ spanSum[bn] = (spanSum[bn] || 0) + (Math.max(...fl) - Math.min(...fl)); spanN[bn] = (spanN[bn] || 0) + 1; }
     if(new Set(us.map(u => getUnitWing(u))).size > 1) split[bn] = (split[bn] || 0) + 1;
@@ -20239,15 +20239,15 @@ function _rptRenderRotation(rot){
   // the nurse × unit grid stays behind a toggle for when the callout sends you to it.
   const row = bn => { const total = Object.values(rot.grid[bn] || {}).reduce((a, c) => a + c, 0);
     const aPct = total ? Math.round(100 * (rot.wingA[bn] || 0) / total) : 0;
-    return { bn, shifts: rot.nights[bn], aPct, twoHigh: rot.twoHigh[bn] || 0, span: rot.spanN[bn] ? (rot.spanSum[bn] / rot.spanN[bn]).toFixed(1) : '', split: rot.split[bn] || 0 }; };
+    return { bn, shifts: rot.nights[bn], aPct, dPct: total ? 100 - aPct : 0, twoHigh: rot.twoHigh[bn] || 0, span: rot.spanN[bn] ? (rot.spanSum[bn] / rot.spanN[bn]).toFixed(1) : '', split: rot.split[bn] || 0 }; };
   const rows = bns.map(row);
   const sth = 'padding:5px 9px;font-size:.66rem;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.05em';
   const std = 'padding:5px 9px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
   const capOn = (typeof _acuityCapOn === 'function') ? (_acuityCapOn('Day') || _acuityCapOn('Noc')) : true;
-  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">A-wing share settles near <strong>43%</strong> (D has 8 of 14 units) · two-High should be 0 on a capped shift · span = floors stretched per assignment</div>`
-    + `<table style="border-collapse:collapse"><tr><th style="${sth};text-align:left">Nurse</th><th style="${sth}">Shifts</th><th style="${sth}">A-wing</th><th style="${sth}">two-High</th><th style="${sth}">Span</th></tr>`
+  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">Even shares settle near <strong>43% A / 57% D</strong> (D has 8 of 14 units) · two-High should be 0 on a capped shift · span = floors stretched per assignment</div>`
+    + `<table style="border-collapse:collapse"><tr><th style="${sth};text-align:left">Nurse</th><th style="${sth}">Shifts</th><th style="${sth}">A-wing</th><th style="${sth}">D-wing</th><th style="${sth}">two-High</th><th style="${sth}">Span</th></tr>`
     + rows.map(r => `<tr style="border-top:1px solid var(--border)"><td style="${std};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(r.bn))}</strong>${r.split ? `<span style="font-size:.62rem;color:#a06a00;margin-left:6px">split-wing ${r.split}</span>` : ''}</td>`
-      + `<td style="${std}">${r.shifts}</td><td style="${std}">${r.aPct}%</td><td style="${std};color:${r.twoHigh && capOn ? 'var(--red)' : 'var(--text)'};font-weight:${r.twoHigh && capOn ? '700' : '400'}">${r.twoHigh}</td><td style="${std}">${r.span}</td></tr>`).join('')
+      + `<td style="${std}">${r.shifts}</td><td style="${std}">${r.aPct}%</td><td style="${std}">${r.dPct}%</td><td style="${std};color:${r.twoHigh && capOn ? 'var(--red)' : 'var(--text)'};font-weight:${r.twoHigh && capOn ? '700' : '400'}">${r.twoHigh}</td><td style="${std}">${r.span}</td></tr>`).join('')
     + `</table>`
     + `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="const g=document.getElementById('rptRotationGrid');const o=g.style.display==='none';g.style.display=o?'':'none';this.textContent=o?'Hide unit grid':'Show unit grid'">Show unit grid</button>`
     + `<div id="rptRotationGrid" style="display:none;overflow-x:auto;margin-top:8px"><table style="border-collapse:collapse">
