@@ -2278,7 +2278,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-13-453'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-456'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3328,7 +3328,17 @@ async function detectBNShiftForName(name){
       return false;
     });
 
-    if(live.length === 0) return null;
+    if(live.length === 0){
+      // Build 454 (Tomas): no live shift → find the NEXT scheduled one, so picking a name
+      // shows that nurse's own next shift rather than the clock's current one.
+      try {
+        const ahead = (await spGet(LISTS.schedule, `ShiftDate ge '${todayStr}' and BreakNurseName eq '${esc(name)}'`)).filter(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1');
+        const startOf = s => { const d = new Date((s.ShiftDate || '').slice(0, 10) + 'T12:00:00'); d.setHours(s.ShiftType === 'Day' ? 8 : 20, 0, 0, 0); return d; };
+        const future = ahead.filter(s => startOf(s) > now).sort((a, b) => startOf(a) - startOf(b));
+        if(future.length) return { shift: future[0].ShiftType, date: (future[0].ShiftDate || '').slice(0, 10), sched: future[0], next: true };
+      } catch(e){}
+      return null;
+    }
     // If more than one is live (unusual — shouldn't happen in practice), pick
     // the one whose start is most recent, i.e. the just-started shift.
     live.sort((a, b) => {
@@ -3670,7 +3680,7 @@ function refreshUnitStatusGrid(){
       const next = _peekNextScheduledForUnit(u);
       if(next){
         const fmt = _fmtUnitDateTime(parseLocalIso(next.effectiveAt));
-        const verb = next.status === 'open' ? 'Open' : 'Close';
+        const verb = next.status === 'open' ? 'Resume' : 'Pause'; // Build 455: union contract language
         lines.push(`<div style="margin-top:4px"><strong>${u}</strong>: ${verb} at ${fmt} · <a href="#" onclick="event.preventDefault();const _a=this;_a.textContent='Cancelling…';_a.style.pointerEvents='none';Promise.resolve(cancelScheduledUnitChangeUI('${u}','${next.effectiveAt}')).finally(()=>{_a.textContent='Cancel';_a.style.pointerEvents=''})" style="color:var(--red);text-decoration:underline">Cancel</a></div>`);
       }
     });
@@ -4142,7 +4152,7 @@ async function openUnitStatusModal(unit){
 
   const currentStatus = effectiveUnitStatusAt(unit, new Date());
   const targetStatus = currentStatus === 'open' ? 'closed' : 'open';
-  const verb = targetStatus === 'open' ? 'Open' : 'Close';
+  const verb = targetStatus === 'open' ? 'Resume' : 'Pause'; // Build 455
 
   const modal = document.createElement('div');
   modal.id = 'unitStatusModal';
@@ -4151,10 +4161,10 @@ async function openUnitStatusModal(unit){
     <div style="background:var(--card);border-radius:12px;padding:24px;max-width:400px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
       <div style="font-weight:700;font-size:1.05rem;margin-bottom:16px">${verb} ${unit}?</div>
       <div style="font-size:.88rem;color:var(--muted);margin-bottom:16px">
-        Current status: <strong style="color:var(--text)">${currentStatus === 'open' ? 'Open' : 'Closed'}</strong>
+        Current status: <strong style="color:var(--text)">${currentStatus === 'open' ? 'Covered' : 'Paused'}</strong>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_unitApplyNow('${unit}','${targetStatus}')">${targetStatus === 'closed' ? 'Close' : 'Open'} ${unit} now</button>
+        <button type="button" class="btn btn-primary" onclick="_unitApplyNow('${unit}','${targetStatus}')">${targetStatus === 'closed' ? 'Pause' : 'Resume'} ${unit} now</button>
         <button type="button" class="btn btn-ghost" onclick="_unitScheduleLater('${unit}','${targetStatus}')">Schedule for later</button>
         <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
@@ -4169,7 +4179,7 @@ function _unitApplyNow(unit, targetStatus){
 
 function _unitScheduleLater(unit, targetStatus){
   _closeUnitStatusModal();
-  const verb = targetStatus === 'open' ? 'Open' : 'Close';
+  const verb = targetStatus === 'open' ? 'Resume' : 'Pause'; // Build 455
   // Default date = today, default time = 08:00 for open, 20:00 for close
   const today = new Date();
   const defDate = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
@@ -4193,7 +4203,7 @@ function _unitScheduleLater(unit, targetStatus){
         </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        <button type="button" class="btn btn-primary" onclick="_unitScheduleSave('${unit}','${targetStatus}')">Schedule the ${targetStatus === 'closed' ? 'close' : 'reopen'}</button>
+        <button type="button" class="btn btn-primary" onclick="_unitScheduleSave('${unit}','${targetStatus}')">Schedule the ${targetStatus === 'closed' ? 'pause' : 'resume'}</button>
         <button type="button" class="btn btn-ghost" onclick="_closeUnitStatusModal()">Go back</button>
       </div>
     </div>`;
@@ -4217,7 +4227,7 @@ function _unitScheduleSave(unit, targetStatus){
 
 // Build preview of affected bookings + BN assignments, then confirm
 async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
-  const verb = targetStatus === 'open' ? 'Open' : 'Close';
+  const verb = targetStatus === 'open' ? 'Resume' : 'Pause'; // Build 455
   const effectiveIso = toLocalIso(effectiveAt);
   const isNow = (effectiveAt.getTime() - Date.now()) < 60*1000; // within 60s = "now"
 
@@ -4399,8 +4409,8 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       : '<span style="color:var(--muted)">None</span>';
 
     const headerText = targetStatus === 'closed'
-      ? `Closing ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`} will:`
-      : `Opening ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`}`;
+      ? `Pausing ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`} will:`
+      : `Resuming ${unit} ${isNow ? 'now' : `at ${_fmtUnitDateTime(effectiveAt)}`}`;
     const nothingAffected = targetStatus === 'closed' && !affectedBookings.length && !_inProgImpacts.length && !suppStrips.length && !hasFutureRedeal;
 
     // Store for confirm handler
@@ -4423,10 +4433,10 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
                <div style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;max-height:140px;overflow-y:auto;font-size:.82rem">${bnLines}</div>`;
       }
     } else {
-      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} will open ${effectiveLabel}. All future shifts will be re-dealt to fold ${unit} back into coverage — break-nurse assignments may change.</div>`;
+      body += `<div style="font-size:.85rem;color:var(--muted);margin-bottom:16px">${unit} resumes ${effectiveLabel}. All future shifts will be re-dealt to fold ${unit} back into coverage — break-nurse assignments may change.</div>`;
     }
 
-    const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? `Close ${unit} & notify ${affectedBookings.length} nurse${affectedBookings.length !== 1 ? 's' : ''}` : `${targetStatus === 'closed' ? 'Close' : 'Open'} ${unit} now`;
+    const confirmLabel = (targetStatus === 'closed' && affectedBookings.length) ? `Pause ${unit} & notify ${affectedBookings.length} nurse${affectedBookings.length !== 1 ? 's' : ''}` : `${targetStatus === 'closed' ? 'Pause' : 'Resume'} ${unit} now`;
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:440px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         ${body}
@@ -4694,7 +4704,7 @@ async function commitUnitChange(){
       const stripTail = (pending.suppStrips || []).length
         ? ` · ${pending.suppStrips.length} absorbed coverage ended`
         : '';
-      toast(`${unit} closing ${when}${cancelTail}${subTail}${stripTail}`);
+      toast(`${unit} pausing ${when}${cancelTail}${subTail}${stripTail}`);
     } else {
       // Opening — recompute affected rotations in background. Dispatch:
       // 3C uses recompute3CAffectedRotations (covers 3C and C_PAIR BNs);
@@ -4821,7 +4831,7 @@ async function commitUnitChange(){
       hideBusy();
 
       const when = isNow ? 'now' : _fmtUnitDateTime(pending.effectiveAt);
-      toast(`${unit} ${isNow ? 'reopened' : 'opening ' + when}`);
+      toast(`${unit} ${isNow ? 'resumed' : 'resuming ' + when}`);
     }
 
     refreshUnitStatusGrid();
@@ -5076,7 +5086,7 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
 
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${unit} reopened mid-shift</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${unit} resumed mid-shift</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
         ${subLine}
         <div style="font-size:.85rem;margin-bottom:10px">Who covers <strong>${unit}</strong> on this shift?</div>
@@ -5124,7 +5134,7 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
 
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${closingUnit} is closing</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${closingUnit} is pausing</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
         <div style="font-size:.85rem;margin-bottom:10px">What should <strong>${firstName(bnName)}</strong> cover instead of <strong>${closingUnit}</strong>?</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${unitButtons}</div>
@@ -11566,6 +11576,31 @@ const CHOICE_KEEP = '__KEEP__';
 // Returns runs in a stable order (unit insertion order, then nurse insertion
 // order, then chronological within nurse) so the modal's row order is
 // deterministic and matches the planner's traversal.
+// ═══ Build 456 (Tomas): GAPS GIVEN ═══════════════════════════════════════════
+// A confirmed slot is one 15-minute increment. When the break nurse hands a run
+// of slots to a staff nurse as one uninterrupted stretch ("come back in an
+// hour"), the 5-minute handoff gaps go to the nurse too; the record counts them
+// as extra increments only when they add up to whole ones: 3 slots + gaps = 60
+// min = 4 increments. Stored as GapsGiven='1' on every booking of the run.
+function gapsGivenCredit(n){ return Math.floor((n * 5) / 15); }
+function _runMinutes(n, gaps){ return n * 15 + (gaps ? n * 5 : 0); }
+// Reports: expand a bookings list with synthetic credit records so every count
+// (tally, delivered, day-vs-night, per-BN) sees the credited increments.
+function _withGapCredits(bookings){
+  const out = bookings.slice();
+  const flagged = bookings.filter(b => isStaffBooking(b) && isConfirmed(b) && String(b.GapsGiven) === '1');
+  if(!flagged.length) return out;
+  const byCtx = {};
+  flagged.forEach(b => { (byCtx[`${(b.SlotDate || '').slice(0, 10)}|${b.ShiftType}`] ||= []).push(b); });
+  Object.entries(byCtx).forEach(([k, list]) => {
+    const sh = k.split('|')[1] === 'Noc' ? 'Noc' : 'Day';
+    groupBookingsIntoRuns(list, sh).forEach(run => {
+      const extra = gapsGivenCredit(run.length);
+      for(let i = 0; i < extra; i++) out.push(Object.assign({}, run[run.length - 1], { Id: `${run[run.length - 1].Id}-gap${i + 1}`, _gapCredit: true }));
+    });
+  });
+  return out;
+}
 function groupBookingsIntoRuns(bookings, shift){
   const byUnit = {};
   bookings.forEach(b => { (byUnit[b.Unit] ||= []).push(b); });
@@ -14214,7 +14249,7 @@ function formatNurse(nurseName){
 // Returns: 'keep_substitute' | 'switch_back'
 function confirmSubstituteRevert(entry){
   return new Promise(resolve => {
-    const msg = `<strong>${entry.original}</strong> is reopening mid-shift, and <strong>${firstName(entry.bn)}</strong> is currently substituting on <strong>${entry.substitute}</strong>.\n\nWhat should happen?`;
+    const msg = `<strong>${entry.original}</strong> is resuming mid-shift, and <strong>${firstName(entry.bn)}</strong> is currently substituting on <strong>${entry.substitute}</strong>.\n\nWhat should happen?`;
     const modal = document.getElementById('customConfirmModal');
     document.getElementById('customConfirmMsg').innerHTML = formatModalMsg(msg);
     const okBtn = document.getElementById('customConfirmOk');
@@ -17258,6 +17293,7 @@ async function loadBNView(){
   let _resolvedFrom = 'detect-null';
   try {
     const lookup = await detectBNShiftForName(name);
+    BNS.contextNext = !!(lookup && lookup.next); BNS.contextNone = !lookup; // Build 454
     if(lookup){
       resolvedShift = lookup.shift;
       resolvedDate  = lookup.date;
@@ -17587,6 +17623,10 @@ function renderBNShiftPill(){
   p.style.display = 'inline-flex'; p.style.alignItems = 'center'; p.style.gap = '6px';
   const icon = BNS.shift==='Day' ? sunSVG(14) : moonSVG(14);
   p.innerHTML = icon + (BNS.shift==='Day' ? 'Day (0800–2030)' : 'Noc (2000–0830)');
+  // Build 454: say what the context IS — the nurse's next shift, or nothing scheduled
+  let tag = document.getElementById('bnContextTag');
+  if(!tag){ tag = document.createElement('div'); tag.id = 'bnContextTag'; tag.style.cssText = 'font-size:.78rem;color:var(--muted);margin-top:6px;width:100%'; if(p.parentElement) p.parentElement.appendChild(tag); }
+  tag.textContent = BNS.contextNext ? `Next scheduled shift for ${bnDisplayName(BNS.name || '')}` : (BNS.contextNone ? `${bnDisplayName(BNS.name || '')} has no upcoming shift — showing the current one` : '');
 }
 
 // updateCoverageBanner removed — banner rendering inlined into loadSlots
@@ -19180,6 +19220,14 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // strips on numeric cells.
       const bookingBySlot = {};
       staffBookings.forEach(b => { bookingBySlot[normSlot(b.SlotTime)] = b; });
+      // Build 456: runs (consecutive slots, same nurse, same unit) → per-booking run info
+      const _runInfo = {};
+      try {
+        groupBookingsIntoRuns(staffBookings.filter(b => String(b.IsCancelled) !== '1' && !isNotTaken(b)), shift).forEach(run => {
+          const gaps = run.every(x => String(x.GapsGiven) === '1'); const allConf = run.every(isConfirmed);
+          run.forEach((x, i) => { _runInfo[String(x.Id)] = { n: run.length, i, gaps, allConf, firstId: run[0].Id }; });
+        });
+      } catch(e){}
 
       // BN's own breaks (from allBookings) — use isBNBreak helper since
       // Sheets returns the field as string "0"/"1" not number.
@@ -19326,7 +19374,11 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         !hardBlockedSet.has(s)
       );
 
-      return allSlots.map(slot => {
+      // Build 456: the shift's tally in increments and minutes, credits included
+      const _sum = (() => { let c = 0, credit = 0, mins = 0; const seen = new Set();
+        staffBookings.forEach(b => { if(!isConfirmed(b) || String(b.IsCancelled) === '1') return; c++; const ri = _runInfo[String(b.Id)]; if(ri && ri.gaps){ mins += 20; if(ri.i === 0 && !seen.has(ri.firstId)){ seen.add(ri.firstId); credit += gapsGivenCredit(ri.n); } } else mins += 15; });
+        return c ? `<div style="font-size:.78rem;color:var(--muted);margin:0 0 8px"><strong>${c}</strong> break${c === 1 ? '' : 's'} confirmed${credit ? ` · <strong>+${credit}</strong> credited for gaps · counts as <strong>${c + credit}</strong>` : ''} · <strong>${mins}</strong> min</div>` : ''; })();
+      return _sum + allSlots.map(slot => {
         const b = bookingBySlot[slot];
         const isOwnBreak = ownBreakSlots.has(slot);
         const isHardBlocked = hardBlockedSet.has(slot);
@@ -19400,6 +19452,13 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
           if(bConfirmed){
             rowClass = 'confirmed';
             centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            { const ri = _runInfo[String(b.Id)]; // Build 456: run line + gaps toggle on the run's first slot
+              if(ri && ri.n >= 2 && ri.i === 0 && ri.allConf){
+                const credit = ri.gaps ? gapsGivenCredit(ri.n) : 0; const mins = _runMinutes(ri.n, ri.gaps);
+                centerHtml += `<div style="font-size:.72rem;color:var(--muted);margin-top:3px">run of ${ri.n} · ${mins} min${credit ? ` · counts as ${ri.n + credit}` : ''}`
+                  + ` <button type="button" class="btn btn-ghost btn-sm" style="padding:1px 7px;font-size:.68rem;margin-left:6px${ri.gaps ? ';background:var(--green-lt);border-color:var(--green)' : ''}" onclick="toggleGapsGiven(${ri.firstId})">${ri.gaps ? '✓ gaps given' : '+ gaps'}</button></div>`;
+              } else if(ri && ri.n >= 2 && ri.i > 0 && ri.gaps){ centerHtml += `<span style="font-size:.68rem;color:var(--muted);margin-left:6px">(gaps given)</span>`; }
+            }
             actionHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
               <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
           } else if(bNotTaken){
@@ -19612,6 +19671,22 @@ async function cancelStaffBooking(id, nurseName, slotTime){
     });
 }
 
+// Build 456: toggle GapsGiven on every booking of the run that contains firstId
+async function toggleGapsGiven(firstId){
+  try {
+    const cache = _bnConfirmCache; const all = (cache && cache.allBookings) || [];
+    const first = all.find(b => String(b.Id) === String(firstId)); if(!first){ toast('Run not found — reload the log', true); return; }
+    const sh = first.ShiftType === 'Noc' ? 'Noc' : 'Day';
+    const runs = groupBookingsIntoRuns(all.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && !isNotTaken(b) && (b.SlotDate || '').slice(0,10) === (first.SlotDate || '').slice(0,10) && b.ShiftType === first.ShiftType), sh);
+    const run = runs.find(r => r.some(b => String(b.Id) === String(firstId))); if(!run) return;
+    const on = !run.every(b => String(b.GapsGiven) === '1');
+    run.forEach(b => { b.GapsGiven = on ? '1' : '0'; });
+    await Promise.all(run.map(b => spPatch(LISTS.bookings, b.Id, { GapsGiven: on ? 1 : 0 })));
+    const credit = on ? gapsGivenCredit(run.length) : 0;
+    toast(on ? `Gaps given on a run of ${run.length} — ${_runMinutes(run.length, true)} min${credit ? `, counts as ${run.length + credit}` : ''}` : `Gaps removed — run of ${run.length} counts as ${run.length}`);
+    loadBNConfirm();
+  } catch(e){ toast(`Couldn't update the run — ${(e && e.message) || e}`, true); }
+}
 async function setBreakStatus(id, status){
   try {
     await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: status, IsCompleted: status === 'confirmed' ? 1 : 0 }));
@@ -20016,10 +20091,10 @@ function _rptRenderCoverage(cov){
     ${rows.map(([u,c]) => {
       if(cov.nInst - c.closed === 0) return `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
-      <td style="${td};color:var(--muted);font-style:italic" colspan="3">closed all range</td>
+      <td style="${td};color:var(--muted);font-style:italic" colspan="3">paused all range</td>
     </tr>`;
       return `<tr style="border-top:1px solid var(--border)">
-      <td style="${td};text-align:left;font-weight:600">${escHTML(u)}${c.closed ? ` <span style="font-size:.65rem;color:var(--muted);font-weight:400">(closed ${c.closed})</span>` : ''}</td>
+      <td style="${td};text-align:left;font-weight:600">${escHTML(u)}${c.closed ? ` <span style="font-size:.65rem;color:var(--muted);font-weight:400">(paused ${c.closed})</span>` : ''}</td>
       <td style="${td};color:var(--teal-dk)">${c.main}</td>
       <td style="${td};color:${c.absorbed ? '#a06a00' : 'var(--muted)'}">${c.absorbed}</td>
       <td style="${td};color:${c.none ? 'var(--red)' : 'var(--muted)'};font-weight:${c.none ? '700' : '400'}">${c.none}</td>
@@ -20030,6 +20105,7 @@ function _rptRenderCoverage(cov){
 
 // ── Card 2: Breaks Delivered ───────────────────────────────────────────
 function _rptDelivered(cov, bookings){
+  bookings = _withGapCredits(bookings); // Build 456
   const staff = bookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1');
   const per = {}; _rptUnits().forEach(u => per[u] = { claims:0, confirmed:0 });
   staff.forEach(b => {
@@ -20232,7 +20308,7 @@ function _rptCoverageExtras(rangeRows, futureRows, from, to){
       ...runs(cats.day).map(r => `${r} (Day)`),
       ...runs(cats.noc).map(r => `${r} (Noc)`)
     ];
-    if(parts.length) closures.push(`${u} closed: ${parts.join(', ')}`);
+    if(parts.length) closures.push(`${u} paused: ${parts.join(', ')}`);
   });
 
   return { holes, upcoming, horizon, closures };
@@ -20298,6 +20374,7 @@ function copyRptSnapshot(btn){
 // under rule B an unconfirmed break reads as zero, so the footnote makes a
 // low tally explainable and meters confirmation discipline in one line.
 function _rptTally(scheds, bookings, from, to){
+  bookings = _withGapCredits(bookings); // Build 456
   const units = _rptUnits();
   const dates = [];
   for(let d = new Date(from + 'T12:00:00'); ; d.setDate(d.getDate() + 1)){
@@ -20490,6 +20567,7 @@ function rptTallyCSV(){
 // Daily winners when the range fits a month; monthly blocks + range champion
 // always.
 function _rptVs(scheds, T, bookings){
+  bookings = _withGapCredits(bookings); // Build 456
   const eq = {}; // date|shift -> shift-equivalents
   scheds.filter(_rptActive).filter(x => String(x.IsSupplemental) !== '1').forEach(x => {
     const k = (x.ShiftDate || '').slice(0, 10) + '|' + x.ShiftType;
