@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-464'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-465'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20442,7 +20442,14 @@ function _rptTally(scheds, bookings, from, to){
     const h = Number(x.Hours || 0); const isPart = x.StartTime && h > 0 && h < 12;
     eq[k] = (eq[k] || 0) + (isPart ? Math.min(1, h / _SHIFT_EQ_HOURS) : 1); // Build 441: 11.25
   });
-  return { units, dates, counts, heads, eq, unresolved };
+  // Build 465: which units had a break nurse each shift (main + absorbed, open units only) — the
+  // Break RN Stats export writes n/a everywhere else, as the manager's workbook does.
+  const covered = {};
+  scheds.filter(_rptActive).forEach(x => {
+    const d = (x.ShiftDate || '').slice(0, 10), k = key(d, x.ShiftType); (covered[k] ||= new Set());
+    _rptRowUnits(x).forEach(u => { if(u === 'C_PAIR'){ ['3C','4C'].forEach(v => { if(isUnitOpenForShift(v, d, x.ShiftType)) covered[k].add(v); }); } else if(isUnitOpenForShift(u, d, x.ShiftType)) covered[k].add(u); });
+  });
+  return { units, dates, counts, heads, eq, unresolved, covered };
 }
 // Build 440 (Tomas's manager's sheet): week-by-week Day | Noc side by side, sized in
 // shift-equivalents (full = 1, partial = hours/12) so a 4-hour pickup counts as a
@@ -20571,12 +20578,56 @@ function _rptRenderTally(T, rangeLabel){
   Object.entries(T.counts).forEach(([k, row]) => { const sh = k.split('|')[1]; Object.values(row).forEach(v => total[sh] += v); });
   card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
     + `<h3 style="margin:0">📊 Break Tally</h3>`
-    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button></div>`
+    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button><button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="rptBreakRNStatsCSV()" title="The Break RN Stats workbook's layout — opens in Excel cell-for-cell on a month tab">⬇ Break RN Stats</button></div>`
     + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks</div>`
     + _rptTallyBand(T)
     + _rptTallyTable(T, 'Day') + _rptTallyTable(T, 'Noc');
   card.style.display = 'block';
   window._rptTallyData = T;
+}
+// Build 465 (Tomas): the manager's Break RN Stats workbook, tab-for-tab — row 1 the RN key,
+// row 2 her unit order, then each Sunday week as 7 date rows (Day block · Total/Day · Noc block ·
+// Total/Night · Total/24hrs) and a Total/week row at her 11-row stride, formulas as formulas.
+// Opened in Excel it lands cell-for-cell on a month tab: select rows 3 down, paste at A3.
+function rptBreakRNStatsCSV(){
+  const T = window._rptTallyData; if(!T) return;
+  const U = ['3A','3C','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
+  const HDR = ['3A','3C/FP','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
+  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const col = i => { let s = ''; i += 1; while(i > 0){ const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const dayC0 = 2, dayC1 = dayC0 + 14, totDay = dayC1 + 2, nocD = totDay + 1, nocC0 = nocD + 2, nocC1 = nocC0 + 14, totNoc = nocC1 + 2, tot24 = totNoc + 3;
+  const cell = (ds, sh, u) => { const cov = T.covered && T.covered[ds + '|' + sh]; if(!cov || !cov.has(u)) return 'n/a'; return (T.counts[ds + '|' + sh] || {})[u] || 0; };
+  const q = v => { const x = String(v == null ? '' : v); return /[",\n]/.test(x) ? '"' + x.replace(/"/g, '""') + '"' : x; };
+  const rows = []; const put = (r, arr) => { rows[r] = arr; };
+  put(0, ['3 RNs', '2 RNs', '1 RN']);
+  const hdr = ['DAYS', '']; hdr.push(...HDR); hdr[totDay - 1] = ''; hdr[nocD] = 'NOCS'; HDR.forEach((h, i) => { hdr[nocC0 + i] = h; }); put(1, hdr);
+  const sun = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); };
+  const weeks = [...new Set(T.dates.map(sun))].sort();
+  weeks.forEach((w, wi) => {
+    const r0 = 2 + wi * 11; // her stride: rows 3–9, total row 11, then 14–20/22, …
+    for(let i = 0; i < 7; i++){
+      const d = new Date(w + 'T12:00:00'); d.setDate(d.getDate() + i); const ds = localDate(d); const r = r0 + i; const xl = r + 1;
+      const row = []; row[0] = ds; row[1] = DOW[i];
+      U.forEach((u, j) => { row[dayC0 + j] = cell(ds, 'Day', u); });
+      row[totDay - 1] = 'Total/Day'; row[totDay] = `=SUM(${col(dayC0)}${xl}:${col(dayC1)}${xl})`;
+      row[nocD] = ds; row[nocD + 1] = DOW[i];
+      U.forEach((u, j) => { row[nocC0 + j] = cell(ds, 'Noc', u); });
+      row[totNoc - 1] = 'Total/Night'; row[totNoc] = `=SUM(${col(nocC0)}${xl}:${col(nocC1)}${xl})`;
+      row[tot24 - 1] = 'Total/24hrs'; row[tot24] = `=SUM(${col(totDay)}${xl}+${col(totNoc)}${xl})`;
+      put(r, row);
+    }
+    const rt = r0 + 8, xl0 = r0 + 1, xl1 = r0 + 7, xlt = rt + 1; const trow = []; trow[0] = 'Total/week'; trow[1] = `=SUM(${col(dayC0)}${xlt}:${col(dayC1)}${xlt})`;
+    U.forEach((u, j) => { const c = col(dayC0 + j); trow[dayC0 + j] = `=SUM(${c}${xl0}:${c}${xl1})`; const cn = col(nocC0 + j); trow[nocC0 + j] = `=SUM(${cn}${xl0}:${cn}${xl1})`; });
+    trow[nocD] = 'Total/week'; trow[nocD + 1] = `=SUM(${col(nocC0)}${xlt}:${col(nocC1)}${xlt})`;
+    put(rt, trow);
+    const t24 = []; t24[tot24 - 1] = 'Total/week'; t24[tot24] = `=SUM(${col(1)}${xlt},${col(nocD + 1)}${xlt})`; put(rt + 1, t24); // her AN12/AO12: the week's 24-hour total sits one row below
+  });
+  const width = tot24 + 1;
+  const csv = rows.map(r => { const a = r || []; const out = []; for(let i = 0; i < width; i++) out.push(q(a[i])); return out.join(','); }).join('\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob(['\ufeff' + csv], { type: 'text/csv' }));
+  a.download = 'Break_RN_Stats_' + T.dates[0] + '_' + T.dates[T.dates.length - 1] + '.csv';
+  a.click(); URL.revokeObjectURL(a.href);
 }
 function rptTallyCSV(){
   const T = window._rptTallyData;
