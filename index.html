@@ -2278,7 +2278,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-456'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-457'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5425,12 +5425,19 @@ let _3CManuallyAssigned = false;
 // same family as the rest of the app: refreshes on navigation and grid
 // rebuilds, not on pure clock ticks.
 let _covPillMemo = { key: null, at: 0, set: null };
+let _covDecorSeq = 0; // Build 457
 async function decorateUnitGridCoverage(){
   try {
     const ug = document.getElementById('unitGrid');
     if(!ug) return;
     if(S.shift === 'Other'){ ug.querySelectorAll('.unit-btn.cov').forEach(b => b.classList.remove('cov')); return; }
     const shift = S.shift;
+    // Build 457 (Tomas: tint flashes then clears on reload): the boot-time call
+    // runs before the shift is known; 428 added a second call after. Both fetch,
+    // and the FIRST one finishing LAST painted its empty result over the second's.
+    // No shift → nothing to paint; and any call outrun by a newer one stands down.
+    if(!shift) return;
+    const _mySeq = ++_covDecorSeq;
     // Build 429: the .cov paint uses the calendar's accent variables, which only
     // the calendar render set on the grid (after a unit tap) — on a fresh load
     // the class landed but only the bold survived. Set them here too, shift-aware.
@@ -5445,6 +5452,7 @@ async function decorateUnitGridCoverage(){
          .forEach(r => { STAFF_UNITS.forEach(u => { if(!covered.has(u) && unitCoveredBy(r, u, dt, shift)) covered.add(u); }); });
       _covPillMemo = { key, at: Date.now(), set: covered };
     }
+    if(_mySeq !== _covDecorSeq) return; // Build 457: superseded while fetching
     ug.querySelectorAll('.unit-btn').forEach(b => b.classList.toggle('cov', covered.has(b.textContent.trim())));
   } catch(e){ /* decoration is a courtesy; never break the grid */ }
 }
