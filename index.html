@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-460'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-461'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19964,6 +19964,8 @@ function setRange(key, btn){
 function _rptMonthList(){
   const now = new Date(); let start = new Date(now.getFullYear(), now.getMonth(), 1); let last = new Date(now.getFullYear(), now.getMonth(), 1);
   try { const ds = getImportedEntries().map(e => e.date).filter(Boolean).sort(); if(ds.length){ const d0 = new Date(ds[0] + 'T12:00:00'); start = new Date(d0.getFullYear(), d0.getMonth(), 1); const d1 = new Date(ds[ds.length - 1] + 'T12:00:00'); const lm = new Date(d1.getFullYear(), d1.getMonth(), 1); if(lm > last) last = lm; } } catch(e){} // Build 460: future months with shifts on file are selectable (planned coverage)
+  // Build 461: the SCHEDULE on file decides the last month, not the archive (console-inserted rows never enter the archive)
+  try { if(RPT.schedMax){ const d2 = new Date(RPT.schedMax + 'T12:00:00'); const lm2 = new Date(d2.getFullYear(), d2.getMonth(), 1); if(lm2 > last) last = lm2; } } catch(e){}
   const out = []; const cur = new Date(start);
   while(cur <= last && out.length < 24){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
   return out;
@@ -20751,6 +20753,7 @@ async function loadReports(){
     // Build 292: future rows power the upcoming preview + horizon,
     // independent of the selected range.
     const futureRows = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    { const mx = futureRows.map(r => (r.ShiftDate || '').slice(0, 10)).filter(Boolean).sort().pop(); if(mx && mx !== RPT.schedMax){ RPT.schedMax = mx; _rptPaintMonths(); } } // Build 461
     const cov = _rptCoverage(scheds);
     if(!cov.nInst){
       // Build 410 (polish #4): point at the nearest upcoming data instead of
