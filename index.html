@@ -580,14 +580,9 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <button class="range-btn"        id="rb-week" onclick="setRange('week',this)">This Week</button>
         <button class="range-btn active" id="rb-2wk"  onclick="setRange('twowk',this)">Last 2 Weeks</button>
         <button class="range-btn"        id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
-        <button class="range-btn"        id="rb-cust" onclick="setRange('cust',this)">Custom</button>
       </div>
-      <div id="customRange" style="display:none">
-        <div class="row" style="margin-top:6px">
-          <div class="field"><label>From</label><input type="date" id="rptFrom" onchange="onReportDateChange('from')"/></div>
-          <div class="field"><label>To</label><input type="date" id="rptTo" onchange="onReportDateChange('to')"/></div>
-        </div>
-      </div>
+      <!-- Build 458 (Tomas): months as pills, multi-select; replaces the custom From/To -->
+      <div id="rptMonths" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
       <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
     </div>
 
@@ -2278,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-457'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-459'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19957,12 +19952,36 @@ function unlockReports(){
 }
 
 function setRange(key, btn){
-  RPT.range = key;
+  RPT.range = key; RPT.months = null;
   document.querySelectorAll('.range-btn').forEach(b => b.classList.remove('active'));
   if (btn) btn.classList.add('active');
-  const cust = document.getElementById('customRange');
-  cust.style.display = key === 'cust' ? 'block' : 'none';
-  if (key !== 'cust') loadReports();
+  _rptPaintMonths();
+  loadReports();
+}
+// Build 458: month pills — every month from the earliest saved shift to the current
+// month; tap to select, tap more to add; the range runs from the first selected
+// month's 1st to the last selected month's end (today if it's the current month).
+function _rptMonthList(){
+  const now = new Date(); let start = new Date(now.getFullYear(), now.getMonth(), 1);
+  try { const ds = getImportedEntries().map(e => e.date).filter(Boolean).sort()[0]; if(ds){ const d = new Date(ds + 'T12:00:00'); start = new Date(d.getFullYear(), d.getMonth(), 1); } } catch(e){}
+  const out = []; const cur = new Date(start);
+  while(cur <= now && out.length < 24){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
+  return out;
+}
+function _rptPaintMonths(){
+  const host = document.getElementById('rptMonths'); if(!host) return;
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const sel = RPT.months || new Set();
+  host.innerHTML = _rptMonthList().map(m => `<button class="range-btn${sel.has(m) ? ' active' : ''}" style="padding:5px 11px;font-size:.74rem" onclick="toggleRptMonth('${m}')">${MON[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}</button>`).join('');
+}
+function toggleRptMonth(m){
+  if(!RPT.months) RPT.months = new Set();
+  if(RPT.months.has(m)){ RPT.months.delete(m); if(!RPT.months.size){ RPT.months = null; setRange('twowk', document.getElementById('rb-2wk')); return; } }
+  else RPT.months.add(m);
+  RPT.range = 'months';
+  document.querySelectorAll('#rptPanel .range-btn').forEach(b => { if(b.id && b.id.startsWith('rb-')) b.classList.remove('active'); });
+  _rptPaintMonths();
+  loadReports();
 }
 
 // Build 129 (2026-05-26): Date range validation. When user picks a From
@@ -19972,6 +19991,7 @@ function setRange(key, btn){
 // If a picked date would invalidate the OTHER input's existing value
 // (rare since the constraint blocks it), auto-clamp to match.
 function onReportDateChange(which){
+  if(!document.getElementById('rptFrom')) return; // Build 458: custom range retired
   // Build 292: clamp-only validation. The Build-129 min/max attributes were
   // sticky across range changes — a previous To pinned From's max, which
   // masqueraded as an "import range" limit at the OS picker. Clamps are
@@ -20002,10 +20022,13 @@ function getRangeDates(){
       const f = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-01`;
       return { from: f, to: t };
     }
-    case 'cust': return {
-      from: document.getElementById('rptFrom').value || t,
-    to:   document.getElementById('rptTo').value   || t
-    };
+    case 'months': { // Build 458
+      const ms = [...(RPT.months || [])].sort(); if(!ms.length) return { from: t, to: t };
+      const from = `${ms[0]}-01`;
+      const [y, mo] = ms[ms.length - 1].split('-').map(Number); const last = new Date(y, mo, 0);
+      const end = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
+      return { from, to: end < t ? end : t };
+    }
     default: return { from: t, to: t };
   }
 }
@@ -20095,7 +20118,7 @@ function _rptRenderCoverage(cov){
   const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
   const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
   body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
-    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Covered</th><th style="${th}">Absorber only</th><th style="${th}">Uncovered</th></tr>
+    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Covered</th><th style="${th}">Uncovered</th></tr>
     ${rows.map(([u,c]) => {
       if(cov.nInst - c.closed === 0) return `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
@@ -20103,8 +20126,7 @@ function _rptRenderCoverage(cov){
     </tr>`;
       return `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;font-weight:600">${escHTML(u)}${c.closed ? ` <span style="font-size:.65rem;color:var(--muted);font-weight:400">(paused ${c.closed})</span>` : ''}</td>
-      <td style="${td};color:var(--teal-dk)">${c.main}</td>
-      <td style="${td};color:${c.absorbed ? '#a06a00' : 'var(--muted)'}">${c.absorbed}</td>
+      <td style="${td};color:var(--teal-dk)">${c.main + c.absorbed}</td>
       <td style="${td};color:${c.none ? 'var(--red)' : 'var(--muted)'};font-weight:${c.none ? '700' : '400'}">${c.none}</td>
     </tr>`; }).join('')}
   </table>`;
@@ -20126,7 +20148,7 @@ function _rptDelivered(cov, bookings){
   Object.keys(per).forEach(u => {
     const nights = cov.per[u].main + cov.per[u].absorbed;
     per[u].nights = nights;
-    per[u].avg = nights ? per[u].claims / nights : 0;
+    per[u].avg = nights ? per[u].confirmed / nights : 0; // Build 458: delivered = confirmed taken
     totC += per[u].claims; totN += nights; anyConf += per[u].confirmed;
   });
   return { per, houseAvg: totN ? totC / totN : 0, anyConf };
@@ -20151,11 +20173,10 @@ function _rptRenderDelivered(del){
   const td = 'padding:6px 10px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.82rem';
   const th = 'padding:6px 10px;font-size:.7rem;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);text-align:center';
   body.innerHTML = `<table style="border-collapse:collapse;min-width:100%">
-    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Breaks</th>${showConf ? `<th style="${th}">Confirmed taken</th>` : ''}<th style="${th}">Covered shifts</th><th style="${th}">Per shift</th></tr>
+    <tr><th style="${th};text-align:left">Unit</th><th style="${th}">Confirmed taken</th><th style="${th}">Covered shifts</th><th style="${th}">Per shift</th></tr>
     ${rows.map(([u,p]) => `<tr style="border-top:1px solid var(--border)">
       <td style="${td};text-align:left;font-weight:600">${escHTML(u)}</td>
-      <td style="${td}">${p.claims}</td>
-      ${showConf ? `<td style="${td};color:var(--teal-dk)">${p.confirmed}</td>` : ''}
+      <td style="${td};color:var(--teal-dk)">${p.confirmed}</td>
       <td style="${td};color:var(--muted)">${p.nights}</td>
       <td style="${td};font-weight:700;color:${(del.houseAvg > 0 && p.avg < del.houseAvg * 0.75) ? 'var(--red)' : 'var(--teal-dk)'}">${p.avg.toFixed(1)}</td>
     </tr>`).join('')}
@@ -20212,18 +20233,26 @@ function _rptRenderRotation(rot){
     : `✅ No unit is concentrated on a single break nurse in this range.`;
   const td = 'padding:5px 7px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
   const th = 'padding:5px 7px;font-size:.66rem;color:var(--muted);text-align:center;font-family:\'DM Mono\',monospace';
-  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">Reading guide: D-wing share settles near <strong>57%</strong> (8 of 14 units), not 50% — so A-wing ≈ 43% is on target · two-High should be 0 on a capped shift · span = floors stretched per assignment.</div><table style="border-collapse:collapse">
+  // Build 459 (Tomas: option 1): the per-nurse fairness numbers as a compact table;
+  // the nurse × unit grid stays behind a toggle for when the callout sends you to it.
+  const row = bn => { const total = Object.values(rot.grid[bn] || {}).reduce((a, c) => a + c, 0);
+    const aPct = total ? Math.round(100 * (rot.wingA[bn] || 0) / total) : 0;
+    return { bn, shifts: rot.nights[bn], aPct, twoHigh: rot.twoHigh[bn] || 0, span: rot.spanN[bn] ? (rot.spanSum[bn] / rot.spanN[bn]).toFixed(1) : '', split: rot.split[bn] || 0 }; };
+  const rows = bns.map(row);
+  const sth = 'padding:5px 9px;font-size:.66rem;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.05em';
+  const std = 'padding:5px 9px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
+  const capOn = (typeof _acuityCapOn === 'function') ? (_acuityCapOn('Day') || _acuityCapOn('Noc')) : true;
+  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">A-wing share settles near <strong>43%</strong> (D has 8 of 14 units) · two-High should be 0 on a capped shift · span = floors stretched per assignment</div>`
+    + `<table style="border-collapse:collapse"><tr><th style="${sth};text-align:left">Nurse</th><th style="${sth}">Shifts</th><th style="${sth}">A-wing</th><th style="${sth}">two-High</th><th style="${sth}">Span</th></tr>`
+    + rows.map(r => `<tr style="border-top:1px solid var(--border)"><td style="${std};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(r.bn))}</strong>${r.split ? `<span style="font-size:.62rem;color:#a06a00;margin-left:6px">split-wing ${r.split}</span>` : ''}</td>`
+      + `<td style="${std}">${r.shifts}</td><td style="${std}">${r.aPct}%</td><td style="${std};color:${r.twoHigh && capOn ? 'var(--red)' : 'var(--text)'};font-weight:${r.twoHigh && capOn ? '700' : '400'}">${r.twoHigh}</td><td style="${std}">${r.span}</td></tr>`).join('')
+    + `</table>`
+    + `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="const g=document.getElementById('rptRotationGrid');const o=g.style.display==='none';g.style.display=o?'':'none';this.textContent=o?'Hide unit grid':'Show unit grid'">Show unit grid</button>`
+    + `<div id="rptRotationGrid" style="display:none;overflow-x:auto;margin-top:8px"><table style="border-collapse:collapse">
     <tr><th style="${th};text-align:left">Nurse</th>${units.map(u => `<th style="${th}">${escHTML(u)}</th>`).join('')}</tr>
-    ${bns.map(bn => {
-      const aPct = rot.nights[bn] ? Math.round(100 * (rot.wingA[bn] || 0) /
-        Object.values(rot.grid[bn] || {}).reduce((a,c) => a + c, 0) || 0) : 0;
-      return `<tr style="border-top:1px solid var(--border)">
-      <td style="${td};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(bn))}</strong>
-        <div style="font-size:.66rem;color:var(--muted)">${rot.nights[bn]} shifts · A-wing ${aPct}% · two-High ${rot.twoHigh[bn] || 0} · span ${rot.spanN[bn] ? (rot.spanSum[bn] / rot.spanN[bn]).toFixed(1) : '—'}${rot.split[bn] ? ` · split-wing ${rot.split[bn]}` : ''}</div></td>
-      ${units.map(u => { const c = rot.grid[bn] && rot.grid[bn][u] || 0;
-        return `<td style="${td};color:${c ? 'var(--text)' : 'var(--border)'}">${c || '·'}</td>`; }).join('')}
-    </tr>`; }).join('')}
-  </table>`;
+    ${bns.map(bn => `<tr style="border-top:1px solid var(--border)"><td style="${td};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(bn))}</strong></td>`
+      + units.map(u => { const c = rot.grid[bn] && rot.grid[bn][u] || 0; return `<td style="${td};color:${c ? 'var(--text)' : 'var(--border)'}">${c || ''}</td>`; }).join('') + `</tr>`).join('')}
+  </table></div>`;
   document.getElementById('rptRotationCard').style.display = 'block';
   return !_conc; // Build 292: snapshot consumes the verdict
 }
@@ -20327,9 +20356,7 @@ function _rptRenderCoverageExtras(x){
   const up = document.getElementById('rptCovUpcoming');
   const cl = document.getElementById('rptCovClosures');
   const hz = document.getElementById('rptCovHorizon');
-  if(hp) hp.innerHTML = x.holes.length
-    ? `<span style="color:var(--red);font-weight:600">No coverage:</span> ${x.holes.map(escHTML).join(' · ')}`
-    : `<span style="color:var(--teal-dk)">✓ No zero-coverage shifts in this range.</span>`;
+  if(hp){ hp.innerHTML = ''; hp.style.display = 'none'; } // Build 459 (Tomas): the no-coverage date list retired — the Uncovered column says it
   if(up) up.innerHTML = x.upcoming.length
     ? `<span style="color:#a06a00;font-weight:600">Coming up:</span> ${x.upcoming.map(h => escHTML(h) + ' — no break nurse scheduled').join(' · ')}`
     : (x.horizon ? `<span style="color:var(--teal-dk)">✓ Next 7 days staffed (within the schedule on file).</span>` : '');
@@ -20702,6 +20729,7 @@ function _rptRenderVs(V, rangeLabel){
 }
 
 async function loadReports(){
+  try { if(!document.querySelector('#rptMonths button')) _rptPaintMonths(); } catch(e){} // Build 458
   if(!RPT.unlocked) return;
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
