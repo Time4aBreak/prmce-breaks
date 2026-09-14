@@ -376,8 +376,14 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div id="subtab-summary" class="subtab active">
 
 
-  <div class="card">
-    <div class="row">
+  <!-- Build 452 (Tomas): the Coverage tab is a LIVE board — the shift(s) with an open claim
+       window (both during the 7:30–8:30 overlaps). Date/shift live behind "Look Back". -->
+  <div class="card" style="padding:12px 16px">
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap">
+      <div id="summLiveLabel" style="font-weight:700;font-size:.95rem"></div>
+      <button type="button" class="btn btn-ghost btn-sm" id="summLookBackBtn" onclick="toggleSummLookBack()">🕘 Look Back</button>
+    </div>
+    <div class="row" id="summLookBack" style="display:none;margin-top:10px">
       <div class="field">
         <label>Date</label>
         <input type="date" id="summDate" onchange="loadSummary()"/>
@@ -395,7 +401,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
     <div>
       <div class="card-label" style="padding:0 4px;margin-bottom:4px">Filter by Unit</div>
-      <div class="filter-row" id="summFilter"></div>
+      <div id="summFilter"></div>
     </div>
     <div>
       <div class="card-label" style="padding:0 4px;margin-bottom:4px">Filter by Break Nurse</div>
@@ -405,6 +411,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
   </div>
   <div id="summList"><div class="empty"><div class="spinner"></div></div></div>
+  <div id="summList2"></div>
 
     </div><!-- /subtab-summary -->
 
@@ -756,7 +763,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
               <div class="toggle-opt" id="aPart" onclick="setAPartial(true)" style="padding:8px 14px">Partial</div>
             </div>
           </div>
-          <div class="field" style="flex:0 0 auto;min-width:0">
+          <div class="field" id="aExpectedField" style="flex:0 0 auto;min-width:0">
             <label>Break nurses this shift</label>
             <input type="number" id="aExpectedBNs" min="1" max="6" inputmode="numeric"
               style="width:64px;padding:8px 4px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:.9rem"
@@ -2271,7 +2278,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-12-449'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-13-452'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5589,8 +5596,10 @@ function init(){
 
   // Summary unit filter
   const sf=document.getElementById('summFilter');
-  const all=pill('All Units','All',true); sf.appendChild(all);
-  UNITS.forEach(u=>sf.appendChild(pill(u, u, false)));
+  // Build 452: wing rows, as everywhere else; All Units sits above them
+  const allWrap = document.createElement('div'); allWrap.style.marginBottom = '6px'; allWrap.appendChild(pill('All Units','All',true)); sf.appendChild(allWrap);
+  const rows = document.createElement('div'); rows.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`); sf.appendChild(rows);
+  [..._WING_ROW_A, ..._WING_ROW_D].forEach(u => { const cell = rows.querySelector(`[data-slot="${u}"]`); const p = pill(u, u, false); p.style.textAlign = 'center'; if(cell) cell.replaceWith(p); else rows.appendChild(p); });
 
   // Shift detection
   S.shift = detectShift();
@@ -10167,6 +10176,7 @@ function setAPartial(on, _byUser = true){
   const t = document.getElementById('aPartTimes');
   if(t) t.style.display = on ? '' : 'none';
   const sf = document.getElementById('aShiftField'); if(sf) sf.style.display = on ? 'none' : ''; // Build 445
+  const ef = document.getElementById('aExpectedField'); if(ef) ef.style.display = on ? 'none' : ''; // Build 451: a partial isn't sized by the count
   if(on) _aInferShift();
 }
 // Build 445: a partial's shift follows its start time (8:00 AM to 8:00 PM = Day,
@@ -12312,19 +12322,58 @@ function hiShift(dayId, nocId, sh){
 // render entirely instead of clobbering a newer one.
 let _summaryRenderSeq = 0;
 let _summaryLoadChain = Promise.resolve();
+// Build 452: the shifts whose staff claim window is open NOW — from the shift's
+// Break Slot Limits open time to the BN clock-out (Day 7:30 AM–8:30 PM, Noc 7:30 PM–
+// 8:30 AM by default); both during the overlaps.
+function _summLiveShifts(){
+  const now = new Date(); const m = now.getHours() * 60 + now.getMinutes();
+  const toM = t => { const [h, mm] = String(t || '').split(':').map(Number); return isFinite(h) ? h * 60 + (mm || 0) : null; };
+  let dOpen = 450, nOpen = 1170; try { const r = _rampCfg(); dOpen = toM(r.Day.openAt) ?? dOpen; nOpen = toM(r.Noc.openAt) ?? nOpen; } catch(e){}
+  const out = [];
+  if(m >= dOpen && m <= BN_CLOCKOUT_DAY) out.push({ shift: 'Day', dt: localDate(now) });
+  if(m >= nOpen) out.push({ shift: 'Noc', dt: localDate(now) });
+  else if(m <= BN_CLOCKOUT_NOC){ const y = new Date(now); y.setDate(y.getDate() - 1); out.push({ shift: 'Noc', dt: localDate(y) }); }
+  if(!out.length){ const sh = detectShift(); out.push({ shift: sh, dt: shiftDate(sh) }); } // dead zones fall back to the BN clock
+  return out;
+}
+function toggleSummLookBack(){
+  const box = document.getElementById('summLookBack'), btn = document.getElementById('summLookBackBtn');
+  const open = box.style.display === 'none';
+  box.style.display = open ? '' : 'none'; S.summLive = !open;
+  if(btn) btn.textContent = open ? '⟵ Live' : '🕘 Look Back';
+  if(open){ const dp = document.getElementById('summDate'); if(dp && !dp.value) dp.value = shiftDate(S.summShift || 'Day'); }
+  loadSummary();
+}
 function loadSummary(){
   const mySeq = ++_summaryRenderSeq;
-  _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq)).catch(()=>{});
+  const live = S.summLive !== false;
+  const label = document.getElementById('summLiveLabel'); const el2 = document.getElementById('summList2');
+  if(live){
+    const shifts = _summLiveShifts();
+    const fmt = x => `${x.shift === 'Day' ? '☀️ Day' : '🌙 Noc'} · ${_fmtDayShort(x.dt)}`;
+    if(label) label.textContent = 'Live claims · ' + shifts.map(fmt).join('  +  ');
+    _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq, { dt: shifts[0].dt, shift: shifts[0].shift, elId: 'summList', heading: shifts[1] ? fmt(shifts[0]) : '' })).catch(()=>{});
+    if(shifts[1]){
+      if(el2) el2.style.display = '';
+      _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq, { dt: shifts[1].dt, shift: shifts[1].shift, elId: 'summList2', heading: fmt(shifts[1]) })).catch(()=>{});
+    } else if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; }
+  } else {
+    if(label) label.textContent = 'Look Back';
+    if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; }
+    _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq)).catch(()=>{});
+  }
   return _summaryLoadChain;
 }
-async function _loadSummaryInner(mySeq){
+async function _loadSummaryInner(mySeq, ctx){
   // Superseded by a newer call queued behind us — skip without touching DOM.
   if(mySeq !== _summaryRenderSeq) return;
-  const dt=document.getElementById('summDate').value;
-  const shift=S.summShift;
+  // Build 452: ctx = { dt, shift, elId, heading } for the live board; absent = Look Back (the selectors)
+  const dt = ctx ? ctx.dt : document.getElementById('summDate').value;
+  const shift = ctx ? ctx.shift : S.summShift;
   const unit=S.summUnit;
   const bnFilter = document.getElementById('summBNFilter')?.value || 'All';
-  const el=document.getElementById('summList');
+  const el=document.getElementById(ctx && ctx.elId ? ctx.elId : 'summList');
+  const _heading = ctx && ctx.heading ? `<div style="font-weight:700;font-size:.9rem;margin:14px 0 6px">${ctx.heading}</div>` : '';
   // Build 443 (Tomas): entering the tab fires loadSummary twice (the tab switch and
   // the unlock/auto-shift path); the chain serializes them, but each repaint
   // blanked the list to a spinner, so the tab visibly "loads again." Show the
@@ -12605,7 +12654,7 @@ async function _loadSummaryInner(mySeq){
         </div>`;
       }
     });
-    el.innerHTML=html;
+    el.innerHTML = _heading + html; // Build 452
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
   }
@@ -12823,7 +12872,7 @@ async function saveAssign(){
   let shift=S.aShift;
   const units=[...new Set(S.aUnits.flatMap(u=>u==='C_PAIR'?['3C','4C']:u))];
   // Build 307: partial shifts carry their times onto the row.
-  let _pStart = '', _pHours = 0, _split2 = null;
+  let _pStart = '', _pHours = 0, _split2 = null, _pHoursWhole = 0;
   if(typeof _aPartial !== 'undefined' && _aPartial){
     _pHours = _aPartialHours();
     if(!_pHours){ toast('Enter the partial start and stop times.', true); loadAssignments(); return; }
@@ -12831,6 +12880,7 @@ async function saveAssign(){
     const _winErr = _aPartialWindowError(shift);
     if(_winErr){ toast(_winErr, true); loadAssignments(); return; }
     _pStart = document.getElementById('aPartStart').value.replace(':', '');
+    _pHoursWhole = _pHours; // Build 450: the window is one pickup — sized on its full length
     { const cal = dt; const halves = splitStraddlingPartial(_pStart, _pHours, cal); // Build 449
       if(halves){ _pStart = halves[0].startTime; _pHours = halves[0].hours; shift = halves[0].shift; dt = halves[0].date; _split2 = halves[1]; }
       else { const inf = inferPartialShift(_pStart, _pHours); if(inf && inf.dateDelta && dt) dt = _wgAddDays(dt, inf.dateDelta); } } // Build 448: the row is dated by shift start
@@ -12840,12 +12890,12 @@ async function saveAssign(){
   if(!units.length){ toast('Select at least one unit.',true); loadAssignments(); return; }
   // Build 446 (Tomas: Anna's 2.25h partial saved with 3 units): the Edit card was the
   // only path that didn't size a partial. Ask when the count disagrees with Settings.
-  if(typeof _aPartial !== 'undefined' && _aPartial && _pHours > 0){
+  if(typeof _aPartial !== 'undefined' && _aPartial && _pHoursWhole > 0){
     const _pc = _covCfg().partial; const _covMax = Math.max(...(_covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam));
-    const _want = Math.min(Math.max(1, Math.ceil(_pHours / _pc.perHours) * _pc.units), Math.max(1, _covMax));
+    const _want = Math.min(Math.max(1, Math.ceil(_pHoursWhole / _pc.perHours) * _pc.units), Math.max(1, _covMax));
     const _have = S.aUnits.length;
     if(_have !== _want){
-      if(!await customConfirm(`A ${_pHours}-hour partial is sized at ${_want} unit${_want === 1 ? '' : 's'} by Settings (${_pc.units} per ${_pc.perHours} hours) — you picked ${_have}.`, 'Save anyway', 'Go back')){ return; }
+      if(!await customConfirm(`A ${_pHoursWhole}-hour partial is sized at ${_want} unit${_want === 1 ? '' : 's'} by Settings (${_pc.units} per ${_pc.perHours} hours) — you picked ${_have}.`, 'Save anyway', 'Go back')){ return; }
     }
   }
   // Build 114 (2026-05-26): Confirm before saving for a past shift. Day
@@ -15582,8 +15632,9 @@ async function renderImportRows(entries, forceReplace = false){
         const halves = splitStraddlingPartial(e.startTime, hh, cal);
         if(halves){
           const size = h => { const _pc = _covCfg().partial; return Math.max(1, Math.ceil(h / _pc.perHours) * _pc.units); };
-          const head = Object.assign({}, e, { startTime: halves[0].startTime, hours: String(halves[0].hours), shift: halves[0].shift, date: halves[0].date, isPartial: true, partialUnitCount: size(halves[0].hours), _splitHead: true });
-          const tail = Object.assign({}, e, { units: [], startTime: halves[1].startTime, hours: String(halves[1].hours), shift: halves[1].shift, date: halves[1].date, isPartial: true, partialUnitCount: size(halves[1].hours), _splitTail: true });
+          const whole = size(hh); // Build 450: one pickup, sized on the whole window; both halves carry it
+          const head = Object.assign({}, e, { startTime: halves[0].startTime, hours: String(halves[0].hours), shift: halves[0].shift, date: halves[0].date, isPartial: true, partialUnitCount: whole, _splitHead: true });
+          const tail = Object.assign({}, e, { units: [], startTime: halves[1].startTime, hours: String(halves[1].hours), shift: halves[1].shift, date: halves[1].date, isPartial: true, partialUnitCount: whole, _splitTail: true });
           head._splitPartnerKey = `${tail.name}|${tail.date}|${tail.shift}`; tail._splitPartnerKey = `${head.name}|${head.date}|${head.shift}`;
           out.push(head, tail); return;
         }
