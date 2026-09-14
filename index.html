@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-459'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-14-460'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19962,10 +19962,10 @@ function setRange(key, btn){
 // month; tap to select, tap more to add; the range runs from the first selected
 // month's 1st to the last selected month's end (today if it's the current month).
 function _rptMonthList(){
-  const now = new Date(); let start = new Date(now.getFullYear(), now.getMonth(), 1);
-  try { const ds = getImportedEntries().map(e => e.date).filter(Boolean).sort()[0]; if(ds){ const d = new Date(ds + 'T12:00:00'); start = new Date(d.getFullYear(), d.getMonth(), 1); } } catch(e){}
+  const now = new Date(); let start = new Date(now.getFullYear(), now.getMonth(), 1); let last = new Date(now.getFullYear(), now.getMonth(), 1);
+  try { const ds = getImportedEntries().map(e => e.date).filter(Boolean).sort(); if(ds.length){ const d0 = new Date(ds[0] + 'T12:00:00'); start = new Date(d0.getFullYear(), d0.getMonth(), 1); const d1 = new Date(ds[ds.length - 1] + 'T12:00:00'); const lm = new Date(d1.getFullYear(), d1.getMonth(), 1); if(lm > last) last = lm; } } catch(e){} // Build 460: future months with shifts on file are selectable (planned coverage)
   const out = []; const cur = new Date(start);
-  while(cur <= now && out.length < 24){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
+  while(cur <= last && out.length < 24){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
   return out;
 }
 function _rptPaintMonths(){
@@ -20027,7 +20027,7 @@ function getRangeDates(){
       const from = `${ms[0]}-01`;
       const [y, mo] = ms[ms.length - 1].split('-').map(Number); const last = new Date(y, mo, 0);
       const end = `${last.getFullYear()}-${String(last.getMonth() + 1).padStart(2, '0')}-${String(last.getDate()).padStart(2, '0')}`;
-      return { from, to: end < t ? end : t };
+      return { from, to: end }; // Build 460: may reach into the future — the schedule cards read it as PLANNED
     }
     default: return { from: t, to: t };
   }
@@ -20770,7 +20770,16 @@ async function loadReports(){
       return;
     }
     status.innerHTML = '';
-    const del = _rptDelivered(cov, bookings);
+    // Build 460: a range reaching past today — Unit Coverage and Rotation read the
+    // SCHEDULE and report the plan; the three delivery cards report the past part.
+    const _today = today(); const _future = to > _today; const _pastTo = _future ? _today : to;
+    const _pastScheds = _future ? scheds.filter(r => (r.ShiftDate || '').slice(0, 10) <= _today) : scheds;
+    const _pastBookings = _future ? bookings.filter(b => (b.SlotDate || '').slice(0, 10) <= _today) : bookings;
+    const _tag = (id, txt) => { const el = document.querySelector(`#${id} .card-label`); if(!el) return; let t = el.querySelector('.rpt-tag'); if(!t){ t = document.createElement('span'); t.className = 'rpt-tag'; t.style.cssText = 'margin-left:8px;font-size:.62rem;font-weight:600;letter-spacing:.04em;text-transform:none;color:var(--muted)'; el.appendChild(t); } t.textContent = txt || ''; };
+    _tag('rptCovScoreCard', _future ? (from > _today ? 'planned' : 'to date + planned') : '');
+    _tag('rptRotationCard', _future ? (from > _today ? 'planned' : 'to date + planned') : '');
+    _tag('rptDeliveredCard', _future ? `through ${_rptFmtD(_pastTo)}` : '');
+    const del = _rptDelivered(_rptCoverage(_pastScheds), _pastBookings);
     _rptRenderCoverage(cov);
     _rptRenderCoverageExtras(_rptCoverageExtras(scheds, futureRows, from, to));
     _rptRenderDelivered(del);
@@ -20778,9 +20787,9 @@ async function loadReports(){
     // Build 386 (Tomas, Sep 2): Self-Care and Summary Snapshot cards RETIRED —
     // render calls removed; divs stay permanently display:none and the pure
     // functions remain inert for easy restoration if ever wanted.
-    const T383 = _rptTally(scheds, bookings, from, to); // Build 383
-    _rptRenderTally(T383, fmtDateRange(from, to));
-    _rptRenderVs(_rptVs(scheds, T383, bookings), fmtDateRange(from, to)); // Builds 385+387
+    const T383 = _rptTally(_pastScheds, _pastBookings, from, _pastTo); // Build 383 · 460: past part only
+    _rptRenderTally(T383, fmtDateRange(from, _pastTo) + (_future ? ' · confirmed breaks to date' : ''));
+    _rptRenderVs(_rptVs(_pastScheds, T383, _pastBookings), fmtDateRange(from, _pastTo)); // Builds 385+387
 
   } catch(e){
     const isTimeout = /timeout/i.test(e.message || '');
