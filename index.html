@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-469'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-470'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11838,7 +11838,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
       subEl.innerHTML = `${runs.length} break run${runs.length!==1?'s':''} need${runs.length!==1?'':'s'} coverage — `
         + `<span style="color:var(--teal);font-weight:600">${coveredCount} covered</span>`
         + (cancelledCount ? `, <span style="color:#b45309;font-weight:600">${cancelledCount} left uncovered</span>` : '')
-        + (elig.some(e => e.length) ? `. Pick who takes each run, or release it.` : `. No other break nurse is on this wing tonight — the run will be released and the nurse told.`); // Build 469
+        + (elig.some(e => e.length) ? `. Pick who takes each run, or release it.` : `. No other break nurse is on this wing tonight.`); // Build 469 · 470
 
       rowsEl.innerHTML = '';
       runs.forEach((run, i) => {
@@ -11889,9 +11889,11 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
         rowsEl.appendChild(row);
       });
 
+      // Build 470 (Tomas): the button says what happens next — runs released, then the mark
+      const _who = firstName(bnName), _runs = `${cancelledCount} break run${cancelledCount === 1 ? '' : 's'}`;
       okBtn.textContent = cancelledCount
-        ? (coveredCount ? `Cover ${coveredCount}, release ${cancelledCount}` : `Release ${cancelledCount} break${cancelledCount === 1 ? '' : 's'} and continue`)
-        : `Cover as shown`;
+        ? (coveredCount ? `Cover ${coveredCount}, release ${_runs} and mark ${_who} unavailable` : `Release ${_runs} and continue to mark ${_who} unavailable`)
+        : `Cover as shown and mark ${_who} unavailable`;
     }
 
     // Build the absorbed/flagged contract from the current on-screen state.
