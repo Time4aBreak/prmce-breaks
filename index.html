@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-482'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-483'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5799,6 +5799,9 @@ function unlockPortal(){
     hiShift('sDay','sNoc', _autoSumShift);
     const _summDp = document.getElementById('summDate');
     if(_summDp) _summDp.value = shiftDate(_autoSumShift);
+    // Build 483 (Tomas): a tap on the tab is a fresh look — spinner and locked controls, not the
+    // old list sitting there while the fetch runs (443's keep-in-place is for the background poll).
+    ['summList','summList2'].forEach(id => { const el = document.getElementById(id); if(el) el.dataset.ctx = ''; });
     loadSummary();
     populateBNDropdown();
     if(PORTAL.level === 'admin'){
@@ -5886,6 +5889,7 @@ function showSubTab(name, btn){
     S.summShift = curShift;
     document.getElementById('summDate').value = curDate;
     hiShift('sDay','sNoc', curShift);
+    ['summList','summList2'].forEach(id => { const el = document.getElementById(id); if(el) el.dataset.ctx = ''; }); // Build 483: a tab tap is a fresh look — spinner + lock
     loadSummary();
     // Start 10s background polling so admin sees staff/BN changes live.
     _coverageLastFingerprint = null;
