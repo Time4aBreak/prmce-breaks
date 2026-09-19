@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-473'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-474'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10921,6 +10921,20 @@ async function countOutageBookings(suppls, outageStartMs, dStr, shiftType){
 // `suppls` is the array of supplemental schedule records for absorbing BNs.
 // Each supplemental's Units field tells us which units that BN covered;
 // bookings on those units within [outageStart, cutoverMs] get credited.
+// Build 474: on take-back, bookings at/after the cutover on the retired supplementals return to
+// the returning BN's CoveredBy stream (473 put this only in markBNAvailable; the self path
+// toggleSelfAvailability has its own restore copy — one helper, called from both).
+async function restampStreamsOnTakeBack(suppls, dStr, shiftType, cutoverMs, bnName){
+  try {
+    const shiftBk = await spGet(LISTS.bookings, `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`);
+    const back = [];
+    for(const sp of suppls){ let us = []; try { us = JSON.parse(sp.Units || '[]'); } catch(e){}
+      shiftBk.forEach(b => { if(isBNBreak(b) || String(b.IsCancelled) === '1') return; if(!us.includes(b.Unit)) return; if(b.CoveredBy !== sp.BreakNurseName) return; if(slotEventTime(b) >= cutoverMs) back.push(b.Id); }); }
+    const res = await Promise.allSettled(back.map(id => spPatch(LISTS.bookings, id, { CoveredBy: bnName })));
+    const failed = res.filter(r => r.status === 'rejected').length; if(failed) console.warn('stream re-stamp: ' + failed + ' of ' + back.length + ' patches failed');
+    return back.length;
+  } catch(e){ console.warn('stream re-stamp on restore failed (non-fatal):', e && e.message); return 0; }
+}
 async function stampOutageAttribution(suppls, outageStartMs, cutoverMs, dStr, shiftType){
   if(!suppls.length || !outageStartMs || isNaN(outageStartMs) || outageStartMs >= cutoverMs){
     return 0;
@@ -11058,15 +11072,7 @@ async function markBNAvailable(schedId, bnName){
       // Take back path: delete supplementals so absorbers drop out of
       // rotation, then recompute their rotations, then reactivate BN.
       const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
-      // Build 473: bookings after the cutover on the retired supplementals come back to the
-      // returning BN's stream; earlier ones keep the absorber's stamp (that is what happened).
-      try {
-        const shiftBk = await spGet(LISTS.bookings, `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${ShiftType}'`);
-        const back = [];
-        for(const sp of suppls){ let us = []; try { us = JSON.parse(sp.Units || '[]'); } catch(e){}
-          shiftBk.forEach(b => { if(isBNBreak(b) || String(b.IsCancelled) === '1') return; if(!us.includes(b.Unit)) return; if(b.CoveredBy !== sp.BreakNurseName) return; if(slotEventTime(b) >= cutoverMs) back.push(b.Id); }); }
-        await Promise.allSettled(back.map(id => spPatch(LISTS.bookings, id, { CoveredBy: bnName })));
-      } catch(e){ console.warn('stream re-stamp on restore failed (non-fatal):', e && e.message); }
+      await restampStreamsOnTakeBack(suppls, dStr, ShiftType, cutoverMs, bnName); // Build 473/474
       for(const s of suppls) await spDel(LISTS.schedule, s.Id);
       for(const otherBN of affectedBNs){
         const bnDef = getDefaultTemplate(otherBN, ShiftType);
@@ -11359,6 +11365,7 @@ async function toggleSelfAvailability(){
           // Take back path: delete supplementals, recompute rotations,
           // reactivate BN.
           const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
+          await restampStreamsOnTakeBack(suppls, dt, shift, cutoverMs, BNS.name); // Build 474: the self path's own restore copy
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
           for(const otherBN of affectedBNs){
             const bnDef = getDefaultTemplate(otherBN, shift);
