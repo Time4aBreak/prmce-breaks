@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-481'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-482'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5191,7 +5191,11 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     s.Status !== 'inactive' &&
     String(s.IsSupplemental) !== '1'
   );
-  const baseCtx = buildAbsorptionContext(activeBNs, { allBookings, allScheds, shift });
+  // Build 482 (Tomas): the claims under decision are what's being placed, not existing load —
+  // a receiver who already holds the unit (double cover) was blocked by the very claims
+  // being handed to her ("isn't available for this run").
+  const _deciding = new Set(); removedUnitsWithBookings.forEach(g => (g.bookings || []).forEach(b => _deciding.add(String(b.Id))));
+  const baseCtx = buildAbsorptionContext(activeBNs, { allBookings: allBookings.filter(b => !_deciding.has(String(b.Id))), allScheds, shift });
 
   const flat = [];
   removedUnitsWithBookings.forEach(({ bookings }) => bookings.forEach(b => flat.push(b)));
@@ -11756,7 +11760,8 @@ function recomputeRunEligibility(baseCtx, runs, candidates, assignments){
 // assignments[i] = covering BN name or CHOICE_CANCEL, and baseCtx is the
 // unmutated base context (the modal reuses it for live recompute).
 function planWholeRunAbsorption(uncovered, otherBNs, ctx){
-  const baseCtx = buildAbsorptionContext(otherBNs, ctx);
+  const _unc = new Set((uncovered || []).map(b => String(b.Id))); // Build 482: the uncovered runs aren't existing load either
+  const baseCtx = buildAbsorptionContext(otherBNs, Object.assign({}, ctx, { allBookings: (ctx.allBookings || []).filter(b => !_unc.has(String(b.Id))) }));
   const runs = groupBookingsIntoRuns(uncovered, ctx.shift);
   const candNames = otherBNs.map(c => c.BreakNurseName);
   const assignments = runs.map(() => CHOICE_CANCEL);
