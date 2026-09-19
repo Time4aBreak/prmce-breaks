@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-479'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-481'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10937,6 +10937,9 @@ async function reconcileStreamStamps(dt, shift, scheds, bookings){
       if(!isStaffBooking(b) || String(b.IsCancelled) === '1' || !b.CoveredBy) return;
       if(slotEventTime(b) < now) return;
       const h = holders(b.Unit); if(h.has(b.CoveredBy)) return;
+      // Build 480: a Keep pin lives in the stamped nurse's rotation (slot → unit). If she still
+      // gives THIS break, the stamp stays — on this save and every later one.
+      try { const rot = loadRotation(b.CoveredBy, dt, shift); if(rot && rot[normSlot(b.SlotTime)] === b.Unit) return; } catch(e){}
       if(h.size === 1) patches.push({ id: b.Id, to: [...h][0] });
       else if(h.size === 0) patches.push({ id: b.Id, to: '' });
     });
@@ -13126,6 +13129,13 @@ async function saveAssign(){
           }
         });
       }
+      // Build 481 (Tomas): claims this nurse still COVERS on units she won't hold — Keep pins from
+      // an earlier edit — come back into the dialog, so they can be transferred once someone
+      // holds the unit (or kept again, or cancelled). Without this a kept claim had no door.
+      { const pinned = shiftBookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && b.CoveredBy === nurse
+          && !units.includes(b.Unit) && !removedUnits.includes(b.Unit) && sortKey(b.SlotTime, shift) > nowKey(shift));
+        if(pinned.length){ staffBookings = shiftBookings; const byU = {}; pinned.forEach(b => { (byU[b.Unit] ||= []).push(b); });
+          Object.entries(byU).forEach(([unit, bookings]) => removedUnitsWithBookings.push({ unit, bookings, _pinned: true })); } }
 
       if(removedUnitsWithBookings.length){
         const result = await promptBookingDecisions({
