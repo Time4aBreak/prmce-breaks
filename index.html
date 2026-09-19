@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-475'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-476'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10924,6 +10924,24 @@ async function countOutageBookings(suppls, outageStartMs, dStr, shiftType){
 // Build 474: on take-back, bookings at/after the cutover on the retired supplementals return to
 // the returning BN's CoveredBy stream (473 put this only in markBNAvailable; the self path
 // toggleSelfAvailability has its own restore copy — one helper, called from both).
+// Build 476: after an Edit Assignment save, a FUTURE claim whose stamped BN no longer holds its
+// unit on that shift follows the unit — to the one BN who holds it now, or cleared (schedule
+// fallback) if nobody does; left alone when two BNs share the unit (that is the stream design).
+async function reconcileStreamStamps(dt, shift, scheds, bookings){
+  try {
+    const holders = u => { const out = new Set(); (scheds || []).forEach(r => { if(r.Status === 'inactive') return; let us = []; try { us = JSON.parse(r.Units || '[]'); } catch(e){} us = us.flatMap(x => x === 'C_PAIR' ? ['3C','4C'] : x); if(us.includes(u)) out.add(r.BreakNurseName); }); return out; };
+    const now = Date.now(); const patches = [];
+    (bookings || []).forEach(b => {
+      if(!isStaffBooking(b) || String(b.IsCancelled) === '1' || !b.CoveredBy) return;
+      if(slotEventTime(b) < now) return;
+      const h = holders(b.Unit); if(h.has(b.CoveredBy)) return;
+      if(h.size === 1) patches.push({ id: b.Id, to: [...h][0] });
+      else if(h.size === 0) patches.push({ id: b.Id, to: '' });
+    });
+    if(patches.length) await Promise.allSettled(patches.map(p => spPatch(LISTS.bookings, p.id, { CoveredBy: p.to })));
+    return patches.length;
+  } catch(e){ console.warn('stream reconcile after edit failed (non-fatal):', e && e.message); return 0; }
+}
 async function restampStreamsOnTakeBack(suppls, dStr, shiftType, cutoverMs, bnName){
   try {
     const shiftBk = await spGet(LISTS.bookings, `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`);
@@ -13263,6 +13281,7 @@ async function saveAssign(){
       // matches the nine sibling seed→recompute pairs; the scheds preload
       // stays (it kills the created-row read-after-write race).
       await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds });
+      await reconcileStreamStamps(dt, shift, _postScheds, _postBookings); // Build 476
       // Build 141 (2026-05-27): Apply Keep overrides after recompute.
       // The user chose to keep specific slots on units that are NO LONGER
       // in this BN's BNSchedule.Units. The rotation cache holds those
