@@ -305,12 +305,12 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
       <div class="field" style="max-width:150px">
-        <label>Spectra Ext</label>
+        <label>Extension</label>
         <input type="text" id="nurseExt" placeholder="5-digit ext" maxlength="5" autocomplete="off" inputmode="numeric" pattern="[0-9]{5}" oninput="validateExt(this);onNameExtInput()" onblur="checkDuplicateExt()"/>
       </div>
     </div>
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
-      ⚠ Both first name and a 5-digit Spectra extension are required.
+      ⚠ Both first name and a 5-digit extension are required.
     </div>
     <div id="nameWindowHint" style="display:none;font-size:.8rem;color:var(--day);font-weight:500;margin-top:6px"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
@@ -433,7 +433,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
       <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1">
-          <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">SPECTRA EXT</label>
+          <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">EXTENSION</label>
           <input type="text" id="bnExtInput" placeholder="— — — — —" maxlength="5" inputmode="numeric"
             style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem;letter-spacing:.15em"
             onfocus="if(this.value===''){this.style.letterSpacing='.05em'}"
@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-14-465'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-17-466'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
