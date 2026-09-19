@@ -77,7 +77,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .unit-btn{padding:10px 4px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);font-family:'DM Mono',monospace;font-size:.875rem;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
 .unit-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-lt)}
 .unit-btn.cov{background:var(--cal-accent-lt,var(--bg));border-color:var(--cal-accent,var(--border));color:var(--cal-accent,var(--muted));font-weight:800} /* Build 377: covered = the calendar's own fill+border */
-.unit-btn.active{background:var(--teal);border-color:var(--teal);color:white;font-weight:700}
+/* Build 477 (Tomas): the selected pill keeps its covered tint; selection is a ring, not a repaint */
+.unit-btn.active{border-color:var(--teal);color:var(--teal);font-weight:800;box-shadow:0 0 0 3px var(--teal);background:var(--teal-lt)}
+.unit-btn.active.cov{background:var(--cal-accent-lt,var(--bg));border-color:var(--cal-accent,var(--teal));color:var(--cal-accent,var(--teal));box-shadow:0 0 0 3px var(--cal-accent,var(--teal))}
 
 /* ── Shift badge ── */
 .shift-pill{display:inline-flex;align-items:center;gap:8px;padding:7px 16px;border-radius:99px;font-size:.875rem;font-weight:600}
@@ -2273,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-476'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-477'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
