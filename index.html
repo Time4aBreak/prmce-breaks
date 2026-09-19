@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-468'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-469'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11838,7 +11838,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
       subEl.innerHTML = `${runs.length} break run${runs.length!==1?'s':''} need${runs.length!==1?'':'s'} coverage — `
         + `<span style="color:var(--teal);font-weight:600">${coveredCount} covered</span>`
         + (cancelledCount ? `, <span style="color:#b45309;font-weight:600">${cancelledCount} left uncovered</span>` : '')
-        + `. Select and confirm from the available options for each row.`;
+        + (elig.some(e => e.length) ? `. Pick who takes each run, or release it.` : `. No other break nurse is on this wing tonight — the run will be released and the nurse told.`); // Build 469
 
       rowsEl.innerHTML = '';
       runs.forEach((run, i) => {
@@ -11861,7 +11861,15 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
           + (wasReverted ? `<div style="font-size:.72rem;color:#b45309;margin-top:3px">↺ reassigned — prior choice no longer available</div>` : '');
         row.appendChild(info);
 
-        // right: dropdown of eligible BNs + Cancel
+        // Build 469 (Tomas): 'Cancel' read as undo. A run nobody can take gets a plain
+        // statement, not a one-option menu; where there IS a choice the last option is 'Release'.
+        if(!elig[i].length){
+          assignments[i] = CHOICE_CANCEL;
+          const note = document.createElement('div');
+          note.style.cssText = 'font-size:.8rem;color:#b45309;font-weight:600;text-align:right;white-space:nowrap';
+          note.textContent = 'No one to cover — released';
+          row.appendChild(note); rowsEl.appendChild(row); return;
+        }
         const sel = document.createElement('select');
         sel.dataset.idx = i;
         sel.style.cssText = 'width:100%;padding:7px 8px;border:1px solid var(--border);border-radius:8px;'
@@ -11869,7 +11877,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
         const opts = [];
         elig[i].forEach(bn => opts.push(`<option value="${bn.replace(/"/g,'&quot;')}"${bn===assignments[i]?' selected':''}>${firstName(bn)}</option>`));
         // Cancel always available
-        opts.push(`<option value="${CHOICE_CANCEL}"${isCancel?' selected':''}>Cancel — leave uncovered</option>`);
+        opts.push(`<option value="${CHOICE_CANCEL}"${isCancel?' selected':''}>Release — no one covers</option>`);
         sel.innerHTML = opts.join('');
 
         sel.onchange = () => {
@@ -11882,7 +11890,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
       });
 
       okBtn.textContent = cancelledCount
-        ? `Cover ${coveredCount}, cancel ${cancelledCount}`
+        ? (coveredCount ? `Cover ${coveredCount}, release ${cancelledCount}` : `Release ${cancelledCount} break${cancelledCount === 1 ? '' : 's'} and continue`)
         : `Cover as shown`;
     }
 
