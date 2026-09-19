@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-472'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-473'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11058,6 +11058,15 @@ async function markBNAvailable(schedId, bnName){
       // Take back path: delete supplementals so absorbers drop out of
       // rotation, then recompute their rotations, then reactivate BN.
       const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
+      // Build 473: bookings after the cutover on the retired supplementals come back to the
+      // returning BN's stream; earlier ones keep the absorber's stamp (that is what happened).
+      try {
+        const shiftBk = await spGet(LISTS.bookings, `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${ShiftType}'`);
+        const back = [];
+        for(const sp of suppls){ let us = []; try { us = JSON.parse(sp.Units || '[]'); } catch(e){}
+          shiftBk.forEach(b => { if(isBNBreak(b) || String(b.IsCancelled) === '1') return; if(!us.includes(b.Unit)) return; if(b.CoveredBy !== sp.BreakNurseName) return; if(slotEventTime(b) >= cutoverMs) back.push(b.Id); }); }
+        await Promise.allSettled(back.map(id => spPatch(LISTS.bookings, id, { CoveredBy: bnName })));
+      } catch(e){ console.warn('stream re-stamp on restore failed (non-fatal):', e && e.message); }
       for(const s of suppls) await spDel(LISTS.schedule, s.Id);
       for(const otherBN of affectedBNs){
         const bnDef = getDefaultTemplate(otherBN, ShiftType);
@@ -12144,6 +12153,12 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       if(!supplementalMap[assignedBN]) supplementalMap[assignedBN] = new Set();
       supplementalMap[assignedBN].add(booking.Unit);
     });
+    // Build 473 (Tomas, live): every view reads the booking's CoveredBy stream stamp (284/289)
+    // before the schedule, and absorption never moved it — real claims kept pointing at the
+    // inactive BN ("BN unavailable") while the unit had gone to the absorber. Console fixtures
+    // carry no stamp, which is why Section D never saw it. The absorbed bookings now follow
+    // their absorber's stream; CreatedBy (report attribution) is still stamped on restore.
+    await Promise.allSettled(absorbed.map(({booking, bnName: assignedBN}) => spPatch(LISTS.bookings, booking.Id, { CoveredBy: assignedBN })));
 
     for(const [assignedBN, unitSet] of Object.entries(supplementalMap)){
       const suppUnits = [...unitSet];
