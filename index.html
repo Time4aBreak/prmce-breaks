@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-478'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-479'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13283,7 +13283,6 @@ async function saveAssign(){
       // matches the nine sibling seed→recompute pairs; the scheds preload
       // stays (it kills the created-row read-after-write race).
       await recalculateRotation(nurse, dt, shift, null, { scheds: _postScheds });
-      await reconcileStreamStamps(dt, shift, _postScheds, _postBookings); // Build 476
       // Build 141 (2026-05-27): Apply Keep overrides after recompute.
       // The user chose to keep specific slots on units that are NO LONGER
       // in this BN's BNSchedule.Units. The rotation cache holds those
@@ -13307,13 +13306,17 @@ async function saveAssign(){
         // Units no longer includes the kept unit.
         for(const ko of keepOverrides){
           rot[ko.slot] = ko.unit;
-          if(ko.booking && ko.booking.Id && ko.booking.CreatedBy !== nurse){
-            try { await spPatch(LISTS.bookings, ko.booking.Id, { CreatedBy: nurse }); }
-            catch(e){ console.warn(`CreatedBy patch failed for kept booking ${ko.booking.Id}:`, e.message); }
+          if(ko.booking && ko.booking.Id && (ko.booking.CreatedBy !== nurse || ko.booking.CoveredBy !== nurse)){
+            // Build 479: Keep = this nurse still gives this break (a rotation pin) — both stamps say so
+            try { await spPatch(LISTS.bookings, ko.booking.Id, { CreatedBy: nurse, CoveredBy: nurse }); }
+            catch(e){ console.warn(`stamp patch failed for kept booking ${ko.booking.Id}:`, e.message); }
           }
         }
         await saveRotation(nurse, dt, shift, rot);
       }
+      // Build 476/479: claims that follow their unit — after the pins, and never the pinned ones
+      { const _kept = new Set(keepOverrides.map(ko => String(ko.booking && ko.booking.Id)));
+        await reconcileStreamStamps(dt, shift, _postScheds, _postBookings.filter(b => !_kept.has(String(b.Id)))); }
     } catch(e){ console.warn('rotation save failed:', e && e.message); _finalWarn = `Couldn't save the rotation — ${(e && e.message) || e || 'unknown error'}`; }
     hideBusy();
     // Build 374: single final toast — warnings outrank celebration; no clobber.
