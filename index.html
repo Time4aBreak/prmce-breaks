@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-474'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-475'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12456,9 +12456,11 @@ async function _loadSummaryInner(mySeq, ctx){
   // Look Back controls are inert while a load is in flight.
   const _ctxKey = `${dt}|${shift}|${el.id}`;
   if(!el.firstElementChild || el.querySelector('.spinner') || el.dataset.ctx !== _ctxKey) el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
-  el.dataset.ctx = _ctxKey;
-  const _lockEls = ['summLookBackBtn','summDate','sDay','sNoc'].map(id => document.getElementById(id)).filter(Boolean);
+  // Build 475: lock the controls only for a context CHANGE (Look Back, a new date/shift), not for
+  // the 10-second poll — the poll dimmed the button a fifth of the time.
+  const _lockEls = (el.dataset.ctx !== _ctxKey || !el.firstElementChild) ? ['summLookBackBtn','summDate','sDay','sNoc'].map(id => document.getElementById(id)).filter(Boolean) : [];
   _lockEls.forEach(x => { x.style.pointerEvents = 'none'; x.style.opacity = '.55'; });
+  el.dataset.ctx = _ctxKey;
   const _unlock = () => _lockEls.forEach(x => { x.style.pointerEvents = ''; x.style.opacity = ''; });
 
   try{
