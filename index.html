@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-471'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-472'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10202,7 +10202,11 @@ function _aInferShift(){
   const h0 = parseInt(st.value.slice(0, 2), 10);
   const sh = inf ? inf.shift : ((h0 >= 8 && h0 < 20) ? 'Day' : 'Noc'); // Build 448: by grid overlap once both clocks are set
   if(S.aShift !== sh) setAShift(sh);
-  if(chip) chip.textContent = (sh === 'Day' ? '→ ☀️ Day' : '→ 🌙 Noc') + ((inf && inf.dateDelta) ? ' (previous evening\'s row)' : '');
+  // Build 472 (Tomas): the card's Date is the SHIFT date, as everywhere else. A Noc window that
+  // starts after midnight is on the morning after that date — the chip names the day.
+  let _when = '';
+  try { if(sh === 'Noc' && inf && inf.dateDelta){ const d = document.getElementById('aDate'); const e = document.getElementById('aPartEnd'); if(d && d.value) _when = ` · ${fmt12(st.value.replace(':',''))}–${e && /^\d{2}:\d{2}$/.test(e.value) ? fmt12(e.value.replace(':','')) : ''} ${_fmtDayShort(_wgAddDays(d.value, 1))}`; } } catch(e){}
+  if(chip) chip.textContent = (sh === 'Day' ? '→ ☀️ Day' : '→ 🌙 Noc') + _when;
 }
 // ═══ Build 448: five-minute time pickers ═══════════════════════════════════
 // Chrome's drop-down ignores step="300" on <input type="time">, so every manual
@@ -10442,7 +10446,6 @@ async function editAssign(id){
       const _hr = Number(s.Hours) || 0;
       if(/^\d{4}$/.test(_st) && _hr > 0 && _hr < 12){
         setAPartial(true);
-        if(s.ShiftType === 'Noc' && parseInt(_st, 10) < 1200){ const dEl = document.getElementById('aDate'); if(dEl && dEl.value) dEl.value = _wgAddDays(dEl.value, 1); } // Build 448
         const sEl = document.getElementById('aPartStart'), eEl = document.getElementById('aPartEnd');
         if(sEl){ sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`; _tpSync('aPartStart'); }
         if(eEl){
@@ -12942,9 +12945,13 @@ async function saveAssign(){
     if(_winErr){ toast(_winErr, true); loadAssignments(); return; }
     _pStart = document.getElementById('aPartStart').value.replace(':', '');
     _pHoursWhole = _pHours; // Build 450: the window is one pickup — sized on its full length
-    { const cal = dt; const halves = splitStraddlingPartial(_pStart, _pHours, cal); // Build 449
+    { const inf0 = inferPartialShift(_pStart, _pHours);
+      // Build 472: Date = SHIFT date. The window's calendar day is Date, or Date+1 for a Noc
+      // window that starts after midnight. The split (449) works from that calendar day.
+      const cal = (inf0 && inf0.shift === 'Noc' && inf0.dateDelta) ? _wgAddDays(dt, 1) : dt;
+      const halves = splitStraddlingPartial(_pStart, _pHours, cal); // Build 449
       if(halves){ _pStart = halves[0].startTime; _pHours = halves[0].hours; shift = halves[0].shift; dt = halves[0].date; _split2 = halves[1]; }
-      else { const inf = inferPartialShift(_pStart, _pHours); if(inf && inf.dateDelta && dt) dt = _wgAddDays(dt, inf.dateDelta); } } // Build 448: the row is dated by shift start
+      else if(inf0){ shift = inf0.shift; } } // no date shift on this card
   }
   if(!nurse)  { toast('Select a break nurse.',true); loadAssignments(); return; }
   if(!dt)     { toast('Select a date.',true); loadAssignments(); return; }
