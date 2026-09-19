@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-17-466'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-467'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12416,7 +12416,15 @@ async function _loadSummaryInner(mySeq, ctx){
   // the unlock/auto-shift path); the chain serializes them, but each repaint
   // blanked the list to a spinner, so the tab visibly "loads again." Show the
   // spinner only when there's nothing on screen yet; later loads replace in place.
-  if(!el.firstElementChild || el.querySelector('.spinner')) el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
+  // Build 467: 443's keep-in-place applies to a refresh of the SAME shift only; a different
+  // date/shift (Look Back, or the live board rolling over) shows the spinner, and the
+  // Look Back controls are inert while a load is in flight.
+  const _ctxKey = `${dt}|${shift}|${el.id}`;
+  if(!el.firstElementChild || el.querySelector('.spinner') || el.dataset.ctx !== _ctxKey) el.innerHTML='<div class="empty"><div class="spinner"></div></div>';
+  el.dataset.ctx = _ctxKey;
+  const _lockEls = ['summLookBackBtn','summDate','sDay','sNoc'].map(id => document.getElementById(id)).filter(Boolean);
+  _lockEls.forEach(x => { x.style.pointerEvents = 'none'; x.style.opacity = '.55'; });
+  const _unlock = () => _lockEls.forEach(x => { x.style.pointerEvents = ''; x.style.opacity = ''; });
 
   try{
     let filter=`SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`;
@@ -12696,7 +12704,9 @@ async function _loadSummaryInner(mySeq, ctx){
       }
     });
     el.innerHTML = _heading + html; // Build 452
+    _unlock(); // Build 467
   }catch(e){
+    try { _unlock(); } catch(_x){} // Build 467
     el.innerHTML=`<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
   }
 }
