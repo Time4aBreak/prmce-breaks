@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-484'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-485'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5170,7 +5170,7 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
 //   transfers: [{booking, targetBN}] — bookings-only since 224 (D8)
 // }
 // Returns null if admin aborts.
-async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, date, shift, allScheds, allBookings }){
+async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, date, shift, allScheds, allBookings, noKeep }){
   // Build 224 (Phase-D spec, Tomas 2026-07-07) — full rewrite to the eight
   // decisions. RUN rows via groupBookingsIntoRuns (D1: runs move whole);
   // eligibility = the shared bnCanTakeRun incl. the single-slot T+1 buffer
@@ -5220,6 +5220,9 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
 
   // state[i]: 'keep' | 'cancel' | targetBNName
   const state = runs.map(() => 'keep');
+  // Build 485 (Tomas): on Remove from this shift there is no one to Keep for — default each run
+  // to Transfer when exactly one BN can take it, else Cancel; the Keep options are hidden.
+  if(noKeep){ try { const e0 = recomputeRunEligibility(baseCtx, runs, activeBNs, runs.map(() => CHOICE_CANCEL)); runs.forEach((_, i) => { state[i] = (e0[i] && e0[i].length === 1) ? e0[i][0] : 'cancel'; }); } catch(e){ runs.forEach((_, i) => { state[i] = 'cancel'; }); } }
   const engineAssignments = () => state.map(a =>
     a === 'keep' ? CHOICE_KEEP : a === 'cancel' ? CHOICE_CANCEL : a);
   const allowedFor = (eligByRun, i) => {
@@ -5254,7 +5257,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
           ).join('')
         : `<option value="" disabled>No eligible Break Nurse for this run</option>`;
       return `
-        <option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>
+        ${noKeep ? '' : `<option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>`}
         <option value="cancel"${state[i]==='cancel' ? ' selected' : ''}>Cancel booking${n!==1?'s':''}</option>
         ${transferOptions}`;
     };
@@ -5280,7 +5283,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap">
             <div style="font-weight:700;font-size:.95rem">${unit} — ${nRuns} break run${nRuns!==1?'s':''} ${headerNote}</div>
             <div style="display:flex;gap:4px">
-              <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>
+              ${noKeep ? '' : `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>`}
               <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="cancel" style="font-size:.72rem;padding:3px 8px">All Cancel</button>
               ${meta.cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="transfer:${meta.cover}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(meta.cover)}</button>` : ''}
             </div>
@@ -10378,10 +10381,23 @@ async function removeAssignment(id){
       hit = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit)).length;
     } catch(e){}
     const who = `${firstName(s.BreakNurseName)}'s ${_fmtDayShort(d)} ${s.ShiftType}`;
-    const msg = hit > 0
-      ? `${hit} break${hit !== 1 ? 's are' : ' is'} booked under ${who} assignment. Removing it leaves them without coverage.`
-      : `Remove ${who} assignment (${units.join(', ') || 'no units'})?`;
-    if(!await customConfirm(msg, hit > 0 ? 'Remove anyway' : 'Remove it', 'Keep it')){ loadAssignments(); return false; }
+    // Build 485 (Tomas): a removal with future claims runs the same coverage dialog as an edit —
+    // Transfer to whoever holds the unit, or Cancel — instead of orphaning them.
+    let bk = [];
+    try { bk = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`); } catch(e){}
+    const future = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+    if(future.length){
+      const byU = {}; future.forEach(b => { (byU[b.Unit] ||= []).push(b); });
+      const decisions = await promptBookingDecisions({ removedUnitsWithBookings: Object.entries(byU).map(([unit, bookings]) => ({ unit, bookings })), outgoingBN: s.BreakNurseName, date: d, shift: s.ShiftType, allScheds: shiftScheds, allBookings: bk, noKeep: true });
+      if(!decisions){ loadAssignments(); return false; }
+      for(const b of (decisions.bookingsToCancel || [])){ try { await spDel(LISTS.bookings, b.Id); } catch(e){ console.warn('cancel failed', b.Id, e && e.message); } }
+      for(const t of (decisions.transfers || [])){ try { await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: t.targetBN, CoveredBy: t.targetBN }); } catch(e){ console.warn('transfer failed', t.booking && t.booking.Id, e && e.message); } }
+    } else {
+      const msg = hit > 0
+        ? `${hit} past break${hit !== 1 ? 's were' : ' was'} given under ${who} assignment; they stay on the record. Remove the assignment?`
+        : `Remove ${who} assignment (${units.join(', ') || 'no units'})?`;
+      if(!await customConfirm(msg, 'Remove it', 'Keep it')){ loadAssignments(); return false; }
+    }
     await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(mine.map(r => r.Id))) });
     try { await syncedLS.delete(rotationKey(s.BreakNurseName, d, s.ShiftType)); } catch(e){}
     try {
