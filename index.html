@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-483'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-484'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -16878,6 +16878,8 @@ async function acceptAllAndSave(){
   try {
     setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
+    // Build 484: rows the grid no longer has (cleared / moved) go with the same save
+    try { const del = (window._wgDeleteIds || []).slice(); if(del.length && entriesToProcess.every(e => e._source === 'grid')){ setPhase(`Removing ${del.length} shift${del.length === 1 ? '' : 's'} no longer on the grid...`, 'Removing...'); await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(del)) }); } window._wgDeleteIds = []; } catch(e){ console.warn('stale-row delete failed (non-fatal):', e && e.message); }
 
     // Warm BN defaults from BNState — coordinator device may not have them cached
     const bnPairs = indices.map(i => ({ name: entriesToProcess[i].name, shift: entriesToProcess[i].shift }));
@@ -21758,8 +21760,24 @@ async function wgReview(){
   }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
   _impExpectedSet(entries.length);
   _impGateAcks = new Set();
+  // Build 484 (Tomas): Save All is an upsert keyed nurse|date|shift — it can't remove a row for a
+  // cell that was cleared or moved to the other shift. Find those rows now (today forward) so
+  // the save can delete them and the sheet ends up matching the grid.
   const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Manual Schedule — Review & Assign Units';
   await renderImportRows(entries);
+  // (after renderImportRows: a straddling partial's two halves are both wanted rows)
+  window._wgDeleteIds = []; let _staleNote = '';
+  try {
+    const wkEnd = _wgAddDays(_wgWeek, 6), t = today();
+    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${_wgWeek}' and ShiftDate le '${wkEnd}T23'`);
+    const gridNames = new Set(keys.map(k => k.split('|')[0]));
+    const wantKeys = new Set(entries.map(e => `${e.name}|${e.date}|${e.shift}`));
+    const stale = rows.filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1' && gridNames.has(r.BreakNurseName)
+      && (r.ShiftDate || '').slice(0, 10) >= t && !wantKeys.has(`${r.BreakNurseName}|${(r.ShiftDate || '').slice(0, 10)}|${r.ShiftType}`));
+    window._wgDeleteIds = stale.map(r => r.Id);
+    if(stale.length) _staleNote = `<div style="margin:8px 0 4px;padding:8px 12px;border:1px solid #e6a23c;background:#fff8e6;border-radius:8px;font-size:.82rem">Save All will also <strong>remove ${stale.length} saved shift${stale.length === 1 ? '' : 's'}</strong> no longer on the grid: ${stale.map(r => `${firstName(r.BreakNurseName)} ${_fmtDayShort((r.ShiftDate || '').slice(0, 10))} ${r.ShiftType}`).join(' · ')}</div>`;
+  } catch(e){ console.warn('stale-row check failed (non-fatal):', e && e.message); }
+  try { const tEl = document.getElementById('importResultsTitle'); if(tEl){ let note = document.getElementById('wgStaleNote'); if(!note){ note = document.createElement('div'); note.id = 'wgStaleNote'; tEl.insertAdjacentElement('afterend', note); } note.innerHTML = _staleNote; } } catch(e){}
   try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
