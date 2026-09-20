@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-486'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-19-487'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19818,13 +19818,16 @@ async function handOffClaim(id){
     const wing = getUnitWing(b.Unit);
     const cands = scheds.filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1' && r.BreakNurseName !== BNS.name
       && (() => { try { return JSON.parse(r.Units || '[]').flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : u).some(u => getUnitWing(u) === wing); } catch(e){ return false; } })());
-    const ctx = buildAbsorptionContext(cands, { allBookings: bookings.filter(x => String(x.Id) !== String(id)), allScheds: scheds, shift });
-    const run = [b];
+    // Build 487: runs move whole (D1) — the run containing this claim, not the slot alone
+    const runs = groupBookingsIntoRuns(bookings.filter(x => isStaffBooking(x) && String(x.IsCancelled) !== '1' && !isNotTaken(x)), shift);
+    const run = runs.find(r => r.some(x => String(x.Id) === String(id))) || [b];
+    const runIds = new Set(run.map(x => String(x.Id)));
+    const ctx = buildAbsorptionContext(cands, { allBookings: bookings.filter(x => !runIds.has(String(x.Id))), allScheds: scheds, shift });
     const elig = [...new Set(cands.map(r => r.BreakNurseName))].filter(bn => bnCanTakeRun(bn, run, ctx));
     if(!elig.length){ toast(`No break nurse on the ${wing} wing has ${fmt12(b.SlotTime)} free`, true); return; }
     const target = await new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal'), msgEl = document.getElementById('customConfirmMsg'), okBtn = document.getElementById('customConfirmOk'), cancelBtn = document.getElementById('customConfirmCancel');
-      msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${fmt12(b.SlotTime)}</div><div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
+      msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${run.map(x => fmt12(x.SlotTime)).join(' + ')}${run.length > 1 ? ` · ${run.length} slots` : ''}</div><div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
         + `<select id="handOffSel" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem">${elig.map(bn => `<option value="${bn}">${bnDisplayName(bn)}</option>`).join('')}</select>`;
       okBtn.textContent = 'Hand off'; cancelBtn.textContent = 'Keep it';
       const done = v => { modal.style.display = 'none'; okBtn.onclick = null; cancelBtn.onclick = null; resolve(v); };
@@ -19832,12 +19835,13 @@ async function handOffClaim(id){
       modal.style.display = 'flex';
     });
     if(!target) return;
-    await spPatch(LISTS.bookings, b.Id, { CoveredBy: target, CreatedBy: target });
-    const slot = normSlot(b.SlotTime);
-    try { const rot = loadRotation(target, d, shift) || {}; rot[slot] = b.Unit; await saveRotation(target, d, shift, rot); } catch(e){ console.warn('receiver pin failed', e && e.message); }
-    try { const mine = loadRotation(BNS.name, d, shift); if(mine && mine[slot] === b.Unit && !(cache.scheds || []).some(r => r.BreakNurseName === BNS.name && r.Status !== 'inactive' && (() => { try { return JSON.parse(r.Units || '[]').includes(b.Unit); } catch(e){ return false; } })())){ delete mine[slot]; await saveRotation(BNS.name, d, shift, mine); } } catch(e){}
-    b.CoveredBy = target; b.CreatedBy = target;
-    toast(`${fmt12(b.SlotTime)} on ${b.Unit} → ${bnDisplayName(target)}`);
+    await Promise.all(run.map(x => spPatch(LISTS.bookings, x.Id, { CoveredBy: target, CreatedBy: target })));
+    const slots = run.map(x => normSlot(x.SlotTime));
+    try { const rot = loadRotation(target, d, shift) || {}; slots.forEach(sl => { rot[sl] = b.Unit; }); await saveRotation(target, d, shift, rot); } catch(e){ console.warn('receiver pin failed', e && e.message); }
+    try { const mine = loadRotation(BNS.name, d, shift); const holdsUnit = (cache.scheds || []).some(r => r.BreakNurseName === BNS.name && r.Status !== 'inactive' && (() => { try { return JSON.parse(r.Units || '[]').includes(b.Unit); } catch(e){ return false; } })());
+      if(mine && !holdsUnit){ let ch = false; slots.forEach(sl => { if(mine[sl] === b.Unit){ delete mine[sl]; ch = true; } }); if(ch) await saveRotation(BNS.name, d, shift, mine); } } catch(e){}
+    run.forEach(x => { x.CoveredBy = target; x.CreatedBy = target; });
+    toast(`${run.map(x => fmt12(x.SlotTime)).join(' + ')} on ${b.Unit} → ${bnDisplayName(target)}`);
     loadBNConfirm(); try { notifyProdLogChanged(target); } catch(e){}
   } catch(e){ toast(`Hand-off failed — ${(e && e.message) || e}`, true); }
 }
