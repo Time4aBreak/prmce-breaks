@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-19-487'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-20-488'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -16783,6 +16783,7 @@ async function acceptAllAndSave(){
   // Guard: refuse to save if any flagged entries are unresolved. The user
   // must either Suggest/manually assign units, or Discard them, before Save All.
   const entriesToProcess = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
+  const _gridBatch488 = entriesToProcess.length > 0 && entriesToProcess.every(e => e._source === 'grid'); // captured now — the batch array is emptied on success
   const unresolvedFlagged = entriesToProcess.filter((e, i) =>
     e.isFlagged && !e.isDiscarded && (importUnitSel[i] || []).length === 0
   );
@@ -17085,6 +17086,8 @@ async function acceptAllAndSave(){
       // Build 221: a fully-verified save closes the review session — the
       // expected-count checksum and any acknowledgments die with it.
       _impExpectedSet(0); _impGateAcks = new Set(); window._impRosterBefore = null;
+      // Build 488: the grid re-reads the sheet; edits that landed prune themselves, any that didn't stay marked unsaved
+      if(_gridBatch488 && _wgWeek){ try { wgSetWeek(_wgWeek); } catch(e){} }
     }
 
     // Build assignment list immediately from saved data (no Sheets delay)
@@ -21630,20 +21633,75 @@ async function _populateNurseDropdownCore(){
 
 // ═══ Build 423: WEEKLY SCHEDULE GRID (Tomas's B, tap model A) ═══════════════
 // A second input beside the extractor. State: the week's Sunday + a cell map
-// name|date → {shift, startTime, hours}. Drafts persist per device per week;
-// a week with no draft prefills from the history archive (so a saved week can
-// be edited by re-entering it). "Suggest & Review" hands renderImportRows the
+// name|date → {shift, startTime, hours}.
+// Build 488 (Sep 20): THE GRID READS THE SHEET. It used to prefill from the history
+// archive (bnImportedEntries) — a second copy of the schedule that silently froze on
+// Sep 12 when its single BNState cell hit Sheets' 50,000-character cap. Fully scheduled
+// weeks opened EMPTY, and with 484 live a Save All there would have deleted the touched
+// nurses' other shifts. A copy that can drift must never hold delete power. Now:
+//   _wgBase  = the week as it is on BNSchedule (active, non-supplemental rows)
+//   _wgEdits = this device's UNSAVED changes on top of it: key → cell, or null = cleared
+//   _wgCells = base + edits (what the grid shows and what Review sends)
+// The per-device draft stores only _wgEdits; an edit that says what the sheet already
+// says is pruned on every read, so drafts clean themselves up after a save. A week that
+// can't be read shows an error and no grid — it fails closed, never blank-as-truth.
+// "Suggest & Review" hands renderImportRows the
 // same entry shape the extractor produces, then self-acknowledges the mirror
 // (a human typed it — there is no machine reading to verify) and sets the
 // expected count to the batch size so the Σ gate reads green.
 let _wgWeek = null;          // 'YYYY-MM-DD' of the Sunday
-let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours}
+let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours} — base + edits
+let _wgBase = {};            // Build 488: the week as saved on the sheet
+let _wgEdits = {};           // Build 488: unsaved changes — key → cell | null (cleared)
+let _wgBaseState = 'loading'; // 'loading' | 'ok' | 'failed'
+let _wgLoadSeq = 0;          // a slow read for a week you already left must not paint
 const _WG_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 function _wgSunday(ds){ const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); }
 function _wgAddDays(ds, n){ const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() + n); return localDate(d); }
 function _wgDates(){ return Array.from({ length: 7 }, (_, i) => _wgAddDays(_wgWeek, i)); }
 function _wgDraftKey(){ return `bnWeeklyGrid_${_wgWeek}`; }
-function _wgSaveDraft(){ try { localStorage.setItem(_wgDraftKey(), JSON.stringify(_wgCells)); } catch(e){} }
+function _wgSaveDraft(){ try { if(Object.keys(_wgEdits).length) localStorage.setItem(_wgDraftKey(), JSON.stringify(_wgEdits)); else localStorage.removeItem(_wgDraftKey()); } catch(e){} }
+function _wgIsPart(c){ const h = Number(c && c.hours || 0); return !!(c && c.startTime && h > 0 && h < 12); }
+function _wgSameCell(a, b){
+  if(!a || !b) return false;
+  if(_wgIsPart(a) || _wgIsPart(b)) return _wgIsPart(a) && _wgIsPart(b) && String(a.startTime).padStart(4, '0') === String(b.startTime).padStart(4, '0') && Math.abs(Number(a.hours) - Number(b.hours)) < 0.011; // a partial's shift is derived from its window
+  return a.shift === b.shift;
+}
+function _wgMerge(){
+  if(_wgBaseState === 'ok') Object.keys(_wgEdits).forEach(k => { const e = _wgEdits[k], b = _wgBase[k]; if((!e && !b) || _wgSameCell(e, b)) delete _wgEdits[k]; });
+  const c = Object.assign({}, _wgBase);
+  Object.keys(_wgEdits).forEach(k => { if(_wgEdits[k]) c[k] = _wgEdits[k]; else delete c[k]; });
+  _wgCells = c;
+}
+function _wgEdit(key, cell){ _wgEdits[key] = cell || null; _wgMerge(); _wgSaveDraft(); wgRender(); }
+// The week's cells straight from BNSchedule. Reads one day early: a post-midnight Noc
+// partial is stored on the PREVIOUS evening's shift date but shown on the day it starts.
+async function _wgFetchBase(wk){
+  const end = _wgAddDays(wk, 6);
+  const rows = await spGet(LISTS.schedule, `ShiftDate ge '${_wgAddDays(wk, -1)}' and ShiftDate le '${end}T23'`);
+  const perCell = {};
+  rows.filter(r => r.BreakNurseName && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1').forEach(r => {
+    const hh = Number(r.Hours || 0); const part = !!(r.StartTime && hh > 0 && hh < 12);
+    const st = part ? String(r.StartTime).replace(/\D/g, '').padStart(4, '0') : '';
+    let d = String(r.ShiftDate || '').slice(0, 10);
+    if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
+    if(d < wk || d > end) return;
+    (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '' });
+  });
+  const cells = {};
+  // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
+  Object.entries(perCell).forEach(([k, list]) => {
+    const parts = list.filter(_wgIsPart).sort((a, b) => a.startTime.localeCompare(b.startTime));
+    if(parts.length === 2){
+      const toM = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
+      const endM = c => (toM(c.startTime) + Math.round(Number(c.hours) * 60)) % 1440;
+      const [A, B] = endM(parts[0]) === toM(parts[1].startTime) ? [parts[0], parts[1]] : (endM(parts[1]) === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
+      if(A){ cells[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
+    }
+    cells[k] = list[list.length - 1];
+  });
+  return cells;
+}
 function _wgRosterNames(){
   const names = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames.slice() : [];
   return names.sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
@@ -21652,7 +21710,7 @@ function toggleWeeklyGrid(){
   const body = document.getElementById('wgBody'), chev = document.getElementById('wgChevron');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none'; chev.textContent = open ? '▲' : '▼';
-  if(open && !_wgWeek) wgSetWeek(_wgDefaultWeek());
+  if(open) wgSetWeek(_wgWeek || _wgDefaultWeek()); // Build 488: every open re-reads the sheet
 }
 // Build 426 (Tomas): open on the NEXT EMPTY WEEK — the Sunday after the latest
 // date in the history archive (every entered week is in it); next week if empty.
@@ -21663,36 +21721,19 @@ function _wgDefaultWeek(){
   if(!latest || latest < today) return _wgSunday(_wgAddDays(today, 7));
   return _wgAddDays(_wgSunday(latest), 7);
 }
-function wgSetWeek(ds){
+async function wgSetWeek(ds){
   if(!ds) return;
   _wgWeek = _wgSunday(ds);
   document.getElementById('wgWeekPick').value = _wgWeek;
-  let draft = null; try { draft = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); } catch(e){}
-  if(draft && typeof draft === 'object'){ _wgCells = draft; }
-  else {
-    // prefill from the archive so an already-entered week can be edited
-    _wgCells = {};
-    const end = _wgAddDays(_wgWeek, 6);
-    try {
-      const perCell = {};
-      getImportedEntries().forEach(e => {
-        let d = e.date; const hh = Number(e.hours || 0);
-        if(e.shift === 'Noc' && e.startTime && hh > 0 && hh < 12 && parseInt(e.startTime, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
-        if(d < _wgWeek || d > end) return;
-        (perCell[`${e.name}|${d}`] ||= []).push({ shift: e.shift, startTime: e.startTime || '', hours: e.hours || '' });
-      });
-      // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
-      Object.entries(perCell).forEach(([k, list]) => {
-        const parts = list.filter(c => c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12).sort((a, b) => a.startTime.localeCompare(b.startTime));
-        if(parts.length === 2){
-          const toM = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
-          const [A, B] = (toM(parts[0].startTime) + Math.round(Number(parts[0].hours) * 60)) % 1440 === toM(parts[1].startTime) ? [parts[0], parts[1]] : ((toM(parts[1].startTime) + Math.round(Number(parts[1].hours) * 60)) % 1440 === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
-          if(A){ _wgCells[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
-        }
-        _wgCells[k] = list[list.length - 1];
-      });
-    } catch(e){}
-  }
+  const seq = ++_wgLoadSeq, wk = _wgWeek;
+  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgBaseState = 'loading';
+  try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
+  wgRender();
+  let base = null;
+  try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
+  if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
+  if(base){ _wgBase = base; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
+  else _wgBaseState = 'failed';
   wgRender();
 }
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
@@ -21700,19 +21741,18 @@ function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * 
 // Edit → Remove on the Schedule cards. On a saved week the button REVERTS the grid
 // to what's on the schedule (drops the draft, re-prefills from the archive); on an
 // unsaved week it clears the grid as before.
-function _wgWeekIsSaved(){
-  try { const end = _wgAddDays(_wgWeek, 6); return getImportedEntries().some(e => e.date >= _wgWeek && e.date <= end); } catch(e){ return false; }
-}
+function _wgWeekIsSaved(){ return Object.keys(_wgBase).length > 0; } // Build 488: the sheet decides, not the archive
 function wgClearWeek(){
+  if(_wgBaseState !== 'ok'){ wgSetWeek(_wgWeek); return; }
   if(_wgWeekIsSaved()){
-    if(!confirm('Discard your unsaved changes and show this week as it is on the schedule?')) return;
-    try { localStorage.removeItem(_wgDraftKey()); } catch(e){}
-    wgSetWeek(_wgWeek); // no draft → prefills from the archive
+    if(Object.keys(_wgEdits).length && !confirm('Discard your unsaved changes and show this week as it is on the schedule?')) return;
+    _wgEdits = {}; _wgSaveDraft();
+    wgSetWeek(_wgWeek); // re-reads the sheet
     return;
   }
   if(!Object.keys(_wgCells).length) return;
   if(!confirm('Clear every shift on this week\'s grid?')) return;
-  _wgCells = {}; _wgSaveDraft(); wgRender();
+  _wgEdits = {}; _wgMerge(); _wgSaveDraft(); wgRender();
 }
 function _wgCellLabel(c){
   if(!c) return '';
@@ -21729,14 +21769,23 @@ function wgRender(){
   const dates = _wgDates(); const names = _wgRosterNames();
   const end = dates[6];
   if(!names.length){ host.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses on the roster yet — add them on the Break Nurses card in Settings.</div>'; return; }
+  if(_wgBaseState !== 'ok'){ // Build 488: no grid until the week has been read — never blank-as-truth
+    host.innerHTML = _wgBaseState === 'failed'
+      ? '<div class="empty" style="padding:14px 0">Couldn\'t read this week\'s schedule. <button type="button" class="btn btn-ghost btn-sm" onclick="wgSetWeek(_wgWeek)">Try again</button></div>'
+      : '<div class="empty" style="padding:14px 0">Reading this week\'s schedule…</div>';
+    document.getElementById('wgCount').textContent = '';
+    const rb = document.getElementById('wgReviewBtn'); if(rb) rb.disabled = true;
+    return;
+  }
   const cell = (n, d) => {
     const c = _wgCells[`${n}|${d}`];
+    const ed = Object.prototype.hasOwnProperty.call(_wgEdits, `${n}|${d}`); // Build 488: unsaved change
     const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
     const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1';
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:4px 6px;line-height:1.25">${c ? _wgCellLabel(c) : '<span style="opacity:.35">+</span>'}</button>`;
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:4px 6px;line-height:1.25">${c ? _wgCellLabel(c) : '<span style="opacity:.35">+</span>'}</button>`;
   };
   const today = localDate(new Date());
   host.innerHTML = `<div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -21744,13 +21793,15 @@ function wgRender(){
     + names.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
     + `</div>`;
   const count = Object.keys(_wgCells).length;
-  document.getElementById('wgCount').textContent = count ? `${count} shift${count === 1 ? '' : 's'}` : '';
+  const edN = Object.keys(_wgEdits).length;
+  document.getElementById('wgCount').textContent = (count ? `${count} shift${count === 1 ? '' : 's'}` : '') + (edN ? `${count ? ' · ' : ''}${edN} unsaved` : '');
   const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !count;
   const cb = document.getElementById('wgClearBtn'); if(cb) cb.textContent = _wgWeekIsSaved() ? '↺ Revert to saved' : '✕ Clear week'; // Build 438
 }
 function wgTap(name, date){
   const key = `${name}|${date}`;
-  if(!_wgCells[key]){ _wgCells[key] = { shift: bnShiftDefault(name), startTime: '', hours: '' }; _wgSaveDraft(); wgRender(); return; }
+  if(_wgBaseState !== 'ok') return;
+  if(!_wgCells[key]){ _wgEdit(key, { shift: bnShiftDefault(name), startTime: '', hours: '' }); return; }
   _wgChooser(name, date);
 }
 function _wgChooser(name, date){
@@ -21784,7 +21835,7 @@ function _wgChooser(name, date){
   document.body.appendChild(wrap);
   _tpSync('wgcStart'); _tpSync('wgcEnd'); // Build 448
   const close = () => wrap.remove();
-  const set = c => { if(c) _wgCells[key] = c; else delete _wgCells[key]; _wgSaveDraft(); wgRender(); close(); };
+  const set = c => { _wgEdit(key, c); close(); };
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
   wrap.querySelector('#wgcNoc').onclick = () => set({ shift: 'Noc', startTime: '', hours: '' });
   wrap.querySelector('#wgcPart').onclick = () => {
@@ -21803,6 +21854,15 @@ function _wgChooser(name, date){
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
 async function wgReview(){
+  if(_wgBaseState !== 'ok') return;
+  { // Build 488: Review is the decision point — the batch is the sheet AS IT IS NOW plus this device's edits
+    const wk = _wgWeek, rb = document.getElementById('wgReviewBtn'); if(rb){ rb.disabled = true; rb.textContent = 'Reading the schedule…'; }
+    let b = null; try { b = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] review read failed:', e && e.message); }
+    if(rb) rb.textContent = '✨ Suggest & Review';
+    if(wk !== _wgWeek) return;
+    if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
+    _wgBase = b; _wgMerge(); _wgSaveDraft(); wgRender();
+  }
   const keys = Object.keys(_wgCells); if(!keys.length) return;
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
