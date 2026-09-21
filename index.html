@@ -2276,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-21-494'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-21-495'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21884,6 +21884,8 @@ function _wgChooser(name, date){
   const isPart = cur.startTime && Number(cur.hours) > 0 && Number(cur.hours) < 12;
   const st = isPart ? `${String(cur.startTime).padStart(4,'0').slice(0,2)}:${String(cur.startTime).padStart(4,'0').slice(2)}` : '';
   const en = isPart ? (() => { const m = parseInt(st.slice(0,2),10)*60 + parseInt(st.slice(3),10) + Math.round(Number(cur.hours)*60); const mm = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; })() : '';
+  // Build 495 (Tomas): the bottom-left button reads "Remove shift" on a SAVED shift (it comes off the schedule at the
+  // next Save All) and "Clear" on a tap not yet saved — the app's two verbs, kept apart. Behaviour is unchanged.
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
@@ -21900,7 +21902,7 @@ function _wgChooser(name, date){
         </div>
       </div>
       <div style="display:flex;gap:8px">
-        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">Clear</button>
+        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">${_wgBase[key] ? 'Remove shift' : 'Clear'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="wgcCancel" style="flex:1">Cancel</button>
       </div>
     </div>`;
