@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-20-490'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-20-492'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10366,6 +10366,27 @@ function resetManualCard(){
 // fairness-history entry (the nurse never covered it; leaving the entry
 // would bias future deals — the exact scrub our test teardowns always
 // did by hand, productized).
+// Build 492: nowKey() is CLOCK-only. "Is this slot still ahead?" needs the date too — on a shift
+// dated after the active one every slot is ahead; on an earlier one none is. (485 compared clock
+// to clock, so a Thursday 09:00 claim looked "past" at 10 PM on Sunday and would have been orphaned.)
+function _slotIsAhead(date, hhmm, shift){
+  const d = String(date || '').slice(0, 10), act = shiftDate(shift);
+  return d > act || (d === act && sortKey(hhmm, shift) > nowKey(shift));
+}
+// Build 492: what a deleted schedule row leaves behind — its rotation, and its day in the nurse's
+// wing history (left there, the dealer believes she covered that wing on a day she never worked).
+// ONE helper for every path that deletes a row (Remove from this shift, the grid's Save All).
+// The history is re-read first and written only if it changed: a cold cache must never wipe it.
+async function _forgetShifts(list){
+  for(const r of list){ try { await syncedLS.delete(rotationKey(r.name, r.date, r.shift)); } catch(e){} }
+  const groups = {}; list.forEach(r => { (groups[`${r.name}|${r.shift}`] ||= []).push(r.date); });
+  try { await syncedLS.refreshMany(Object.keys(groups).map(g => { const [n, sh] = g.split('|'); return `bnWingHistory_${n}_${sh}`; })); }
+  catch(e){ console.warn('[forgetShifts] history re-read failed — left as is:', e && e.message); return; }
+  Object.entries(groups).forEach(([g, dates]) => {
+    const [n, sh] = g.split('|');
+    try { const h = getNurseWingHistory(n, sh), kept = h.filter(e => !dates.includes(e.date)); if(kept.length !== h.length) saveNurseWingHistory(n, sh, kept); } catch(e){}
+  });
+}
 async function removeAssignment(id){
   try {
     const one = await spGet(LISTS.schedule, `Id eq ${id}`);
@@ -10385,7 +10406,7 @@ async function removeAssignment(id){
     // Transfer to whoever holds the unit, or Cancel — instead of orphaning them.
     let bk = [];
     try { bk = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`); } catch(e){}
-    const future = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit) && sortKey(b.SlotTime, s.ShiftType) > nowKey(s.ShiftType));
+    const future = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit) && _slotIsAhead(d, b.SlotTime, s.ShiftType)); // Build 492: date-aware
     if(future.length){
       const byU = {}; future.forEach(b => { (byU[b.Unit] ||= []).push(b); });
       const decisions = await promptBookingDecisions({ removedUnitsWithBookings: Object.entries(byU).map(([unit, bookings]) => ({ unit, bookings })), outgoingBN: s.BreakNurseName, date: d, shift: s.ShiftType, allScheds: shiftScheds, allBookings: bk, noKeep: true });
@@ -10399,11 +10420,7 @@ async function removeAssignment(id){
       if(!await customConfirm(msg, 'Remove it', 'Keep it')){ loadAssignments(); return false; }
     }
     await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(mine.map(r => r.Id))) });
-    try { await syncedLS.delete(rotationKey(s.BreakNurseName, d, s.ShiftType)); } catch(e){}
-    try {
-      const hist = getNurseWingHistory(s.BreakNurseName, s.ShiftType).filter(e => e.date !== d);
-      saveNurseWingHistory(s.BreakNurseName, s.ShiftType, hist);
-    } catch(e){}
+    await _forgetShifts([{ name: s.BreakNurseName, date: d, shift: s.ShiftType }]); // Build 492: shared cleanup
     toast(`✓ Removed ${who} assignment`);
     return true;
   } catch(e){
@@ -16722,6 +16739,13 @@ function _impGateRender(){
     ? `<div style="font-size:.8rem;color:var(--muted);margin-top:10px">New this batch: ${res.newNames.map(escHTML).join(' · ')}</div>`
     : '';
   const passes = _impGatePasses(res);
+  // Build 491 (Tomas): one tap for the thin / no-BN findings instead of Accept × N. It never
+  // accepts a COUNT mismatch — that checksum is the only guard against a nurse missing from
+  // the batch, so while it is open the button stays the (disabled) plain Save All.
+  const countOpen = !!countAnom && !_impGateAcks.has('count');
+  const saveBtn = (open.length && !countOpen)
+    ? `<button class="btn btn-primary btn-sm" onclick="_impGateAcceptAllSave()">Accept all &amp; Save →</button>`
+    : `<button class="btn btn-primary btn-sm" ${passes?'':'disabled style="opacity:.5"'} onclick="document.getElementById('importGateModal').remove();acceptAllAndSave(true);">Save All →</button>`;
   body.innerHTML = `
     ${countRow}
     ${open.map(line).join('')}
@@ -16730,8 +16754,15 @@ function _impGateRender(){
     <div id="impGateAddWrap"></div>
     <div style="display:flex;justify-content:flex-end;gap:10px;margin-top:16px">
       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('importGateModal').remove()">Go back</button>
-      <button class="btn btn-primary btn-sm" ${passes?'':'disabled style="opacity:.5"'} onclick="document.getElementById('importGateModal').remove();acceptAllAndSave();">Save All →</button>
+      ${saveBtn}
     </div>`;
+}
+function _impGateAcceptAllSave(){
+  const res = _runImportGateChecks();
+  res.errors.filter(a => a.kind !== 'count').forEach(a => _impGateAcks.add(a.key));
+  if(!_impGatePasses(res)){ _impGateRender(); return; } // a count mismatch is still open — stay in the dialog
+  const m = document.getElementById('importGateModal'); if(m) m.remove();
+  acceptAllAndSave(true);
 }
 
 function _showImportGate(){
@@ -16751,7 +16782,7 @@ function _showImportGate(){
 }
 
 // Accept all & save — saves every row that has units selected
-async function acceptAllAndSave(){
+async function acceptAllAndSave(fromGate){ // Build 491: true only from the reconcile dialog's own save buttons
   // Build 375 (F2 gate): Save All is locked until the admin has acknowledged
   // the CURRENT batch against the posted schedule. The fingerprint re-derives
   // here, so any change since the ✓ tap — re-extract, rename, unit edit,
@@ -16769,7 +16800,8 @@ async function acceptAllAndSave(){
   // discard splices, the card's marks). Count what the save loop below will
   // actually write: not discarded, and holding units.
   const _n389 = _currentImportEntries.filter((e, i) => !e.isDiscarded && (importUnitSel[i] || []).length > 0).length;
-  if(_n389 && !confirm(`Save ${_n389} staged assignment${_n389 === 1 ? '' : 's'} to the live schedule?`)) return;
+  // Build 491: the dialog is reached only AFTER this confirm was answered once — don't ask the same question twice
+  if(_n389 && fromGate !== true && !confirm(`Save ${_n389} staged assignment${_n389 === 1 ? '' : 's'} to the live schedule?`)) return;
   const btns = document.querySelectorAll('.accept-all-btn');
   const status = document.getElementById('acceptAllStatus');
   // Helper: update phase indicator. Status div is positioned below the import
@@ -16896,7 +16928,7 @@ async function acceptAllAndSave(){
     setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
     // Build 484: rows the grid no longer has (cleared / moved) go with the same save
-    try { const del = (window._wgDeleteIds || []).slice(); if(del.length && entriesToProcess.every(e => e._source === 'grid')){ setPhase(`Removing ${del.length} shift${del.length === 1 ? '' : 's'} no longer on the grid...`, 'Removing...'); await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(del)) }); } window._wgDeleteIds = []; } catch(e){ console.warn('stale-row delete failed (non-fatal):', e && e.message); }
+    try { const del = (window._wgDeleteIds || []).slice(); if(del.length && entriesToProcess.every(e => e._source === 'grid')){ setPhase(`Removing ${del.length} shift${del.length === 1 ? '' : 's'} no longer on the grid...`, 'Removing...'); await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(del)) }); await _forgetShifts((window._wgDeleteRows || []).filter(r => del.includes(r.Id))); } window._wgDeleteIds = []; window._wgDeleteRows = []; } catch(e){ console.warn('stale-row delete failed (non-fatal):', e && e.message); }
 
     // Warm BN defaults from BNState — coordinator device may not have them cached
     const bnPairs = indices.map(i => ({ name: entriesToProcess[i].name, shift: entriesToProcess[i].shift }));
@@ -21665,6 +21697,7 @@ let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours} 
 let _wgBase = {};            // Build 488: the week as saved on the sheet
 let _wgEdits = {};           // Build 488: unsaved changes — key → cell | null (cleared)
 let _wgFormer = {};          // Build 490: saved shifts of nurses no longer on the roster — display only
+let _wgBaseRows = [];        // Build 492: the sheet rows behind _wgBase — {Id, name, date, shift, units}
 let _wgBaseState = 'loading'; // 'loading' | 'ok' | 'failed'
 let _wgLoadSeq = 0;          // a slow read for a week you already left must not paint
 const _WG_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -21699,7 +21732,7 @@ function _wgEdit(key, cell){ _wgEdits[key] = cell || null; _wgMerge(); _wgSaveDr
 async function _wgFetchBase(wk){
   const end = _wgAddDays(wk, 6);
   const rows = await spGet(LISTS.schedule, `ShiftDate ge '${_wgAddDays(wk, -1)}' and ShiftDate le '${end}T23'`);
-  const perCell = {};
+  const perCell = {}, baseRows = [];
   const roster = new Set(_wgRosterNames());
   rows.filter(r => r.BreakNurseName && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1').forEach(r => {
     const hh = Number(r.Hours || 0); const part = !!(r.StartTime && hh > 0 && hh < 12);
@@ -21707,6 +21740,7 @@ async function _wgFetchBase(wk){
     let d = String(r.ShiftDate || '').slice(0, 10);
     if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
     if(d < wk || d > end) return;
+    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), shift: r.ShiftType, units: Array.isArray(u) ? u : [] }); } // Build 492
     (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '' });
   });
   const cells = {}, former = {};
@@ -21722,7 +21756,7 @@ async function _wgFetchBase(wk){
     }
     into[k] = list[list.length - 1];
   });
-  return { cells, former };
+  return { cells, former, rows: baseRows };
 }
 function _wgRosterNames(){
   const names = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames.slice() : [];
@@ -21748,13 +21782,13 @@ async function wgSetWeek(ds){
   _wgWeek = _wgSunday(ds);
   document.getElementById('wgWeekPick').value = _wgWeek;
   const seq = ++_wgLoadSeq, wk = _wgWeek;
-  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseState = 'loading';
+  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseRows = []; _wgBaseState = 'loading';
   try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
   wgRender();
   let base = null;
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
-  if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
+  if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
   else _wgBaseState = 'failed';
   wgRender();
 }
@@ -21887,7 +21921,7 @@ async function wgReview(){
     if(rb) rb.textContent = '✨ Suggest & Review';
     if(wk !== _wgWeek) return;
     if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
-    _wgBase = b.cells; _wgFormer = b.former; _wgMerge(); _wgSaveDraft(); wgRender();
+    _wgBase = b.cells; _wgFormer = b.former; _wgBaseRows = b.rows; _wgMerge(); _wgSaveDraft(); wgRender();
   }
   const keys = Object.keys(_wgCells); if(!keys.length) return;
   const entries = keys.map(k => {
@@ -21911,17 +21945,33 @@ async function wgReview(){
   const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Manual Schedule — Review & Assign Units';
   await renderImportRows(entries);
   // (after renderImportRows: a straddling partial's two halves are both wanted rows)
-  window._wgDeleteIds = []; let _staleNote = '';
+  // Build 492: the 484 rework. The rows to remove are the SAVED rows behind this grid (read fresh at
+  // the top of this review) that the batch no longer wants, today forward — i.e. exactly what you
+  // cleared or moved. It no longer depends on which nurses still have a cell (a nurse's ONLY shift
+  // now goes), nor on a second read with a different date range. A row whose units carry breaks
+  // still ahead is NOT removed here — Remove from this shift runs the coverage dialog for those.
+  window._wgDeleteIds = []; window._wgDeleteRows = []; let _staleNote = '';
+  const _box = h => `<div style="margin:8px 0 4px;padding:8px 12px;border:1px solid #e6a23c;background:#fff8e6;border-radius:8px;font-size:.82rem">${h}</div>`;
+  const _nm = r => `${firstName(r.name)} ${_fmtDayShort(r.date)} ${r.shift}`;
   try {
-    const wkEnd = _wgAddDays(_wgWeek, 6), t = today();
-    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${_wgWeek}' and ShiftDate le '${wkEnd}T23'`);
-    const gridNames = new Set(keys.map(k => k.split('|')[0]));
+    const t = today();
     const wantKeys = new Set(entries.map(e => `${e.name}|${e.date}|${e.shift}`));
-    const stale = rows.filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1' && gridNames.has(r.BreakNurseName)
-      && (r.ShiftDate || '').slice(0, 10) >= t && !wantKeys.has(`${r.BreakNurseName}|${(r.ShiftDate || '').slice(0, 10)}|${r.ShiftType}`));
-    window._wgDeleteIds = stale.map(r => r.Id);
-    if(stale.length) _staleNote = `<div style="margin:8px 0 4px;padding:8px 12px;border:1px solid #e6a23c;background:#fff8e6;border-radius:8px;font-size:.82rem">Save All will also <strong>remove ${stale.length} saved shift${stale.length === 1 ? '' : 's'}</strong> no longer on the grid: ${stale.map(r => `${firstName(r.BreakNurseName)} ${_fmtDayShort((r.ShiftDate || '').slice(0, 10))} ${r.ShiftType}`).join(' · ')}</div>`;
-  } catch(e){ console.warn('stale-row check failed (non-fatal):', e && e.message); }
+    const stale = _wgBaseRows.filter(r => r.date >= t && !wantKeys.has(`${r.name}|${r.date}|${r.shift}`));
+    let held = [];
+    if(stale.length){
+      const ds = stale.map(r => r.date).sort();
+      const bk = await spGet(LISTS.bookings, `SlotDate ge '${ds[0]}' and SlotDate le '${ds[ds.length - 1]}T23'`);
+      held = stale.filter(r => bk.some(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && String(b.SlotDate || '').slice(0, 10) === r.date && b.ShiftType === r.shift && r.units.includes(b.Unit) && _slotIsAhead(r.date, b.SlotTime, r.shift)));
+    }
+    const go = stale.filter(r => !held.includes(r));
+    window._wgDeleteIds = go.map(r => r.Id); window._wgDeleteRows = go;
+    if(go.length) _staleNote += _box(`Save All will also <strong>remove ${go.length} saved shift${go.length === 1 ? '' : 's'}</strong> no longer on the grid: ${go.map(_nm).join(' · ')}`);
+    if(held.length) _staleNote += _box(`<strong>Not removed — breaks are already claimed:</strong> ${held.map(_nm).join(' · ')}. Remove ${held.length === 1 ? 'it' : 'them'} on the Schedule tab (✏️ Edit → Remove from this shift) so the breaks are handed to another break nurse or cancelled.`);
+  } catch(e){
+    console.warn('stale-row check failed:', e && e.message);
+    window._wgDeleteIds = []; window._wgDeleteRows = [];
+    _staleNote = _box('Couldn\'t check the shifts you cleared for claimed breaks — this save will <strong>not remove</strong> any saved shift. Review again to retry.');
+  }
   try { const tEl = document.getElementById('importResultsTitle'); if(tEl){ let note = document.getElementById('wgStaleNote'); if(!note){ note = document.createElement('div'); note.id = 'wgStaleNote'; tEl.insertAdjacentElement('afterend', note); } note.innerHTML = _staleNote; } } catch(e){}
   try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
