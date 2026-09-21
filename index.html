@@ -724,6 +724,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             <span id="importRestoreMsg"></span>
             <button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button>
           </div>
+          <div id="wgStaleNote"></div><!-- Build 493: what Save All will ALSO remove (grid batches) — full width, above the button it describes -->
           <div id="acceptBarTop" style="margin-bottom:12px;display:none;justify-content:flex-end">
             <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
           </div>
@@ -2275,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-20-492'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-21-494'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15841,6 +15842,8 @@ async function renderImportRows(entries, forceReplace = false){
   // New batch incoming → re-enable Re-suggest / Clear / Save All. They may
   // have been disabled by a previous Save All success.
   setImportActionsActive(true);
+  // Build 493: the status line belongs to the save that wrote it — a new batch starts blank
+  { const _st = document.getElementById('acceptAllStatus'); if(_st){ _st.textContent = ''; _st.style.display = 'none'; } }
   const existingEntries = getImportedEntries(); // Build 260: guarded accessor
 
   // Find overlapping dates between new import and existing entries
@@ -16807,9 +16810,16 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   // Helper: update phase indicator. Status div is positioned below the import
   // rows so users scrolled to the top miss those updates. We mirror the phase
   // to both Save All buttons (top and bottom) so progress is always visible.
+  // Build 494 (Tomas): the save runs 10–30 s (write → removals → defaults → rotations → wing history →
+  // read-back) and its only progress was the SAVE ALL label — off screen as often as not — while the
+  // grid, the cards and Review stayed live. A Review tapped mid-save REPLACES the batch the rotation
+  // step is still walking by index. The app's busy overlay (z 9998, under real dialogs) is now both
+  // the progress indicator and the tap guard, from the first write to the last exit.
+  let _busyUp = false;
   const setPhase = (statusMsg, btnMsg) => {
     if(status) status.textContent = statusMsg;
     btns.forEach(b => { b.textContent = '⏳ ' + (btnMsg || statusMsg); });
+    if(_busyUp) showBusy(statusMsg);
   };
 
   // Guard: refuse to save if any flagged entries are unresolved. The user
@@ -16924,6 +16934,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     }).join(', ');
   };
 
+  _busyUp = true; // Build 494: overlay up with the first write; the finally below is its only way down
   try {
     setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
@@ -17176,6 +17187,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       b.style.cursor = '';
     });
     console.error('acceptAllAndSave batch error:', e);
+    if(_busyUp) showBusy('Checking what was saved…'); // Build 494: the read-back below can take up to 30 s
     // Build 206: a thrown error here is often the Apps Script echo-redirect CORS issue,
     // where the POST actually SAVED but the browser couldn't read the reply. Don't trust
     // the throw — read back and report what truly landed. Build 207: keep SAVE ALL disabled
@@ -17198,7 +17210,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
       if(status) status.textContent = `⚠ Batch failed: ${(e && e.message) || e || 'unknown error'}. Re-run SAVE ALL to retry.`;
     }
-  }
+  } finally { _busyUp = false; hideBusy(); } // Build 494: every exit — saved, partly saved, failed
   // Reload full assignment list with buttons after save
   loadAssignments();
   notifyProdLogChanged();
@@ -21972,7 +21984,7 @@ async function wgReview(){
     window._wgDeleteIds = []; window._wgDeleteRows = [];
     _staleNote = _box('Couldn\'t check the shifts you cleared for claimed breaks — this save will <strong>not remove</strong> any saved shift. Review again to retry.');
   }
-  try { const tEl = document.getElementById('importResultsTitle'); if(tEl){ let note = document.getElementById('wgStaleNote'); if(!note){ note = document.createElement('div'); note.id = 'wgStaleNote'; tEl.insertAdjacentElement('afterend', note); } note.innerHTML = _staleNote; } } catch(e){}
+  try { const note = document.getElementById('wgStaleNote'); if(note) note.innerHTML = _staleNote; } catch(e){} // Build 493: static home in the markup (484 had squeezed it into the flex header row)
   try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
