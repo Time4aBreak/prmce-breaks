@@ -2275,7 +2275,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-20-488'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-20-490'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21645,6 +21645,17 @@ async function _populateNurseDropdownCore(){
 // The per-device draft stores only _wgEdits; an edit that says what the sheet already
 // says is pruned on every read, so drafts clean themselves up after a save. A week that
 // can't be read shows an error and no grid — it fails closed, never blank-as-truth.
+// Build 489 (Sep 20): THE GRID'S DATA IS EXACTLY WHAT IT DRAWS. It draws roster rows × the
+// week's seven dates but sent every cell it held — drafts kept cells for nurses since removed
+// from the roster (invisible), and Review would have silently re-added them to the roster
+// (addNamesToRoster) and scheduled them. Now a cell for a nurse not on the roster, or a date
+// outside the week, is never held in _wgCells; unsaved cells for her are dropped from the
+// draft, with a toast saying so.
+// Build 490 (Tomas: "show the removed nurse for shifts prior to removal, not after"): her
+// SAVED shifts are history and the grid shows them — read-only rows under the roster, tagged
+// "no longer on roster". They live in _wgFormer, a separate display-only map: never tappable,
+// never in a Review batch, never seen by 484. No removal date is stored — roster Remove
+// deletes every today-forward row, so the rows still on the sheet ARE the shifts before removal.
 // "Suggest & Review" hands renderImportRows the
 // same entry shape the extractor produces, then self-acknowledges the mirror
 // (a human typed it — there is no machine reading to verify) and sets the
@@ -21653,6 +21664,7 @@ let _wgWeek = null;          // 'YYYY-MM-DD' of the Sunday
 let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours} — base + edits
 let _wgBase = {};            // Build 488: the week as saved on the sheet
 let _wgEdits = {};           // Build 488: unsaved changes — key → cell | null (cleared)
+let _wgFormer = {};          // Build 490: saved shifts of nurses no longer on the roster — display only
 let _wgBaseState = 'loading'; // 'loading' | 'ok' | 'failed'
 let _wgLoadSeq = 0;          // a slow read for a week you already left must not paint
 const _WG_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -21668,7 +21680,15 @@ function _wgSameCell(a, b){
   return a.shift === b.shift;
 }
 function _wgMerge(){
-  if(_wgBaseState === 'ok') Object.keys(_wgEdits).forEach(k => { const e = _wgEdits[k], b = _wgBase[k]; if((!e && !b) || _wgSameCell(e, b)) delete _wgEdits[k]; });
+  if(_wgBaseState === 'ok'){
+    const roster = new Set(_wgRosterNames()), end = _wgAddDays(_wgWeek, 6), gone = [];
+    Object.keys(_wgEdits).forEach(k => {
+      const e = _wgEdits[k], b = _wgBase[k]; const [n, d] = k.split('|');
+      if(roster.size && (!roster.has(n) || d < _wgWeek || d > end)){ if(e && !roster.has(n)) gone.push(n); delete _wgEdits[k]; return; } // Build 489: not drawn → not held (only roster drops are announced)
+      if((!e && !b) || _wgSameCell(e, b)) delete _wgEdits[k];
+    });
+    if(gone.length){ const who = [...new Set(gone)].map(n => firstName(n)).join(', '); try { toast(`Dropped ${gone.length} unsaved shift${gone.length === 1 ? '' : 's'} for ${who} — no longer on the roster`); } catch(e){} }
+  }
   const c = Object.assign({}, _wgBase);
   Object.keys(_wgEdits).forEach(k => { if(_wgEdits[k]) c[k] = _wgEdits[k]; else delete c[k]; });
   _wgCells = c;
@@ -21680,6 +21700,7 @@ async function _wgFetchBase(wk){
   const end = _wgAddDays(wk, 6);
   const rows = await spGet(LISTS.schedule, `ShiftDate ge '${_wgAddDays(wk, -1)}' and ShiftDate le '${end}T23'`);
   const perCell = {};
+  const roster = new Set(_wgRosterNames());
   rows.filter(r => r.BreakNurseName && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1').forEach(r => {
     const hh = Number(r.Hours || 0); const part = !!(r.StartTime && hh > 0 && hh < 12);
     const st = part ? String(r.StartTime).replace(/\D/g, '').padStart(4, '0') : '';
@@ -21688,19 +21709,20 @@ async function _wgFetchBase(wk){
     if(d < wk || d > end) return;
     (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '' });
   });
-  const cells = {};
+  const cells = {}, former = {};
   // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
   Object.entries(perCell).forEach(([k, list]) => {
+    const into = (!roster.size || roster.has(k.split('|')[0])) ? cells : former; // Build 490: off-roster → display-only map
     const parts = list.filter(_wgIsPart).sort((a, b) => a.startTime.localeCompare(b.startTime));
     if(parts.length === 2){
       const toM = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
       const endM = c => (toM(c.startTime) + Math.round(Number(c.hours) * 60)) % 1440;
       const [A, B] = endM(parts[0]) === toM(parts[1].startTime) ? [parts[0], parts[1]] : (endM(parts[1]) === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
-      if(A){ cells[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
+      if(A){ into[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
     }
-    cells[k] = list[list.length - 1];
+    into[k] = list[list.length - 1];
   });
-  return cells;
+  return { cells, former };
 }
 function _wgRosterNames(){
   const names = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames.slice() : [];
@@ -21726,13 +21748,13 @@ async function wgSetWeek(ds){
   _wgWeek = _wgSunday(ds);
   document.getElementById('wgWeekPick').value = _wgWeek;
   const seq = ++_wgLoadSeq, wk = _wgWeek;
-  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgBaseState = 'loading';
+  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseState = 'loading';
   try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
   wgRender();
   let base = null;
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
-  if(base){ _wgBase = base; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
+  if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
   else _wgBaseState = 'failed';
   wgRender();
 }
@@ -21787,10 +21809,14 @@ function wgRender(){
     const esc = n.replace(/'/g, "\\'");
     return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:4px 6px;line-height:1.25">${c ? _wgCellLabel(c) : '<span style="opacity:.35">+</span>'}</button>`;
   };
+  // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
+  const formerNames = [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
+  const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:4px 6px;line-height:1.25;opacity:.8">${_wgCellLabel(c)}</div>` : '<div></div>'; };
   const today = localDate(new Date());
   host.innerHTML = `<div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
     + `<div></div>` + dates.map((d, i) => `<div style="text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:${d === today ? 'var(--teal)' : 'var(--muted)'}">${_WG_DOW[i]}<br><span style="font-weight:500">${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</span></div>`).join('')
     + names.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
+    + formerNames.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;color:var(--muted);overflow:hidden" title="${escHTML(n)} — no longer on the roster; saved shifts shown for the record">${escHTML(bnDisplayName(n))}<div style="font-size:.62rem;font-weight:500;white-space:nowrap">no longer on roster</div></div>` + dates.map(d => fcell(n, d)).join('')).join('')
     + `</div>`;
   const count = Object.keys(_wgCells).length;
   const edN = Object.keys(_wgEdits).length;
@@ -21861,7 +21887,7 @@ async function wgReview(){
     if(rb) rb.textContent = '✨ Suggest & Review';
     if(wk !== _wgWeek) return;
     if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
-    _wgBase = b; _wgMerge(); _wgSaveDraft(); wgRender();
+    _wgBase = b.cells; _wgFormer = b.former; _wgMerge(); _wgSaveDraft(); wgRender();
   }
   const keys = Object.keys(_wgCells); if(!keys.length) return;
   const entries = keys.map(k => {
