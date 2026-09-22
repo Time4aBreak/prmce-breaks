@@ -870,11 +870,14 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- High-acuity units (Build 430): the map + per-shift cap toggles -->
+    <!-- More Demanding Units (Build 430; renamed 502 per Tomas): the map + per-shift cap toggles -->
     <div class="card">
-      <div class="card-label" style="margin:0 0 4px">High-Acuity Units</div>
+      <div class="card-label" style="margin:0 0 4px">More Demanding Units</div>
       <div id="acuityBody"></div>
-      <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveAcuityCfg(this)">Save acuity</button>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:10px">
+        <button class="btn btn-primary btn-sm" onclick="saveAcuityCfg(this)">Save</button>
+        <button class="btn btn-ghost btn-sm" onclick="redealUpcomingNow(this)" title="Re-deal every shift from tomorrow forward under the current settings">↻ Re-deal upcoming</button>
+      </div>
     </div>
 
     <!-- App version / push update -->
@@ -1582,14 +1585,14 @@ async function saveAcuityCfg(btn){
   const old = btn ? btn.textContent : ''; if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     await syncedLS.set('acuityConfig', cfg);
-    toast('✓ Acuity saved — new deals use it from now on');
+    toast('✓ Saved — new deals use it from now on');
     if(before !== JSON.stringify(_acuityCfg())){
-      if(await customConfirm('Acuity settings changed. Apply them to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use the new settings for future scheduling only?', 'Re-deal upcoming', 'Keep as scheduled')){
+      if(await customConfirm('The more-demanding units changed. Apply this to already-scheduled shifts (tomorrow forward) by re-dealing, or keep those as they are and use it for future scheduling only?', 'Re-deal upcoming', 'Keep as scheduled')){
         await applyCoverageLimitsToUpcoming();
       }
       if(typeof loadAssignments === 'function') loadAssignments();
     }
-  } catch(e){ toast(`Couldn't save acuity — ${(e && e.message) || e || 'unknown error'}`, true); }
+  } catch(e){ toast(`Couldn't save — ${(e && e.message) || e || 'unknown error'}`, true); }
   finally { if(btn){ btn.disabled = false; btn.textContent = old; } initAcuityCard(); }
 }
 // Build 435 (wording review #35): standalone Re-deal upcoming — the cure the
@@ -2283,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-501'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-502'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
