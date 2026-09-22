@@ -2283,7 +2283,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-21-497'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-498'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19391,7 +19391,9 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // ─────────────────────────────────────────────────────────────────────
 
       const allSlots = generateSlots(shift);
-      const nowSortKey = nowKey(shift);
+      // Build 498: "has this slot happened" is date-aware (_slotIsAhead), not clock-only. The log can show
+      // any date (Portal date picker): on a past date every slot has happened, on a future date none has.
+      // Clock-only read yesterday's afternoon as "not yet" at 7 AM (Taken locked, Hand off shown).
 
       // Build lookup: slotTime -> booking for this BN's responsible units.
       // Uses module-level normSlot() helper to pad leading zeros that Sheets
@@ -19561,7 +19563,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         const isOwnBreak = ownBreakSlots.has(slot);
         const isHardBlocked = hardBlockedSet.has(slot);
         const rotationUnit = rotation[slot] || (_fallbackRotation ? _fallbackRotation[slot] : undefined);  // the unit where this BN was scheduled (or fallback for freed slots)
-        const isPast = sortKey(slot, shift) <= nowSortKey;
+        const isPast = !_slotIsAhead(dt, slot, shift); // Build 498: date-aware
         const staged = b ? _prodLogStaged.get(b.Id) : _prodLogStaged.get(`unclaimed:${slot}`);
 
         let rowClass = 'open';
@@ -19875,7 +19877,9 @@ async function handOffClaim(id){
     const cache = _bnConfirmCache; if(!cache){ toast('Reload the log first', true); return; }
     const b = (cache.allBookings || []).find(x => String(x.Id) === String(id)); if(!b){ toast('Claim not found — reload the log', true); return; }
     const shift = b.ShiftType === 'Noc' ? 'Noc' : 'Day', d = (b.SlotDate || '').slice(0, 10);
-    if(sortKey(b.SlotTime, shift) <= nowKey(shift)){ toast('That break has already come around', true); return; }
+    // Build 498: date-aware. Clock-only refused a Noc tail's 07:15 Day-overlap claim at 11 PM ("already come
+    // around" — 07:15 < 23:00 on the Day clock) and any claim on a later date whose clock time had passed today.
+    if(!_slotIsAhead(d, b.SlotTime, shift)){ toast('That break has already come around', true); return; }
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${d}' and ShiftDate le '${d}T23' and ShiftType eq '${shift}'`);
     const bookings = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${shift}'`);
     const wing = getUnitWing(b.Unit);
