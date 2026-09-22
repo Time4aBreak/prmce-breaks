@@ -664,7 +664,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <input type="date" id="wgWeekPick" onchange="wgSetWeek(this.value)" style="font-size:.9rem;padding:6px 8px;width:auto"/>
           <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(1)" title="Next week">›</button>
           <span style="flex:1"></span>
-          <button type="button" id="wgClearBtn" class="btn btn-ghost btn-sm" onclick="wgClearWeek()">✕ Clear week</button>
+          <button type="button" id="wgClearBtn" class="btn btn-ghost btn-sm" onclick="wgClearWeek()" disabled style="opacity:.5">↺ Discard unsaved</button>
         </div>
         <div id="wgGrid" style="overflow-x:auto"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
@@ -2283,7 +2283,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-500'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-501'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21848,17 +21848,12 @@ function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * 
 // to what's on the schedule (drops the draft, re-prefills from the archive); on an
 // unsaved week it clears the grid as before.
 function _wgWeekIsSaved(){ return Object.keys(_wgBase).length > 0; } // Build 488: the sheet decides, not the archive
-function wgClearWeek(){
+function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes and show the week as it is on the sheet
   if(_wgBaseState !== 'ok'){ wgSetWeek(_wgWeek); return; }
-  if(_wgWeekIsSaved()){
-    if(Object.keys(_wgEdits).length && !confirm('Discard your unsaved changes and show this week as it is on the schedule?')) return;
-    _wgEdits = {}; _wgSaveDraft();
-    wgSetWeek(_wgWeek); // re-reads the sheet
-    return;
-  }
-  if(!Object.keys(_wgCells).length) return;
-  if(!confirm('Clear every shift on this week\'s grid?')) return;
-  _wgEdits = {}; _wgMerge(); _wgSaveDraft(); wgRender();
+  const n = Object.keys(_wgEdits).length; if(!n) return;
+  if(!confirm(`Discard ${n} unsaved change${n === 1 ? '' : 's'} and show this week as it is on the schedule?`)) return;
+  _wgEdits = {}; _wgSaveDraft();
+  wgSetWeek(_wgWeek); // re-reads the sheet
 }
 function _wgCellLabel(c){
   if(!c) return '';
@@ -21881,6 +21876,7 @@ function wgRender(){
       : '<div class="empty" style="padding:14px 0">Reading this week\'s schedule…</div>';
     document.getElementById('wgCount').textContent = '';
     const rb = document.getElementById('wgReviewBtn'); if(rb) rb.disabled = true;
+    const cb = document.getElementById('wgClearBtn'); if(cb){ cb.disabled = true; cb.style.opacity = '.5'; } // Build 501
     return;
   }
   const cell = (n, d) => {
@@ -21906,7 +21902,9 @@ function wgRender(){
   const edN = Object.keys(_wgEdits).length;
   document.getElementById('wgCount').textContent = (count ? `${count} shift${count === 1 ? '' : 's'}` : '') + (edN ? `${count ? ' · ' : ''}${edN} unsaved` : '');
   const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !count;
-  const cb = document.getElementById('wgClearBtn'); if(cb) cb.textContent = _wgWeekIsSaved() ? '↺ Revert to saved' : '✕ Clear week'; // Build 438
+  // Build 501 (Tomas): one label. "Revert to saved" / "Clear week" both meant "drop what I haven't saved" and the
+  // label changing between weeks read as two features. Enabled only while something is unsaved.
+  { const cb = document.getElementById('wgClearBtn'); if(cb){ const n = Object.keys(_wgEdits).length; cb.textContent = '↺ Discard unsaved'; cb.disabled = !n; cb.style.opacity = n ? '' : '.5'; } }
 }
 function wgTap(name, date){
   const key = `${name}|${date}`;
