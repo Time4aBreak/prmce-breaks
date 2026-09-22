@@ -722,7 +722,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <div id="f2MirrorWrap" style="display:none;margin-bottom:12px"></div>
           <div id="importRestoreBanner" style="display:none;padding:10px 12px;background:var(--teal-lt);border-radius:8px;font-size:.82rem;color:var(--teal-dk);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
             <span id="importRestoreMsg"></span>
-            <button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button>
+            <span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button><button class="btn btn-ghost btn-sm" onclick="discardLastImport()" title="Forget these unsaved suggestions">✕ Discard</button></span>
           </div>
           <div id="wgStaleNote"></div><!-- Build 493: what Save All will ALSO remove (grid batches) — full width, above the button it describes -->
           <div id="acceptBarTop" style="margin-bottom:12px;display:none;justify-content:flex-end">
@@ -2283,7 +2283,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-498'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-500'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3312,7 +3312,9 @@ async function detectBNShiftForName(name){
     const scheds = await spGet(LISTS.schedule,
       `ShiftDate ge '${yStr}' and ShiftDate le '${todayStr}T23' and BreakNurseName eq '${esc(name)}'`);
     const candidates = scheds.filter(s => s.Status !== 'inactive');
-    if(!candidates.length) return null;
+    // Build 499: no early return here. With no row yesterday/today this returned null BEFORE the
+    // Build 454 next-shift lookup below, so a nurse on a day off got "no upcoming shift" while the
+    // older forward-scan in loadBNView jumped the date to her real next shift anyway.
 
     // Pick the schedule whose window is currently live.
     //   Day: 08:00 – 20:30 on ShiftDate
@@ -15313,6 +15315,11 @@ function expandSuggestionUnits(slots){
 }
 
 function saveLastBatch(entries){
+  // Build 500 (Tomas): the stash exists so an EXPENSIVE batch (an extraction) survives a refresh. A grid
+  // batch is two taps to redo and the grid keeps its own draft, so it never stashes — and a grid review
+  // drops any stash that is lying around. Before, a reviewed-then-reverted grid week came back as a
+  // "N unsaved suggestions — restore to review?" banner that nothing on the panel could dismiss.
+  if(!entries || !entries.length || entries.every(e => e && e._source === 'grid')){ clearLastBatch(); return; }
   try { localStorage.setItem(LAST_BATCH_KEY, JSON.stringify(entries)); } catch{}
   saveImportSide();
 }
@@ -15322,6 +15329,7 @@ function saveLastBatch(entries){
 // debounced repaint calls this on every chip tap.
 function saveImportSide(){
   try {
+    if(!localStorage.getItem(LAST_BATCH_KEY)) return; // Build 500: the side key belongs to a stash — none, no side
     let exp = null; try { exp = _impExpectedGet(); } catch(e){}
     localStorage.setItem(LAST_BATCH_KEY + ':side', JSON.stringify({ sel: importUnitSel, expected: exp }));
   } catch(e){}
@@ -15462,6 +15470,16 @@ function checkForRestorableSuggestions(){
   }
 }
 
+// Build 500: the banner's way out. Forgets the stash; no shift on the schedule is touched.
+function discardLastImport(){
+  const batch = loadLastBatch(); const n = Array.isArray(batch) ? batch.length : 0;
+  clearLastBatch();
+  const banner = document.getElementById('importRestoreBanner'); if(banner) banner.style.display = 'none';
+  const rows = document.getElementById('importRows');
+  if(!rows || !rows.children.length){ const p = document.getElementById('importResults'); if(p) p.style.display = 'none'; }
+  updateAcceptBars();
+  toast(n ? `Discarded ${n} unsaved suggestion${n === 1 ? '' : 's'}` : 'Nothing to discard');
+}
 async function restoreLastImport(){
   const batch = loadLastBatch();
   if(!batch || !batch.length){
@@ -16457,7 +16475,7 @@ async function clearAllImportedEntries(){
 
 
 async function clearAllImportSels(){
-  if(!await customConfirm('Clear all unit selections? This does not delete extracted entries.','Clear','Cancel')) return;
+  if(!await customConfirm('Clear the unit selections on every card below? No shift is removed.','Clear','Cancel')) return; // Build 500 wording
   Object.keys(importUnitSel).forEach(i => {
     importUnitSel[i] = [];
     UNITS.forEach(u => {
