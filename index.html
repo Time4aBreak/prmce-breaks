@@ -1858,19 +1858,26 @@ async function applyCoverageLimitsToUpcoming(){
     }
     showBusy('Applying — retiring stale rotations…');
     try {
-      _rotKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+      // Build 497: setMany takes an ARRAY of {key, value}. Since Build 329 this passed an object map, so
+      // setMany saw no .length and returned at once — the stale rotations were never retired on the
+      // backend. Every other device kept serving the OLD units' rotation; a unit that had moved to a new
+      // nurse found no slots of its own in it, and Sign Up's filter fell open: every slot claimable.
       if(_rotKeys.length && typeof syncedLS.setMany === 'function'){
-        const _tomb = {}; _rotKeys.forEach(k => _tomb[k] = null);
-        await _tmo(syncedLS.setMany(_tomb), 60000, 'retiring rotations');
+        await _tmo(syncedLS.setMany(_rotKeys.map(k => ({ key: k, value: null }))), 60000, 'retiring rotations');
       }
-    } catch(e){}
+      // …then drop the local copies (setMany leaves the string "null" behind, which warm() reads as
+      // "already have it" and would never re-fetch — hiding a rotation another device saves later).
+      _rotKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
+    } catch(e){ console.warn('[re-deal] retiring rotations failed:', e && e.message); }
     // Build 329: ONE flush for every nurse's history the sweep touched.
     try {
       if(Object.keys(_whb).length){
-        if(typeof syncedLS.setMany === 'function') await syncedLS.setMany(_whb);
+        // Build 497: same shape bug — the object map made this flush a silent no-op, so the re-deal's wing
+        // history lived only on the device that ran it and the backend kept the OLD deal's.
+        if(typeof syncedLS.setMany === 'function') await syncedLS.setMany(Object.keys(_whb).map(k => ({ key: k, value: _whb[k] })));
         else for(const k of Object.keys(_whb)) await syncedLS.set(k, _whb[k]);
       }
-    } catch(e){}
+    } catch(e){ console.warn('[re-deal] wing-history flush failed:', e && e.message); }
     clearCoverageCountsCache(); // the sweep's writes make any cache stale
     hideBusy();
     toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
@@ -2276,7 +2283,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-21-496'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-21-497'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
