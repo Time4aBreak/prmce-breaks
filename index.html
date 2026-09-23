@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-512'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-513'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15899,61 +15899,44 @@ async function renderImportRows(entries, forceReplace = false){
   setImportActionsActive(true);
   // Build 493: the status line belongs to the save that wrote it — a new batch starts blank
   { const _st = document.getElementById('acceptAllStatus'); if(_st){ _st.textContent = ''; _st.style.display = 'none'; } }
-  const existingEntries = getImportedEntries(); // Build 260: guarded accessor
-
-  // Find overlapping dates between new import and existing entries
-  const newDates = [...new Set(entries.map(e => e.date))];
-  const existingDates = new Set(existingEntries.map(e => e.date));
-  const overlappingDates = newDates.filter(d => existingDates.has(d));
-
+  // Build 513 (archive retirement, reader 4 of 5): the overlap check asks the SHEET, and the archive is no longer
+  // merged or written here (this was the ~50 KB write that failed silently on every Review since Sep 12).
+  // A GRID batch skips the check — the grid is a view of the sheet and Save All upserts. An EXTRACTOR batch is
+  // warned when dates already hold shifts, since Save All will update the matching ones.
   let replacementNotice = '';
-
-  if(overlappingDates.length > 0 && !forceReplace){
-    // Format date range for prompt
-    const sortedDates = [...overlappingDates].sort();
-    const first = sortedDates[0], last = sortedDates[sortedDates.length-1];
-    const dateRange = first === last ? first : `${first} to ${last}`;
-    const proceed = await customConfirm(
-      `A schedule has already been imported for some of these dates (${dateRange}). Replace existing entries and re-run suggestions?`,
-      'Replace & Continue',
-      'Cancel import'
-    );
-    if(!proceed){
-      toast('Import cancelled.');
-      return;
+  const _isGrid = entries.length > 0 && entries.every(e => e && e._source === 'grid');
+  if(!forceReplace && !_isGrid && entries.length){
+    const newDates = [...new Set(entries.map(e => e.date).filter(Boolean))].sort();
+    let overlappingDates = [];
+    try {
+      const rows = await spGet(LISTS.schedule, `ShiftDate ge '${newDates[0]}' and ShiftDate le '${newDates[newDates.length - 1]}T23'`);
+      const have = new Set(rows.filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1').map(r => String(r.ShiftDate || '').slice(0, 10)));
+      overlappingDates = newDates.filter(d => have.has(d));
+    } catch(e){ console.warn('[import] overlap read failed:', e && e.message); }
+    if(overlappingDates.length){
+      const first = overlappingDates[0], last = overlappingDates[overlappingDates.length - 1];
+      const dateRange = first === last ? first : `${first} to ${last}`;
+      const proceed = await customConfirm(
+        `The schedule already has shifts on some of these dates (${dateRange}). Continue? Save All updates the matching shifts; shifts not in this batch are left as they are.`,
+        'Continue',
+        'Cancel import'
+      );
+      if(!proceed){ toast('Import cancelled.'); return; }
+      replacementNotice = `Existing shifts on ${dateRange} will be updated — review and save the suggestions below.`;
     }
-    // Replace: remove all existing entries for overlapping dates
-    const filtered = existingEntries.filter(e => !overlappingDates.includes(e.date));
-    localStorage.setItem('bnImportedEntries', JSON.stringify(filtered)); setState('bnImportedEntries', filtered).catch(()=>{});
-    replacementNotice = `Schedule updated for ${dateRange} — review and save the new suggestions below to update assignments.`;
   }
-
-  // Re-read after possible replacement
-  const baseEntries = getImportedEntries(); // Build 260: guarded accessor
-
-  // Deduplicate: key = name|date|shift — no merging, new always wins for replaced dates
-  const existingKeys = new Set(baseEntries.map(e => `${e.name}|${e.date}|${e.shift}`));
-  const newEntries = entries.filter(e => !existingKeys.has(`${e.name}|${e.date}|${e.shift}`));
-
-  importEntries = [...baseEntries, ...newEntries.map(e => Object.assign({}, e))];
 
   // Auto-populate the name roster from extracted entries. addNamesToRoster
   // returns a rename map for any names the user chose to snap to existing
   // roster spellings (e.g. AI extracted "Traijo" but user kept "Traljo").
-  // Apply those renames to BOTH `entries` (so Save All persists the right
-  // spelling) AND `importEntries` (so the cached batch reflects the choice).
+  // Apply those renames to `entries` so Save All persists the right spelling.
   const extractedNames = [...new Set(entries.map(e => e.name).filter(Boolean))];
   const renames = addNamesToRoster(extractedNames) || {};
   if(Object.keys(renames).length){
     entries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
-    importEntries.forEach(e => { if(renames[e.name]) e.name = renames[e.name]; });
   }
 
-  importEntries.sort((a,b) => a.date.localeCompare(b.date) || a.shift.localeCompare(b.shift) || a.name.localeCompare(b.name));
-  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-
-  // Process all imported entries for this batch (replacement = re-run all)
-  const entriesToProcess = overlappingDates.length > 0 ? entries : (newEntries.length > 0 ? newEntries : entries);
+  const entriesToProcess = entries;
 
   const wrap = document.getElementById('importRows');
   if (!entries.length) {
