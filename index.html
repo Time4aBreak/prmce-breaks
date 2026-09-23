@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-503'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-504'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21805,6 +21805,7 @@ function _wgMerge(){
   Object.keys(_wgEdits).forEach(k => { if(_wgEdits[k]) c[k] = _wgEdits[k]; else delete c[k]; });
   _wgCells = c;
 }
+function _wgReviewLabel(){ return Object.keys(_wgCells).length ? '✨ Suggest & Review' : '🗑 Review removals'; } // Build 504
 function _wgEdit(key, cell){ _wgEdits[key] = cell || null; _wgMerge(); _wgSaveDraft(); wgRender(); }
 // The week's cells straight from BNSchedule. Reads one day early: a post-midnight Noc
 // partial is stored on the PREVIOUS evening's shift date but shown on the day it starts.
@@ -21930,7 +21931,9 @@ function wgRender(){
   const count = Object.keys(_wgCells).length;
   const edN = Object.keys(_wgEdits).length;
   document.getElementById('wgCount').textContent = (count ? `${count} shift${count === 1 ? '' : 's'}` : '') + (edN ? `${count ? ' · ' : ''}${edN} unsaved` : '');
-  const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !(count || edN); // Build 503: edits alone can be reviewed (removals-only save)
+  // Build 503: edits alone can be reviewed (removals-only save). Build 504 (Tomas): the button says what it will
+  // do — with cells it suggests and reviews; with only removals there is nothing to suggest.
+  const btn = document.getElementById('wgReviewBtn'); if(btn){ btn.disabled = !(count || edN); btn.textContent = _wgReviewLabel(); }
   // Build 501 (Tomas): one label. "Revert to saved" / "Clear week" both meant "drop what I haven't saved" and the
   // label changing between weeks read as two features. Enabled only while something is unsaved.
   { const cb = document.getElementById('wgClearBtn'); if(cb){ const n = Object.keys(_wgEdits).length; cb.textContent = '↺ Discard unsaved'; cb.disabled = !n; cb.style.opacity = n ? '' : '.5'; } }
@@ -21997,7 +22000,7 @@ async function wgReview(){
   { // Build 488: Review is the decision point — the batch is the sheet AS IT IS NOW plus this device's edits
     const wk = _wgWeek, rb = document.getElementById('wgReviewBtn'); if(rb){ rb.disabled = true; rb.textContent = 'Reading the schedule…'; }
     let b = null; try { b = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] review read failed:', e && e.message); }
-    if(rb) rb.textContent = '✨ Suggest & Review';
+    if(rb) rb.textContent = _wgReviewLabel(); // Build 504
     if(wk !== _wgWeek) return;
     if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
     _wgBase = b.cells; _wgFormer = b.former; _wgBaseRows = b.rows; _wgMerge(); _wgSaveDraft(); wgRender();
@@ -22024,7 +22027,7 @@ async function wgReview(){
   // Build 484 (Tomas): Save All is an upsert keyed nurse|date|shift — it can't remove a row for a
   // cell that was cleared or moved to the other shift. Find those rows now (today forward) so
   // the save can delete them and the sheet ends up matching the grid.
-  const title = document.getElementById('importResultsTitle'); if(title) title.textContent = 'Manual Schedule — Review & Assign Units';
+  const title = document.getElementById('importResultsTitle'); if(title) title.textContent = entries.length ? 'Manual Schedule — Review & Assign Units' : 'Manual Schedule — Nothing to suggest'; // Build 504
   await renderImportRows(entries);
   // (after renderImportRows: a straddling partial's two halves are both wanted rows)
   // Build 492: the 484 rework. The rows to remove are the SAVED rows behind this grid (read fresh at
@@ -22047,7 +22050,7 @@ async function wgReview(){
     }
     const go = stale.filter(r => !held.includes(r));
     window._wgDeleteIds = go.map(r => r.Id); window._wgDeleteRows = go;
-    if(go.length) _staleNote += _box(`Save All will also <strong>remove ${go.length} saved shift${go.length === 1 ? '' : 's'}</strong> no longer on the grid: ${go.map(_nm).join(' · ')}`);
+    if(go.length) _staleNote += _box(`Save All will ${entries.length ? 'also ' : ''}<strong>remove ${go.length} saved shift${go.length === 1 ? '' : 's'}</strong> no longer on the grid: ${go.map(_nm).join(' · ')}`); // Build 504: no "also" when that is all it does
     if(held.length) _staleNote += _box(`<strong>Not removed — breaks are already claimed:</strong> ${held.map(_nm).join(' · ')}. Remove ${held.length === 1 ? 'it' : 'them'} on the Schedule tab (✏️ Edit → Remove from this shift) so the breaks are handed to another break nurse or cancelled.`);
   } catch(e){
     console.warn('stale-row check failed:', e && e.message);
