@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-509'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-510'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21873,14 +21873,24 @@ function toggleWeeklyGrid(){
   const body = document.getElementById('wgBody'), chev = document.getElementById('wgChevron');
   const open = body.style.display === 'none';
   body.style.display = open ? 'block' : 'none'; chev.textContent = open ? '▲' : '▼';
-  if(open) wgSetWeek(_wgWeek || _wgDefaultWeek()); // Build 488: every open re-reads the sheet
+  if(!open) return;
+  if(_wgWeek){ wgSetWeek(_wgWeek); return; } // Build 488: every open re-reads the sheet
+  // Build 510: the first open asks the SHEET for the next empty week (archive retirement, reader 1 of 5)
+  const host = document.getElementById('wgGrid'); if(host) host.innerHTML = '<div class="empty" style="padding:14px 0">Reading the schedule…</div>';
+  _wgDefaultWeek().then(wk => { if(!_wgWeek) wgSetWeek(wk); });
 }
 // Build 426 (Tomas): open on the NEXT EMPTY WEEK — the Sunday after the latest
 // date in the history archive (every entered week is in it); next week if empty.
-function _wgDefaultWeek(){
-  let latest = '';
-  try { getImportedEntries().forEach(e => { if(e && e.date > latest) latest = e.date; }); } catch(e){}
+async function _wgDefaultWeek(){
+  // Build 510: reads the sheet, not the archive (frozen Sep 12 → the grid opened on Sep 27 while the schedule
+  // ran to Nov 7). The Sunday after the latest scheduled week; next week if nothing is scheduled ahead or the
+  // read fails.
   const today = localDate(new Date());
+  let latest = '';
+  try {
+    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${today}'`);
+    rows.forEach(r => { if(r.Status !== 'inactive' && String(r.IsSupplemental) !== '1'){ const d = String(r.ShiftDate || '').slice(0, 10); if(d > latest) latest = d; } });
+  } catch(e){ console.warn('[grid] default-week read failed:', e && e.message); }
   if(!latest || latest < today) return _wgSunday(_wgAddDays(today, 7));
   return _wgAddDays(_wgSunday(latest), 7);
 }
