@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-510'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-511'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17823,19 +17823,25 @@ async function saveExtForLiveShift(name, ext, live){
   }
 }
 
-function onBNDateChange(){
+let _bnDateSeq = 0; // Build 511: a slow read for a date you already left must not set the shift
+async function onBNDateChange(){
   const dp = document.getElementById('bnDate');
   if (!dp || !dp.value) return;
   const _prevDate = BNS.date;
   BNS.date = dp.value;
   // Build 102 diagnostic: catch manual date-picker changes vs programmatic
   _logDateTrace(`onBNDateChange: BNS.date ${_prevDate} → ${BNS.date} (picker tapped or set programmatically). localToday=${today()}`);
-  // Auto-detect shift based on imported entries for this date
-  const entry = importEntries.find(e => e.name === BNS.name && e.date === BNS.date);
-  if (entry) {
-    BNS.shift = entry.shift;
-    renderBNShiftPill();
-  }
+  // Build 511: auto-detect the shift from the SHEET (archive retirement, reader 2 of 5 — the archive froze on
+  // Sep 12, so this fell back to the default for every later date). The nurse's row on that date decides.
+  const seq = ++_bnDateSeq;
+  try {
+    if(BNS.name){
+      const rows = await spGet(LISTS.schedule, `ShiftDate ge '${BNS.date}' and ShiftDate le '${BNS.date}T23' and BreakNurseName eq '${esc(BNS.name)}'`);
+      if(seq !== _bnDateSeq) return;
+      const row = rows.find(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1') || rows[0];
+      if(row && (row.ShiftType === 'Day' || row.ShiftType === 'Noc') && row.ShiftType !== BNS.shift){ BNS.shift = row.ShiftType; renderBNShiftPill(); }
+    }
+  } catch(e){ console.warn('[portal] shift auto-detect read failed:', e && e.message); }
   // Build 118 (2026-05-26): Re-evaluate ext input live state. A future or
   // past date selection disables the field; switching back to today re-
   // enables it.
