@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-511'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-512'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21706,19 +21706,10 @@ async function _populateNurseDropdownCore(){
   const shift = document.getElementById('aDay') && document.getElementById('aDay').classList.contains('active')
                 ? 'Day' : 'Noc';
 
-  // Filter importEntries to only nurses scheduled on this date+shift
-  let fromImport = [];
-  if (date && importEntries.length) {
-    fromImport = [...new Set(
-      importEntries
-        .filter(e => e.date === date && e.shift === shift)
-        .map(e => e.name)
-        .filter(Boolean)
-    )];
-  }
-
-  // Also include BNs who have an actual assignment on this date+shift
-  // (manually added, not from UKG import) so they show up for editing.
+  // Build 512: the "scheduled" group comes from the SHEET only (archive retirement, reader 3 of 5). The archive
+  // half listed nurses from an extraction that hadn't been saved yet — the grid never produces that state, and
+  // the archive itself froze on Sep 12.
+  // BNs who have an actual assignment on this date+shift show up for editing.
   let fromScheds = [];
   if (date) {
     try {
@@ -21736,10 +21727,10 @@ async function _populateNurseDropdownCore(){
         .filter(s => s.Status !== 'inactive' && String(s.IsSupplemental) !== '1')
         .map(s => s.BreakNurseName)
         .filter(Boolean))];
-    } catch(e){ /* silent — fall back to imports only */ }
+    } catch(e){ console.warn('[edit] scheduled-group read failed:', e && e.message); }
   }
 
-  const combined = [...new Set([...fromImport, ...fromScheds])].sort();
+  const combined = [...new Set(fromScheds)].sort();
 
   // Other BNs from the master roster who AREN'T already in combined. The
   // top section shows BNs actually scheduled on this date+shift (prominent);
