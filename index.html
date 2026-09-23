@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-507'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-508'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10432,6 +10432,17 @@ async function removeAssignment(id){
       showBusy(`Removing ${who} assignment…`);
       for(const b of (decisions.bookingsToCancel || [])){ try { await spDel(LISTS.bookings, b.Id); } catch(e){ console.warn('cancel failed', b.Id, e && e.message); } }
       for(const t of (decisions.transfers || [])){ try { await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: t.targetBN, CoveredBy: t.targetBN }); } catch(e){ console.warn('transfer failed', t.booking && t.booking.Id, e && e.message); } }
+      // Build 508 (found on the Transfer witness, Sep 23): the Edit dialog's transfer PINS the unit into the
+      // receiver's rotation at that slot (13270s, Build 373/374 rationale) so Sign Up stops offering her other
+      // unit at that time; 485's commit only patched the claim. Same pin, grouped per receiver.
+      try {
+        const _byT = {}; (decisions.transfers || []).forEach(t => { if(t.targetBN && t.booking) (_byT[t.targetBN] ||= []).push(t); });
+        for(const [tbn, list] of Object.entries(_byT)){
+          const targetRot = loadRotation(tbn, d, s.ShiftType) || {};
+          list.forEach(t => { targetRot[String(t.booking.SlotTime).padStart(4, '0')] = t.booking.Unit; });
+          await saveRotation(tbn, d, s.ShiftType, targetRot);
+        }
+      } catch(e){ console.warn('transfer rotation pin failed:', e && e.message); }
     } else {
       const msg = hit > 0
         ? `${hit} past break${hit !== 1 ? 's were' : ' was'} given under ${who} assignment; they stay on the record. Remove the assignment?`
