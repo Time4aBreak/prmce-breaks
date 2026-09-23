@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-502'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-503'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15252,6 +15252,7 @@ async function runImport(){
     if(_expFld) _expFld.value = '';
     _impGateAcks = new Set();
 
+    window._wgDeleteIds = []; window._wgDeleteRows = []; // Build 503: removals belong to a grid review only
     { const t = document.getElementById('importResultsTitle'); if(t) t.textContent = 'Extracted — Review & Assign Units'; } // Build 423
     renderImportRows(entries);
 
@@ -15431,7 +15432,8 @@ function _renderImportCountChips(){
 function updateAcceptBars(){
   _renderImportCountChips();
   const rows = document.getElementById('importRows');
-  const show = rows && rows.children.length > 0;
+  const removalsOnly = (window._wgDeleteIds || []).length > 0 && (_currentImportEntries || []).length === 0; // Build 503
+  const show = (rows && rows.children.length > 0) || removalsOnly;
   const top = document.getElementById('acceptBarTop');
   const bot = document.getElementById('acceptBarBottom');
   if(top) top.style.display = show ? 'flex' : 'none';
@@ -15496,6 +15498,7 @@ async function restoreLastImport(){
   if(banner) banner.style.display = 'none';
 
   // Re-run suggestions on the saved batch without triggering replacement prompt
+  window._wgDeleteIds = []; window._wgDeleteRows = []; // Build 503: a restored (extractor) batch carries no grid removals
   _currentImportEntries = batch;
   window._lastEntriesToProcess = batch;
 
@@ -16916,6 +16919,29 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
 
   const skipped = entriesToProcess.length - indices.length;
   if(!records.length){
+    // Build 503 (Tomas): a grid review with nothing to save but shifts to remove (the week's last cell cleared).
+    // Only a grid review sets _wgDeleteIds, and only the grid can review an empty batch. One confirm, then the
+    // same delete + cleanup the normal path runs, under the overlay, then the grid re-reads.
+    const _del = (window._wgDeleteIds || []).slice(), _delRows = (window._wgDeleteRows || []).filter(r => _del.includes(r.Id));
+    if(_del.length && entriesToProcess.length === 0 && _delRows.length === _del.length){
+      const n = _del.length, what = `${n} saved shift${n === 1 ? '' : 's'}`;
+      if(!confirm(`Remove ${what} from the live schedule? Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); return; }
+      showBusy(`Removing ${what}…`);
+      try {
+        await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(_del)) });
+        await _forgetShifts(_delRows);
+        window._wgDeleteIds = []; window._wgDeleteRows = [];
+        if(status){ status.textContent = `✓ Removed ${what}`; status.style.display = 'block'; }
+        toast(`✓ Removed ${what}`);
+        const _ir = document.getElementById('importResults'); if(_ir) _ir.style.display = 'none';
+        setImportActionsActive(false);
+        if(_wgWeek){ try { wgSetWeek(_wgWeek); } catch(e){} }
+      } catch(e){
+        console.error('removals-only save failed:', e);
+        toast(`Couldn't remove — ${(e && e.message) || e || 'unknown error'}. Review again to retry.`, true);
+      } finally { hideBusy(); btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); loadAssignments(); }
+      return;
+    }
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
     // Bug #1 fix: also re-enable the import/extract action buttons so the
     // user can clear and re-extract without refreshing. Mirrors the catch
@@ -21904,7 +21930,7 @@ function wgRender(){
   const count = Object.keys(_wgCells).length;
   const edN = Object.keys(_wgEdits).length;
   document.getElementById('wgCount').textContent = (count ? `${count} shift${count === 1 ? '' : 's'}` : '') + (edN ? `${count ? ' · ' : ''}${edN} unsaved` : '');
-  const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !count;
+  const btn = document.getElementById('wgReviewBtn'); if(btn) btn.disabled = !(count || edN); // Build 503: edits alone can be reviewed (removals-only save)
   // Build 501 (Tomas): one label. "Revert to saved" / "Clear week" both meant "drop what I haven't saved" and the
   // label changing between weeks read as two features. Enabled only while something is unsaved.
   { const cb = document.getElementById('wgClearBtn'); if(cb){ const n = Object.keys(_wgEdits).length; cb.textContent = '↺ Discard unsaved'; cb.disabled = !n; cb.style.opacity = n ? '' : '.5'; } }
@@ -21976,7 +22002,10 @@ async function wgReview(){
     if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
     _wgBase = b.cells; _wgFormer = b.former; _wgBaseRows = b.rows; _wgMerge(); _wgSaveDraft(); wgRender();
   }
-  const keys = Object.keys(_wgCells); if(!keys.length) return;
+  // Build 503 (Tomas): a week whose ONLY saved shift was cleared has 0 cells and 1 edit — Review used to be
+  // disabled, so that removal could never be saved from the grid. Now an empty batch reviews (no cards, just
+  // the "will also remove" note) and Save All carries out the removals.
+  const keys = Object.keys(_wgCells); if(!keys.length && !Object.keys(_wgEdits).length) return;
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
     let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
