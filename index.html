@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-504'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-505'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21805,7 +21805,7 @@ function _wgMerge(){
   Object.keys(_wgEdits).forEach(k => { if(_wgEdits[k]) c[k] = _wgEdits[k]; else delete c[k]; });
   _wgCells = c;
 }
-function _wgReviewLabel(){ return Object.keys(_wgCells).length ? '✨ Suggest & Review' : '🗑 Review removals'; } // Build 504
+function _wgReviewLabel(){ return (Object.keys(_wgCells).length || !Object.keys(_wgEdits).length) ? '✨ Suggest & Review' : '🗑 Review removals'; } // Build 504; 505: an empty week with nothing pending is not "removals"
 function _wgEdit(key, cell){ _wgEdits[key] = cell || null; _wgMerge(); _wgSaveDraft(); wgRender(); }
 // The week's cells straight from BNSchedule. Reads one day early: a post-midnight Noc
 // partial is stored on the PREVIOUS evening's shift date but shown on the day it starts.
@@ -21923,10 +21923,13 @@ function wgRender(){
   const formerNames = [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
   const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:4px 6px;line-height:1.25;opacity:.8">${_wgCellLabel(c)}</div>` : '<div></div>'; };
   const today = localDate(new Date());
+  // Build 505 (Tomas): the name column stays put when the grid scrolls sideways (narrow window / phone); the
+  // box-shadow paints the 6px column gap so scrolled cells don't peek through it.
+  const _WG_STICKY = 'position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 0 var(--card);';
   host.innerHTML = `<div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
-    + `<div></div>` + dates.map((d, i) => `<div style="text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:${d === today ? 'var(--teal)' : 'var(--muted)'}">${_WG_DOW[i]}<br><span style="font-weight:500">${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</span></div>`).join('')
-    + names.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
-    + formerNames.map(n => `<div style="font-weight:600;font-size:.85rem;padding-right:4px;color:var(--muted);overflow:hidden" title="${escHTML(n)} — no longer on the roster; saved shifts shown for the record">${escHTML(bnDisplayName(n))}<div style="font-size:.62rem;font-weight:500;white-space:nowrap">no longer on roster</div></div>` + dates.map(d => fcell(n, d)).join('')).join('')
+    + `<div style="${_WG_STICKY}"></div>` + dates.map((d, i) => `<div style="text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:${d === today ? 'var(--teal)' : 'var(--muted)'}">${_WG_DOW[i]}<br><span style="font-weight:500">${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</span></div>`).join('')
+    + names.map(n => `<div style="${_WG_STICKY}font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
+    + formerNames.map(n => `<div style="${_WG_STICKY}font-weight:600;font-size:.85rem;padding-right:4px;color:var(--muted);overflow:hidden" title="${escHTML(n)} — no longer on the roster; saved shifts shown for the record">${escHTML(bnDisplayName(n))}<div style="font-size:.62rem;font-weight:500;white-space:nowrap">no longer on roster</div></div>` + dates.map(d => fcell(n, d)).join('')).join('')
     + `</div>`;
   const count = Object.keys(_wgCells).length;
   const edN = Object.keys(_wgEdits).length;
