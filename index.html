@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-22-506'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-22-507'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17388,6 +17388,10 @@ async function saveImportRow(i){
       );
       if(!proceed) return;
     }
+    // Build 507 (Tomas): the per-card save had no progress or tap guard (494 covered Save All only). The
+    // overlay covers the read, the write and the default warm-up; the rotation recalc stays fire-and-forget as
+    // before (it is keyed by nurse/date/shift, so nothing tapped meanwhile can corrupt it). One finally brings it down.
+    showBusy(`Saving ${firstName(name)} · ${shift} ${date}…`);
 
     // Check if assignment already exists for this nurse/date/shift — update if so
     const existing = await spGet(LISTS.schedule,
@@ -17447,6 +17451,7 @@ async function saveImportRow(i){
     loadAssignments();
     notifyProdLogChanged(name);
   } catch(e) { toast(e.message, true); }
+  finally { hideBusy(); } // Build 507: every exit, including a declined split
 }
 
 // ═══════════════════════════════════════════════════════
