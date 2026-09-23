@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-508'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-23-509'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10418,7 +10418,11 @@ async function removeAssignment(id){
     let bk;
     try { bk = await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23' and ShiftType eq '${s.ShiftType}'`); }
     catch(e){ toast('Couldn\'t check this shift for claimed breaks — nothing was removed. Try again.', true); return false; }
-    const mineBk = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && units.includes(b.Unit));
+    // Build 509 (found on the Transfer witness): a claim is THIS nurse's by the stream stamp (bnOwns: CoveredBy,
+    // then CreatedBy, then the unit for unstamped rows) — not by whether its unit is in her row. A transferred
+    // claim sits on a unit she doesn't hold; the unit test missed it and offered the plain confirm → an orphan.
+    const _unitSet = new Set(units);
+    const mineBk = bk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && bnOwns(b, _unitSet, s.BreakNurseName));
     const hit = mineBk.length;
     const who = `${firstName(s.BreakNurseName)}'s ${_fmtDayShort(d)} ${s.ShiftType}`;
     // Build 485 (Tomas): a removal with future claims runs the same coverage dialog as an edit —
@@ -22072,7 +22076,7 @@ async function wgReview(){
     if(stale.length){
       const ds = stale.map(r => r.date).sort();
       const bk = await spGet(LISTS.bookings, `SlotDate ge '${ds[0]}' and SlotDate le '${ds[ds.length - 1]}T23'`);
-      held = stale.filter(r => bk.some(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && String(b.SlotDate || '').slice(0, 10) === r.date && b.ShiftType === r.shift && r.units.includes(b.Unit) && _slotIsAhead(r.date, b.SlotTime, r.shift)));
+      held = stale.filter(r => bk.some(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && String(b.SlotDate || '').slice(0, 10) === r.date && b.ShiftType === r.shift && bnOwns(b, new Set(r.units), r.name) && _slotIsAhead(r.date, b.SlotTime, r.shift))); // Build 509: by the stream stamp, not the unit
     }
     const go = stale.filter(r => !held.includes(r));
     window._wgDeleteIds = go.map(r => r.Id); window._wgDeleteRows = go;
