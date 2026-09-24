@@ -2295,7 +2295,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-527'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-528'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21992,13 +21992,16 @@ function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes
 }
 // Build 526 (Tomas): a SAVED cell shows the units it covers — the colour already says Day or Noc. A partial keeps its
 // window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
-function _wgCellHtml(c){
+function _wgCellHtml(c, date){
   if(!c) return '<span style="opacity:.35">+</span>';
   const h = Number(c.hours || 0), part = c.startTime && h > 0 && h < 12;
   const units = Array.isArray(c.units) ? c.units : [];
+  // Build 528 (Tomas): a unit that isn't being covered on that shift (3C paused, say) shows dimmed in the cell
+  let _open = () => true;
+  try { if(date){ const at = shiftStartDateTime(date, c.shift === 'Noc' ? 'Noc' : 'Day'); _open = u => isUnitOpenAt(u, at); } } catch(e){}
   const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (units.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
   // Build 527: one span per unit so five units wrap between units instead of running off the cell
-  const body = units.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${units.map(u => `<span style="white-space:nowrap">${u}</span>`).join('')}</div>` : '';
+  const body = units.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${units.map(u => `<span style="white-space:nowrap${_open(u) ? '' : ';opacity:.38;text-decoration:line-through'}" ${_open(u) ? '' : `title="${u} isn't being covered"`}>${u}</span>`).join('')}</div>` : '';
   return head + body;
 }
 function _wgCellLabel(c){
@@ -22033,11 +22036,11 @@ function wgRender(){
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25">${_wgCellHtml(c)}</button>`;
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25">${_wgCellHtml(c, d)}</button>`;
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
   const formerNames = [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
-  const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c)}</div></div>` : '<div></div>'; };
+  const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
   const today = localDate(new Date());
   // Build 505 (Tomas): the name column stays put when the grid scrolls sideways (narrow window / phone); the
   // box-shadow paints the 6px column gap so scrolled cells don't peek through it.
