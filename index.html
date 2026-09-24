@@ -2292,7 +2292,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-521'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-522'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22028,15 +22028,15 @@ function _wgChooser(name, date){
         </div>
       </div>
       ${_savedRow ? `<div style="border-top:1px solid var(--border);margin:2px 0 10px;padding-top:10px">
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Saved shift</div>
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Saved shift · acts right away</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button type="button" class="btn btn-ghost btn-sm" id="wgcUnits" style="flex:1" title="Open this shift's units in the Edit form">✏️ Units</button>
-          <button type="button" class="btn btn-ghost btn-sm" id="wgcRemoveNow" style="flex:1;color:#c0392b" title="Remove it now — claimed breaks go through the coverage dialog">🗑 Remove now</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="wgcRemoveNow" style="flex:1;color:#c0392b" title="Takes this shift off the schedule right away. A claimed break goes through the coverage dialog.">🗑 Remove now</button>
           ${_canUnavail ? `<button type="button" class="btn btn-ghost btn-sm" id="wgcUnavail" style="flex:1;color:#c0392b" title="Start the coverage flow for this shift">🏠 Unavailable</button>` : ''}
         </div>
       </div>` : ''}
       <div style="display:flex;gap:8px">
-        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">${_wgBase[key] ? 'Remove at Save All' : 'Clear'}</button>
+        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1" title="${_wgBase[key] ? 'Nothing happens yet: the cell goes dashed, and the next Save All removes it (you can Discard unsaved before then). Good for several removals at once.' : 'Undo this tap'}">${_wgBase[key] ? '⏳ Queue removal for Save All' : 'Clear'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="wgcCancel" style="flex:1">Cancel</button>
       </div>
     </div>`;
