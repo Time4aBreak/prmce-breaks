@@ -2292,7 +2292,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-518'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-519'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15706,6 +15706,7 @@ function _buildImportRowsHTML(batch){
       : '';
 
     const borderColor = e.isFlagged ? ';border-color:#fb8c00' : (e.isPartial ? ';border-color:#ffb300' : '');
+    const keptBadge = e._keep ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Saved units, not re-dealt. Change a chip or tap Re-suggest to change it.">saved · unchanged</span>` : ''; // Build 519
 
     // Action row depends on flagged-unresolved status.
     const actionRow = isFlaggedUnresolved
@@ -15723,6 +15724,7 @@ function _buildImportRowsHTML(batch){
         <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>${(() => { const h = Number(e.hours || 0); if(!(e.startTime && h > 0 && h < 12)) return ''; const st = String(e.startTime).replace(/[:.]/g,'').padStart(4,'0'); return `<span style="background:#fff3e0;border:1px solid #ffb74d;color:#bf360c;border-radius:99px;padding:1px 8px;font-size:.72rem;font-weight:600;white-space:nowrap">⏱ ${fmt12(st)} · ${h}h</span>`; })()}
         ${flaggedBadge}
         ${partialBadge}
+        ${keptBadge}
         <div style="display:flex;gap:5px;margin-left:auto">
           <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}"
             style="padding:3px 10px;font-size:.75rem;cursor:pointer"
@@ -16022,11 +16024,17 @@ async function renderImportRows(entries, forceReplace = false){
     const nurses = byDateShift[key] || [];
     const partials = partialsByDateShift[key] || [];
     const [date, shift] = key.split('|');
+    // Build 519: kept (untouched, saved) entries on this date+shift are LOCKS — dealt around, units returned
+    // verbatim, wing history untouched, and not added to the overlay (the base counts already hold them).
+    const _kept = {};
+    entriesToProcess.forEach(e => { if(e._keep && e._savedUnits && e.date === date && e.shift === shift) _kept[e.name] = e._savedUnits.slice(); });
+    const _keptUnits = [...new Set(Object.values(_kept).flat())];
     // Full nurses through normal suggester
     if(nurses.length){
-      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch);
+      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch, Object.keys(_kept).length ? _kept : null);
       for(const [name, slots] of Object.entries(suggestions)){
         allSuggestions[`${name}|${date}|${shift}`] = slots;
+        if(_kept[name]) continue;
         slots.forEach(slot => {
           batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
         });
@@ -16034,8 +16042,9 @@ async function renderImportRows(entries, forceReplace = false){
     }
     // Partials: pick top-N under-covered units (sees overlay from full BNs above)
     for(const pe of partials){
+      if(pe._keep && pe._savedUnits){ allSuggestions[`${pe.name}|${date}|${shift}`] = pe._savedUnits.slice(); continue; } // Build 519
       const _partner = pe._splitPartnerKey && allSuggestions[pe._splitPartnerKey]; // Build 449: same units on both halves
-      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
+      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay, _keptUnits);
       allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
       // Persist wing history so the partial's coverage feeds back into their
       // own per-BN fairness next time they appear in the suggester.
@@ -16506,6 +16515,7 @@ async function clearAllImportSels(){
 async function resuggestAll(){
   const batch = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
   if(!batch.length){ toast('No entries to re-suggest.', true); return; }
+  batch.forEach(e => { if(e && e._keep){ delete e._keep; delete e._savedUnits; } }); // Build 519: "re-deal the week" means everyone
 
   clearCoverageCountsCache();
   Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
@@ -16853,7 +16863,9 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   // 30 — the batch still HOLDS a card ✕ Discard marked (isDiscarded; the mirror's
   // discard splices, the card's marks). Count what the save loop below will
   // actually write: not discarded, and holding units.
-  const _n389 = _currentImportEntries.filter((e, i) => !e.isDiscarded && (importUnitSel[i] || []).length > 0).length;
+  // Build 519: a kept entry whose chips still equal its saved units is not written (nothing changed)
+  const _keptSame = (e, i) => { if(!e || !e._keep || !e._savedUnits) return false; const a = [...new Set((importUnitSel[i] || []).flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]))].sort().join(), b = [...new Set(e._savedUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]))].sort().join(); return a === b; };
+  const _n389 = _currentImportEntries.filter((e, i) => !e.isDiscarded && (importUnitSel[i] || []).length > 0 && !_keptSame(e, i)).length;
   // Build 491: the dialog is reached only AFTER this confirm was answered once — don't ask the same question twice
   if(_n389 && fromGate !== true && !confirm(`Save ${_n389} staged assignment${_n389 === 1 ? '' : 's'} to the live schedule?`)) return;
   const btns = document.querySelectorAll('.accept-all-btn');
@@ -16912,8 +16924,10 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   const records = [];
   const indices = [];
 
+  let keptN = 0; // Build 519
   for(let i = 0; i < entriesToProcess.length; i++){
     if(entriesToProcess[i].isDiscarded) continue;
+    if(_keptSame(entriesToProcess[i], i)){ keptN++; continue; } // Build 519: unchanged saved shift — leave it be
     const rawUnits = importUnitSel[i] || [];
     if(!rawUnits.length) continue;
     const units = rawUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]);
@@ -16928,15 +16942,15 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     indices.push(i);
   }
 
-  const skipped = entriesToProcess.length - indices.length;
+  const skipped = entriesToProcess.length - indices.length - keptN; // Build 519: kept ones are not "skipped"
   if(!records.length){
     // Build 503 (Tomas): a grid review with nothing to save but shifts to remove (the week's last cell cleared).
     // Only a grid review sets _wgDeleteIds, and only the grid can review an empty batch. One confirm, then the
     // same delete + cleanup the normal path runs, under the overlay, then the grid re-reads.
     const _del = (window._wgDeleteIds || []).slice(), _delRows = (window._wgDeleteRows || []).filter(r => _del.includes(r.Id));
-    if(_del.length && entriesToProcess.length === 0 && _delRows.length === _del.length){
+    if(_del.length && _delRows.length === _del.length && entriesToProcess.every(e => e._keep || e.isDiscarded)){ // Build 519: kept entries may sit in the batch
       const n = _del.length, what = `${n} saved shift${n === 1 ? '' : 's'}`;
-      if(!confirm(`Remove ${what} from the live schedule? Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); return; }
+      if(!confirm(`Remove ${what} from the live schedule? ${keptN ? `The ${keptN} unchanged shift${keptN === 1 ? '' : 's'} stay${keptN === 1 ? 's' : ''} as saved. ` : ''}Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); return; }
       showBusy(`Removing ${what}…`);
       try {
         await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(_del)) });
@@ -16962,7 +16976,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       b.style.opacity = '';
       b.style.cursor = '';
     });
-    if(status) status.textContent = `Nothing to save (${skipped} skipped)`;
+    if(status) status.textContent = keptN && !skipped ? `Nothing changed — ${keptN} shift${keptN === 1 ? '' : 's'} kept as saved` : `Nothing to save (${skipped} skipped)`;
     // Toast so the user gets visible feedback. The status element below the
     // import card is easy to miss when the user is scrolled near the buttons.
     toast(skipped > 0
@@ -22046,6 +22060,10 @@ async function wgReview(){
   // disabled, so that removal could never be saved from the grid. Now an empty batch reviews (no cards, just
   // the "will also remove" note) and Save All carries out the removals.
   const keys = Object.keys(_wgCells); if(!keys.length && !Object.keys(_wgEdits).length) return;
+  // Build 519 (step 1 of "the grid is the master"): a saved cell you did NOT touch keeps its units — Review
+  // deals the new/changed cells AROUND it (the dealer's 300 lock overlay) instead of re-dealing the week, and
+  // Save All skips it. Re-suggest All is still the explicit "re-deal this week".
+  const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.date}|${r.shift}`] = r.units; });
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
     let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
@@ -22056,6 +22074,10 @@ async function wgReview(){
       const _pc = _covCfg().partial;
       const _covMax = Math.max(...(_covCfg()[e.shift === 'Day' ? 'Day' : 'Noc'].byTeam));
       e.partialUnitCount = Math.min(Math.max(1, Math.ceil(h / _pc.perHours) * _pc.units), Math.max(1, _covMax));
+    }
+    if(_wgBase[k] && !Object.prototype.hasOwnProperty.call(_wgEdits, k)){ // Build 519: untouched saved cell
+      const saved = _savedByKey[`${name}|${date}|${c.shift}`] || _savedByKey[`${name}|${_wgAddDays(date, -1)}|${c.shift}`] || null;
+      if(saved && saved.length){ e._keep = true; e._savedUnits = saved.slice(); }
     }
     return e;
   }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
