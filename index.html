@@ -741,11 +741,14 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- Assign coverage — collapsible -->
-    <div class="card" id="assignFormCard">
-      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleAssignForm()">
+    <!-- Build 523 (step 3 of the master grid): the Edit form is no longer a card on the page. It is docked here
+         HIDDEN and lifted into an overlay by editAssign() (the grid's Units, the list's Edit); Cancel edit, a
+         successful save, and Remove dock it back. Every field id is unchanged — nothing inside the form moved. -->
+    <div id="assignFormDock" style="display:none"></div>
+    <div class="card" id="assignFormCard" style="display:none">
+      <div style="display:flex;align-items:center;justify-content:space-between">
         <div class="card-label" style="margin:0">Edit Assignment</div>
-        <span id="assignChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="cancelEditMode();resetManualCard();_assignModalClose()" title="Close without saving">✕</button>
       </div>
       <div id="assignFormBody" style="margin-top:12px;display:none">
 
@@ -780,10 +783,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             </div>
           </div>
           <div class="field" id="aPartTimes" style="display:none;flex:0 0 auto;min-width:0">
-            <label>Start – Stop</label>
-            <div style="display:flex;gap:8px;align-items:center">
+            <label>Start · for</label>
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <span id="aPartStartHost"></span>
-              <span style="color:var(--muted)">–</span>
+              <span style="color:var(--muted)">for</span>
               <span id="aPartEndHost"></span>
               <span id="aInferredShift" style="font-size:.8rem;font-weight:600;color:var(--muted);white-space:nowrap"></span>
             </div>
@@ -812,7 +815,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
         <div id="editActionRow" style="display:none;gap:8px;margin-bottom:8px">
           <button type="button" class="btn btn-ghost btn-sm" style="flex:1;color:var(--red)" onclick="this.disabled=true;const _l=this.textContent;this.textContent='Checking…';removeAssignmentFromEdit().finally(()=>{this.disabled=false;this.textContent=_l})">🗑 Remove from this shift</button>
-          <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode();resetManualCard()">✕ Cancel edit</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="cancelEditMode();resetManualCard();_assignModalClose()">✕ Cancel edit</button>
         </div>
         <button class="btn btn-primary" style="width:100%" onclick="this.disabled=true;this.textContent='Saving…';saveAssign().finally(()=>{this.disabled=false;this.textContent='Save Assignment'})">Save Assignment</button>
       </div>
@@ -2292,7 +2295,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-522'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-525'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5606,9 +5609,9 @@ function init(){
   // Admin unit check grid
   // Build 448: the Edit card's clocks are five-minute pickers
   { const sh = document.getElementById('aPartStartHost'), eh = document.getElementById('aPartEndHost');
-    if(sh) sh.innerHTML = _tpHtml('aPartStart', '20:00', 'oninput="_aInferShift()"');
-    if(eh) eh.innerHTML = _tpHtml('aPartEnd', '00:00', 'oninput="_aInferShift()"');
-    _tpSync('aPartStart'); _tpSync('aPartEnd'); }
+    if(sh) sh.innerHTML = _tpHtml('aPartStart', '20:00', 'oninput="_aDurToEnd();_aInferShift()"');
+    if(eh) eh.innerHTML = _durHtml('aPartDur', '', 'oninput="_aDurToEnd();_aInferShift()"') + '<input type="hidden" id="aPartEnd" value="">'; // Build 525: the stop is derived
+    _tpSync('aPartStart'); _durSync('aPartDur'); _aDurToEnd(); }
   const ag = document.getElementById('aUnits');
   ag.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`); // Build 444: wing rows, as on Settings
   [..._WING_ROW_A, ..._WING_ROW_D].forEach(u=>{
@@ -10264,6 +10267,33 @@ function _tpHtml(id, value, extraAttrs){
     + `<input type="hidden" id="${id}" value="${value || ''}" ${extraAttrs || ''}></span>`
     ;
 }
+// Build 525 (Tomas): a partial is a START and a DURATION ("9 AM for 4 hours"), not a start and a stop. The stop
+// is derived where the older code still reads one. Hours 0–11, minutes in quarters; the hidden input holds
+// decimal hours (the stored shape, 2 decimals).
+function _durHtml(id, hoursValue, extraAttrs){
+  const sel = 'padding:8px 6px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit';
+  const hrs = Array.from({ length: 12 }, (_, i) => i).map(h => `<option value="${h}">${h}</option>`).join('');
+  const mins = ['00', '15', '30', '45'].map(m => `<option value="${m}">${m}</option>`).join('');
+  return `<span class="dur" id="dur-${id}" style="display:inline-flex;align-items:center;gap:4px">`
+    + `<select class="dur-h" onchange="_durCompose('${id}')" style="${sel}"><option value=""></option>${hrs}</select><span style="color:var(--muted);font-size:.8rem">h</span>`
+    + `<select class="dur-m" onchange="_durCompose('${id}')" style="${sel}">${mins}</select><span style="color:var(--muted);font-size:.8rem">min</span>`
+    + `<input type="hidden" id="${id}" value="${hoursValue || ''}" ${extraAttrs || ''}></span>`;
+}
+function _durCompose(id){
+  const wrap = document.getElementById('dur-' + id), hid = document.getElementById(id); if(!wrap || !hid) return;
+  const h = wrap.querySelector('.dur-h').value, m = wrap.querySelector('.dur-m').value;
+  if(h === ''){ hid.value = ''; hid.dispatchEvent(new Event('input', { bubbles: true })); return; }
+  hid.value = String(Math.round((parseInt(h, 10) + parseInt(m, 10) / 60) * 100) / 100);
+  hid.dataset.userSet = '1';
+  hid.dispatchEvent(new Event('input', { bubbles: true }));
+}
+function _durSync(id){
+  const wrap = document.getElementById('dur-' + id), hid = document.getElementById(id); if(!wrap || !hid) return;
+  const v = Number(hid.value); const H = wrap.querySelector('.dur-h'), M = wrap.querySelector('.dur-m');
+  if(!(v > 0)){ H.value = ''; M.value = '00'; return; }
+  const total = Math.round(v * 4) / 4; // to the quarter hour
+  H.value = String(Math.min(11, Math.floor(total))); M.value = String(Math.round((total - Math.floor(total)) * 60)).padStart(2, '0');
+}
 function _tpCompose(id){
   const wrap = document.getElementById('tp-' + id), hid = document.getElementById(id); if(!wrap || !hid) return;
   const h = wrap.querySelector('.tp-h').value, m = wrap.querySelector('.tp-m').value, ap = wrap.querySelector('.tp-ap').value;
@@ -10315,6 +10345,16 @@ function splitStraddlingPartial(startHHMM, hours, calDate){
   };
   const A = mk(s0, cut), B = mk(cut, e0);
   return (A && B) ? [A, B] : null;
+}
+// Build 525: stop = start + duration, written into the hidden aPartEnd every reader still uses
+function _aDurToEnd(){
+  const s = document.getElementById('aPartStart'), d = document.getElementById('aPartDur'), e = document.getElementById('aPartEnd');
+  if(!s || !d || !e) return;
+  const hrs = Number(d.value);
+  if(!/^\d{2}:\d{2}$/.test(s.value) || !(hrs > 0)){ e.value = ''; return; }
+  const m = (parseInt(s.value.slice(0, 2), 10) * 60 + parseInt(s.value.slice(3), 10) + Math.round(hrs * 60)) % 1440;
+  e.value = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+  if(d.dataset.userSet) e.dataset.userSet = '1';
 }
 function _aPartialHours(){
   const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
@@ -10379,7 +10419,7 @@ function cancelEditMode(){
 function resetManualCard(){
   // Build 434: the partial time inputs' user-set marks clear with the card, so
   // the 375 courtesy may fill them again for the next assignment.
-  ['aPartStart','aPartEnd'].forEach(id => { const el = document.getElementById(id); if(el) delete el.dataset.userSet; });
+  ['aPartStart','aPartEnd','aPartDur'].forEach(id => { const el = document.getElementById(id); if(el) delete el.dataset.userSet; });
   S.aUnits = [];
   S.editingAssignId = null;
   const t = document.getElementById('aNurseText'); if(t) t.value = '';
@@ -10489,7 +10529,7 @@ async function removeAssignmentFromEdit(){
     return;
   }
   const removed = await removeAssignment(_editSource.ids[0]);
-  if(removed){ cancelEditMode(); resetManualCard(); } // Build 407: the row is gone — the card shouldn't still show it
+  if(removed){ cancelEditMode(); resetManualCard(); _assignModalClose(); } // Build 407: the row is gone — the card shouldn't still show it; 523: and the form closes
 }
 
 async function editAssign(id){
@@ -10539,12 +10579,10 @@ async function editAssign(id){
       const _hr = Number(s.Hours) || 0;
       if(/^\d{4}$/.test(_st) && _hr > 0 && _hr < 12){
         setAPartial(true);
-        const sEl = document.getElementById('aPartStart'), eEl = document.getElementById('aPartEnd');
+        const sEl = document.getElementById('aPartStart'), dEl = document.getElementById('aPartDur');
         if(sEl){ sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`; _tpSync('aPartStart'); }
-        if(eEl){
-          const em = ((parseInt(_st.slice(0,2), 10) * 60 + parseInt(_st.slice(2), 10)) + Math.round(_hr * 60)) % 1440;
-          eEl.value = `${String(Math.floor(em / 60)).padStart(2,'0')}:${String(em % 60).padStart(2,'0')}`; _tpSync('aPartEnd');
-        }
+        if(dEl){ dEl.value = String(_hr); _durSync('aPartDur'); } // Build 525: the row's Hours, as saved
+        _aDurToEnd();
       } else setAPartial(false); }
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
@@ -10585,11 +10623,7 @@ async function editAssign(id){
     // Store the ID being edited so saveAssign patches instead of posting new
     S.editingAssignId = id;
 
-    // Scroll to assign form card and expand it if collapsed
-    const assignCard = document.getElementById('assignFormCard');
-    if(assignCard) assignCard.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    const body = document.getElementById('assignFormBody');
-    if(body && body.style.display === 'none') toggleAssignForm();
+    _assignModalOpen(); // Build 523: the form opens over the page instead of scrolling to a card
     toast(`Editing ${firstName(s.BreakNurseName)} — modify units and click Save Assignment`);
   } catch(e){
     toast(e.message, true);
@@ -12412,14 +12446,34 @@ function toggleImportInput(){
   body.style.display = open ? 'none' : 'block';
   if(chev) chev.textContent = open ? '▼' : '▲';
 }
-function toggleAssignForm(){
+function toggleAssignForm(){ // Build 523: the form has no collapsed state any more — open means "in the overlay"
   const body = document.getElementById('assignFormBody');
-  const chev = document.getElementById('assignChevron');
-  if(!body) return;
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : 'block';
-  if(chev) chev.textContent = open ? '▼' : '▲';
+  if(body) body.style.display = 'block';
 }
+// Build 523: lift the docked form card into a full-screen overlay (the DOM node MOVES, so every id and listener
+// inside it is untouched); dock it back on close. The overlay sits above the busy overlay's siblings but under
+// the app's real dialogs, which are z 10000+.
+function _assignModalOpen(){
+  const card = document.getElementById('assignFormCard'); if(!card) return;
+  let ov = document.getElementById('assignModal');
+  if(!ov){
+    ov = document.createElement('div'); ov.id = 'assignModal';
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9990;background:rgba(15,40,40,.55);display:flex;align-items:flex-start;justify-content:center;overflow-y:auto;padding:max(16px,env(safe-area-inset-top)) 12px 24px';
+    ov.addEventListener('click', e => { if(e.target === ov){ cancelEditMode(); resetManualCard(); _assignModalClose(); } });
+    document.body.appendChild(ov);
+  }
+  card.style.display = ''; card.style.width = '100%'; card.style.maxWidth = '820px'; card.style.margin = '0';
+  ov.appendChild(card); ov.style.display = 'flex';
+  const body = document.getElementById('assignFormBody'); if(body) body.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+function _assignModalClose(){
+  const card = document.getElementById('assignFormCard'), dock = document.getElementById('assignFormDock'), ov = document.getElementById('assignModal');
+  if(card && dock){ card.style.display = 'none'; dock.parentNode.insertBefore(card, dock.nextSibling); }
+  if(ov) ov.style.display = 'none';
+  document.body.style.overflow = '';
+}
+document.addEventListener('keydown', e => { const ov = document.getElementById('assignModal'); if(e.key === 'Escape' && ov && ov.style.display === 'flex'){ cancelEditMode(); resetManualCard(); _assignModalClose(); } });
 
 // Collapse/expand the Breaker's Breaks card (defaults to collapsed).
 // Card body contains the slot list, submit bar, start time, and action
@@ -13345,6 +13399,8 @@ async function saveAssign(){
     // dropdown still shows the just-saved BN, and any later field change
     // triggers _loadExistingAssignmentFor which reloads their units.
     resetManualCard(); // Build 407: the same reset the ✕ Clear button runs
+    _assignModalClose(); // Build 523: saved — the form closes
+    try { if(_wgWeek) wgSetWeek(_wgWeek); } catch(e){} // Build 523: the grid re-reads so kept cells carry the NEW units (519)
     // Auto-apply BN default template and calculate rotation — await so slots load after rotation is ready
     // Warm BN default from BNState before using it
     await warmDefaultTemplate(nurse, shift);
@@ -22002,7 +22058,6 @@ function _wgChooser(name, date){
   const d = new Date(date + 'T12:00:00');
   const isPart = cur.startTime && Number(cur.hours) > 0 && Number(cur.hours) < 12;
   const st = isPart ? `${String(cur.startTime).padStart(4,'0').slice(0,2)}:${String(cur.startTime).padStart(4,'0').slice(2)}` : '';
-  const en = isPart ? (() => { const m = parseInt(st.slice(0,2),10)*60 + parseInt(st.slice(3),10) + Math.round(Number(cur.hours)*60); const mm = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; })() : '';
   // Build 495 (Tomas): the bottom-left button reads "Remove shift" on a SAVED shift (it comes off the schedule at the
   // next Save All) and "Clear" on a tap not yet saved — the app's two verbs, kept apart. Behaviour is unchanged.
   // Build 521 (step 2 of the master grid): a SAVED cell also offers the list's actions, reached from the cell —
@@ -22023,7 +22078,7 @@ function _wgChooser(name, date){
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">–</span>${_tpHtml('wgcEnd', en)}
+          ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">for</span>${_durHtml('wgcDur', isPart ? cur.hours : '')}
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
@@ -22041,17 +22096,14 @@ function _wgChooser(name, date){
       </div>
     </div>`;
   document.body.appendChild(wrap);
-  _tpSync('wgcStart'); _tpSync('wgcEnd'); // Build 448
+  _tpSync('wgcStart'); _durSync('wgcDur'); // Build 448; 525: duration
   const close = () => wrap.remove();
   const set = c => { _wgEdit(key, c); close(); };
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
   wrap.querySelector('#wgcNoc').onclick = () => set({ shift: 'Noc', startTime: '', hours: '' });
   wrap.querySelector('#wgcPart').onclick = () => {
-    const a = wrap.querySelector('#wgcStart').value, b = wrap.querySelector('#wgcEnd').value;
-    if(!a || !b){ toast('A partial needs both a start and an end time', true); return; }
-    const toM = v => { const [h, m] = v.split(':').map(Number); return h * 60 + m; };
-    let mins = toM(b) - toM(a); if(mins <= 0) mins += 1440;
-    const hours = Math.round(mins / 0.6) / 100; // Build 446
+    const a = wrap.querySelector('#wgcStart').value, hours = Number(wrap.querySelector('#wgcDur').value); // Build 525: start + duration
+    if(!a || !(hours > 0)){ toast('A partial needs a start time and how long it runs', true); return; }
     if(hours >= 12){ toast('That is a full shift — use Day or Noc', true); return; }
     const inf = inferPartialShift(a.replace(':', ''), hours); // Build 448: by grid overlap
     if(inf && inf.daySlots === 0 && inf.nocSlots === 0){ toast('No break slots fall inside these times', true); return; }
@@ -22618,9 +22670,10 @@ async function onAssignContextChange(){
       m = Math.ceil(m/5)*5; // next 5-min boundary
       const hh = String(Math.floor((m/60))%24).padStart(2,'0'), mm = String(m%60).padStart(2,'0');
       setAPartial(true, false);
-      const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
+      const s = document.getElementById('aPartStart'), d = document.getElementById('aPartDur');
       if(s && !s.dataset.userSet){ s.value = `${hh}:${mm}`; _tpSync('aPartStart'); }
-      if(e && !e.dataset.userSet){ e.value = sh === 'Day' ? '20:30' : '08:30'; _tpSync('aPartEnd'); }
+      if(d && !d.dataset.userSet){ const endM = sh === 'Day' ? 20 * 60 + 30 : 8 * 60 + 30; const dur = ((endM - m) % 1440 + 1440) % 1440; d.value = String(Math.round(Math.min(11.75, Math.max(0.25, dur / 60)) * 4) / 4); _durSync('aPartDur'); } // Build 525: "until shift end", as before, but as a duration
+      _aDurToEnd();
     } else if(!window._aPartialTouched && (typeof _aPartial !== 'undefined') && _aPartial
               && !(typeof _editSource !== 'undefined' && _editSource)){
       // Build 408 (Tomas, Sep 7): WITHDRAW the courtesy when its condition
