@@ -2295,7 +2295,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-525'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-526'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21915,7 +21915,8 @@ async function _wgFetchBase(wk){
     if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
     if(d < wk || d > end) return;
     if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), shift: r.ShiftType, units: Array.isArray(u) ? u : [] }); } // Build 492
-    (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '' });
+    let _cu = []; try { _cu = JSON.parse(r.Units || '[]'); } catch(e){} // Build 526: the cell shows its units
+    (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [] });
   });
   const cells = {}, former = {};
   // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
@@ -21926,7 +21927,7 @@ async function _wgFetchBase(wk){
       const toM = t => parseInt(t.slice(0, 2), 10) * 60 + parseInt(t.slice(2), 10);
       const endM = c => (toM(c.startTime) + Math.round(Number(c.hours) * 60)) % 1440;
       const [A, B] = endM(parts[0]) === toM(parts[1].startTime) ? [parts[0], parts[1]] : (endM(parts[1]) === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
-      if(A){ into[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100) }; return; }
+      if(A){ into[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100), units: A.units || [] }; return; }
     }
     into[k] = list[list.length - 1];
   });
@@ -21989,6 +21990,16 @@ function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes
   _wgEdits = {}; _wgSaveDraft();
   wgSetWeek(_wgWeek); // re-reads the sheet
 }
+// Build 526 (Tomas): a SAVED cell shows the units it covers — the colour already says Day or Noc. A partial keeps its
+// window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
+function _wgCellHtml(c){
+  if(!c) return '<span style="opacity:.35">+</span>';
+  const h = Number(c.hours || 0), part = c.startTime && h > 0 && h < 12;
+  const units = Array.isArray(c.units) ? c.units : [];
+  const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (units.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
+  const body = units.length ? `<div style="font-size:.7rem;font-weight:600;letter-spacing:.01em;line-height:1.3">${units.join('·')}</div>` : '';
+  return head + body;
+}
 function _wgCellLabel(c){
   if(!c) return '';
   const h = Number(c.hours || 0);
@@ -22021,11 +22032,11 @@ function wgRender(){
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:4px 6px;line-height:1.25">${c ? _wgCellLabel(c) : '<span style="opacity:.35">+</span>'}</button>`;
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25">${_wgCellHtml(c)}</button>`;
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
   const formerNames = [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
-  const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:4px 6px;line-height:1.25;opacity:.8">${_wgCellLabel(c)}</div>` : '<div></div>'; };
+  const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c)}</div></div>` : '<div></div>'; };
   const today = localDate(new Date());
   // Build 505 (Tomas): the name column stays put when the grid scrolls sideways (narrow window / phone); the
   // box-shadow paints the 6px column gap so scrolled cells don't peek through it.
