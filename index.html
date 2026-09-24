@@ -74,6 +74,9 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
 /* ── Unit grid ── */
 .unit-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(68px,1fr));gap:8px}
+.wing-rows{display:flex;flex-direction:column;gap:8px} /* Build 518 */
+.wing-row{display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px}
+@media (max-width:520px){ .wing-rows{gap:14px} .wing-row{grid-template-columns:repeat(4,minmax(0,1fr))} }
 .unit-btn{padding:10px 4px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg);font-family:'DM Mono',monospace;font-size:.875rem;font-weight:500;color:var(--muted);cursor:pointer;text-align:center;transition:all .15s}
 .unit-btn:hover{border-color:var(--teal);color:var(--teal);background:var(--teal-lt)}
 .unit-btn.cov{background:var(--cal-accent-lt,var(--bg));border-color:var(--cal-accent,var(--border));color:var(--cal-accent,var(--muted));font-weight:800} /* Build 377: covered = the calendar's own fill+border */
@@ -1559,8 +1562,10 @@ function _acuityCapOn(shift){ return !!_acuityCfg().cap[shift]; }
 const _WING_ROW_A = ['3A','4A','5A','6A','7A','3C','4C'];
 const _WING_ROW_D = ['6N','7N','8N','8S','9N','9S','10N','10S'];
 function _wingRowsHtml(chip){
-  const row = us => `<div style="display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:8px">${us.map(chip).join('')}${'<div></div>'.repeat(8 - us.length)}</div>`;
-  return `<div style="display:flex;flex-direction:column;gap:8px">${row(_WING_ROW_A)}${row(_WING_ROW_D)}</div>`;
+  // Build 518 (Tomas): the row is a class, not inline — below 520px each wing runs four across (A/C 4+3, D 4+4)
+  // so a thumb has a real target, and D still never shares a row with A. Every screen that uses this changes together.
+  const row = us => `<div class="wing-row">${us.map(chip).join('')}${'<div></div>'.repeat(8 - us.length)}</div>`;
+  return `<div class="wing-rows">${row(_WING_ROW_A)}${row(_WING_ROW_D)}</div>`;
 }
 function initAcuityCard(){
   const body = document.getElementById('acuityBody'); if(!body) return;
@@ -2287,7 +2292,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-517'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-518'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
