@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-23-514'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-515'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5701,7 +5701,7 @@ function init(){
     if(!t || (t.tagName !== 'INPUT' && t.tagName !== 'SELECT')) return; // Build 363: the opens dropdowns count as edits
     const rb = document.getElementById('rampCfgBody');
     if(rb && rb.contains(t)){
-      const dirty = [...rb.querySelectorAll('input')].some(i => i.dataset.r !== undefined && i.value !== i.dataset.r);
+      const dirty = [...rb.querySelectorAll('input, select')].some(i => i.dataset.r !== undefined && i.value !== i.dataset.r); // Build 515 (Tomas): the dropdowns count — 363 wired them into the listener and the refresh guard but not this
       const el = document.getElementById('rampDirtyDot');
       if(el) el.style.display = dirty ? '' : 'none';
       // Build 367: the "= max N" readouts recompute as you type.
