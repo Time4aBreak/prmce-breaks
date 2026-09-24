@@ -2292,7 +2292,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-520'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-521'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22005,6 +22005,13 @@ function _wgChooser(name, date){
   const en = isPart ? (() => { const m = parseInt(st.slice(0,2),10)*60 + parseInt(st.slice(3),10) + Math.round(Number(cur.hours)*60); const mm = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(mm/60)).padStart(2,'0')}:${String(mm%60).padStart(2,'0')}`; })() : '';
   // Build 495 (Tomas): the bottom-left button reads "Remove shift" on a SAVED shift (it comes off the schedule at the
   // next Save All) and "Clear" on a tap not yet saved — the app's two verbs, kept apart. Behaviour is unchanged.
+  // Build 521 (step 2 of the master grid): a SAVED cell also offers the list's actions, reached from the cell —
+  // Units (the existing Edit form), Remove now (removeAssignment, coverage dialog), Unavailable (the existing
+  // flow, only while the list would offer it). The queued removal is now labelled "Remove at Save All".
+  const _savedRow = (() => { if(!_wgBase[key]) return null; const sh = (cur && cur.shift) || 'Day';
+    const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.date === date || r.date === _wgAddDays(date, -1))).sort((a, b) => a.date.localeCompare(b.date));
+    return rows[0] || null; })();
+  const _canUnavail = !!_savedRow && _savedRow.date >= shiftDate(_savedRow.shift) && !shiftIsOver(_savedRow.date, _savedRow.shift);
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
@@ -22020,8 +22027,16 @@ function _wgChooser(name, date){
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
+      ${_savedRow ? `<div style="border-top:1px solid var(--border);margin:2px 0 10px;padding-top:10px">
+        <div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Saved shift</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button type="button" class="btn btn-ghost btn-sm" id="wgcUnits" style="flex:1" title="Open this shift's units in the Edit form">✏️ Units</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="wgcRemoveNow" style="flex:1;color:#c0392b" title="Remove it now — claimed breaks go through the coverage dialog">🗑 Remove now</button>
+          ${_canUnavail ? `<button type="button" class="btn btn-ghost btn-sm" id="wgcUnavail" style="flex:1;color:#c0392b" title="Start the coverage flow for this shift">🏠 Unavailable</button>` : ''}
+        </div>
+      </div>` : ''}
       <div style="display:flex;gap:8px">
-        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">${_wgBase[key] ? 'Remove shift' : 'Clear'}</button>
+        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1">${_wgBase[key] ? 'Remove at Save All' : 'Clear'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="wgcCancel" style="flex:1">Cancel</button>
       </div>
     </div>`;
@@ -22044,6 +22059,11 @@ function _wgChooser(name, date){
   };
   wrap.querySelector('#wgcClear').onclick = () => set(null);
   wrap.querySelector('#wgcCancel').onclick = close;
+  if(_savedRow){ // Build 521
+    const u = wrap.querySelector('#wgcUnits'); if(u) u.onclick = () => { close(); editAssign(_savedRow.Id); };
+    const r = wrap.querySelector('#wgcRemoveNow'); if(r) r.onclick = () => { close(); removeAssignment(_savedRow.Id); };
+    const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = () => { close(); markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); };
+  }
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
 async function wgReview(){
