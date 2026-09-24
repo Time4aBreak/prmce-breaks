@@ -2292,7 +2292,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-519'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-520'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15645,7 +15645,7 @@ async function restoreLastImport(){
           const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
-        }).join('')}
+        })}
       </div>
       <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
       <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
@@ -15749,7 +15749,7 @@ function _buildImportRowsHTML(batch){
           const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
           const dimStyle = isClosed ? 'opacity:.45' : '';
           return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
-        }).join('')}
+        })}
       </div>
       ${actionRow}
     </div>`;
