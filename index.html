@@ -669,6 +669,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <span style="flex:1"></span>
           <button type="button" id="wgClearBtn" class="btn btn-ghost btn-sm" onclick="wgClearWeek()" disabled style="opacity:.5">↺ Discard unsaved</button>
         </div>
+        <div id="wgFilter" style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px"></div><!-- Build 529: nurse filter (a view, not an edit) -->
         <div id="wgGrid" style="overflow-x:auto"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
           <span style="font-size:.76rem;color:var(--muted);line-height:1.4">Tap a cell once to schedule a shift. Tap again for more options.</span>
@@ -2295,7 +2296,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-528'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-529'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21871,6 +21872,18 @@ let _wgBase = {};            // Build 488: the week as saved on the sheet
 let _wgEdits = {};           // Build 488: unsaved changes — key → cell | null (cleared)
 let _wgFormer = {};          // Build 490: saved shifts of nurses no longer on the roster — display only
 let _wgBaseRows = [];        // Build 492: the sheet rows behind _wgBase — {Id, name, date, shift, units}
+// Build 529 (Tomas): the list's nurse filter, on the grid. A VIEW only — the count, Review, Save All and the removal
+// set still see every cell. Remembered per device. Former nurses' rows hide while a filter is on.
+let _wgFilter = new Set(); try { const f = JSON.parse(localStorage.getItem('bnWeeklyGridFilter') || '[]'); if(Array.isArray(f)) _wgFilter = new Set(f); } catch(e){}
+function _wgSaveFilter(){ try { localStorage.setItem('bnWeeklyGridFilter', JSON.stringify([..._wgFilter])); } catch(e){} }
+function wgToggleFilter(name){ if(_wgFilter.has(name)) _wgFilter.delete(name); else _wgFilter.add(name); _wgSaveFilter(); wgRender(); }
+function wgClearFilter(){ _wgFilter.clear(); _wgSaveFilter(); wgRender(); }
+function _wgRenderFilter(names){
+  const row = document.getElementById('wgFilter'); if(!row) return;
+  const valid = new Set(names); [..._wgFilter].forEach(n => { if(!valid.has(n)) _wgFilter.delete(n); });
+  const pills = names.map(n => `<button type="button" class="bn-pill${_wgFilter.has(n) ? ' active' : ''}" onclick="wgToggleFilter('${n.replace(/'/g, "\\'")}')">${escHTML(bnDisplayName(n))}</button>`).join('');
+  row.innerHTML = `<span style="font-size:.74rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:2px">Filter:</span>${pills}${_wgFilter.size ? '<button type="button" class="bn-pill" onclick="wgClearFilter()" style="font-style:italic">Clear</button>' : ''}`;
+}
 let _wgBaseState = 'loading'; // 'loading' | 'ok' | 'failed'
 let _wgLoadSeq = 0;          // a slow read for a week you already left must not paint
 const _WG_DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -22016,9 +22029,11 @@ function _wgCellLabel(c){
 }
 function wgRender(){
   const host = document.getElementById('wgGrid'); if(!host || !_wgWeek) return;
-  const dates = _wgDates(); const names = _wgRosterNames();
+  const dates = _wgDates(); const allNames = _wgRosterNames();
+  _wgRenderFilter(allNames); // Build 529
+  const names = _wgFilter.size ? allNames.filter(n => _wgFilter.has(n)) : allNames;
   const end = dates[6];
-  if(!names.length){ host.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses on the roster yet — add them on the Break Nurses card in Settings.</div>'; return; }
+  if(!allNames.length){ host.innerHTML = '<div class="empty" style="padding:10px 0">No break nurses on the roster yet — add them on the Break Nurses card in Settings.</div>'; return; } // Build 529: the roster, not the filtered view
   if(_wgBaseState !== 'ok'){ // Build 488: no grid until the week has been read — never blank-as-truth
     host.innerHTML = _wgBaseState === 'failed'
       ? '<div class="empty" style="padding:14px 0">Couldn\'t read this week\'s schedule. <button type="button" class="btn btn-ghost btn-sm" onclick="wgSetWeek(_wgWeek)">Try again</button></div>'
@@ -22039,7 +22054,7 @@ function wgRender(){
     return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25">${_wgCellHtml(c, d)}</button>`;
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
-  const formerNames = [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
+  const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b))); // Build 529: hidden while a filter is on
   const fcell = (n, d) => { const c = _wgFormer[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
   const today = localDate(new Date());
   // Build 505 (Tomas): the name column stays put when the grid scrolls sideways (narrow window / phone); the
