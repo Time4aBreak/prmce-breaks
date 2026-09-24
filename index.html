@@ -2287,7 +2287,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-516'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-517'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5487,22 +5487,25 @@ function buildStaffUnitGrid(){
   // grayed button. Same UX for 5A closed today as 3C closed today.
   const show3C = is3COpenAt(new Date()) || _3CManuallyAssigned;
   // Build 516 (Tomas): wing rows, as on Settings / Coverage / Edit — A/C on the first row, D on its own.
-  // A unit hidden because it's closed leaves its slot empty rather than pulling the rest across.
+  // Build 517 (Tomas): a unit that isn't being covered shows as a DIMMED pill, not a gap — same as Settings.
+  // It can't be picked; a tap says why.
   ug.className = ''; ug.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`);
+  const _closed = new Set();
   STAFF_UNITS.forEach(u => {
-    if(u === '3C'){ if(!show3C) return; }
-    else { if(!isUnitOpenAt(u, new Date())) return; }
+    const open = u === '3C' ? show3C : isUnitOpenAt(u, new Date());
+    if(!open) _closed.add(u);
     const slot = ug.querySelector(`[data-slot="${u}"]`); if(!slot) return;
     const b = document.createElement('button');
     b.className = 'unit-btn'; b.textContent = u; b.id = `ub-${u}`; b.style.width = '100%';
-    b.onclick = () => pickUnit(u);
+    if(open){ b.onclick = () => pickUnit(u); }
+    else { b.style.opacity = '.45'; b.style.cursor = 'default'; b.title = `${u} isn't being covered today`; b.setAttribute('aria-disabled', 'true'); b.onclick = () => toast(`${u} isn't being covered today`); }
     slot.appendChild(b);
   });
   // Re-apply active state if unit already selected
   if(S.unit){
     const btn = document.getElementById(`ub-${S.unit}`);
-    if(btn) btn.classList.add('active');
-    else { S.unit = null; } // unit was hidden — reset
+    if(btn && !_closed.has(S.unit)) btn.classList.add('active');
+    else { S.unit = null; } // unit is closed (or gone) — reset
   }
   decorateUnitGridCoverage(); // Build 377: tint follows every rebuild
 }
@@ -5515,7 +5518,7 @@ function refreshStaffUnitGridIfChanged(){
   if(!ug) return;
   const show3C = is3COpenAt(new Date()) || _3CManuallyAssigned;
   const want = STAFF_UNITS.filter(u => u === '3C' ? show3C : isUnitOpenAt(u, new Date())).join('|');
-  const have = [...ug.querySelectorAll('.unit-btn')].map(b => b.textContent).join('|');
+  const have = [...ug.querySelectorAll('.unit-btn')].filter(b => b.getAttribute('aria-disabled') !== 'true').map(b => b.textContent).join('|'); // Build 517: dimmed (closed) pills are on screen too — compare the OPEN set only
   if(want !== have) buildStaffUnitGrid();
 }
 
@@ -7490,7 +7493,7 @@ let _unitLockT = null;
 function _setUnitButtonsLocked(on){
   document.querySelectorAll('.unit-btn').forEach(b => {
     b.style.pointerEvents = on ? 'none' : '';
-    b.style.opacity = on ? '.55' : '';
+    b.style.opacity = on ? '.55' : (b.getAttribute('aria-disabled') === 'true' ? '.45' : ''); // Build 517: closed pills stay dimmed when the guard lifts
   });
   // Build 340 (Tomas): the whole Sign Up surface guards during the check —
   // shift toggle, calendar, name card, everything. The grid's dim stays
