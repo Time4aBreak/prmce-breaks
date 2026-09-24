@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-531'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-532'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21885,7 +21885,11 @@ let _wgWeeks = 1; try { const w = parseInt(localStorage.getItem('bnWeeklyGridWee
 let _wgStackData = {}; // week → {cells, former} | 'loading' | 'failed'
 // Build 531: tapping a stacked cell makes that week active AND brings the active grid into view — otherwise the
 // page kept its scroll height while the stack shrank, and landed on whatever card was now at that height.
-function wgGoWeek(wk){ wgSetWeek(wk); const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
+// Build 532: the scroll happens AFTER the active grid has rendered (a flag wgSetWeek honours), instantly — a smooth
+// scroll started while the stack was still "Reading…" got clamped to a short page and landed mid-stack.
+let _wgScrollAfterRender = false;
+function wgGoWeek(wk){ _wgScrollAfterRender = true; wgSetWeek(wk); }
+function _wgScrollToBar(){ const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
 function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
 function _wgRenderWeeksToggle(){ const t = document.getElementById('wgWeeksToggle'); if(!t) return; t.innerHTML = [1, 2, 4].map(n => `<button type="button" class="bn-pill${_wgWeeks === n ? ' active' : ''}" onclick="wgSetWeeks(${n})" style="padding:3px 9px">${n}</button>`).join(''); }
 async function _wgLoadStack(seq){
@@ -22033,6 +22037,7 @@ async function wgSetWeek(ds){
   if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
   else _wgBaseState = 'failed';
   wgRender();
+  if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); } // Build 532
   _wgLoadStack(seq); // Build 530: the weeks after this one
 }
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
