@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-532'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-533'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21888,7 +21888,10 @@ let _wgStackData = {}; // week → {cells, former} | 'loading' | 'failed'
 // Build 532: the scroll happens AFTER the active grid has rendered (a flag wgSetWeek honours), instantly — a smooth
 // scroll started while the stack was still "Reading…" got clamped to a short page and landed mid-stack.
 let _wgScrollAfterRender = false;
-function wgGoWeek(wk){ _wgScrollAfterRender = true; wgSetWeek(wk); }
+// Build 533 (Tomas): the tap acts on the cell once the week is up — the same thing the tap does on the active grid
+// (an empty cell gets a Day shift; a saved cell opens the chooser). Replayed once, after the read.
+let _wgPendingTap = null;
+function wgGoWeek(wk, name, date){ _wgScrollAfterRender = true; _wgPendingTap = (name && date) ? { name, date, wk } : null; return wgSetWeek(wk); }
 function _wgScrollToBar(){ const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
 function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
 function _wgRenderWeeksToggle(){ const t = document.getElementById('wgWeeksToggle'); if(!t) return; t.innerHTML = [1, 2, 4].map(n => `<button type="button" class="bn-pill${_wgWeeks === n ? ' active' : ''}" onclick="wgSetWeeks(${n})" style="padding:3px 9px">${n}</button>`).join(''); }
@@ -21913,7 +21916,7 @@ function _wgRenderStack(){
     if(data === 'failed' || !data) return head + `<div class="empty" style="padding:8px 0">Couldn't read this week. <button type="button" class="btn btn-ghost btn-sm" onclick="_wgLoadStack(_wgLoadSeq)">Try again</button></div>`;
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
       const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1'; const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825'; const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-      return `<button type="button" onclick="wgGoWeek('${wk}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;opacity:.9">${_wgCellHtml(c, d)}</button>`; };
+      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;opacity:.9">${_wgCellHtml(c, d)}</button>`; };
     const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(data.former || {}).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
     const fcell = (n, d) => { const c = (data.former || {})[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
     return head + `<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -22038,6 +22041,7 @@ async function wgSetWeek(ds){
   else _wgBaseState = 'failed';
   wgRender();
   if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); } // Build 532
+  if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; if(_wgBaseState === 'ok') wgTap(t.name, t.date); } // Build 533
   _wgLoadStack(seq); // Build 530: the weeks after this one
 }
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
