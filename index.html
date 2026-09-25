@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-533'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-534'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10259,7 +10259,7 @@ function _aInferShift(){
 // input with the ORIGINAL id, so every reader (.value) and inline oninput handler
 // keeps working. _tpSync pushes a programmatic .value write back into the selects.
 function _tpHtml(id, value, extraAttrs){
-  const sel = 'padding:8px 6px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit';
+  const sel = 'width:auto;min-width:0;padding:8px 26px 8px 8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit'; // Build 534: the global select{width:100%} squeezed these until the text clipped
   const hrs = Array.from({ length: 12 }, (_, i) => i + 1).map(h => `<option value="${h}">${h}</option>`).join('');
   const mins = Array.from({ length: 12 }, (_, i) => String(i * 5).padStart(2, '0')).map(m => `<option value="${m}">${m}</option>`).join('');
   return `<span class="tp" id="tp-${id}" style="display:inline-flex;align-items:center;gap:4px">`
@@ -10274,7 +10274,7 @@ function _tpHtml(id, value, extraAttrs){
 // is derived where the older code still reads one. Hours 0–11, minutes in quarters; the hidden input holds
 // decimal hours (the stored shape, 2 decimals).
 function _durHtml(id, hoursValue, extraAttrs){
-  const sel = 'padding:8px 6px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit';
+  const sel = 'width:auto;min-width:0;padding:8px 26px 8px 8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;background:var(--card);font-family:inherit'; // Build 534: the global select{width:100%} squeezed these until the text clipped
   const hrs = Array.from({ length: 12 }, (_, i) => i).map(h => `<option value="${h}">${h}</option>`).join('');
   const mins = ['00', '15', '30', '45'].map(m => `<option value="${m}">${m}</option>`).join('');
   return `<span class="dur" id="dur-${id}" style="display:inline-flex;align-items:center;gap:4px">`
