@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-535'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-536'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21891,7 +21891,7 @@ let _wgScrollAfterRender = false;
 // Build 533 (Tomas): the tap acts on the cell once the week is up — the same thing the tap does on the active grid
 // (an empty cell gets a Day shift; a saved cell opens the chooser). Replayed once, after the read.
 let _wgPendingTap = null;
-function wgGoWeek(wk, name, date){ _wgScrollAfterRender = true; _wgPendingTap = (name && date) ? { name, date, wk } : null; return wgSetWeek(wk); }
+function wgGoWeek(wk, name, date){ _wgScrollAfterRender = true; _wgPendingTap = (name && date) ? { name, date, wk } : null; const seed = _wgStackData[wk]; return wgSetWeek(wk, (seed && typeof seed === 'object') ? seed : undefined); } // Build 536: seeded from the stack
 function _wgScrollToBar(){ const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
 function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
 function _wgRenderWeeksToggle(){ const t = document.getElementById('wgWeeksToggle'); if(!t) return; t.innerHTML = [1, 2, 4].map(n => `<button type="button" class="bn-pill${_wgWeeks === n ? ' active' : ''}" onclick="wgSetWeeks(${n})" style="padding:3px 9px">${n}</button>`).join(''); }
@@ -21911,7 +21911,7 @@ function _wgRenderStack(){
   const today = localDate(new Date());
   host.innerHTML = weeks.map(wk => {
     const data = _wgStackData[wk]; const dates = Array.from({ length: 7 }, (_, i) => _wgAddDays(wk, i));
-    const head = `<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px"><div style="font-size:.78rem;font-weight:700;color:var(--muted)">Week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}</div><span style="font-size:.7rem;color:var(--muted)">· read-only · tap a cell to edit this week</span></div>`;
+    const head = `<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px"><div style="font-size:.78rem;font-weight:700;color:var(--muted)">Week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}</div></div>`; // Build 536 (Tomas): no "read-only · tap a cell…" note
     if(data === 'loading') return head + `<div class="empty" style="padding:8px 0">Reading…</div>`;
     if(data === 'failed' || !data) return head + `<div class="empty" style="padding:8px 0">Couldn't read this week. <button type="button" class="btn btn-ghost btn-sm" onclick="_wgLoadStack(_wgLoadSeq)">Try again</button></div>`;
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
@@ -22026,19 +22026,26 @@ async function _wgDefaultWeek(){
   if(!latest || latest < today) return _wgSunday(_wgAddDays(today, 7));
   return _wgAddDays(_wgSunday(latest), 7);
 }
-async function wgSetWeek(ds){
+async function wgSetWeek(ds, seed){
   if(!ds) return;
   _wgWeek = _wgSunday(ds);
   document.getElementById('wgWeekPick').value = _wgWeek;
   const seq = ++_wgLoadSeq, wk = _wgWeek;
   _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseRows = []; _wgBaseState = 'loading';
   try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
-  wgRender();
+  // Build 536 (Tomas): coming from a stacked week, that week's data is already in memory — start from it at once
+  // (scroll, replay the tap) and refresh from the sheet quietly afterwards, instead of making the tap wait for a read.
+  if(seed && seed.cells){
+    _wgBase = seed.cells; _wgFormer = seed.former || {}; _wgBaseRows = seed.rows || []; _wgBaseState = 'ok'; _wgMerge();
+    wgRender();
+    if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); }
+    if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; wgTap(t.name, t.date); }
+  } else wgRender();
   let base = null;
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
   if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
-  else _wgBaseState = 'failed';
+  else if(!(seed && seed.cells)) _wgBaseState = 'failed'; // Build 536: a seeded week keeps its seed if the refresh fails
   wgRender();
   if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); } // Build 532
   if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; if(_wgBaseState === 'ok') wgTap(t.name, t.date); } // Build 533
