@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-539'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-540'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17526,6 +17526,16 @@ async function saveImportRow(i){
     loadAssignments();
     notifyProdLogChanged(name);
     try { if(entry && entry._source === 'grid' && _wgWeek) wgSetWeek(_wgWeek); } catch(err){} // Build 539: the grid re-reads so the saved cell goes solid (Save All already did this)
+    // Build 540 (Tomas): a saved card leaves the review — the grid shows the saved cell now. Same removal Discard
+    // uses (splice + rekey), no archive change. An empty batch closes the panel.
+    try {
+      if(entry && entry._source === 'grid'){
+        const idx = _currentImportEntries.indexOf(entry);
+        if(idx >= 0){ _currentImportEntries.splice(idx, 1); _382Rekey(idx); }
+        if(_currentImportEntries.length){ await renderImportRows(_currentImportEntries, true); }
+        else { const _ir = document.getElementById('importResults'); if(_ir) _ir.style.display = 'none'; window._wgDeleteIds = []; window._wgDeleteRows = []; updateAcceptBars(); }
+      }
+    } catch(err){ console.warn('card removal after save failed:', err && err.message); }
   } catch(e) { toast(e.message, true); }
   finally { hideBusy(); } // Build 507: every exit, including a declined split
 }
