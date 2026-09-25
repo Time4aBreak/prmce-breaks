@@ -657,7 +657,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
          are unchanged downstream. -->
     <div class="card" id="weeklyGridCard">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleWeeklyGrid()">
-        <div class="card-label" style="margin:0">🗓 Manual Schedule</div>
+        <div class="card-label" style="margin:0"></div><!-- Build 538 (Tomas): unlabelled — the only card under Schedule once the import card goes -->
         <div style="display:flex;align-items:center;gap:8px">
           <span id="wgCount" style="font-size:.75rem;color:var(--muted)"></span>
           <span id="wgChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
@@ -678,6 +678,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;flex-wrap:wrap">
           <span style="font-size:.76rem;color:var(--muted);line-height:1.4">Tap a cell once to schedule a shift. Tap again for more options.</span>
           <button type="button" id="wgReviewBtn" class="btn btn-primary" onclick="wgReview()" disabled>✨ Suggest &amp; Review</button>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><!-- Build 538: from the retired list card -->
+          <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate assignments</button>
+          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations';})">↺ Recalculate all rotations</button>
         </div>
       </div>
     </div>
@@ -826,27 +830,9 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- View / remove assignments -->
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:11px">
-        <div class="card-label" style="margin:0">Scheduled Assignments</div>
-        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-          <button class="range-btn active" id="va-all" onclick="setViewRange('all',this)">All Upcoming</button>
-          <button class="range-btn" id="va-thisweek" onclick="setViewRange('thisweek',this)">This Week</button>
-          <button class="range-btn" id="va-nextweek" onclick="setViewRange('nextweek',this)">Next Week</button>
-          <input type="date" id="viewDateFrom" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
-          <span style="font-size:.8rem;color:var(--muted)">to</span>
-          <input type="date" id="viewDateTo" onchange="setViewRange('range',null)" style="font-size:.8rem;padding:5px 8px"/>
-        </div>
-      </div>
-      <div id="bnFilterRow" style="display:none;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:11px"></div>
-      <div id="assignList"><div class="empty"><div class="spinner"></div></div></div>
-      <div style="margin-top:10px">
-        <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate assignments</button>
-        <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations'})">↺ Recalculate all rotations</button>
-      </div>
-    </div>
-
+    <!-- Build 538 (step 4 of the master grid): the Scheduled Assignments card is gone — the grid is the schedule.
+         Its list code stays (loadAssignments guards for the missing element); Remove duplicates and Recalculate
+         all rotations live in the grid's footer. -->
   </div><!-- /adminPanel -->
     </div><!-- /subtab-admin -->
 
@@ -2300,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-537'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-538'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -13752,6 +13738,7 @@ async function _loadAssignmentsCore(preloadedScheds){
   clearSchedCache();
   clearCoverageCountsCache();
   const el = document.getElementById('assignList');
+  if(!el) return; // Build 538: the list card is gone; the cache clears above are what every caller still needs
   el.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   // Ensure the BN filter row reflects current roster + selection state.
   // Idempotent and cheap; safest to refresh on every view load.
@@ -17305,7 +17292,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       const months=['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
       const days=['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
       const el = document.getElementById('assignList');
-      el.innerHTML = Object.entries(byDate).map(([date, items]) => {
+      if(el) el.innerHTML = Object.entries(byDate).map(([date, items]) => {
         const d = new Date(date + 'T12:00:00');
         const label = `${days[d.getDay()]} ${months[d.getMonth()]} ${d.getDate()}`;
         return `<div style="margin-bottom:14px">
