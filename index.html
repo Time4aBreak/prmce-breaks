@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-540'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-25-541'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12499,7 +12499,7 @@ function expandExtractedRows(){
 // entries. Re-enabled by setImportActionsActive(true) which fires at the
 // start of each new extraction batch (renderImportRows / restoreLastImport).
 function setImportActionsActive(active){
-  document.querySelectorAll('.import-action-btn, .accept-all-btn').forEach(b => {
+  document.querySelectorAll('.import-action-btn, .accept-all-btn, .extract-action-btn').forEach(b => { // Build 541: the Extract button follows too
     b.disabled = !active;
     b.style.opacity = active ? '' : '.5';
     b.style.cursor = active ? '' : 'not-allowed';
@@ -14895,6 +14895,7 @@ function loadImportFile(file){
   const reader = new FileReader();
   reader.onload = (e) => {
     importImageB64 = e.target.result.split(',')[1];
+    document.querySelectorAll('.extract-action-btn').forEach(b => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; }); // Build 541: a fresh image is a fresh extraction — never greyed by an earlier save
     document.getElementById('previewImg').src = e.target.result;
     document.getElementById('importPreview').style.display = 'block';
     document.getElementById('importResults').style.display = 'none';
@@ -17000,7 +17001,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     const _del = (window._wgDeleteIds || []).slice(), _delRows = (window._wgDeleteRows || []).filter(r => _del.includes(r.Id));
     if(_del.length && _delRows.length === _del.length && entriesToProcess.every(e => e._keep || e.isDiscarded)){ // Build 519: kept entries may sit in the batch
       const n = _del.length, what = `${n} saved shift${n === 1 ? '' : 's'}`;
-      if(!confirm(`Remove ${what} from the live schedule? ${keptN ? `The ${keptN} unchanged shift${keptN === 1 ? '' : 's'} stay${keptN === 1 ? 's' : ''} as saved. ` : ''}Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); return; }
+      if(!confirm(`Remove ${what} from the live schedule? ${keptN ? `The ${keptN} unchanged shift${keptN === 1 ? '' : 's'} stay${keptN === 1 ? 's' : ''} as saved. ` : ''}Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); setImportActionsActive(true); return; } // Build 541
       showBusy(`Removing ${what}…`);
       try {
         await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(_del)) });
@@ -17014,10 +17015,11 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       } catch(e){
         console.error('removals-only save failed:', e);
         toast(`Couldn't remove — ${(e && e.message) || e || 'unknown error'}. Review again to retry.`, true);
-      } finally { hideBusy(); btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); loadAssignments(); }
+      } finally { hideBusy(); btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); setImportActionsActive(true); loadAssignments(); } // Build 541: the Extract button too
       return;
     }
     btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; });
+    setImportActionsActive(true); // Build 541: "nothing to save" / "nothing changed" must not leave Extract greyed
     // Bug #1 fix: also re-enable the import/extract action buttons so the
     // user can clear and re-extract without refreshing. Mirrors the catch
     // branch's recovery below.
