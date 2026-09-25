@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-25-541'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-25-542'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21183,7 +21183,9 @@ async function loadReports(){
     const futureRows = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     { const mx = futureRows.map(r => (r.ShiftDate || '').slice(0, 10)).filter(Boolean).sort().pop(); if(mx && mx !== RPT.schedMax){ RPT.schedMax = mx; _rptPaintMonths(); } } // Build 461
     // Build 514: the earliest saved shift, read once per load, sets the first month pill (the archive used to)
-    if(!RPT.schedMin){ try { const past = await spGet(LISTS.schedule, `ShiftDate le '${t}T23'`); const mn = past.map(r => (r.ShiftDate || '').slice(0, 10)).filter(Boolean).sort()[0]; if(mn){ RPT.schedMin = mn; _rptPaintMonths(); } } catch(e){ console.warn('[reports] earliest-shift read failed:', e && e.message); } }
+    // Build 542 (Tomas saved a March schedule and the first pill stayed June): re-learn the earliest shift on EVERY
+    // Reports open, not once per load; repaint only when it moved.
+    try { const past = await spGet(LISTS.schedule, `ShiftDate le '${t}T23'`); const mn = past.map(r => (r.ShiftDate || '').slice(0, 10)).filter(Boolean).sort()[0]; if(mn && mn !== RPT.schedMin){ RPT.schedMin = mn; _rptPaintMonths(); } } catch(e){ console.warn('[reports] earliest-shift read failed:', e && e.message); }
     const cov = _rptCoverage(scheds);
     if(!cov.nInst){
       // Build 410 (polish #4): point at the nearest upcoming data instead of
