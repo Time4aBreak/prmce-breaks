@@ -660,10 +660,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <div class="card-label" style="margin:0"></div><!-- Build 538 (Tomas): unlabelled — the only card under Schedule once the import card goes -->
         <div style="display:flex;align-items:center;gap:8px">
           <span id="wgCount" style="font-size:.75rem;color:var(--muted)"></span>
-          <span id="wgChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
+          <span id="wgChevron" style="font-size:.85rem;color:var(--muted)">▲</span>
         </div>
       </div>
-      <div id="wgBody" style="display:none;margin-top:12px">
+      <div id="wgBody" style="display:block;margin-top:12px"><!-- Build 539 (Tomas): open by default; the first read runs when the Schedule tab is shown -->
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:10px">
           <button type="button" class="btn btn-ghost btn-sm" onclick="wgShiftWeek(-1)" title="Previous week">‹</button>
           <input type="date" id="wgWeekPick" onchange="wgSetWeek(this.value)" style="font-size:.9rem;padding:6px 8px;width:auto"/>
@@ -2286,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-538'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-539'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5979,6 +5979,8 @@ function showSubTab(name, btn){
     }
   }
   if(name==='admin'){
+    // Build 539: the grid is open by default — its first read happens here, not on a card tap
+    try { if(!_wgWeek){ const host = document.getElementById('wgGrid'); if(host && !host.innerHTML) host.innerHTML = '<div class="empty" style="padding:14px 0">Reading the schedule…</div>'; _wgDefaultWeek().then(wk => { if(!_wgWeek) wgSetWeek(wk); }); } } catch(e){}
     // Refresh assign form date/shift to current on each open
     const curSh = detectShift();
     document.getElementById('aDate').value = shiftDate(curSh);
@@ -17523,6 +17525,7 @@ async function saveImportRow(i){
     if(allSaved) clearLastBatch();
     loadAssignments();
     notifyProdLogChanged(name);
+    try { if(entry && entry._source === 'grid' && _wgWeek) wgSetWeek(_wgWeek); } catch(err){} // Build 539: the grid re-reads so the saved cell goes solid (Save All already did this)
   } catch(e) { toast(e.message, true); }
   finally { hideBusy(); } // Build 507: every exit, including a declined split
 }
