@@ -123,6 +123,8 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 .sub-tab{padding:10px 16px;background:none;border:none;border-bottom:3px solid transparent;color:var(--muted);font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:600;cursor:pointer;transition:all .15s;white-space:nowrap}
 .sub-tab:hover{color:var(--teal-dk)}
 .sub-tab.active{color:var(--teal-dk);border-bottom-color:var(--teal)}
+.sub-tab-bar{max-width:100%;flex-wrap:wrap} /* Build 537: five sub-tabs overflowed a phone and widened the page — Chrome then zoomed out to fit after a rotation */
+body{overflow-x:hidden} /* Build 537: nothing may widen the page past the screen; wide content scrolls inside its own container */
 .subtab{display:none}
 .subtab.active{display:block}
 .range-btn{padding:6px 14px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
@@ -369,7 +371,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
   <div id="portalPanel" style="display:none">
 
     <!-- Sub-tab nav -->
-    <div style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
+    <div class="sub-tab-bar" style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
       <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
       <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
       <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">🕐 Schedule</button>
@@ -2298,7 +2300,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-24-536'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-09-24-537'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21907,7 +21909,7 @@ function _wgRenderStack(){
   const host = document.getElementById('wgStack'); if(!host) return;
   const weeks = Object.keys(_wgStackData).sort(); if(!weeks.length){ host.innerHTML = ''; return; }
   const allNames = _wgRosterNames(); const names = _wgFilter.size ? allNames.filter(n => _wgFilter.has(n)) : allNames;
-  const STICKY = 'position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 0 var(--card);';
+  const STICKY = 'position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 0 var(--card);align-self:stretch;display:flex;flex-direction:column;justify-content:center;'; // 537
   const today = localDate(new Date());
   host.innerHTML = weeks.map(wk => {
     const data = _wgStackData[wk]; const dates = Array.from({ length: 7 }, (_, i) => _wgAddDays(wk, i));
@@ -22121,7 +22123,7 @@ function wgRender(){
   const today = localDate(new Date());
   // Build 505 (Tomas): the name column stays put when the grid scrolls sideways (narrow window / phone); the
   // box-shadow paints the 6px column gap so scrolled cells don't peek through it.
-  const _WG_STICKY = 'position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 0 var(--card);';
+  const _WG_STICKY = 'position:sticky;left:0;z-index:1;background:var(--card);box-shadow:6px 0 0 var(--card);align-self:stretch;display:flex;flex-direction:column;justify-content:center;'; // 537: full row height, so cells scrolling behind don't peek out
   host.innerHTML = `<div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
     + `<div style="${_WG_STICKY}"></div>` + dates.map((d, i) => `<div style="text-align:center;font-size:.72rem;font-weight:700;letter-spacing:.04em;color:${d === today ? 'var(--teal)' : 'var(--muted)'}">${_WG_DOW[i]}<br><span style="font-weight:500">${Number(d.slice(5,7))}/${Number(d.slice(8,10))}</span></div>`).join('')
     + names.map(n => `<div style="${_WG_STICKY}font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
