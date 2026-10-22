@@ -91,6 +91,7 @@ select{padding:9px 12px;border:1.5px solid var(--border);border-radius:9px;font-
 
 /* ── Toggle buttons ── */
 .toggle-row{display:flex;gap:8px}
+.toggle{display:inline-flex;gap:4px;vertical-align:middle}
 .toggle-opt{flex:1;padding:8px 12px;border:1.5px solid var(--border);border-radius:8px;background:var(--bg);text-align:center;font-family:'DM Sans',sans-serif;font-size:.85rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s}
 .toggle-opt:hover{border-color:var(--teal);color:var(--teal)}
 .toggle-opt.active{background:var(--teal);border-color:var(--teal);color:white}
@@ -1568,10 +1569,12 @@ function initAcuityCard(){
   const tog = sh => `<span class="toggle" style="font-size:.8rem"><span class="toggle-opt${c.cap[sh] ? ' active' : ''}" data-cap="${sh}" data-on="1" onclick="_acuitySetCap('${sh}',true)">On</span><span class="toggle-opt${c.cap[sh] ? '' : ' active'}" data-cap="${sh}" data-on="0" onclick="_acuitySetCap('${sh}',false)">Off</span></span>`;
   body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tap the units where patients and staff require more of the break nurse. A capped shift never puts two of them on one BN.</div>
     <div id="acuityGrid" style="margin-bottom:12px">${_wingRowsHtml(chip)}</div>
-    <div style="display:flex;align-items:center;gap:8px 14px;flex-wrap:wrap;font-size:.85rem">
-      <strong style="width:76px">Cap</strong>
-      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">☀️ Day ${tog('Day')}</span>
-      <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">🌙 Noc ${tog('Noc')}</span>
+    <div style="display:flex;align-items:flex-start;gap:8px;font-size:.85rem">
+      <strong style="width:76px;flex:none;line-height:34px">Cap</strong>
+      <div style="display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center">
+        <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">☀️ Day ${tog('Day')}</span>
+        <span style="display:inline-flex;align-items:center;gap:6px;white-space:nowrap">🌙 Noc ${tog('Noc')}</span>
+      </div>
     </div>`;
 }
 function _acuitySetCap(sh, on){
@@ -2286,7 +2289,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-09-25-542'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-10-15-544'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22076,12 +22079,14 @@ function _wgCellHtml(c, date){
   if(!c) return '<span style="opacity:.35">+</span>';
   const h = Number(c.hours || 0), part = c.startTime && h > 0 && h < 12;
   const units = Array.isArray(c.units) ? c.units : [];
-  // Build 528 (Tomas): a unit that isn't being covered on that shift (3C paused, say) shows dimmed in the cell
+  // Build 528 (Tomas): a unit that isn't being covered on that shift (3C paused, say) — 543 (Tomas): HIDDEN in the
+  // cell, not dimmed. The row still stores it (the pair stays ["3C","4C"]), so it reappears the day it's covered.
   let _open = () => true;
   try { if(date){ const at = shiftStartDateTime(date, c.shift === 'Noc' ? 'Noc' : 'Day'); _open = u => isUnitOpenAt(u, at); } } catch(e){}
-  const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (units.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
+  const shown = units.filter(_open);
+  const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (shown.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
   // Build 527: one span per unit so five units wrap between units instead of running off the cell
-  const body = units.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${units.map(u => `<span style="white-space:nowrap${_open(u) ? '' : ';opacity:.38;text-decoration:line-through'}" ${_open(u) ? '' : `title="${u} isn't being covered"`}>${u}</span>`).join('')}</div>` : '';
+  const body = shown.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${shown.map(u => `<span style="white-space:nowrap">${u}</span>`).join('')}</div>` : '';
   return head + body;
 }
 function _wgCellLabel(c){
