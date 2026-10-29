@@ -2289,7 +2289,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-10-15-544'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-10-29-545'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21987,7 +21987,7 @@ async function _wgFetchBase(wk){
     let d = String(r.ShiftDate || '').slice(0, 10);
     if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
     if(d < wk || d > end) return;
-    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), shift: r.ShiftType, units: Array.isArray(u) ? u : [] }); } // Build 492
+    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [] }); } // Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial)
     let _cu = []; try { _cu = JSON.parse(r.Units || '[]'); } catch(e){} // Build 526: the cell shows its units
     (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [] });
   });
@@ -22154,6 +22154,13 @@ function wgTap(name, date){
   if(!_wgCells[key]){ _wgEdit(key, { shift: bnShiftDefault(name), startTime: '', hours: '' }); return; }
   _wgChooser(name, date);
 }
+// Build 545: the sheet row behind a drawn cell, matched on the grid date it was drawn on. (521–544 also accepted the
+// row dated the day before — meant for the post-midnight Noc partial, but it let a nurse's previous-day shift win:
+// Deepi 12/8 + 12/9 Day, tap 12/9 → Units opened 12/8.) Two halves of a straddling partial share a cell; the earlier row wins.
+function _wgSavedRowFor(name, date, sh){
+  const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.cell || r.date) === date).sort((a, b) => a.date.localeCompare(b.date));
+  return rows[0] || null;
+}
 function _wgChooser(name, date){
   const key = `${name}|${date}`; const cur = _wgCells[key] || {};
   const wrap = document.createElement('div');
@@ -22166,9 +22173,7 @@ function _wgChooser(name, date){
   // Build 521 (step 2 of the master grid): a SAVED cell also offers the list's actions, reached from the cell —
   // Units (the existing Edit form), Remove now (removeAssignment, coverage dialog), Unavailable (the existing
   // flow, only while the list would offer it). The queued removal is now labelled "Remove at Save All".
-  const _savedRow = (() => { if(!_wgBase[key]) return null; const sh = (cur && cur.shift) || 'Day';
-    const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.date === date || r.date === _wgAddDays(date, -1))).sort((a, b) => a.date.localeCompare(b.date));
-    return rows[0] || null; })();
+  const _savedRow = _wgBase[key] ? _wgSavedRowFor(name, date, (cur && cur.shift) || 'Day') : null;
   const _canUnavail = !!_savedRow && _savedRow.date >= shiftDate(_savedRow.shift) && !shiftIsOver(_savedRow.date, _savedRow.shift);
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
@@ -22238,7 +22243,7 @@ async function wgReview(){
   // Build 519 (step 1 of "the grid is the master"): a saved cell you did NOT touch keeps its units — Review
   // deals the new/changed cells AROUND it (the dealer's 300 lock overlay) instead of re-dealing the week, and
   // Save All skips it. Re-suggest All is still the explicit "re-deal this week".
-  const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.date}|${r.shift}`] = r.units; });
+  const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.cell || r.date}|${r.shift}`] = r.units; }); // Build 545: by the drawn date
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
     let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
@@ -22251,7 +22256,7 @@ async function wgReview(){
       e.partialUnitCount = Math.min(Math.max(1, Math.ceil(h / _pc.perHours) * _pc.units), Math.max(1, _covMax));
     }
     if(_wgBase[k] && !Object.prototype.hasOwnProperty.call(_wgEdits, k)){ // Build 519: untouched saved cell
-      const saved = _savedByKey[`${name}|${date}|${c.shift}`] || _savedByKey[`${name}|${_wgAddDays(date, -1)}|${c.shift}`] || null;
+      const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null; // Build 545: exact cell, no day-before fallback
       if(saved && saved.length){ e._keep = true; e._savedUnits = saved.slice(); }
     }
     return e;
