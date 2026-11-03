@@ -2309,7 +2309,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-02-546'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-02-547'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19322,6 +19322,7 @@ function _bpuPill(u, n, kind){ // kind: mine | other | off
     : 'background:var(--bg);color:var(--muted);opacity:.45';
   return `<div style="padding:6px 4px;border-radius:8px;border:1.5px solid var(--border);text-align:center;font-family:'DM Mono',monospace;line-height:1.2;user-select:none;${look}"><div style="font-size:.72rem;font-weight:600">${u}</div><div style="font-size:1rem;font-weight:800">${n === null ? '–' : n}</div></div>`;
 }
+function _bpuTone(n){ return n <= 1 ? 'var(--red)' : n === 2 ? '#1f6fd6' : n === 3 ? 'var(--green)' : '#c2189b'; } // Build 547: 1 red · 2 blue · 3 green · 4+ magenta
 function _bpuExpand(list){ const out = []; (list || []).forEach(u => { (u === 'C_PAIR' ? ['3C', '4C'] : [u]).forEach(x => { if(!out.includes(x)) out.push(x); }); }); return out; }
 // Called by the log's painter with the log's own scope (staffBookings = what her log shows).
 function _renderBreaksPerUnit(myStaffBookings, myUnits, allBookings, dt, shift, nextDt){
@@ -19331,7 +19332,7 @@ function _renderBreaksPerUnit(myStaffBookings, myUnits, allBookings, dt, shift, 
   const order = [..._WING_ROW_A, ..._WING_ROW_D];
   const mine = _bpuExpand(myUnits);
   const shown = order.filter(u => mine.includes(u)).concat(Object.keys(taken).filter(u => !mine.includes(u))); // her units in house order, then any unit a stamped break put on her log
-  const el = document.getElementById('bpuTotal'); if(el) el.textContent = `${total} taken`;
+  const el = document.getElementById('bpuTotal'); if(el) el.textContent = String(total); // Build 547 (Tomas): no "taken" on this card
   const mineEl = document.getElementById('bpuMine');
   if(mineEl) mineEl.innerHTML = shown.length
     ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px">${shown.map(u => _bpuPill(u, taken[u] || 0, 'mine')).join('')}</div>`
@@ -19368,8 +19369,11 @@ function _bpuRenderOthers(allBookings, dt, shift, nextDt){
   const me = BNS.name;
   const chip = u => { const who = unitOf[u]; return _bpuPill(u, who ? (byBN[who].taken[u] || 0) : null, !who ? 'off' : (who === me ? 'mine' : 'other')); };
   const names = Object.keys(byBN).sort((a, b) => (a === me ? -1 : b === me ? 1 : bnDisplayName(a).localeCompare(bnDisplayName(b))));
+  // Build 547 (Tomas): the line names the selected BN (not "You"), drops "taken", and is colored by the shift's headcount —
+  // 1 BN red · 2 blue · 3 green · 4+ magenta — so the team size reads at a glance.
+  const tone = _bpuTone(names.length);
   el.innerHTML = _wingRowsHtml(chip)
-    + (names.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:.8rem">${names.map(n => `<span><span style="font-weight:600">${escHTML(n === me ? 'You' : bnDisplayName(n))}</span> <span style="color:var(--muted)">${byBN[n].total} taken</span></span>`).join('')}</div>`
+    + (names.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:.8rem;color:${tone}">${names.map(n => `<span><span style="font-weight:600">${escHTML(bnDisplayName(n))}</span> <span style="font-weight:800">${byBN[n].total}</span></span>`).join('')}</div>`
                    : '<div class="empty" style="padding:6px 0">Nobody else is scheduled on this shift</div>');
 }
 function toggleBreaksPerUnit(){
