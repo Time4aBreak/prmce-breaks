@@ -406,16 +406,21 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
   </div>
 
-  <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px">
-    <div>
-      <div class="card-label" style="padding:0 4px;margin-bottom:4px">Filter by Unit</div>
-      <div id="summFilter"></div>
-    </div>
-    <div>
-      <div class="card-label" style="padding:0 4px;margin-bottom:4px">Filter by Break Nurse</div>
-      <select id="summBNFilter" onchange="loadSummary()" style="font-size:.8rem;padding:5px 8px;min-width:160px">
-        <option value="All">All Break Nurses</option>
-      </select>
+  <!-- Build 549 (Tomas, laptop screenshot): the filters get a card like everything else on the tab; the two blocks are
+       top-aligned (they were centered against each other, so the dropdown floated at mid-height of the unit rows) and
+       the unit block takes the width so the wing rows span the column instead of stopping short of it. -->
+  <div class="card" style="padding:14px 16px">
+    <div style="display:flex;align-items:flex-start;gap:12px 20px;flex-wrap:wrap">
+      <div style="flex:1 1 420px;min-width:0">
+        <div class="card-label" style="margin-bottom:6px">Filter by Unit</div>
+        <div id="summFilter"></div>
+      </div>
+      <div style="flex:0 0 auto">
+        <div class="card-label" style="margin-bottom:6px">Filter by Break Nurse</div>
+        <select id="summBNFilter" onchange="loadSummary()" style="font-size:.8rem;padding:6px 8px;min-width:180px">
+          <option value="All">All Break Nurses</option>
+        </select>
+      </div>
     </div>
   </div>
   <div id="summList"><div class="empty"><div class="spinner"></div></div></div>
@@ -2309,7 +2314,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-548'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-549'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
