@@ -2309,7 +2309,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-02-547'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-548'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19322,12 +19322,16 @@ function _bpuPill(u, n, kind){ // kind: mine | other | off
     : 'background:var(--bg);color:var(--muted);opacity:.45';
   return `<div style="padding:6px 4px;border-radius:8px;border:1.5px solid var(--border);text-align:center;font-family:'DM Mono',monospace;line-height:1.2;user-select:none;${look}"><div style="font-size:.72rem;font-weight:600">${u}</div><div style="font-size:1rem;font-weight:800">${n === null ? '–' : n}</div></div>`;
 }
+// Build 548 (Tomas, option B): what a unit counts as — confirmed, not cancelled, plus the gaps credit a flagged run earns
+// (_withGapCredits appends one synthetic copy per credited increment, so a 3-slot run with + gaps counts as 4). This is
+// the Break Tally's arithmetic, so the card agrees with the report; the log's tally line still shows the split.
+function _bpuCounted(scoped){ return _withGapCredits(scoped.filter(b => isConfirmed(b) && String(b.IsCancelled) !== '1')); }
 function _bpuTone(n){ return n <= 1 ? 'var(--red)' : n === 2 ? '#1f6fd6' : n === 3 ? 'var(--green)' : '#c2189b'; } // Build 547: 1 red · 2 blue · 3 green · 4+ magenta
 function _bpuExpand(list){ const out = []; (list || []).forEach(u => { (u === 'C_PAIR' ? ['3C', '4C'] : [u]).forEach(x => { if(!out.includes(x)) out.push(x); }); }); return out; }
 // Called by the log's painter with the log's own scope (staffBookings = what her log shows).
 function _renderBreaksPerUnit(myStaffBookings, myUnits, allBookings, dt, shift, nextDt){
   const wrap = document.getElementById('bnPerUnitWrap'); if(!wrap) return;
-  const taken = {}; myStaffBookings.filter(b => isConfirmed(b) && String(b.IsCancelled) !== '1').forEach(b => { taken[b.Unit] = (taken[b.Unit] || 0) + 1; }); // the log's own "N breaks confirmed" rule (19789)
+  const taken = {}; _bpuCounted(myStaffBookings).forEach(b => { taken[b.Unit] = (taken[b.Unit] || 0) + 1; }); // Build 548: "counts as" — confirmed slots + gaps credit, the Break Tally's number
   const total = Object.values(taken).reduce((a, n) => a + n, 0);
   const order = [..._WING_ROW_A, ..._WING_ROW_D];
   const mine = _bpuExpand(myUnits);
@@ -19363,7 +19367,7 @@ function _bpuRenderOthers(allBookings, dt, shift, nextDt){
     _bpuExpand(Array.isArray(u) ? u : []).forEach(x => e.units.add(x));
   });
   Object.entries(byBN).forEach(([name, e]) => {
-    allBookings.filter(b => _bnCoversBooking(b, name, e.units, shift, dt, nextDt) && isConfirmed(b) && String(b.IsCancelled) !== '1').forEach(b => { e.taken[b.Unit] = (e.taken[b.Unit] || 0) + 1; e.total++; });
+    _bpuCounted(allBookings.filter(b => _bnCoversBooking(b, name, e.units, shift, dt, nextDt))).forEach(b => { e.taken[b.Unit] = (e.taken[b.Unit] || 0) + 1; e.total++; }); // Build 548: counts as
   });
   const unitOf = {}; Object.entries(byBN).forEach(([name, e]) => e.units.forEach(u => { if(!unitOf[u] || name === BNS.name) unitOf[u] = name; }));
   const me = BNS.name;
