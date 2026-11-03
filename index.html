@@ -528,6 +528,26 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
       </div>
 
+      <!-- Build 546 (Tomas): Breaks Per Unit — ✓ Taken per unit for the selected shift, drawn from the log's own
+           data by the same painter. Collapsed = this BN's units; the chevron opens the whole shift (both wing rows,
+           hers teal, other BNs' outlined, uncovered dim) with a per-nurse totals line. -->
+      <div id="bnPerUnitWrap" style="display:none">
+        <div class="card">
+          <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer;gap:8px" onclick="toggleBreaksPerUnit()">
+            <div class="card-label" style="margin:0;display:flex;align-items:center;gap:8px">
+              <span>Breaks Per Unit</span>
+              <span id="bpuTotal" style="font-size:.72rem;font-weight:600;color:var(--teal-dk);background:var(--teal-mid);padding:2px 8px;border-radius:10px"></span>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span id="bpuHint" style="font-size:.72rem;color:var(--muted)">whole shift</span>
+              <span id="bpuChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
+            </div>
+          </div>
+          <div id="bpuMine" style="margin-top:10px"></div>
+          <div id="bpuOthers" style="display:none;margin-top:12px;padding-top:10px;border-top:1px solid var(--border)"></div>
+        </div>
+      </div>
+
 
 
 
@@ -2289,7 +2309,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-10-29-545'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-02-546'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19275,6 +19295,92 @@ let _bnConfirmCache = null;
 
 // Render-only path. Reads _bnConfirmCache + current _prodLogStaged.
 // Returns true if a render happened, false if cache empty/stale or wrap missing.
+// ── Build 546 (Tomas): Breaks Per Unit ─────────────────────────────────────
+// Does BN `name` (holding `responsibleUnits` on `shift` dated `dt`) cover booking `b`? The Productivity Log's
+// scope rule, lifted verbatim: own-shift bookings on her units except the overlap window (the opposite shift's
+// tail covers those), plus the opposite shift's overlap bookings where she IS the tail. Manual/transferred
+// breaks ride the stream stamp (bnOwns), not the unit.
+function _bnCoversBooking(b, name, responsibleUnits, shift, dt, nextDt){
+  if(isBNBreak(b)) return false;
+  if(!bnOwns(b, responsibleUnits, name)) return false;
+  const bDate = (b.SlotDate || '').slice(0, 10);
+  if(b.ShiftType === shift && bDate === dt){
+    if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;   // morning overlap → Noc tail
+    if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;   // evening overlap → Day tail
+    return true;
+  }
+  if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt) return isOverlapSlot(b.SlotTime, 'Day'); // Noc tail, D+1 morning
+  if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt) return isOverlapSlot(b.SlotTime, 'Noc');     // Day tail, same evening
+  return false;
+}
+let _bpuOpen = false;                                   // chevron state (per device, not persisted)
+let _bpuShift = { key: '', rows: null, loading: false }; // the shift's schedule rows, read once per date|shift on first expand
+function _bpuHide(){ const w = document.getElementById('bnPerUnitWrap'); if(w) w.style.display = 'none'; }
+function _bpuPill(u, n, kind){ // kind: mine | other | off
+  const look = kind === 'mine' ? 'background:var(--teal-lt);border-color:var(--teal);color:var(--teal-dk)'
+    : kind === 'other' ? 'background:var(--card);border-color:var(--muted);color:var(--text)'
+    : 'background:var(--bg);color:var(--muted);opacity:.45';
+  return `<div style="padding:6px 4px;border-radius:8px;border:1.5px solid var(--border);text-align:center;font-family:'DM Mono',monospace;line-height:1.2;user-select:none;${look}"><div style="font-size:.72rem;font-weight:600">${u}</div><div style="font-size:1rem;font-weight:800">${n === null ? '–' : n}</div></div>`;
+}
+function _bpuExpand(list){ const out = []; (list || []).forEach(u => { (u === 'C_PAIR' ? ['3C', '4C'] : [u]).forEach(x => { if(!out.includes(x)) out.push(x); }); }); return out; }
+// Called by the log's painter with the log's own scope (staffBookings = what her log shows).
+function _renderBreaksPerUnit(myStaffBookings, myUnits, allBookings, dt, shift, nextDt){
+  const wrap = document.getElementById('bnPerUnitWrap'); if(!wrap) return;
+  const taken = {}; myStaffBookings.filter(b => isConfirmed(b) && String(b.IsCancelled) !== '1').forEach(b => { taken[b.Unit] = (taken[b.Unit] || 0) + 1; }); // the log's own "N breaks confirmed" rule (19789)
+  const total = Object.values(taken).reduce((a, n) => a + n, 0);
+  const order = [..._WING_ROW_A, ..._WING_ROW_D];
+  const mine = _bpuExpand(myUnits);
+  const shown = order.filter(u => mine.includes(u)).concat(Object.keys(taken).filter(u => !mine.includes(u))); // her units in house order, then any unit a stamped break put on her log
+  const el = document.getElementById('bpuTotal'); if(el) el.textContent = `${total} taken`;
+  const mineEl = document.getElementById('bpuMine');
+  if(mineEl) mineEl.innerHTML = shown.length
+    ? `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(64px,1fr));gap:8px">${shown.map(u => _bpuPill(u, taken[u] || 0, 'mine')).join('')}</div>`
+    : '<div class="empty" style="padding:6px 0">No units on this shift</div>';
+  const ch = document.getElementById('bpuChevron'); if(ch) ch.textContent = _bpuOpen ? '▲' : '▼';
+  const hint = document.getElementById('bpuHint'); if(hint) hint.textContent = _bpuOpen ? 'my units' : 'whole shift';
+  const oth = document.getElementById('bpuOthers'); if(oth) oth.style.display = _bpuOpen ? 'block' : 'none';
+  wrap.style.display = 'block';
+  if(_bpuOpen) _bpuRenderOthers(allBookings, dt, shift, nextDt);
+}
+function _bpuRenderOthers(allBookings, dt, shift, nextDt){
+  const el = document.getElementById('bpuOthers'); if(!el) return;
+  const key = `${dt}|${shift}`;
+  if(_bpuShift.key !== key || !_bpuShift.rows){
+    if(!(_bpuShift.key === key && _bpuShift.loading)){
+      _bpuShift = { key, rows: null, loading: true };
+      spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`)
+        .then(rows => { if(_bpuShift.key !== key) return; _bpuShift = { key, rows, loading: false }; const c = _bnConfirmCache; if(_bpuOpen && c && c.dt === dt && c.shift === shift) _bpuRenderOthers(c.allBookings, dt, shift, c.nextDt); })
+        .catch(e => { if(_bpuShift.key === key) _bpuShift = { key: '', rows: null, loading: false }; el.innerHTML = `<div class="empty" style="padding:6px 0;color:var(--red)">Couldn't read the shift — ${escHTML((e && e.message) || String(e))}</div>`; });
+    }
+    el.innerHTML = '<div class="empty" style="padding:6px 0"><div class="spinner" style="margin:0 auto 6px"></div>Reading the shift…</div>';
+    return;
+  }
+  const byBN = {};
+  _bpuShift.rows.filter(r => r.BreakNurseName && r.Status !== 'inactive').forEach(r => {
+    let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){}
+    const e = (byBN[r.BreakNurseName] ||= { units: new Set(), taken: {}, total: 0 });
+    _bpuExpand(Array.isArray(u) ? u : []).forEach(x => e.units.add(x));
+  });
+  Object.entries(byBN).forEach(([name, e]) => {
+    allBookings.filter(b => _bnCoversBooking(b, name, e.units, shift, dt, nextDt) && isConfirmed(b) && String(b.IsCancelled) !== '1').forEach(b => { e.taken[b.Unit] = (e.taken[b.Unit] || 0) + 1; e.total++; });
+  });
+  const unitOf = {}; Object.entries(byBN).forEach(([name, e]) => e.units.forEach(u => { if(!unitOf[u] || name === BNS.name) unitOf[u] = name; }));
+  const me = BNS.name;
+  const chip = u => { const who = unitOf[u]; return _bpuPill(u, who ? (byBN[who].taken[u] || 0) : null, !who ? 'off' : (who === me ? 'mine' : 'other')); };
+  const names = Object.keys(byBN).sort((a, b) => (a === me ? -1 : b === me ? 1 : bnDisplayName(a).localeCompare(bnDisplayName(b))));
+  el.innerHTML = _wingRowsHtml(chip)
+    + (names.length ? `<div style="display:flex;flex-wrap:wrap;gap:6px 16px;margin-top:10px;font-size:.8rem">${names.map(n => `<span><span style="font-weight:600">${escHTML(n === me ? 'You' : bnDisplayName(n))}</span> <span style="color:var(--muted)">${byBN[n].total} taken</span></span>`).join('')}</div>`
+                   : '<div class="empty" style="padding:6px 0">Nobody else is scheduled on this shift</div>');
+}
+function toggleBreaksPerUnit(){
+  _bpuOpen = !_bpuOpen;
+  const ch = document.getElementById('bpuChevron'); if(ch) ch.textContent = _bpuOpen ? '▲' : '▼';
+  const hint = document.getElementById('bpuHint'); if(hint) hint.textContent = _bpuOpen ? 'my units' : 'whole shift';
+  const oth = document.getElementById('bpuOthers'); if(oth) oth.style.display = _bpuOpen ? 'block' : 'none';
+  const c = _bnConfirmCache;
+  if(_bpuOpen && c) _bpuRenderOthers(c.allBookings, c.dt, c.shift, c.nextDt);
+}
+
 function _renderBNConfirm(){
   if(!_bnConfirmCache) return false;
   const wrap = document.getElementById('bnConfirmWrap');
@@ -19366,7 +19472,7 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
     // not the cache.
     if(dt !== (BNS.date || today()) || shift !== BNS.shift){ if(loader) loader.style.display = 'none'; return; }
 
-    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; return; }
+    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; _bpuHide(); return; }
 
     // Cache the fetched data so stage handlers can re-render instantly
     // without waiting for another network round trip. Cache is invalidated
@@ -19429,37 +19535,12 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
     const responsibleUnits = new Set(units);
 
     // Overlap-aware coverage predicate: does THIS BN actually cover this booking?
-    const bnCovers = (b) => {
-      if(isBNBreak(b)) return false;
-      // Manual breaks bypass the unit filter — BN may log a break for a
-      // nurse from a unit they don't normally cover (favor, cross-coverage).
-      // The shift/date checks below still apply.
-      if(!bnOwns(b, responsibleUnits, BNS.name)) return false;
-      const bDate = (b.SlotDate || '').slice(0, 10);
-
-      // Same-shift, same-date: this BN covers — UNLESS the slot is in the
-      // overlap window, in which case the OPPOSITE shift's tail BN covers.
-      if(b.ShiftType === shift && bDate === dt){
-        if(shift === 'Day' && isOverlapSlot(b.SlotTime, 'Day')) return false;   // morning overlap → Noc tail
-        if(shift === 'Noc' && isOverlapSlot(b.SlotTime, 'Noc')) return false;   // evening overlap → Day tail
-        return true;
-      }
-
-      // Cross-shift overlap: this BN is the tail covering the opposite shift.
-      // Noc BN on shiftStartDate D covers Day overlap bookings on D+1 morning.
-      if(shift === 'Noc' && b.ShiftType === 'Day' && bDate === nextDt){
-        return isOverlapSlot(b.SlotTime, 'Day');
-      }
-      // Day BN on shiftStartDate D covers Noc overlap bookings on same day evening.
-      if(shift === 'Day' && b.ShiftType === 'Noc' && bDate === dt){
-        return isOverlapSlot(b.SlotTime, 'Noc');
-      }
-
-      return false;
-    };
+    // Build 546: the rule itself now lives in _bnCoversBooking (shared with Breaks Per Unit), unchanged.
+    const bnCovers = (b) => _bnCoversBooking(b, BNS.name, responsibleUnits, shift, dt, nextDt);
 
     const staffBookings = allBookings.filter(bnCovers);
     staffBookings.sort((a,b) => sortKey(a.SlotTime, shift) - sortKey(b.SlotTime, shift));
+    try { _renderBreaksPerUnit(staffBookings, units, allBookings, dt, shift, nextDt); } catch(e){ console.warn('[Breaks Per Unit]', e && e.message); } // Build 546
 
     // ── Load notifications from batch result ──
     let notifications = [];
