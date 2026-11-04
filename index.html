@@ -2314,7 +2314,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-549'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-550'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22049,6 +22049,7 @@ function _wgSaveDraft(){ try { if(Object.keys(_wgEdits).length) localStorage.set
 function _wgIsPart(c){ const h = Number(c && c.hours || 0); return !!(c && c.startTime && h > 0 && h < 12); }
 function _wgSameCell(a, b){
   if(!a || !b) return false;
+  if(!!a.orientation !== !!b.orientation) return false; // Build 550
   if(_wgIsPart(a) || _wgIsPart(b)) return _wgIsPart(a) && _wgIsPart(b) && String(a.startTime).padStart(4, '0') === String(b.startTime).padStart(4, '0') && Math.abs(Number(a.hours) - Number(b.hours)) < 0.011; // a partial's shift is derived from its window
   return a.shift === b.shift;
 }
@@ -22098,7 +22099,87 @@ async function _wgFetchBase(wk){
     }
     into[k] = list[list.length - 1];
   });
+  // Build 550 (Tomas): orientation markers live in BNState, not on the sheet (option A: a grid marker — the orientee holds
+  // no units and no slots, so Review, the dealer, Sign Up and the reports never see her). Drawn as saved cells; a sheet
+  // row on the same key wins (the chooser refuses to set an orientation over a saved shift).
+  Object.entries(_wgOrientMap()).forEach(([k, o]) => {
+    if(!o || typeof o !== 'object') return; const [n, d] = k.split('|'); if(!n || !d || d < wk || d > end) return;
+    const into = (!roster.size || roster.has(n)) ? cells : former;
+    if(into[k]) return;
+    into[k] = { shift: o.shift === 'Noc' ? 'Noc' : 'Day', startTime: '', hours: '', units: [], orientation: true, preceptor: String(o.preceptor || '') };
+  });
   return { cells, former, rows: baseRows };
+}
+// ── Build 550: Orientation ──────────────────────────────────────────────────
+const _WG_ORIENT_KEY = 'bnOrientations'; // BNState: { "Name (12345)|YYYY-MM-DD": { preceptor: "Name (12345)", shift: "Day"|"Noc" } }
+function _wgOrientMap(){ const m = syncedLS.get(_WG_ORIENT_KEY); return (m && typeof m === 'object' && !Array.isArray(m)) ? m : {}; }
+// read fresh → mutate → prune (120 days back) → write. syncedLS.set writes LS first and THROWS if the sheet write fails
+// (the key is then on the retry queue), so the grid may keep the new state either way; the caller words the toast.
+async function _wgOrientWrite(mutate){
+  try { await syncedLS.refresh(_WG_ORIENT_KEY); } catch(e){}
+  const m = _wgOrientMap(); mutate(m);
+  const cut = _wgAddDays(localDate(new Date()), -120);
+  Object.keys(m).forEach(k => { const d = k.split('|')[1]; if(!d || d < cut) delete m[k]; });
+  await syncedLS.set(_WG_ORIENT_KEY, m);
+}
+async function _wgOrientSet(key, o){
+  const name = key.split('|')[0];
+  showBusy('Saving orientation…');
+  let queued = false;
+  try { await _wgOrientWrite(m => { m[key] = { preceptor: o.preceptor, shift: o.shift }; }); }
+  catch(e){ queued = true; }
+  finally { hideBusy(); }
+  delete _wgEdits[key]; _wgSaveDraft();
+  _wgBase[key] = { shift: o.shift, startTime: '', hours: '', units: [], orientation: true, preceptor: o.preceptor };
+  _wgMerge(); wgRender();
+  toast(queued ? `Saved on this device — the sheet didn't answer; it will keep retrying.` : `✓ ${firstName(name)} orienting with ${bnDisplayName(o.preceptor)}`, queued);
+}
+async function _wgOrientClear(key, quiet){
+  const name = key.split('|')[0];
+  showBusy('Removing orientation…');
+  let queued = false;
+  try { await _wgOrientWrite(m => { delete m[key]; }); }
+  catch(e){ queued = true; }
+  finally { hideBusy(); }
+  delete _wgBase[key]; _wgMerge(); wgRender();
+  if(queued) toast('Removed on this device — the sheet didn\'t answer; it will keep retrying.', true);
+  else if(!quiet) toast(`✓ Removed ${firstName(name)}'s orientation`);
+  return true;
+}
+// The picker: any roster name (Tomas) and the shift the orientee is following.
+function _wgOrientPick(name, date, cur){
+  const key = `${name}|${date}`;
+  const roster = _wgRosterNames().filter(n => n !== name);
+  if(!roster.length){ toast('Nobody else is on the roster to be a preceptor', true); return; }
+  const curP = cur && cur.orientation ? cur.preceptor : '';
+  let sh = (cur && cur.shift) || bnShiftDefault(name);
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
+  const d = new Date(date + 'T12:00:00');
+  wrap.innerHTML = `
+    <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+      <div style="font-size:1rem;font-weight:700;margin-bottom:2px">🎓 Orientation</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${escHTML(bnDisplayName(name))} · ${_WG_DOW[d.getDay()]} ${Number(date.slice(5,7))}/${Number(date.slice(8,10))}</div>
+      <label style="display:block;font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px">Preceptor</label>
+      <select id="wgoPre" style="width:100%;font-size:.9rem;padding:8px 10px;margin-bottom:12px">${roster.map(n => `<option value="${escHTML(n)}"${n === curP ? ' selected' : ''}>${escHTML(bnDisplayName(n))}</option>`).join('')}</select>
+      <div style="display:flex;gap:8px;margin-bottom:12px">
+        <button type="button" class="btn ${sh === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:10px" id="wgoDay">☀️ Day</button>
+        <button type="button" class="btn ${sh === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:10px" id="wgoNoc">🌙 Noc</button>
+      </div>
+      <div style="font-size:.78rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${escHTML(firstName(name))} follows the preceptor. No units or break slots are dealt to her, and nothing else in the app changes — the cell shows the preceptor's name.</div>
+      <div style="display:flex;gap:8px">
+        <button type="button" class="btn btn-primary btn-sm" id="wgoSet" style="flex:1">${curP ? 'Save' : 'Set orientation'}</button>
+        <button type="button" class="btn btn-ghost btn-sm" id="wgoCancel" style="flex:1">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  const paint = () => { wrap.querySelector('#wgoDay').className = `btn ${sh === 'Day' ? 'btn-primary' : 'btn-ghost'}`; wrap.querySelector('#wgoNoc').className = `btn ${sh === 'Noc' ? 'btn-primary' : 'btn-ghost'}`; };
+  wrap.querySelector('#wgoDay').onclick = () => { sh = 'Day'; paint(); };
+  wrap.querySelector('#wgoNoc').onclick = () => { sh = 'Noc'; paint(); };
+  wrap.querySelector('#wgoCancel').onclick = close;
+  wrap.querySelector('#wgoSet').onclick = () => { const pre = wrap.querySelector('#wgoPre').value; if(!pre) return; close(); _wgOrientSet(key, { preceptor: pre, shift: sh }); };
+  wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
 function _wgRosterNames(){
   const names = (typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames.slice() : [];
@@ -22145,6 +22226,7 @@ async function wgSetWeek(ds, seed){
     if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; wgTap(t.name, t.date); }
   } else wgRender();
   let base = null;
+  try { await syncedLS.refresh(_WG_ORIENT_KEY); } catch(e){} // Build 550: one pull per week change; _wgFetchBase and the stack read LS
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
   if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
@@ -22171,6 +22253,7 @@ function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes
 // window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
 function _wgCellHtml(c, date){
   if(!c) return '<span style="opacity:.35">+</span>';
+  if(c.orientation) return `<div style="font-size:.64rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8">🎓 Preceptor</div><div style="font-size:.74rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(bnDisplayName(c.preceptor || ''))}</div>`; // Build 550
   const h = Number(c.hours || 0), part = c.startTime && h > 0 && h < 12;
   const units = Array.isArray(c.units) ? c.units : [];
   // Build 528 (Tomas): a unit that isn't being covered on that shift (3C paused, say) — 543 (Tomas): HIDDEN in the
@@ -22185,6 +22268,7 @@ function _wgCellHtml(c, date){
 }
 function _wgCellLabel(c){
   if(!c) return '';
+  if(c.orientation) return `🎓 Orientation · ${bnDisplayName(c.preceptor || '')}`; // Build 550
   const h = Number(c.hours || 0);
   if(c.startTime && h > 0 && h < 12){
     const st = String(c.startTime).padStart(4, '0');
@@ -22277,6 +22361,7 @@ function _wgChooser(name, date){
         <button type="button" class="btn ${!isPart && cur.shift === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcDay">☀️ Day</button>
         <button type="button" class="btn ${!isPart && cur.shift === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcNoc">🌙 Noc</button>
       </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="wgcOrient" style="width:100%;margin-bottom:10px" title="She follows a preceptor: no units, no slots">🎓 ${cur.orientation ? `Orientation with ${escHTML(bnDisplayName(cur.preceptor || ''))} · change` : 'Orientation — pick a preceptor'}</button><!-- Build 550 -->
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -22293,14 +22378,19 @@ function _wgChooser(name, date){
         </div>
       </div>` : ''}
       <div style="display:flex;gap:8px">
-        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1" title="${_wgBase[key] ? 'Nothing happens yet: the cell goes dashed, and the next Save All removes it (you can Discard unsaved before then). Good for several removals at once.' : 'Undo this tap'}">${_wgBase[key] ? '⏳ Queue removal for Save All' : 'Clear'}</button>
+        <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1" title="${cur.orientation ? 'Takes the orientation off the grid right away' : _wgBase[key] ? 'Nothing happens yet: the cell goes dashed, and the next Save All removes it (you can Discard unsaved before then). Good for several removals at once.' : 'Undo this tap'}">${cur.orientation ? '🗑 Remove orientation' : _wgBase[key] ? '⏳ Queue removal for Save All' : 'Clear'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="wgcCancel" style="flex:1">Cancel</button>
       </div>
     </div>`;
   document.body.appendChild(wrap);
   _tpSync('wgcStart'); _durSync('wgcDur'); // Build 448; 525: duration
   const close = () => wrap.remove();
-  const set = c => { _wgEdit(key, c); close(); };
+  // Build 550: a shift chosen on an orientation cell takes the marker off first (its own write), then stages as usual
+  const set = async c => { close(); if(cur.orientation){ if(c === null){ await _wgOrientClear(key, false); return; } await _wgOrientClear(key, true); } _wgEdit(key, c); };
+  wrap.querySelector('#wgcOrient').onclick = () => { // Build 550
+    if(_savedRow){ toast('She has a saved shift that day — Remove now first, then set the orientation', true); return; }
+    close(); _wgOrientPick(name, date, cur);
+  };
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
   wrap.querySelector('#wgcNoc').onclick = () => set({ shift: 'Noc', startTime: '', hours: '' });
   wrap.querySelector('#wgcPart').onclick = () => {
@@ -22333,7 +22423,7 @@ async function wgReview(){
   // Build 503 (Tomas): a week whose ONLY saved shift was cleared has 0 cells and 1 edit — Review used to be
   // disabled, so that removal could never be saved from the grid. Now an empty batch reviews (no cards, just
   // the "will also remove" note) and Save All carries out the removals.
-  const keys = Object.keys(_wgCells); if(!keys.length && !Object.keys(_wgEdits).length) return;
+  const keys = Object.keys(_wgCells).filter(k => !(_wgCells[k] && _wgCells[k].orientation)); if(!keys.length && !Object.keys(_wgEdits).length) return; // Build 550: orientation cells are markers, not shifts
   // Build 519 (step 1 of "the grid is the master"): a saved cell you did NOT touch keeps its units — Review
   // deals the new/changed cells AROUND it (the dealer's 300 lock overlay) instead of re-dealing the week, and
   // Save All skips it. Re-suggest All is still the explicit "re-deal this week".
