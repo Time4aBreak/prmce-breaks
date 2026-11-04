@@ -2314,7 +2314,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-551'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-552'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22447,7 +22447,7 @@ function _wgChooser(name, date){
   if(_savedRow){ // Build 521
     const u = wrap.querySelector('#wgcUnits'); if(u) u.onclick = () => { close(); editAssign(_savedRow.Id); };
     const r = wrap.querySelector('#wgcRemoveNow'); if(r) r.onclick = () => { close(); removeAssignment(_savedRow.Id); };
-    const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = () => { close(); markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); };
+    const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = async () => { close(); try { await markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 552 (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
   }
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
