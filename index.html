@@ -2314,7 +2314,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-552'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-553'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22017,9 +22017,10 @@ function _wgRenderStack(){
     const head = `<div style="display:flex;align-items:center;gap:8px;margin:16px 0 8px"><div style="font-size:.78rem;font-weight:700;color:var(--muted)">Week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}</div></div>`; // Build 536 (Tomas): no "read-only · tap a cell…" note
     if(data === 'loading') return head + `<div class="empty" style="padding:8px 0">Reading…</div>`;
     if(data === 'failed' || !data) return head + `<div class="empty" style="padding:8px 0">Couldn't read this week. <button type="button" class="btn btn-ghost btn-sm" onclick="_wgLoadStack(_wgLoadSeq)">Try again</button></div>`;
+    const _dev = _wgDevMapFor(data.rows || []); // Build 553
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
       const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1'; const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825'; const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}</button>`; };
+      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}${(c && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}</button>`; };
     const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(data.former || {}).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
     const fcell = (n, d) => { const c = (data.former || {})[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
     return head + `<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -22083,7 +22084,7 @@ async function _wgFetchBase(wk){
     let d = String(r.ShiftDate || '').slice(0, 10);
     if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
     if(d < wk || d > end) return;
-    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [] }); } // Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial)
+    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [], part }); } // Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial); 553: part for the ⚖ headcount
     let _cu = []; try { _cu = JSON.parse(r.Units || '[]'); } catch(e){} // Build 526: the cell shows its units
     (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [] });
   });
@@ -22264,6 +22265,34 @@ function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes
   _wgEdits = {}; _wgSaveDraft();
   wgSetWeek(_wgWeek); // re-reads the sheet
 }
+// ── Build 553 (Tomas, option A): the ⚖ badge, on the grid. The retired list's rule (397 badge · 400 a 3C+4C pair is ONE
+// dealt slot · 404 only before the shift's slots open to staff · 430 a capped shift with a BN holding two High units),
+// computed from the rows behind the drawn week. Keyed `date|shift` by the row's ShiftDate; names = who is off.
+function _wgDevMapFor(rows){
+  const map = {}; const now = Date.now(); const byKey = {};
+  (rows || []).forEach(r => { (byKey[`${r.date}|${r.shift}`] ||= []).push(r); });
+  Object.entries(byKey).forEach(([k, act]) => {
+    const [date, sh] = k.split('|');
+    const mains = act.filter(r => !r.part); if(!mains.length) return;
+    let open = 0; try { open = _rampOpenMs(sh, date, (_rampCfg()[sh] || {})); } catch(e){ return; }
+    if(!(open > now)) return;
+    const rate = unitsPerNurse(sh, act.length);
+    let pairOpen = true; try { pairOpen = isUnitOpenForShift('3C', date, sh) || isUnitOpenForShift('4C', date, sh); } catch(e){}
+    const sized = mains.map(r => { const us = [...new Set(r.units || [])]; const hasPair = us.includes('3C') || us.includes('4C') || us.includes('C_PAIR');
+      return { r, sz: us.filter(u => u !== '3C' && u !== '4C' && u !== 'C_PAIR').length + ((hasPair && pairOpen) ? 1 : 0) }; });
+    const devs = sized.filter(w => w.sz !== rate);
+    let capDevs = []; try { capDevs = _acuityCapOn(sh) ? mains.map(r => ({ r, hs: [...new Set(r.units || [])].filter(u => isHighUnit(u)) })).filter(w => w.hs.length >= 2) : []; } catch(e){}
+    if(!devs.length && !capDevs.length) return;
+    const un = n => `${n} unit${n === 1 ? '' : 's'}`, nm = r => firstName(r.name);
+    const sizeMsg = !devs.length ? '' : devs.length === 1 ? `${nm(devs[0].r)} has ${un(devs[0].sz)} — settings say ${rate} each`
+      : devs.length === 2 ? `${nm(devs[0].r)} ${devs[0].sz}, ${nm(devs[1].r)} ${devs[1].sz} — settings say ${rate} each`
+      : (devs.length === sized.length ? `all ${sized.length} BNs off settings (${rate} each)` : `${devs.length} of ${sized.length} BNs off settings (${rate} each)`);
+    const capMsg = capDevs.map(w => `${nm(w.r)} holds ${w.hs.join(' + ')} — both High`).join(' · ');
+    map[k] = { rate, names: new Set([...devs.map(w => w.r.name), ...capDevs.map(w => w.r.name)]), msg: [sizeMsg, capMsg].filter(Boolean).join(' · ') };
+  });
+  return map;
+}
+function _wgDevBadge(dv, n){ return (dv && dv.names.has(n)) ? `<span title="${escHTML(dv.msg)}" style="position:absolute;top:1px;right:4px;font-size:.72rem;line-height:1">⚖</span>` : ''; }
 // Build 526 (Tomas): a SAVED cell shows the units it covers — the colour already says Day or Noc. A partial keeps its
 // window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
 function _wgCellHtml(c, date){
@@ -22310,6 +22339,7 @@ function wgRender(){
     const cb = document.getElementById('wgClearBtn'); if(cb){ cb.disabled = true; cb.style.opacity = '.5'; } // Build 501
     return;
   }
+  const _dev = _wgDevMapFor(_wgBaseRows); // Build 553
   const cell = (n, d) => {
     const c = _wgCells[`${n}|${d}`];
     const ed = Object.prototype.hasOwnProperty.call(_wgEdits, `${n}|${d}`); // Build 488: unsaved change
@@ -22318,7 +22348,7 @@ function wgRender(){
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}</button>`; // 551: out cells dim
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}${(c && !ed && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}</button>`; // 551: out cells dim; 553: ⚖
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
   const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b))); // Build 529: hidden while a filter is on
@@ -22394,6 +22424,7 @@ function _wgChooser(name, date){
   // flow, only while the list would offer it). The queued removal is now labelled "Remove at Save All".
   const _savedRow = _wgBase[key] ? _wgSavedRowFor(name, date, (cur && cur.shift) || 'Day') : null;
   const _canUnavail = !!_savedRow && _savedRow.date >= shiftDate(_savedRow.shift) && !shiftIsOver(_savedRow.date, _savedRow.shift);
+  const _wgDev = _savedRow ? (_wgDevMapFor(_wgBaseRows)[`${_savedRow.date}|${_savedRow.shift}`] || null) : null; // Build 553
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
@@ -22417,6 +22448,10 @@ function _wgChooser(name, date){
           <button type="button" class="btn btn-ghost btn-sm" id="wgcRemoveNow" style="flex:1;color:#c0392b" title="Takes this shift off the schedule right away. A claimed break goes through the coverage dialog.">🗑 Remove now</button>
           ${_canUnavail ? `<button type="button" class="btn btn-ghost btn-sm" id="wgcUnavail" style="flex:1;color:#c0392b" title="Start the coverage flow for this shift">🏠 Unavailable</button>` : ''}
         </div>
+      </div>` : ''}
+      ${_wgDev ? `<div style="margin:2px 0 10px;padding:10px 12px;border:1.5px solid #f5c883;background:#fff8e6;border-radius:10px">
+        <div style="font-size:.78rem;color:#b45309;line-height:1.4;margin-bottom:8px">⚖ ${escHTML(_wgDev.msg)}</div>
+        <button type="button" class="btn btn-ghost btn-sm" id="wgcRebal" style="width:100%;color:#b45309;border-color:#f5c883" title="Re-deal this shift's full-shift nurses to the settings' count. Only before the shift opens to staff.">⚖ Rebalance this shift</button>
       </div>` : ''}
       <div style="display:flex;gap:8px">
         <button type="button" class="btn btn-danger btn-sm" id="wgcClear" style="flex:1" title="${cur.orientation ? 'Takes the orientation off the grid right away' : _wgBase[key] ? 'Nothing happens yet: the cell goes dashed, and the next Save All removes it (you can Discard unsaved before then). Good for several removals at once.' : 'Undo this tap'}">${cur.orientation ? '🗑 Remove orientation' : _wgBase[key] ? '⏳ Queue removal for Save All' : 'Clear'}</button>
@@ -22447,7 +22482,8 @@ function _wgChooser(name, date){
   if(_savedRow){ // Build 521
     const u = wrap.querySelector('#wgcUnits'); if(u) u.onclick = () => { close(); editAssign(_savedRow.Id); };
     const r = wrap.querySelector('#wgcRemoveNow'); if(r) r.onclick = () => { close(); removeAssignment(_savedRow.Id); };
-    const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = async () => { close(); try { await markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 552 (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
+    const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = async () => { close(); try { await markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 552
+    const rb = wrap.querySelector('#wgcRebal'); if(rb) rb.onclick = async () => { close(); try { await repriceShift(_savedRow.date, _savedRow.shift, null); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 553 (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
   }
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
