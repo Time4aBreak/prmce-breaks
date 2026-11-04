@@ -373,11 +373,12 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
     <!-- Sub-tab nav -->
     <div class="sub-tab-bar" style="background:var(--teal-lt);border-bottom:1px solid var(--border);padding:0 16px;display:flex;gap:4px">
-      <button class="sub-tab active" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
-      <button class="sub-tab" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
+      <!-- Build 554 (Tomas): My Shift first and the tab the portal opens on; then Coverage, Schedule, Settings, Reports -->
+      <button class="sub-tab active" id="st-bn" onclick="showSubTab('bn',this)">🩺 My Shift</button>
+      <button class="sub-tab" id="st-summary" onclick="showSubTab('summary',this)">📋 Coverage</button>
       <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">🕐 Schedule</button>
-      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
       <button class="sub-tab" id="st-settings" onclick="showSubTab('settings',this)" style="display:none">🛠️ Settings</button>
+      <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
     </div>
 
     <!-- Sub-tab content -->
@@ -2314,7 +2315,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-553'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-04-554'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5843,8 +5844,8 @@ function unlockPortal(){
     const settingsBtn = document.getElementById('st-settings');
     if(settingsBtn) settingsBtn.style.display = 'inline-flex';
 
-    showSubTab('summary', document.getElementById('st-summary'));
-    // Auto-detect Day/Noc for coverage tab
+    showSubTab('bn', document.getElementById('st-bn')); // Build 554 (Tomas): the portal opens on My Shift
+    // Auto-detect Day/Noc for coverage tab (its own entry re-detects; this seeds the state)
     const _autoSumShift = detectShift();
     S.summShift = _autoSumShift;
     hiShift('sDay','sNoc', _autoSumShift);
