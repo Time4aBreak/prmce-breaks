@@ -2314,7 +2314,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-03-550'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-03-551'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -22019,7 +22019,7 @@ function _wgRenderStack(){
     if(data === 'failed' || !data) return head + `<div class="empty" style="padding:8px 0">Couldn't read this week. <button type="button" class="btn btn-ghost btn-sm" onclick="_wgLoadStack(_wgLoadSeq)">Try again</button></div>`;
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
       const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1'; const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825'; const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;opacity:.9">${_wgCellHtml(c, d)}</button>`; };
+      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}</button>`; };
     const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(data.former || {}).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
     const fcell = (n, d) => { const c = (data.former || {})[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
     return head + `<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -22050,6 +22050,7 @@ function _wgIsPart(c){ const h = Number(c && c.hours || 0); return !!(c && c.sta
 function _wgSameCell(a, b){
   if(!a || !b) return false;
   if(!!a.orientation !== !!b.orientation) return false; // Build 550
+  if(!!a.inactive !== !!b.inactive) return false; // Build 551
   if(_wgIsPart(a) || _wgIsPart(b)) return _wgIsPart(a) && _wgIsPart(b) && String(a.startTime).padStart(4, '0') === String(b.startTime).padStart(4, '0') && Math.abs(Number(a.hours) - Number(b.hours)) < 0.011; // a partial's shift is derived from its window
   return a.shift === b.shift;
 }
@@ -22098,6 +22099,20 @@ async function _wgFetchBase(wk){
       if(A){ into[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100), units: A.units || [] }; return; }
     }
     into[k] = list[list.length - 1];
+  });
+  // Build 551: a nurse marked unavailable (Status 'inactive') is drawn as an OUT cell so the grid can offer ✅ Mark
+  // Available — the manager's button lost its home with the list card (538). A marker, not a base row: Review and
+  // Save All never see it, so a tap can't stage a second active shift over it; an active row on the key wins.
+  rows.filter(r => r.BreakNurseName && r.Status === 'inactive' && String(r.IsSupplemental) !== '1').forEach(r => {
+    const hh = Number(r.Hours || 0); const part = !!(r.StartTime && hh > 0 && hh < 12);
+    const st = part ? String(r.StartTime).replace(/\D/g, '').padStart(4, '0') : '';
+    let d = String(r.ShiftDate || '').slice(0, 10);
+    if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1);
+    if(d < wk || d > end) return;
+    const k = `${r.BreakNurseName}|${d}`; const into = (!roster.size || roster.has(r.BreakNurseName)) ? cells : former;
+    if(into[k]) return;
+    let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){}
+    into[k] = { shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(u) ? u.flatMap(x => x === 'C_PAIR' ? ['3C', '4C'] : [x]) : [], inactive: true, rowId: r.Id };
   });
   // Build 550 (Tomas): orientation markers live in BNState, not on the sheet (option A: a grid marker — the orientee holds
   // no units and no slots, so Review, the dealer, Sign Up and the reports never see her). Drawn as saved cells; a sheet
@@ -22253,6 +22268,7 @@ function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes
 // window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
 function _wgCellHtml(c, date){
   if(!c) return '<span style="opacity:.35">+</span>';
+  const outHead = c.inactive ? '<div style="font-size:.64rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase">🏠 Out</div>' : ''; // Build 551
   if(c.orientation) return `<div style="font-size:.64rem;font-weight:700;letter-spacing:.04em;text-transform:uppercase;opacity:.8">🎓 Preceptor</div><div style="font-size:.74rem;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${escHTML(bnDisplayName(c.preceptor || ''))}</div>`; // Build 550
   const h = Number(c.hours || 0), part = c.startTime && h > 0 && h < 12;
   const units = Array.isArray(c.units) ? c.units : [];
@@ -22264,7 +22280,7 @@ function _wgCellHtml(c, date){
   const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (shown.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
   // Build 527: one span per unit so five units wrap between units instead of running off the cell
   const body = shown.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${shown.map(u => `<span style="white-space:nowrap">${u}</span>`).join('')}</div>` : '';
-  return head + body;
+  return outHead + head + body;
 }
 function _wgCellLabel(c){
   if(!c) return '';
@@ -22302,7 +22318,7 @@ function wgRender(){
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25">${_wgCellHtml(c, d)}</button>`;
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}</button>`; // 551: out cells dim
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
   const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b))); // Build 529: hidden while a filter is on
@@ -22339,8 +22355,33 @@ function _wgSavedRowFor(name, date, sh){
   const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.cell || r.date) === date).sort((a, b) => a.date.localeCompare(b.date));
   return rows[0] || null;
 }
+// Build 551: the chooser for a nurse marked unavailable — Mark Available (today or ahead; the existing return flow,
+// absorbed-breaks questions included) or nothing. No shift choices: her row is still on the sheet.
+function _wgOutChooser(name, date, cur){
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
+  const d = new Date(date + 'T12:00:00');
+  let canBack = false; try { canBack = date >= shiftDate(cur.shift) && !shiftIsOver(date, cur.shift); } catch(e){}
+  const units = Array.isArray(cur.units) ? cur.units : [];
+  wrap.innerHTML = `
+    <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
+      <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
+      <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${_WG_DOW[d.getDay()]} ${Number(date.slice(5,7))}/${Number(date.slice(8,10))} · ${escHTML(_wgCellLabel(cur))} · 🏠 marked unavailable${units.length ? ' · ' + units.join(', ') : ''}</div>
+      <div style="font-size:.8rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${canBack ? 'Her breaks may have been absorbed by another nurse while she is out. Mark Available runs the return flow and asks what to do with them.' : 'This shift is over — the record stays as it is.'}</div>
+      <div style="display:flex;gap:8px">
+        ${canBack ? '<button type="button" class="btn btn-primary btn-sm" id="wgoBack" style="flex:1">✅ Mark Available</button>' : ''}
+        <button type="button" class="btn btn-ghost btn-sm" id="wgoCancel" style="flex:1">Cancel</button>
+      </div>
+    </div>`;
+  document.body.appendChild(wrap);
+  const close = () => wrap.remove();
+  wrap.querySelector('#wgoCancel').onclick = close;
+  const b = wrap.querySelector('#wgoBack'); if(b) b.onclick = async () => { close(); try { await markBNAvailable(cur.rowId, name); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } };
+  wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
+}
 function _wgChooser(name, date){
   const key = `${name}|${date}`; const cur = _wgCells[key] || {};
+  if(cur.inactive){ _wgOutChooser(name, date, cur); return; } // Build 551
   const wrap = document.createElement('div');
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
   const d = new Date(date + 'T12:00:00');
@@ -22423,7 +22464,7 @@ async function wgReview(){
   // Build 503 (Tomas): a week whose ONLY saved shift was cleared has 0 cells and 1 edit — Review used to be
   // disabled, so that removal could never be saved from the grid. Now an empty batch reviews (no cards, just
   // the "will also remove" note) and Save All carries out the removals.
-  const keys = Object.keys(_wgCells).filter(k => !(_wgCells[k] && _wgCells[k].orientation)); if(!keys.length && !Object.keys(_wgEdits).length) return; // Build 550: orientation cells are markers, not shifts
+  const keys = Object.keys(_wgCells).filter(k => !(_wgCells[k] && (_wgCells[k].orientation || _wgCells[k].inactive))); if(!keys.length && !Object.keys(_wgEdits).length) return; // Build 550/551: orientation and out cells are markers, not shifts
   // Build 519 (step 1 of "the grid is the master"): a saved cell you did NOT touch keeps its units — Review
   // deals the new/changed cells AROUND it (the dealer's 300 lock overlay) instead of re-dealing the week, and
   // Save All skips it. Re-suggest All is still the explicit "re-deal this week".
