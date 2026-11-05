@@ -2315,7 +2315,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-04-554'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-05-555'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -10556,6 +10556,7 @@ async function removeAssignmentFromEdit(){
 
 async function editAssign(id){
   _schedulePollHoldUntil = Date.now() + 90000; // Build 240: quiet the poller while editing
+  showBusy('Opening the assignment…'); // Build 555 (Tomas's tap-guard audit): three reads before the form opens
   try {
     const scheds = await spGet(LISTS.schedule, `Id eq ${id}`);
     if(!scheds.length){ toast('Assignment not found', true); return; }
@@ -10650,6 +10651,7 @@ async function editAssign(id){
   } catch(e){
     toast(e.message, true);
   } finally {
+    hideBusy(); // Build 555
     // Always refresh the assignment cards — ensures the Edit button that
     // was set to "Loading…" resets on every exit path (success, early return,
     // user cancel, or error).
@@ -16593,6 +16595,10 @@ async function clearAllImportSels(){
 }
 
 async function resuggestAll(){
+  showBusy('Re-dealing the whole review…'); // Build 555
+  try { await _resuggestAllCore(); } finally { hideBusy(); }
+}
+async function _resuggestAllCore(){
   const batch = _currentImportEntries || []; // Build 298 (R2): single source, no fallback
   if(!batch.length){ toast('No entries to re-suggest.', true); return; }
   batch.forEach(e => { if(e && e._keep){ delete e._keep; delete e._savedUnits; } }); // Build 519: "re-deal the week" means everyone
@@ -17393,7 +17399,12 @@ function clearImportSel(i){
   });
 }
 
+// Build 555 (Tomas's tap-guard audit): the re-deal ran with nothing on screen. Thin wrappers own the overlay; the bodies are unchanged.
 async function rerunSuggest(i, name, date, shift){
+  showBusy(`Re-dealing ${shift} on ${_fmtDayShort(date)}…`);
+  try { await _rerunSuggestCore(i, name, date, shift); } finally { hideBusy(); }
+}
+async function _rerunSuggestCore(i, name, date, shift){
   // Build 275: the onclick bakes shift at RENDER time, but setImportShift
   // mutates the entry without re-rendering — a flipped card's button still
   // carried the extraction-time shift (live-caught: Re-suggest after a
@@ -22484,7 +22495,7 @@ function _wgChooser(name, date){
     const u = wrap.querySelector('#wgcUnits'); if(u) u.onclick = () => { close(); editAssign(_savedRow.Id); };
     const r = wrap.querySelector('#wgcRemoveNow'); if(r) r.onclick = () => { close(); removeAssignment(_savedRow.Id); };
     const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = async () => { close(); try { await markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 552
-    const rb = wrap.querySelector('#wgcRebal'); if(rb) rb.onclick = async () => { close(); try { await repriceShift(_savedRow.date, _savedRow.shift, null); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 553 (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
+    const rb = wrap.querySelector('#wgcRebal'); if(rb) rb.onclick = async () => { close(); showBusy('Checking the shift…'); try { await repriceShift(_savedRow.date, _savedRow.shift, null); } finally { hideBusy(); if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 553; 555: the pre-confirm read is covered (the chip used to say "Working…") (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
   }
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
 }
@@ -22528,8 +22539,11 @@ async function wgReview(){
   // Build 484 (Tomas): Save All is an upsert keyed nurse|date|shift — it can't remove a row for a
   // cell that was cleared or moved to the other shift. Find those rows now (today forward) so
   // the save can delete them and the sheet ends up matching the grid.
+  // Build 555 (Tomas's tap-guard audit): the button's "Reading the schedule…" covered only the base read; the deal
+  // itself (coverage counts, wing history, the dealer per shift, partial picks) ran with nothing on screen.
+  { const _n = new Set(entries.map(e => `${e.date}|${e.shift}`)).size; if(_n) showBusy(`Dealing ${_n} shift${_n === 1 ? '' : 's'}…`); }
   const title = document.getElementById('importResultsTitle'); if(title) title.textContent = entries.length ? 'Manual Schedule — Review & Assign Units' : 'Manual Schedule — Nothing to suggest'; // Build 504
-  await renderImportRows(entries);
+  try { await renderImportRows(entries); } catch(e){ hideBusy(); throw e; }
   // (after renderImportRows: a straddling partial's two halves are both wanted rows)
   // Build 492: the 484 rework. The rows to remove are the SAVED rows behind this grid (read fresh at
   // the top of this review) that the batch no longer wants, today forward — i.e. exactly what you
@@ -22558,6 +22572,7 @@ async function wgReview(){
     window._wgDeleteIds = []; window._wgDeleteRows = [];
     _staleNote = _box('Couldn\'t check the shifts you cleared for claimed breaks — this save will <strong>not remove</strong> any saved shift. Review again to retry.');
   }
+  hideBusy(); // Build 555
   try { const note = document.getElementById('wgStaleNote'); if(note) note.innerHTML = _staleNote; } catch(e){} // Build 493: static home in the markup (484 had squeezed it into the flex header row)
   try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
