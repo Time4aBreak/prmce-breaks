@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-05-557'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-05-558'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11341,8 +11341,12 @@ function bnShiftStarted(dt, shift, bnName){
   // Date math anchored it to the shift-start calendar date and read "started"
   // ~24h early (bug B). nowKey is date-agnostic, i.e. current-shift-only, which
   // is all the Prod Log ever renders.
-  const startKey = custom ? sortKey(custom, shift) : (shift === 'Day' ? 480 : 1200);
-  return nowKey(shift) >= startKey;
+  // Build 558 (Tomas: "didn't we decide to not allow claims for future shifts?" — + Log was open on a shift a week out,
+  // and three test claims landed on 11/12): the log renders ANY date now (date picker, "next scheduled shift"), so the
+  // clock alone is wrong — a later date has not started however late the hour; an earlier one has. Same arithmetic as
+  // before on the active date (_slotIsAhead is nowKey + the date).
+  const startHHMM = custom ? String(custom).replace(/\D/g, '').padStart(4, '0') : (shift === 'Day' ? '0800' : '2000');
+  return !_slotIsAhead(dt, startHHMM, shift);
 }
 function populateBNStartTimeSlots(){
   const el = document.getElementById('bnStartTime');
@@ -13319,7 +13323,7 @@ async function saveAssign(){
           const unitFutureBookings = staffBookings.filter(b =>
             isStaffBooking(b) &&
             b.Unit === unit &&
-            sortKey(b.SlotTime, shift) > nowKey(shift)
+            _slotIsAhead(dt, b.SlotTime, shift) // 558: date-aware — on a future shift every claim is ahead
           );
           if(unitFutureBookings.length){
             removedUnitsWithBookings.push({ unit, bookings: unitFutureBookings });
@@ -13330,7 +13334,7 @@ async function saveAssign(){
       // an earlier edit — come back into the dialog, so they can be transferred once someone
       // holds the unit (or kept again, or cancelled). Without this a kept claim had no door.
       { const pinned = shiftBookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && b.CoveredBy === nurse
-          && !units.includes(b.Unit) && !removedUnits.includes(b.Unit) && sortKey(b.SlotTime, shift) > nowKey(shift));
+          && !units.includes(b.Unit) && !removedUnits.includes(b.Unit) && _slotIsAhead(dt, b.SlotTime, shift)); // 558
         if(pinned.length){ staffBookings = shiftBookings; const byU = {}; pinned.forEach(b => { (byU[b.Unit] ||= []).push(b); });
           Object.entries(byU).forEach(([unit, bookings]) => removedUnitsWithBookings.push({ unit, bookings, _pinned: true })); } }
 
@@ -18452,7 +18456,7 @@ function _prodLogUpdateHeader(){
 function stageBreakAction(id, action, nurseName, slotTime, unit){
   // Build 442: no confirming a break before its time (see the row render).
   if((action === 'confirmed' || action === 'not_taken') && slotTime){
-    try { const sh = BNS.shift; if(sh && sortKey(slotTime, sh) > nowKey(sh)){ toast(`${fmt12(slotTime)} hasn't happened yet`, true); return; } } catch(e){}
+    try { const sh = BNS.shift; if(sh && _slotIsAhead(BNS.date || shiftDate(sh), slotTime, sh)){ toast(`${fmt12(slotTime)} hasn't happened yet`, true); return; } } catch(e){} // 558: date-aware (the row's buttons already were, 498)
   }
   // Keys in _prodLogStaged must match how lookups are done elsewhere.
   // b.Id comes back from Sheets as a string (Apps Script normalizeValue
@@ -20367,7 +20371,7 @@ async function confirmAllBreaks(){
   };
 
   const _all = cache.allBookings.filter(b => bnCovers(b) && isPending(b));
-  const pending = _all.filter(b => { try { return sortKey(b.SlotTime, b.ShiftType === 'Noc' ? 'Noc' : 'Day') <= nowKey(b.ShiftType === 'Noc' ? 'Noc' : 'Day'); } catch(e){ return true; } }); // Build 442: only breaks that have happened
+  const pending = _all.filter(b => { try { const sh = b.ShiftType === 'Noc' ? 'Noc' : 'Day'; return !_slotIsAhead(b.SlotDate, b.SlotTime, sh); } catch(e){ return true; } }); // 558: date-aware — one tap on a week-ahead shift confirmed nothing before, it confirmed the morning // Build 442: only breaks that have happened
   const _skipped = _all.length - pending.length;
   if(!pending.length){ toast(_skipped ? `${_skipped} pending break${_skipped === 1 ? " hasn't" : "s haven't"} happened yet — nothing to confirm` : 'No pending breaks to confirm'); return; }
   if(_skipped) toast(`${_skipped} future break${_skipped === 1 ? '' : 's'} left pending — confirm after the time`);
