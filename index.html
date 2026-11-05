@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-06-560'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-06-561'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8513,13 +8513,19 @@ async function _loadSlotsCore(silent=false){
       // the render obeys; hardcoded 6:30 labels retired.
       const _winOpenMs = _rampOpenMs(_slotShift, _slotDate, (_rampCfg()[_slotShift] || {}));
       const shiftWindowOpen = Date.now() >= _winOpenMs;
+      // Build 561 (Tomas, Nov 5 2:36 PM): a calendar day BEHIND the home date is a record, not a sign-up sheet. The 346
+      // per-date window locks FUTURE previews (their open moment hasn't come) but a past day's open moment has long
+      // passed, so its rows offered + Select — and claimSlot writes on the HOME date, so a 6A claim made while viewing
+      // yesterday (covered by Deepi) landed on today's 6A, which nobody covers.
+      const _pastPreview = !!(_calSelectedDate && dt < staffShiftDate(S.shift));
       const _winD = new Date(_winOpenMs);
       const openLabel = `Opens ${fmt12(`${String(_winD.getHours()).padStart(2,'0')}${String(_winD.getMinutes()).padStart(2,'0')}`)}`;
 
       const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
       let canClaim=false, lockReason='';
       if(!isTaken && !isMine){
-        if(!shiftWindowOpen)              { canClaim=false; lockReason=openLabel; }
+        if(_pastPreview)                  { canClaim=false; lockReason='Past day'; } // Build 561
+        else if(!shiftWindowOpen)         { canClaim=false; lockReason=openLabel; }
         else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
         else if(!canClaimMore)            { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
         else                              { canClaim=true; }
@@ -8573,7 +8579,7 @@ async function _loadSlotsCore(silent=false){
       }
       // Action cell — owned slots route through the new picker; others unchanged
       let actionHtml = '';
-      if(isMine && !isPastSlot){
+      if(isMine && !isPastSlot && !_pastPreview){ // Build 561: no Manage on a past day either
         if(isCancelStaged || isTransferStaged){
           actionHtml = `<button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="unstageOwnedAndRender('${booking.Id}','${slot}')">↺ Undo</button>`;
         } else if(isPickerOpen){
@@ -9276,6 +9282,11 @@ async function submitClaims(){
   if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
     toast('Enter name and 5-digit extension', true);
+    return;
+  }
+  // Build 561: nothing is written from a calendar preview — the write date is the HOME date, whatever the list shows
+  if(typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate && _calSelectedDate !== staffShiftDate(S.shift) && S.shift !== 'Other'){
+    toast(`You're viewing ${_fmtDayShort(_calSelectedDate)} — tap ← Back to ${staffShiftDate(S.shift) === today() ? 'today' : _fmtDayShort(staffShiftDate(S.shift))} to claim`, true);
     return;
   }
 
@@ -10068,7 +10079,8 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       const _rcDt = (typeof srcDt === 'string' && srcDt) ? srcDt : _rampShiftDate(slotShift);
       const _rcAllow = rampAllowedCount(slotShift, _rcDt);
       const _rcMax = rampMaxFor(slotShift);
-      if(staffMine.length >= _rcAllow){
+      const _preparedHere = runRows ? runRows.filter(r => r.NurseName === name && r.Unit === _unit && r.ShiftType === slotShift).length : 0; // Build 561: 560's prepare mode writes nothing per slot, so the cache didn't grow between a run's slots — a run of 4 on top of 2 held passed every check (Mona, 6 on 6A)
+      if(staffMine.length + _preparedHere >= _rcAllow){
         const _rcLine = _rcAllow < _rcMax ? rampCheckBackLine(slotShift, _rcDt) : `Max ${_rcMax} slots per shift.`;
         if(!silent) toast(_rcLine, true);
         return _rcAllow < _rcMax ? _rcLine : `Max ${_rcMax} reached`;
