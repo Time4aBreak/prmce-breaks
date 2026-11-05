@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-06-559'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-06-560'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2524,6 +2524,13 @@ async function spPost(list, data){
   return { d: item };
 }
 
+// Build 560 (Tomas): a nurse's consecutive run is claimed as ONE request — the backend checks every slot under a
+// lock and appends all or none, so phones submitting the same run can't split it between them. Resolves to the
+// created items; a conflict throws SLOT_TAKEN:<name> with `.slot` = the blocking slot.
+async function spPostRun(list, rows){
+  if (!SIM_MODE) return _spPostRunReal(list, rows);
+  const out = []; for(const r of rows) out.push((await spPost(list, r)).d || r); return out;
+}
 async function spDel(list, id){
   if (!SIM_MODE) return _spDelReal(list, id);
   await new Promise(r => setTimeout(r, 50));
@@ -2605,7 +2612,7 @@ async function gasCallPost(params){
   });
   if(!r.ok) throw new Error('Server error: ' + r.status);
   const d = await r.json();
-  if(d.error) throw new Error(d.error);
+  if(d.error && d.error !== 'SLOT_TAKEN') throw new Error(d.error); // Build 560: same passthrough as gasCall (559) — a run can travel by POST
   clearAPIError();
   return d;
 }
@@ -2656,6 +2663,21 @@ async function _spPostReal(list, data){
     throw new Error(`SLOT_TAKEN:${d.takenBy || 'another nurse'}`);
   }
   return d.item;
+}
+
+async function _spPostRunReal(list, rows){ // Build 560
+  const rowsStr = encodeURIComponent(JSON.stringify(rows));
+  const params = { action: 'postRun', sheet: list, rows: rowsStr };
+  let d;
+  try { d = rowsStr.length > 3000 ? await gasCallPost(params) : await gasCall(params); }
+  catch(e){ // a backend that predates postRun (deployed out of order): fall back to the 559 per-slot posts rather than refuse the run
+    if(!/Unknown action: postRun/.test((e && e.message) || '')) throw e;
+    const out = []; for(const r of rows) out.push(await spPost(list, r)); return out;
+  }
+  if(d && d.error === 'SLOT_TAKEN'){
+    const err = new Error(`SLOT_TAKEN:${d.takenBy || 'another nurse'}`); err.slot = d.slot || ''; throw err;
+  }
+  return d.items || [];
 }
 
 async function _spDelReal(list, id){
@@ -9447,21 +9469,41 @@ async function submitClaims(){
     const ka = _parseClaimKey(a), kb = _parseClaimKey(b);
     return sortKey(ka.time, ka.shift) - sortKey(kb.time, kb.shift);
   });
+  // Build 560 (Tomas): consecutive picks on one stream (same shift, BN and source date, SLOT_IV apart) are a RUN and
+  // post as ONE request — all or none under the backend's lock — so phones submitting the same run can't split it
+  // (Nov 5: 1:35+3:15 went to one nurse, 3:35 to the other). Singles post as before. A refused run names the slot
+  // that blocked it and who holds it; the nurse re-picks.
+  const _runs = [];
   for(const slot of slots){
     const _k = _parseClaimKey(slot);
-    const slotTime  = _k.time;
-    const slotShift = _k.shift;
-    const slotBN    = _k.bn; // Build 283: staged BN — threads into claimSlot in 284
-    const slotDt    = _k.dt; // Build 290: staged source-shift date (Other rows only)
-    const result = await claimSlot(slotTime, true, slotShift, allBookingsToday, submitUnit, slotBN, slotDt);
-    if(result === 'ok'){
-      results.claimed.push(slotTime);
-      // Add to cached data so next iteration's max/race checks see it.
-      // Build 138: use submitUnit (not live S.unit) to match what claimSlot
-      // just wrote — otherwise the cache could lie if user navigated.
-      allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:slotTime, SlotDate:(slotDt || dt), ShiftType:slotShift, IsBNBreak:false, CoveredBy: slotBN || ''}); // Build 290: cache mirrors the written date
+    const last = _runs.length ? _runs[_runs.length - 1] : null, prev = last ? last[last.length - 1] : null;
+    if(prev && prev.shift === _k.shift && prev.bn === _k.bn && prev.dt === _k.dt && sortKey(_k.time, _k.shift) - sortKey(prev.time, prev.shift) === SLOT_IV) last.push(_k);
+    else _runs.push([_k]);
+  }
+  const _cacheClaim = (k) => allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:k.time, SlotDate:(k.dt || dt), ShiftType:k.shift, IsBNBreak:false, CoveredBy: k.bn || ''}); // Build 138/290: the cache mirrors what was written, on submitUnit
+  for(const run of _runs){
+    if(run.length === 1){
+      const _k = run[0];
+      const result = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt);
+      if(result === 'ok'){ results.claimed.push(_k.time); _cacheClaim(_k); }
+      else results.failed.push({ label: fmt12(_k.time), reason: result });
+      continue;
     }
-    else results.failed.push({ label: fmt12(slotTime), reason: result });
+    const runLabel = `${fmt12(run[0].time)}–${fmt12(run[run.length - 1].time)}`;
+    const rows = []; let refused = null;
+    for(const _k of run){
+      const r = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt, rows);
+      if(r !== 'prepared'){ refused = `${fmt12(_k.time)}: ${r}`; break; }
+    }
+    if(refused){ results.failed.push({ label: runLabel, reason: `${refused} — the run wasn't saved` }); continue; }
+    try {
+      await spPostRun(LISTS.bookings, rows);
+      run.forEach(_k => { results.claimed.push(_k.time); _cacheClaim(_k); });
+    } catch(e){
+      const msg = (e && e.message) || '';
+      const who = msg.startsWith('SLOT_TAKEN:') ? String(msg.slice('SLOT_TAKEN:'.length) || 'another nurse').replace(/\s*\((\d{5})\)/, ' $1') : null;
+      results.failed.push({ label: runLabel, reason: who ? `${e.slot ? fmt12(e.slot) + ' ' : ''}just claimed by ${who} — the run wasn't saved` : (msg || 'Network error') });
+    }
   }
 
   // ── Clear staging state ──
@@ -9935,7 +9977,7 @@ function renderOtherSlotsFromCache(){
 // legitimate distinct claims.
 const _claimsInFlight = new Set();
 
-async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy='', srcDt=''){ // Build 284: coveredBy = the BN whose row was tapped (streams ruling) · Build 290: srcDt = source-shift date threaded from the composed Other row
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy='', srcDt='', runRows=null){ // Build 560: runRows = prepare only — every check runs, the row is pushed, submitClaims posts the run as one request // Build 284: coveredBy = the BN whose row was tapped (streams ruling) · Build 290: srcDt = source-shift date threaded from the composed Other row
   // Build 138 (2026-05-27): Capture unit at function entry. Without this,
   // submitClaims's batch loop reads S.unit fresh on each iteration — if
   // the user navigates to another unit mid-submit (via pickUnit), later
@@ -10115,14 +10157,16 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       if(!silent){ toast(`${fmt12(slotTime)} is being claimed by someone else right now — try another slot.`, true); }
       return 'duplicate-in-flight';
     }
+    const _row = {
+      Title:`${_unit}-${dt}-${slotTime}`,
+      NurseName:name, Unit:_unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
+      IsOtherShift: (S.shift === 'Other') ? 1 : 0,
+      CoveredBy: coveredBy || '' // Build 284: attribution stamp — empty until 285 threads row BNs; bnOwns falls back per-unit exactly as before
+    };
+    if(runRows){ runRows.push(_row); return 'prepared'; } // Build 560: the run is written by submitClaims in one request
     _claimsInFlight.add(_inFlightKey);
     try {
-      await spPost(LISTS.bookings,{
-        Title:`${_unit}-${dt}-${slotTime}`,
-        NurseName:name, Unit:_unit, SlotTime:slotTime, SlotDate:dt, ShiftType:slotShift,
-        IsOtherShift: (S.shift === 'Other') ? 1 : 0,
-        CoveredBy: coveredBy || '' // Build 284: attribution stamp — empty until 285 threads row BNs; bnOwns falls back per-unit exactly as before
-      });
+      await spPost(LISTS.bookings, _row);
     } finally {
       // Clear the guard ~3 seconds after the POST completes — long enough
       // to cover the eventual-consistency window where the next GET might
