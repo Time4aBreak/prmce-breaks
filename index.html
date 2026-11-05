@@ -445,6 +445,9 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <option value="">— Select your name —</option>
         </select>
       </div>
+      <!-- Build 557 (Tomas): on a phone the log card's "Finding next scheduled shift…" sits below the fold, and the first
+           selection showed nothing at all — this line lives under the picker and clears when the log paints -->
+      <div id="bnNameStatus" style="display:none;margin-top:8px;font-size:.8rem;color:var(--muted);align-items:center;gap:8px"><span class="spinner" style="width:14px;height:14px;flex:none"></span><span id="bnNameStatusText"></span></div>
       <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
         <div style="flex:1">
           <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">EXTENSION</label>
@@ -2337,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-05-556'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-05-557'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6857,13 +6860,15 @@ async function resetShiftToDefault(){
   const name = BNS.name, dt = BNS.date || today(), shift = BNS.shift;
   // Warm from BNState in case the template was set on another device and
   // hasn't propagated to this device's localStorage yet. No-op if already cached.
-  await warmDefaultTemplate(name, shift);
+  showBusy('Checking your default…'); // Build 557 (Tomas's tap-guard audit)
+  try { await warmDefaultTemplate(name, shift); } finally { hideBusy(); }
   const def = getDefaultTemplate(name, shift);
   if(!def || !def.length){
     toast('No default schedule set for ' + shift + ' shift', true); return;
   }
   if(!await customConfirm('Reset this shift to your default break schedule?','Reset this shift','Keep current')) return;
-  await applyDefaultToShift(name, dt, shift, def, true);
+  showBusy('Resetting this shift to your default…'); // Build 557
+  try { await applyDefaultToShift(name, dt, shift, def, true); } finally { hideBusy(); }
   toast('Shift reset to default');
   loadBNConfirm();
 }
@@ -17633,7 +17638,9 @@ function populateBNDropdown(){
 }
 
 let _bnViewGen = 0; // Build 280: generation counter — see guard notes inside loadBNView
-async function loadBNView(){
+function _bnStatus(text){ const el = document.getElementById('bnNameStatus'), t = document.getElementById('bnNameStatusText'); if(!el) return; if(text){ if(t) t.textContent = text; el.style.display = 'flex'; } else el.style.display = 'none'; } // Build 557
+async function loadBNView(){ try { await _loadBNViewCore(); } catch(e){ _bnStatus(null); throw e; } } // Build 557: the status never outlives a failed load
+async function _loadBNViewCore(){
   // Build 280: the _loadSlotsGen lesson applied to the view's OWN state.
   // Live-reproduced tonight with 279's honest labels: loadBNView ran twice
   // one second apart; flight #1 got a stale detect-null (row written
@@ -17646,6 +17653,7 @@ async function loadBNView(){
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first', true); return; }
   const ext = document.getElementById('bnExtInput').value.trim();
+  _bnStatus(`Finding ${firstName(name)}'s shift…`); // Build 557: cleared when the log paints (or says there is no shift)
 
   // Clear ext and slot display immediately when switching to a different BN
   if(BNS.name && BNS.name !== name){
@@ -19518,7 +19526,7 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
     // not the cache.
     if(dt !== (BNS.date || today()) || shift !== BNS.shift){ if(loader) loader.style.display = 'none'; return; }
 
-    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; _bpuHide(); return; }
+    if (!scheds.length) { wrap.style.display = 'none'; loader.style.display = 'none'; _bnConfirmCache = null; _bpuHide(); _bnStatus(null); return; } // 557
 
     // Cache the fetched data so stage handlers can re-render instantly
     // without waiting for another network round trip. Cache is invalidated
@@ -19552,6 +19560,7 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
 // Synchronous render body — assumes data is already fetched. Called from
 // loadBNConfirm (after fetch) and _renderBNConfirm (from cache, on stage taps).
 function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, shift, nextDt){
+  _bnStatus(null); // Build 557: the log is painting — the picker's status line is done
   // Build 276: stale-flight guard for ALL painters (loadBNConfirm and the
   // 5s refresher both land here). Live-caught: a poll cycle captured
   // dt=Jul-16, the user picked Jul-23 mid-flight, the old cycle landed last
@@ -20137,11 +20146,15 @@ async function toggleGapsGiven(firstId){
     const runs = groupBookingsIntoRuns(all.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && !isNotTaken(b) && (b.SlotDate || '').slice(0,10) === (first.SlotDate || '').slice(0,10) && b.ShiftType === first.ShiftType), sh);
     const run = runs.find(r => r.some(b => String(b.Id) === String(firstId))); if(!run) return;
     const on = !run.every(b => String(b.GapsGiven) === '1');
-    run.forEach(b => { b.GapsGiven = on ? '1' : '0'; });
-    await Promise.all(run.map(b => spPatch(LISTS.bookings, b.Id, { GapsGiven: on ? 1 : 0 })));
+    // Build 557 (Tomas's tap-guard audit): optimistic, the ✓ Taken / Undo pattern — the cache flips and the log repaints at
+    // once (the "counts as" line and Breaks Per Unit with it); the N patches go behind, tracked so the refresher can't
+    // paint over them, and roll back with a toast if they fail. (Was: N patches, then a full reload — seconds of nothing.)
+    run.forEach(b => { b.GapsGiven = on ? '1' : '0'; trackPatch(b.Id, { GapsGiven: on ? '1' : '0' }); });
+    if(!_renderBNConfirm()) loadBNConfirm();
     const credit = on ? gapsGivenCredit(run.length) : 0;
     toast(on ? `Gaps given on a run of ${run.length} — ${_runMinutes(run.length, true)} min${credit ? `, counts as ${run.length + credit}` : ''}` : `Gaps removed — run of ${run.length} counts as ${run.length}`);
-    loadBNConfirm();
+    Promise.all(run.map(b => spPatch(LISTS.bookings, b.Id, { GapsGiven: on ? 1 : 0 })))
+      .catch(e => { run.forEach(b => { b.GapsGiven = on ? '0' : '1'; trackPatch(b.Id, { GapsGiven: on ? '0' : '1' }); }); if(!_renderBNConfirm()) loadBNConfirm(); toast(`Couldn't update the run — ${(e && e.message) || e}`, true); });
   } catch(e){ toast(`Couldn't update the run — ${(e && e.message) || e}`, true); }
 }
 // ═══ Build 486 (Tomas): HAND OFF one claim to another break nurse ═══════════════
@@ -20163,6 +20176,7 @@ async function handOffClaim(id){
     // shift date (`cache.dt`) is the anchor whenever the claim is this shift's; rotations key on it too.
     const sd = (shift === (cache.shift || BNS.shift) && cache.dt) ? String(cache.dt).slice(0, 10) : d;
     const lo = sd < d ? sd : d, hi = sd < d ? d : sd;
+    showBusy('Finding who can take it…'); // Build 557: two reads before the picker ran bare
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${sd}' and ShiftDate le '${sd}T23' and ShiftType eq '${shift}'`);
     const bookings = await spGet(LISTS.bookings, `SlotDate ge '${lo}' and SlotDate le '${hi}T23' and ShiftType eq '${shift}'`);
     const wing = getUnitWing(b.Unit);
@@ -20175,6 +20189,7 @@ async function handOffClaim(id){
     const ctx = buildAbsorptionContext(cands, { allBookings: bookings.filter(x => !runIds.has(String(x.Id))), allScheds: scheds, shift });
     const elig = [...new Set(cands.map(r => r.BreakNurseName))].filter(bn => bnCanTakeRun(bn, run, ctx));
     if(!elig.length){ toast(`No break nurse on the ${wing} wing has ${fmt12(b.SlotTime)} free`, true); return; }
+    hideBusy(); // Build 557: the picker is the user's turn
     const target = await new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal'), msgEl = document.getElementById('customConfirmMsg'), okBtn = document.getElementById('customConfirmOk'), cancelBtn = document.getElementById('customConfirmCancel');
       msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${run.map(x => fmt12(x.SlotTime)).join(' + ')}${run.length > 1 ? ` · ${run.length} slots` : ''}</div><div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
@@ -20185,6 +20200,7 @@ async function handOffClaim(id){
       modal.style.display = 'flex';
     });
     if(!target) return;
+    showBusy(`Handing off to ${bnDisplayName(target)}…`); // Build 557
     await Promise.all(run.map(x => spPatch(LISTS.bookings, x.Id, { CoveredBy: target, CreatedBy: target })));
     const slots = run.map(x => normSlot(x.SlotTime));
     try { const rot = loadRotation(target, sd, shift) || {}; slots.forEach(sl => { rot[sl] = b.Unit; }); await saveRotation(target, sd, shift, rot); } catch(e){ console.warn('receiver pin failed', e && e.message); } // Build 506: sd
@@ -20194,6 +20210,7 @@ async function handOffClaim(id){
     toast(`${run.map(x => fmt12(x.SlotTime)).join(' + ')} on ${b.Unit} → ${bnDisplayName(target)}`);
     loadBNConfirm(); try { notifyProdLogChanged(target); } catch(e){}
   } catch(e){ toast(`Hand-off failed — ${(e && e.message) || e}`, true); }
+  finally { hideBusy(); } // Build 557: every exit, including the early-return toasts during the reads
 }
 async function setBreakStatus(id, status){
   try {
