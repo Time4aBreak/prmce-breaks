@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-05-558'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-06-559'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2619,7 +2619,7 @@ async function gasCall(params, retries=API_MAX_RETRIES){
       const r = await fetchWithTimeout(url, API_TIMEOUT_MS);
       if(!r.ok) throw new Error('Server error: ' + r.status);
       const d = await r.json();
-      if(d.error) throw new Error(d.error);
+      if(d.error && d.error !== 'SLOT_TAKEN') throw new Error(d.error); // Build 559 (testbed finding 1): the double-booking guard's answer is a decision, not a fault — no retries, no API banner; _spPostReal throws it as SLOT_TAKEN:<name>
       clearAPIError();
       return d;
     } catch(e){
@@ -10133,17 +10133,19 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     if(!silent){ toast(`✓ ${fmt12(slotTime)} claimed for ${toTitleCase(_nurseFirst)}`); loadSlots(); if(document.getElementById('summList')) loadSummary(); }
     return 'ok';
   }catch(e){
+    const msg = e.message || '';
+    // Build 559 (testbed finding 1): the guard's answer reads as a sentence on BOTH doors — the single-claim toast and the
+    // Submit summary ("1 couldn't be saved: 11:15 AM: just claimed by Sarah 12345") — with the ext bare, never "(12345)".
+    const _takenBy = msg.startsWith('SLOT_TAKEN:') ? String(msg.slice('SLOT_TAKEN:'.length) || 'another nurse').replace(/\s*\((\d{5})\)/, ' $1') : null;
     if(!silent){
-      const msg = e.message || '';
-      if(msg.startsWith('SLOT_TAKEN:')){
-        const who = msg.split(':')[1];
-        toast(`${fmt12(slotTime)} was just claimed by ${who}. Please choose another slot.`, true);
+      if(_takenBy){
+        toast(`${fmt12(slotTime)} was just claimed by ${_takenBy}. Please choose another slot.`, true);
         loadSlots();
       } else {
         toast(msg, true);
       }
     }
-    return e.message;
+    return _takenBy ? `just claimed by ${_takenBy}` : e.message;
   }
 }
 
@@ -17382,7 +17384,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
           }).join('')}
         </div>`;
       }).join('');
-      el.dataset.schedCount = upcoming.length;
+      if(el) el.dataset.schedCount = upcoming.length; // Build 559 (testbed finding 2): #assignList left with the list card in 538 — every Save All since threw here and took the "Checking what was saved…" read-back detour
     }
   } catch(e) {
     // Re-enable the ghost + extract buttons so user can try again or clear and retry.
@@ -20169,7 +20171,11 @@ async function handOffClaim(id){
   try {
     const cache = _bnConfirmCache; if(!cache){ toast('Reload the log first', true); return; }
     const b = (cache.allBookings || []).find(x => String(x.Id) === String(id)); if(!b){ toast('Claim not found — reload the log', true); return; }
-    const shift = b.ShiftType === 'Noc' ? 'Noc' : 'Day', d = (b.SlotDate || '').slice(0, 10);
+    const d = (b.SlotDate || '').slice(0, 10);
+    // Build 559 (testbed finding 4, the open 506 witness): the covering shift is the LOG's shift, always — the log only shows
+    // claims this shift covers. A Day-tab claim at 07:35 is stored as Day (Build 204) but is covered by the outgoing Noc nurse;
+    // keying on its ShiftType sent the receiver search to the incoming Day roster, not yet in the building ("No break nurse…").
+    const shift = (cache.shift === 'Noc' || cache.shift === 'Day') ? cache.shift : (b.ShiftType === 'Noc' ? 'Noc' : 'Day');
     // Build 498: date-aware (a claim on another date is judged by its date first, then the clock).
     // (498's comment about an overlap claim being refused was wrong — overlap claims are stored under the
     // OUTGOING shift's type, so 07:15 was always "ahead" on the Noc clock.)
@@ -20178,7 +20184,7 @@ async function handOffClaim(id){
     // claim (Day staff at 07:15, stored as Noc) made after 06:30 is dated the MORNING, so looking up Noc rows on
     // its SlotDate found tonight's nurses — not yet in the building — instead of the outgoing ones. The log's own
     // shift date (`cache.dt`) is the anchor whenever the claim is this shift's; rotations key on it too.
-    const sd = (shift === (cache.shift || BNS.shift) && cache.dt) ? String(cache.dt).slice(0, 10) : d;
+    const sd = cache.dt ? String(cache.dt).slice(0, 10) : d; // Build 559: the log's own date (506 anchored it only when the ShiftTypes matched)
     const lo = sd < d ? sd : d, hi = sd < d ? d : sd;
     showBusy('Finding who can take it…'); // Build 557: two reads before the picker ran bare
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${sd}' and ShiftDate le '${sd}T23' and ShiftType eq '${shift}'`);
@@ -22438,7 +22444,7 @@ function wgRender(){
     + names.map(n => `<div style="${_WG_STICKY}font-weight:600;font-size:.85rem;padding-right:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis" title="${escHTML(n)}">${escHTML(bnDisplayName(n))} <span style="font-size:.66rem;color:var(--muted);font-weight:500">${bnShiftDefault(n) === 'Noc' ? '🌙' : '☀️'}</span></div>` + dates.map(d => cell(n, d)).join('')).join('')
     + formerNames.map(n => `<div style="${_WG_STICKY}font-weight:600;font-size:.85rem;padding-right:4px;color:var(--muted);overflow:hidden" title="${escHTML(n)} — no longer on the roster; saved shifts shown for the record">${escHTML(bnDisplayName(n))}<div style="font-size:.62rem;font-weight:500;white-space:nowrap">no longer on roster</div></div>` + dates.map(d => fcell(n, d)).join('')).join('')
     + `</div>`;
-  const count = Object.keys(_wgCells).length;
+  const count = Object.keys(_wgCells).filter(k => !(_wgCells[k] && (_wgCells[k].orientation || _wgCells[k].inactive))).length; // Build 559 (testbed): markers are not shifts in the count line either (550/551 excluded them from Review)
   const edN = Object.keys(_wgEdits).length;
   document.getElementById('wgCount').textContent = (count ? `${count} shift${count === 1 ? '' : 's'}` : '') + (edN ? `${count ? ' · ' : ''}${edN} unsaved` : '');
   // Build 503: edits alone can be reviewed (removals-only save). Build 504 (Tomas): the button says what it will
