@@ -1811,11 +1811,26 @@ function initRampCard(){
 // construction) or keep existing assignments and use the new counts for
 // future scheduling only. Hand-shaped groups (partials, supplementals,
 // unavailable-restructured) are skipped and counted.
+// Build 556 (Nov 4 7:51 AM incident): two runs of this sweep overlapped (two taps, two tabs or two devices — the
+// trigger is unknown). Each read the same old rows, each inserted a full new set, each deleted only the OLD ids it had
+// read, and neither knew about the other's rows: 62 duplicate shifts, 11/1–11/21, every nurse. The grid hid them (one
+// cell per nurse per day) while Sign Up lit the union. Two fixes: a same-device in-flight guard, and the delete step
+// is now KEY-based at write time — after inserting, every other active row carrying a dealt nurse|date|shift goes,
+// not just the ids read at the start — so overlapping runs end with one set (whichever finished last).
+let _redealInFlight = false;
+// Pure: which rows to remove after the insert. rowsNow = the sheet after our insert; dealtKeys = the shifts we dealt;
+// myIds = the rows we inserted. Supplementals are never touched (a dealt group had none — handShaped skips them).
+function _redealStaleIds(rowsNow, dealtKeys, myIds){
+  const mine = new Set(myIds.map(String));
+  return rowsNow.filter(r => String(r.IsSupplemental) !== '1' && dealtKeys.has(`${r.BreakNurseName}|${String(r.ShiftDate || '').slice(0, 10)}|${r.ShiftType}`) && !mine.has(String(r.Id))).map(r => r.Id);
+}
 async function applyCoverageLimitsToUpcoming(){
   // Build 332: _at lives OUTSIDE the try — the catch names the failing
   // group, and a catch that references try-scoped variables crashes the
   // error handler itself (which is exactly what buried the real error).
   let _at = '';
+  if(_redealInFlight){ toast('A re-deal is already running — let it finish first', true); return; } // Build 556
+  _redealInFlight = true;
   try {
     showBusy('Re-dealing upcoming shifts…');
     const t = today();
@@ -1851,6 +1866,7 @@ async function applyCoverageLimitsToUpcoming(){
     // empty schedule ("Remove duplicate assignments" is the manual out).
     let done = 0, skipped = 0;
     const _delIds = [], _creates = [], _rotKeys = [];
+    const _dealtKeys = new Set(), _stamp = Date.now(); // Build 556: our rows carry our own ids, so the cleanup can tell them apart
     for(const key of _keys){
       const rows = groups[key];
       const [d, sh] = key.split('|');
@@ -1867,8 +1883,9 @@ async function applyCoverageLimitsToUpcoming(){
       for(const bn of nurses){
         const units = expandSuggestionUnits(result[bn] || [], d, sh);
         if(!units.length) continue;
-        _creates.push({ Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
+        _creates.push({ Id: _stamp + _creates.length, Title: `${bn} ${d}`, BreakNurseName: bn, ShiftDate: d, ShiftType: sh,
           Units: JSON.stringify(units) });
+        _dealtKeys.add(`${bn}|${d}|${sh}`); // Build 556
         _rotKeys.push(rotationKey(bn, d, sh));
         (result[bn] || []).forEach(tok => { _ov[`${tok}|${sh}`] = (_ov[`${tok}|${sh}`] || 0) + 1; });
         _any = true;
@@ -1884,9 +1901,14 @@ async function applyCoverageLimitsToUpcoming(){
         rows: encodeURIComponent(JSON.stringify(_creates.slice(ci, ci + _CHUNK))) }), 60000, 'writing the new rows');
     }
     showBusy('Applying — clearing the old rows…');
-    for(let ci = 0; ci < _delIds.length; ci += _CHUNK){
+    // Build 556: re-read and remove EVERY other row on the dealt shifts (the ids read at the start are a subset) —
+    // an overlapping run's rows go too. Falls back to the start-of-run ids if the re-read fails.
+    let _gone = _delIds;
+    try { const _now = await _tmo(spGet(LISTS.schedule, `ShiftDate ge '${t}'`), 60000, 're-reading the schedule'); _gone = _redealStaleIds(_now, _dealtKeys, _creates.map(c => c.Id)); }
+    catch(e){ console.warn('[re-deal] re-read failed, clearing the rows read at the start:', e && e.message); }
+    for(let ci = 0; ci < _gone.length; ci += _CHUNK){
       await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
-        ids: encodeURIComponent(JSON.stringify(_delIds.slice(ci, ci + _CHUNK))) }), 60000, 'clearing the old rows');
+        ids: encodeURIComponent(JSON.stringify(_gone.slice(ci, ci + _CHUNK))) }), 60000, 'clearing the old rows');
     }
     showBusy('Applying — retiring stale rotations…');
     try {
@@ -1918,7 +1940,7 @@ async function applyCoverageLimitsToUpcoming(){
     hideBusy();
     toast(`Couldn't finish the re-deal${_at ? ` at ${_at}` : ''} — ${(e && e.message) || e || 'unknown error'}. Running Re-deal upcoming again will finish the job.`, true);
     loadAssignments();
-  }
+  } finally { _redealInFlight = false; } // Build 556
 }
 
 // Build 364: clock arithmetic for the derived unlock (open + hours, mod 24).
@@ -2315,7 +2337,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-05-555'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-05-556'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14142,10 +14164,9 @@ async function dedupAssignments(){
     const toDelete = [];
     for (const [key, items] of Object.entries(groups)) {
       if (items.length <= 1) continue;
-      items.sort((a,b) => {
-        try { return JSON.parse(b.Units||'[]').length - JSON.parse(a.Units||'[]').length; }
-        catch { return 0; }
-      });
+      // Build 556: newest id first — the last write is the one the rotations and wing history follow. (Was: more units
+      // first, then sheet order — which kept the OLDER row of an equal pair.)
+      items.sort((a,b) => Number(b.Id) - Number(a.Id));
       for (let i = 1; i < items.length; i++) toDelete.push(items[i]);
     }
     // De-dupe by Id: if past batchUpserts collided on Date.now(), multiple
@@ -21988,7 +22009,8 @@ let _wgCells = {};           // `${name}|${date}` → {shift, startTime, hours} 
 let _wgBase = {};            // Build 488: the week as saved on the sheet
 let _wgEdits = {};           // Build 488: unsaved changes — key → cell | null (cleared)
 let _wgFormer = {};          // Build 490: saved shifts of nurses no longer on the roster — display only
-let _wgBaseRows = [];        // Build 492: the sheet rows behind _wgBase — {Id, name, date, shift, units}
+let _wgBaseRows = [];
+let _wgDups = new Set(); // Build 556: nurse|date keys with more than one active row behind them        // Build 492: the sheet rows behind _wgBase — {Id, name, date, shift, units}
 // Build 529 (Tomas): the list's nurse filter, on the grid. A VIEW only — the count, Review, Save All and the removal
 // set still see every cell. Remembered per device. Former nurses' rows hide while a filter is on.
 let _wgFilter = new Set(); try { const f = JSON.parse(localStorage.getItem('bnWeeklyGridFilter') || '[]'); if(Array.isArray(f)) _wgFilter = new Set(f); } catch(e){}
@@ -22032,7 +22054,7 @@ function _wgRenderStack(){
     const _dev = _wgDevMapFor(data.rows || []); // Build 553
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
       const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1'; const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825'; const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}${(c && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}</button>`; };
+      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}${(c && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}${(c && data.dups && data.dups.has(`${n}|${d}`)) ? _wgDupBadge() : ''}</button>`; };
     const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(data.former || {}).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
     const fcell = (n, d) => { const c = (data.former || {})[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
     return head + `<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -22098,9 +22120,9 @@ async function _wgFetchBase(wk){
     if(d < wk || d > end) return;
     if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [], part }); } // Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial); 553: part for the ⚖ headcount
     let _cu = []; try { _cu = JSON.parse(r.Units || '[]'); } catch(e){} // Build 526: the cell shows its units
-    (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [] });
+    (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [], rowId: r.Id, skey: `${String(r.ShiftDate || '').slice(0, 10)}|${r.ShiftType}` }); // 556: rowId + the sheet key
   });
-  const cells = {}, former = {};
+  const cells = {}, former = {}, dups = new Set(); // 556: dups
   // Build 449: two contiguous partial halves (a straddling window saved as two rows) show as ONE cell
   Object.entries(perCell).forEach(([k, list]) => {
     const into = (!roster.size || roster.has(k.split('|')[0])) ? cells : former; // Build 490: off-roster → display-only map
@@ -22111,7 +22133,12 @@ async function _wgFetchBase(wk){
       const [A, B] = endM(parts[0]) === toM(parts[1].startTime) ? [parts[0], parts[1]] : (endM(parts[1]) === toM(parts[0].startTime) ? [parts[1], parts[0]] : [null, null]);
       if(A){ into[k] = { shift: A.shift, startTime: A.startTime, hours: String(Math.round((Number(A.hours) + Number(B.hours)) * 100) / 100), units: A.units || [] }; return; }
     }
-    into[k] = list[list.length - 1];
+    // Build 556: more than one row behind a cell (and not the 449 pair) is a DUPLICATE — the newest row draws and the key
+    // is flagged so the grid never hides what Sign Up will light. (Was: last in sheet order, silently.)
+    // A post-midnight partial drawn on the next day can share a cell with that day's own shift — different sheet keys,
+    // not a duplicate. Only two rows with the SAME ShiftDate+ShiftType are.
+    if(list.length > 1){ const seen = new Set(); if(list.some(c => seen.size === seen.add(c.skey).size)) dups.add(k); }
+    into[k] = list.slice().sort((a, b) => Number(b.rowId || 0) - Number(a.rowId || 0))[0];
   });
   // Build 551: a nurse marked unavailable (Status 'inactive') is drawn as an OUT cell so the grid can offer ✅ Mark
   // Available — the manager's button lost its home with the list card (538). A marker, not a base row: Review and
@@ -22136,7 +22163,22 @@ async function _wgFetchBase(wk){
     if(into[k]) return;
     into[k] = { shift: o.shift === 'Noc' ? 'Noc' : 'Day', startTime: '', hours: '', units: [], orientation: true, preceptor: String(o.preceptor || '') };
   });
-  return { cells, former, rows: baseRows };
+  return { cells, former, rows: baseRows, dups };
+}
+// ── Build 556: duplicate rows on the sheet ──────────────────────────────────
+// Deletes every active row for one nurse|date|shift except the newest, then the grid re-reads.
+async function _wgDedupeKey(name, date, shift){
+  showBusy('Removing the duplicate rows…');
+  try {
+    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}'`);
+    const mine = rows.filter(r => r.BreakNurseName === name && String(r.IsSupplemental) !== '1' && r.Status !== 'inactive').sort((a, b) => Number(b.Id) - Number(a.Id));
+    const gone = mine.slice(1).map(r => r.Id);
+    if(!gone.length){ toast('No duplicate left — the grid was stale'); return; }
+    await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(gone)) });
+    clearCoverageCountsCache();
+    toast(`✓ Removed ${gone.length} duplicate row${gone.length === 1 ? '' : 's'} — ${firstName(name)} ${_fmtDayShort(date)} ${shift} keeps the newest`);
+  } catch(e){ toast(`Couldn't remove the duplicates — ${(e && e.message) || e}`, true); }
+  finally { hideBusy(); if(_wgWeek) wgSetWeek(_wgWeek); }
 }
 // ── Build 550: Orientation ──────────────────────────────────────────────────
 const _WG_ORIENT_KEY = 'bnOrientations'; // BNState: { "Name (12345)|YYYY-MM-DD": { preceptor: "Name (12345)", shift: "Day"|"Noc" } }
@@ -22248,7 +22290,7 @@ async function wgSetWeek(ds, seed){
   // Build 536 (Tomas): coming from a stacked week, that week's data is already in memory — start from it at once
   // (scroll, replay the tap) and refresh from the sheet quietly afterwards, instead of making the tap wait for a read.
   if(seed && seed.cells){
-    _wgBase = seed.cells; _wgFormer = seed.former || {}; _wgBaseRows = seed.rows || []; _wgBaseState = 'ok'; _wgMerge();
+    _wgBase = seed.cells; _wgFormer = seed.former || {}; _wgBaseRows = seed.rows || []; _wgDups = seed.dups || new Set(); _wgBaseState = 'ok'; _wgMerge(); // 556: dups
     wgRender();
     if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); }
     if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; wgTap(t.name, t.date); }
@@ -22257,7 +22299,7 @@ async function wgSetWeek(ds, seed){
   try { await syncedLS.refresh(_WG_ORIENT_KEY); } catch(e){} // Build 550: one pull per week change; _wgFetchBase and the stack read LS
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
-  if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // the pruned draft is written back only after a good read
+  if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgDups = base.dups || new Set(); _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // 556: dups // the pruned draft is written back only after a good read
   else if(!(seed && seed.cells)) _wgBaseState = 'failed'; // Build 536: a seeded week keeps its seed if the refresh fails
   wgRender();
   if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); } // Build 532
@@ -22304,6 +22346,7 @@ function _wgDevMapFor(rows){
   });
   return map;
 }
+function _wgDupBadge(){ return '<span title="Two rows on the sheet for this shift — Sign Up lights both. Tap to clean up." style="position:absolute;top:1px;left:4px;font-size:.66rem;font-weight:800;color:#b45309;line-height:1">⚠2</span>'; } // Build 556
 function _wgDevBadge(dv, n){ return (dv && dv.names.has(n)) ? `<span title="${escHTML(dv.msg)}" style="position:absolute;top:1px;right:4px;font-size:.72rem;line-height:1">⚖</span>` : ''; }
 // Build 526 (Tomas): a SAVED cell shows the units it covers — the colour already says Day or Noc. A partial keeps its
 // window on the first line. A tap not yet saved has no units, so it still reads Day / Noc: "not dealt yet" at a glance.
@@ -22360,7 +22403,7 @@ function wgRender(){
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
     const esc = n.replace(/'/g, "\\'");
-    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}${(c && !ed && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}</button>`; // 551: out cells dim; 553: ⚖
+    return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}${(c && !ed && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}${(c && _wgDups.has(`${n}|${d}`)) ? _wgDupBadge() : ''}</button>`; // 551: out cells dim; 553: ⚖; 556: ⚠2
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
   const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(_wgFormer).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b))); // Build 529: hidden while a filter is on
@@ -22394,7 +22437,7 @@ function wgTap(name, date){
 // row dated the day before — meant for the post-midnight Noc partial, but it let a nurse's previous-day shift win:
 // Deepi 12/8 + 12/9 Day, tap 12/9 → Units opened 12/8.) Two halves of a straddling partial share a cell; the earlier row wins.
 function _wgSavedRowFor(name, date, sh){
-  const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.cell || r.date) === date).sort((a, b) => a.date.localeCompare(b.date));
+  const rows = _wgBaseRows.filter(r => r.name === name && r.shift === sh && (r.cell || r.date) === date).sort((a, b) => a.date.localeCompare(b.date) || Number(b.Id) - Number(a.Id)); // 556: of two rows on one key, the newest (the one the grid draws)
   return rows[0] || null;
 }
 // Build 551: the chooser for a nurse marked unavailable — Mark Available (today or ahead; the existing return flow,
@@ -22437,6 +22480,7 @@ function _wgChooser(name, date){
   const _savedRow = _wgBase[key] ? _wgSavedRowFor(name, date, (cur && cur.shift) || 'Day') : null;
   const _canUnavail = !!_savedRow && _savedRow.date >= shiftDate(_savedRow.shift) && !shiftIsOver(_savedRow.date, _savedRow.shift);
   const _wgDev = _savedRow ? (_wgDevMapFor(_wgBaseRows)[`${_savedRow.date}|${_savedRow.shift}`] || null) : null; // Build 553
+  const _wgDup = !!(_savedRow && _wgDups.has(key)); // Build 556
   wrap.innerHTML = `
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
@@ -22460,6 +22504,10 @@ function _wgChooser(name, date){
           <button type="button" class="btn btn-ghost btn-sm" id="wgcRemoveNow" style="flex:1;color:#c0392b" title="Takes this shift off the schedule right away. A claimed break goes through the coverage dialog.">🗑 Remove now</button>
           ${_canUnavail ? `<button type="button" class="btn btn-ghost btn-sm" id="wgcUnavail" style="flex:1;color:#c0392b" title="Start the coverage flow for this shift">🏠 Unavailable</button>` : ''}
         </div>
+      </div>` : ''}
+      ${_wgDup ? `<div style="margin:2px 0 10px;padding:10px 12px;border:1.5px solid #e6a23c;background:#fff3e0;border-radius:10px">
+        <div style="font-size:.78rem;color:#b45309;line-height:1.4;margin-bottom:8px">⚠ Two rows on the sheet for this shift — Sign Up lights both sets of units. The grid shows the newest.</div>
+        <button type="button" class="btn btn-ghost btn-sm" id="wgcDedupe" style="width:100%;color:#b45309;border-color:#e6a23c">🧹 Remove the duplicate (keep the newest)</button>
       </div>` : ''}
       ${_wgDev ? `<div style="margin:2px 0 10px;padding:10px 12px;border:1.5px solid #f5c883;background:#fff8e6;border-radius:10px">
         <div style="font-size:.78rem;color:#b45309;line-height:1.4;margin-bottom:8px">⚖ ${escHTML(_wgDev.msg)}</div>
@@ -22495,6 +22543,7 @@ function _wgChooser(name, date){
     const u = wrap.querySelector('#wgcUnits'); if(u) u.onclick = () => { close(); editAssign(_savedRow.Id); };
     const r = wrap.querySelector('#wgcRemoveNow'); if(r) r.onclick = () => { close(); removeAssignment(_savedRow.Id); };
     const v = wrap.querySelector('#wgcUnavail'); if(v) v.onclick = async () => { close(); try { await markBNUnavailable(_savedRow.Id, _savedRow.name, _savedRow.date, _savedRow.shift); } finally { if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 552
+    const dd = wrap.querySelector('#wgcDedupe'); if(dd) dd.onclick = () => { close(); _wgDedupeKey(name, _savedRow.date, _savedRow.shift); }; // Build 556
     const rb = wrap.querySelector('#wgcRebal'); if(rb) rb.onclick = async () => { close(); showBusy('Checking the shift…'); try { await repriceShift(_savedRow.date, _savedRow.shift, null); } finally { hideBusy(); if(_wgWeek) wgSetWeek(_wgWeek); } }; // Build 553; 555: the pre-confirm read is covered (the chip used to say "Working…") (Tomas): the flow ends in loadAssignments (the retired list) — re-read the grid so the cell turns OUT at once
   }
   wrap.addEventListener('click', e => { if(e.target === wrap) close(); });
@@ -22507,7 +22556,7 @@ async function wgReview(){
     if(rb) rb.textContent = _wgReviewLabel(); // Build 504
     if(wk !== _wgWeek) return;
     if(!b){ wgRender(); toast('Couldn\'t read this week\'s schedule — try Review again', true); return; }
-    _wgBase = b.cells; _wgFormer = b.former; _wgBaseRows = b.rows; _wgMerge(); _wgSaveDraft(); wgRender();
+    _wgBase = b.cells; _wgFormer = b.former; _wgBaseRows = b.rows; _wgDups = b.dups || new Set(); _wgMerge(); _wgSaveDraft(); wgRender(); // 556: dups
   }
   // Build 503 (Tomas): a week whose ONLY saved shift was cleared has 0 cells and 1 edit — Review used to be
   // disabled, so that removal could never be saved from the grid. Now an empty batch reviews (no cards, just
