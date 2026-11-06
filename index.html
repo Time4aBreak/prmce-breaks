@@ -306,19 +306,20 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
   <!-- Name & extension -->
   <div class="card" id="nameCard" style="display:none">
-    <div class="card-label">Name &amp; Extension</div>
+    <div class="card-label">Who you are</div><!-- Build 563: Vocera name + a 3-character code of your own -->
     <div class="row">
       <div class="field">
-        <label>First Name</label>
-        <input type="text" id="nurseName" placeholder="e.g. Sarah" maxlength="30" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
+        <label>Vocera Name</label>
+        <input type="text" id="nurseName" placeholder="As it appears in Vina" maxlength="40" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
       <div class="field" style="max-width:150px">
-        <label>Extension</label>
-        <input type="text" id="nurseExt" placeholder="5-digit ext" maxlength="5" autocomplete="off" inputmode="numeric" pattern="[0-9]{5}" oninput="validateExt(this);onNameExtInput()" onblur="checkDuplicateExt()"/>
+        <label>Your code</label>
+        <input type="text" id="nurseExt" placeholder="3 characters" maxlength="5" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="validateExt(this);onNameExtInput()"/>
       </div>
     </div>
+    <div style="font-size:.75rem;color:var(--muted);margin-top:6px">Enter any 3 characters you'll remember — they let you manage your breaks later. Nobody else sees them.</div>
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
-      ⚠ Both first name and a 5-digit extension are required.
+      ⚠ Your Vocera name and your 3 characters are both required.
     </div>
     <div id="nameWindowHint" style="display:none;font-size:.8rem;color:var(--day);font-weight:500;margin-top:6px"></div>
     <div style="display:flex;align-items:center;justify-content:space-between;margin-top:6px">
@@ -448,7 +449,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <!-- Build 557 (Tomas): on a phone the log card's "Finding next scheduled shift…" sits below the fold, and the first
            selection showed nothing at all — this line lives under the picker and clears when the log paints -->
       <div id="bnNameStatus" style="display:none;margin-top:8px;font-size:.8rem;color:var(--muted);align-items:center;gap:8px"><span class="spinner" style="width:14px;height:14px;flex:none"></span><span id="bnNameStatusText"></span></div>
-      <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div style="margin-top:10px;display:none;gap:10px;align-items:flex-end;flex-wrap:wrap"><!-- Build 563: no BN extension in Vina — field hidden, its sync plumbing left dormant -->
         <div style="flex:1">
           <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">EXTENSION</label>
           <input type="text" id="bnExtInput" placeholder="— — — — —" maxlength="5" inputmode="numeric"
@@ -953,10 +954,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <div id="manualNameRow" style="display:none;margin-top:10px">
           <div style="display:flex;flex-direction:column;gap:6px">
             <div class="row" style="gap:6px">
-              <input type="text" id="manualLastName" placeholder="Last name" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
-              <input type="text" id="manualFirstName" placeholder="First name" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
+              <input type="text" id="manualLastName" placeholder="Last name (as in Vina)" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
+              <input type="text" id="manualFirstName" placeholder="First name (as in Vina)" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
             </div>
-            <div style="font-size:.72rem;color:var(--muted);line-height:1.3">Both fields required. Saved as <em>Lastname, Firstname</em>.</div>
+            <div style="font-size:.72rem;color:var(--muted);line-height:1.3">Their Vocera name, as it appears in Vina. Both fields required; saved as <em>Lastname, Firstname</em>.</div><!-- Build 563 -->
             <div class="row" style="gap:6px;justify-content:flex-end">
               <button id="manualAddBtn" class="btn btn-success btn-sm" onclick="addManualName()" disabled>Add</button>
               <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">✕</button>
@@ -1055,7 +1056,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
       <div style="display:flex;gap:8px">
         <input type="text" id="transferName" placeholder="First name" autocomplete="off" style="flex:1;padding:8px 10px;font-size:.9rem"/>
-        <input type="text" id="transferExt" placeholder="Ext" maxlength="5" autocomplete="off" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+        <input type="hidden" id="transferExt" value=""/><!-- Build 563: unreachable modal, kept consistent -->
       </div>
       <div id="transferErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
@@ -1077,9 +1078,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div style="margin-bottom:16px;padding:14px;border-radius:10px;border:1.5px solid var(--border);background:var(--bg)">
       <div style="font-size:.82rem;font-weight:600;margin-bottom:8px">Transfer to:</div>
       <div style="display:flex;gap:8px">
-        <input type="text" id="transferStagingName" placeholder="First name" autocomplete="off" style="flex:1;padding:8px 10px;font-size:.9rem"/>
-        <input type="text" id="transferStagingExt" placeholder="Ext" maxlength="5" autocomplete="off" style="width:80px;padding:8px 10px;font-size:.9rem"/>
+        <input type="text" id="transferStagingName" placeholder="Their Vocera name" autocomplete="off" autocapitalize="words" style="flex:1;padding:8px 10px;font-size:.9rem"/>
+        <input type="hidden" id="transferStagingExt" value=""/><!-- Build 563: no code on a row made for someone else -->
       </div>
+      <div style="font-size:.74rem;color:var(--muted);margin-top:6px">They'll see the break under their name. To change it later they call you — you cancel or transfer it from My Shift.</div>
       <div id="transferStagingErr" style="display:none;color:var(--red);font-size:.78rem;margin-top:6px"></div>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px">
@@ -2340,7 +2342,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-07-562'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-07-563'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5640,7 +5642,7 @@ function resetInactivityTimer(){
     const extEl  = document.getElementById('nurseExt');
     if(nameEl && extEl && (nameEl.value.trim() || extEl.value.trim())){
       clearNameExt();
-      toast('Session cleared after 5 minutes — re-enter your extension to continue.');
+      toast('Session cleared after 5 minutes — re-enter your name and code to continue.');
     }
   }, INACTIVITY_MS);
 }
@@ -5847,9 +5849,9 @@ function pill(label, key, active){
 }
 
 function validateExt(input){
-  // Strip non-numeric characters as they type
-  input.value = input.value.replace(/[^0-9]/g, '').slice(0, 5);
-  const valid = /^[0-9]{5}$/.test(input.value);
+  // Build 563: any 3 non-space characters (a legacy 5-digit ext still passes)
+  input.value = input.value.replace(/\s/g, '').slice(0, 5);
+  const valid = lockOk(input.value);
   input.style.borderColor = input.value.length > 0 && !valid ? 'var(--red)' : '';
   // Hide hint once valid
   if(valid && document.getElementById('nurseName').value.trim()){
@@ -6252,8 +6254,8 @@ function updateNameCardVisibility(){
 async function checkWrongUnit(selectedUnit){
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)) return;
-  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
+  if(!_nurseFirst || !lockOk(nurseExt)) return;
+  const name = nurseKey(toTitleCase(_nurseFirst), nurseExt);
   const dt = today();
   try {
     let mine;
@@ -8045,7 +8047,7 @@ async function _loadSlotsCore(silent=false){
     const bnNames = unitBNNames || [...new Set(coveringForDisplay.map(c=>firstName(c.BreakNurseName)))].join(', ');
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
+    const nurseName = _nurseFirst && lockOk(nurseExt) ? nurseKey(toTitleCase(_nurseFirst), nurseExt) : '';
 
     // Await rotation cache warm for both main and overlap BNs so _slotBNMap has data on first load.
     // Build 255: routed through warmMany — N individual warms queued serverside
@@ -8231,7 +8233,7 @@ async function _loadSlotsCore(silent=false){
       const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
       if(ext) bnExtMap[s.BreakNurseName] = ext;
     });
-    const formatBNName = (name) => bnExtMap[name] ? `${firstName(name)} · Ext. ${bnExtMap[name]}` : firstName(name);
+    const formatBNName = (name) => firstName(name); // Build 563: the BN is her name in Vina — no ext
 
     const mainBNNames = [...new Set(coveringForDisplay
       .filter(s => s.Status !== 'inactive')
@@ -8522,12 +8524,12 @@ async function _loadSlotsCore(silent=false){
       const _winD = new Date(_winOpenMs);
       const openLabel = `Opens ${fmt12(`${String(_winD.getHours()).padStart(2,'0')}${String(_winD.getMinutes()).padStart(2,'0')}`)}`;
 
-      const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
+      const nurseExtValid = lockOk(nurseExt);
       let canClaim=false, lockReason='';
       if(!isTaken && !isMine){
         if(_pastPreview)                  { canClaim=false; lockReason='Past day'; } // Build 561
         else if(!shiftWindowOpen)         { canClaim=false; lockReason=openLabel; }
-        else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
+        else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter your name + code above'; }
         else if(!canClaimMore)            { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
         else                              { canClaim=true; }
       }
@@ -8564,7 +8566,7 @@ async function _loadSlotsCore(silent=false){
       if(isCancelStaged){
         nameCellHtml = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
       } else if(isTransferStaged){
-        const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
+        const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
         nameCellHtml = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
       } else if(isMine){
         nameCellHtml = formatNurse(booking.NurseName);
@@ -8573,7 +8575,10 @@ async function _loadSlotsCore(silent=false){
       } else if(isOtherShiftClaim){
         nameCellHtml = `${formatNurse(booking.NurseName)} ⚠`;
       } else if(booking){
-        nameCellHtml = formatNurse(booking.NurseName);
+        // Build 563: a row made FOR this nurse (transfer / the BN's + Log) carries no code — it isn't hers to manage here
+        const _kl = !parseNurse(booking.NurseName).key && sameBareName(booking.NurseName, document.getElementById('nurseName').value);
+        const _klBN = _st.disp || _slotBNMap[slot] || 'your break nurse';
+        nameCellHtml = _kl ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_klBN)} to cancel or transfer</span>` : formatNurse(booking.NurseName);
       } else {
         const _dispBN = _st.disp || _slotBNMap[slot] || '';
         nameCellHtml = canClaim ? `Available${_dispBN ? ` · ${_dispBN}` : ''}` : (lockReason === openLabel ? (_dispBN || lockReason) : `${lockReason}${_dispBN ? ` · ${_dispBN}` : ''}`);
@@ -8734,7 +8739,7 @@ async function silentRefreshSlots(){
 
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    const nurseName = _nurseFirst && nurseExt ? `${toTitleCase(_nurseFirst)} (${nurseExt})` : '';
+    const nurseName = _nurseFirst && lockOk(nurseExt) ? nurseKey(toTitleCase(_nurseFirst), nurseExt) : '';
     const myTimes   = bookings.filter(b => b.NurseName===nurseName && isStaffBooking(b)).map(b => b.SlotTime);
 
     // Build fingerprint: slot:status pairs
@@ -8855,9 +8860,9 @@ function togglePending(slotTime, slotShift, bn, srcDt){
   } else {
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
-    if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
+    if(!_nurseFirst || !lockOk(nurseExt)){
       document.getElementById('nameExtHint').style.display = 'block';
-      toast('Enter name and 5-digit extension', true);
+      toast('Enter your Vocera name and your 3 characters', true);
       return;
     }
     // Build 301's law ("a shift's limits bind anyone claiming its slots,
@@ -8942,7 +8947,7 @@ function _renderSingleSlotRow(slot){
   const _rsFirstName = document.getElementById('nurseName').value.trim();
   const _rsExt       = document.getElementById('nurseExt').value.trim();
   const nurseExt  = _rsExt;
-  const nurseName = _rsFirstName && /^[0-9]{5}$/.test(_rsExt) ? `${toTitleCase(_rsFirstName)} (${_rsExt})` : '';
+  const nurseName = _rsFirstName && lockOk(_rsExt) ? nurseKey(toTitleCase(_rsFirstName), _rsExt) : '';
   const myBookings = nurseName
     ? Object.values(bMap).filter(b => b.NurseName === nurseName && isStaffBooking(b))
     : [];
@@ -8963,7 +8968,7 @@ function _renderSingleSlotRow(slot){
   const shiftWindowOpen = Date.now() >= _mWinMs;
   const _mWinD = new Date(_mWinMs);
   const openLabel = `Opens ${fmt12(`${String(_mWinD.getHours()).padStart(2,'0')}${String(_mWinD.getMinutes()).padStart(2,'0')}`)}`;
-  const nurseExtValid = /^[0-9]{5}$/.test(nurseExt);
+  const nurseExtValid = lockOk(nurseExt);
   // Build 287 (streams): the mirror emits one row per stream — the core
   // loop's twin conversion. Same binding rules; callers' contract unchanged
   // (they still receive "this slot's HTML", now possibly several rows).
@@ -8991,7 +8996,7 @@ function _renderSingleSlotRow(slot){
   let canClaim = false, lockReason = '';
   if(!isTaken && !isMine){
     if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
-    else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + ext above'; }
+    else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter your name + code above'; }
     else if(!canClaimMore)             { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
     else                               { canClaim=true; }
   }
@@ -9013,7 +9018,7 @@ function _renderSingleSlotRow(slot){
   if(isCancelStaged){
     nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
   } else if(isTransferStaged){
-    const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
+    const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
     nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
   } else if(isMine){
     nameCell = formatNurse(booking.NurseName);
@@ -9199,7 +9204,7 @@ function openTransferStagingModal(bookingId, slot, currentNurseName){
   }
   _transferStagingContext = { bookingId, slot, slotShift, currentNurseName };
   document.getElementById('transferStagingTitle').textContent = `Transfer your ${fmt12(slot)} break`;
-  document.getElementById('transferStagingInfo').textContent = `${S.unit} · ${currentNurseName.replace(/\s*\((\d{5})\)/, ' $1')}`;
+  document.getElementById('transferStagingInfo').textContent = `${S.unit} · ${bareName(currentNurseName)}`;
   // Pre-fill if already staged for this booking
   const existing = S.pendingTransfers.get(bookingId);
   document.getElementById('transferStagingName').value = existing ? existing.newFirst : '';
@@ -9229,15 +9234,14 @@ function confirmTransferStaging(){
   const newFirst = document.getElementById('transferStagingName').value.trim();
   const newExt   = document.getElementById('transferStagingExt').value.trim();
   const errEl    = document.getElementById('transferStagingErr');
-  if(!newFirst || !/^\d{5}$/.test(newExt)){
-    errEl.textContent = 'Enter name and 5-digit extension.';
+  if(!newFirst){
+    errEl.textContent = 'Enter their Vocera name.';
     errEl.style.display = 'block';
     return;
   }
-  // Don't allow transferring to yourself (same name + ext)
+  // Don't allow transferring to yourself (same Vocera name)
   const myFirst = document.getElementById('nurseName').value.trim().toLowerCase();
-  const myExt   = document.getElementById('nurseExt').value.trim();
-  if(newFirst.toLowerCase() === myFirst && newExt === myExt){
+  if(newFirst.toLowerCase() === myFirst){
     errEl.textContent = 'Cannot transfer to self.';
     errEl.style.display = 'block';
     return;
@@ -9280,9 +9284,9 @@ function updateSubmitBar(){
 async function submitClaims(){
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
+  if(!_nurseFirst || !lockOk(nurseExt)){
     document.getElementById('nameExtHint').style.display = 'block';
-    toast('Enter name and 5-digit extension', true);
+    toast('Enter your Vocera name and your 3 characters', true);
     return;
   }
   // Build 561: nothing is written from a calendar preview — the write date is the HOME date, whatever the list shows
@@ -9311,7 +9315,7 @@ async function submitClaims(){
   showBusy('Submitting your breaks…');
   clearInterval(S.refreshTmr);
 
-  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
+  const name = nurseKey(toTitleCase(_nurseFirst), nurseExt); // Build 563
   // Build 138 (2026-05-27): Capture S.unit at submit-time so every claim
   // in this batch writes to the same unit, even if the user navigates to
   // a different unit (via pickUnit) mid-submit. Passed through to
@@ -9355,8 +9359,7 @@ async function submitClaims(){
     const otherUnitBookings = allBookingsToday.filter(b => {
       if(isBNBreak(b)) return false;
       if(b.Unit === S.unit) return false;
-      const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
-      return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
+      return sameBareName(b.NurseName, _nurseFirst); // Build 563
     });
     // Don't trigger float modal for the user's own owned slots that are staged
     // for cancel/transfer — those are intentional management actions.
@@ -9391,7 +9394,7 @@ async function submitClaims(){
       const extEl = document.getElementById('nurseExt');
       if(extEl) extEl.value = '';
       loadSlots(true);
-      toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${S.unit}.`);
+      toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your code to confirm and submit on ${S.unit}.`);
       return;
     }
   }
@@ -9455,7 +9458,7 @@ async function submitClaims(){
       continue;
     }
     try {
-      const newNurseName = `${toTitleCase(transferInfo.newFirst)} (${transferInfo.newExt})`;
+      const newNurseName = toTitleCase(transferInfo.newFirst); // Build 563: keyless — the receiver manages it through the BN
       const slotShift = fresh.ShiftType || S.shift;
       const slotDate  = fresh.SlotDate || dt;
       const key = `slotNotify_${slotDate}_${slotShift}`;
@@ -9513,7 +9516,7 @@ async function submitClaims(){
       run.forEach(_k => { results.claimed.push(_k.time); _cacheClaim(_k); });
     } catch(e){
       const msg = (e && e.message) || '';
-      const who = msg.startsWith('SLOT_TAKEN:') ? String(msg.slice('SLOT_TAKEN:'.length) || 'another nurse').replace(/\s*\((\d{5})\)/, ' $1') : null;
+      const who = msg.startsWith('SLOT_TAKEN:') ? bareName(msg.slice('SLOT_TAKEN:'.length) || 'another nurse') : null;
       results.failed.push({ label: runLabel, reason: who ? `${e.slot ? fmt12(e.slot) + ' ' : ''}just claimed by ${who} — the run wasn't saved` : (msg || 'Network error') });
     }
   }
@@ -9765,7 +9768,7 @@ async function loadOtherSlots(silent=false){
     // time identifies the entry.
     const _sFirst = document.getElementById('nurseName').value.trim();
     const _sExt   = document.getElementById('nurseExt').value.trim();
-    const seedName = _sFirst && /^[0-9]{5}$/.test(_sExt) ? `${toTitleCase(_sFirst)} (${_sExt})` : null;
+    const seedName = _sFirst && lockOk(_sExt) ? nurseKey(toTitleCase(_sFirst), _sExt) : null;
     if(seedName){
       const have = new Set(allEntries.map(e => e.time));
       [...dayUnitB, ...nocUnitB].forEach(b => {
@@ -9869,7 +9872,7 @@ function renderOtherSlotsFromCache(){
   // Pull name fresh each call (name/ext may have changed since the load).
   const _rFirstName = document.getElementById('nurseName').value.trim();
   const _rExt       = document.getElementById('nurseExt').value.trim();
-  const curName = _rFirstName && /^[0-9]{5}$/.test(_rExt) ? `${toTitleCase(_rFirstName)} (${_rExt})` : nurseName;
+  const curName = _rFirstName && lockOk(_rExt) ? nurseKey(toTitleCase(_rFirstName), _rExt) : nurseName;
   const myBookings = curName ? allBookings.filter(b => b.NurseName === curName && isStaffBooking(b)) : [];
   // Staged cancels reduce effective ownership — the cancel-and-replace flow.
   const myStagedCancelsOther = myBookings.filter(b => S.pendingCancels.has(b.Id)).length;
@@ -9910,7 +9913,7 @@ function renderOtherSlotsFromCache(){
         } else if(isTransferStaged){
           rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
           timeStyle = 'color:#a06a00;font-weight:700';
-          const newDisplay = `${toTitleCase(transferData.newFirst)} ${transferData.newExt}`;
+          const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
           nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
         } else {
           rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
@@ -10010,12 +10013,12 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
   }
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
-  if(!_nurseFirst || !/^[0-9]{5}$/.test(nurseExt)){
-    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Enter name and 5-digit extension', true); }
+  if(!_nurseFirst || !lockOk(nurseExt)){
+    if(!silent){ document.getElementById('nameExtHint').style.display = 'block'; toast('Enter your Vocera name and your 3 characters', true); }
     return 'Name/ext missing';
   }
   document.getElementById('nameExtHint').style.display = 'none';
-  const name = `${toTitleCase(_nurseFirst)} (${nurseExt})`;
+  const name = nurseKey(toTitleCase(_nurseFirst), nurseExt); // Build 563
   let dt;
   if(srcDt) dt = srcDt; // Build 290 (count #4): the composed row's source-shift date — the write no longer re-derives from the wall clock, so an Other Noc-tail claim in the 06:30–08:30 window lands on the shift-START date (the row-54 ghost class is impossible by construction)
   else if(slotShiftOverride === 'Noc') dt = staffShiftDate('Noc');
@@ -10047,8 +10050,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       const otherUnitBookings = allBookingsToday.filter(b => {
         if(isBNBreak(b)) return false;
         if(b.Unit === _unit) return false;
-        const m = b.NurseName && b.NurseName.match(/^(.+?)\s*\(\d{5}\)$/);
-        return m && m[1].trim().toLowerCase() === _nurseFirst.toLowerCase();
+        return sameBareName(b.NurseName, _nurseFirst); // Build 563
       });
       const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
       if(myOtherUnits.length){
@@ -10063,7 +10065,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
         const extElF = document.getElementById('nurseExt');
         if(extElF) extElF.value = '';
         loadSlots(true);
-        toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your extension to confirm and submit on ${_unit}`);
+        toast(`Breaks on ${myOtherUnits.join(', ')} cancelled. Re-enter your code to confirm and submit on ${_unit}`);
         return 'ext-cleared';
       }
     }
@@ -10107,7 +10109,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     const taken = slotBookings.find(b => isStaffBooking(b) &&
       (!coveredBy || !b.CoveredBy || b.CoveredBy === coveredBy));
     if(taken){
-      if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${taken.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}. Please choose another slot.`, true); loadSlots(); }
+      if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${bareName(taken.NurseName)}. Please choose another slot.`, true); loadSlots(); }
       return `${fmt12(slotTime)} already taken`;
     }
 
@@ -10153,7 +10155,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       const _crossTaken = _crossPool.find(b => isStaffBooking(b) && String(b.SlotTime).padStart(4,'0') === _pad &&
         (b.NurseName === name || !coveredBy || !b.CoveredBy || b.CoveredBy === coveredBy)); // Build 288: stream-scoped, same-nurse always blocks
       if(_crossTaken){
-        const _by = String(_crossTaken.NurseName||'').replace(/\s*\((\d{5})\)/, ' $1');
+        const _by = bareName(_crossTaken.NurseName);
         if(!silent){
           toast(`${fmt12(slotTime)} is already taken by ${_by}. Please choose another slot.`, true);
           loadSlots();
@@ -10193,7 +10195,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     const msg = e.message || '';
     // Build 559 (testbed finding 1): the guard's answer reads as a sentence on BOTH doors — the single-claim toast and the
     // Submit summary ("1 couldn't be saved: 11:15 AM: just claimed by Sarah 12345") — with the ext bare, never "(12345)".
-    const _takenBy = msg.startsWith('SLOT_TAKEN:') ? String(msg.slice('SLOT_TAKEN:'.length) || 'another nurse').replace(/\s*\((\d{5})\)/, ' $1') : null;
+    const _takenBy = msg.startsWith('SLOT_TAKEN:') ? bareName(msg.slice('SLOT_TAKEN:'.length) || 'another nurse') : null;
     if(!silent){
       if(_takenBy){
         toast(`${fmt12(slotTime)} was just claimed by ${_takenBy}. Please choose another slot.`, true);
@@ -10249,12 +10251,12 @@ async function manageSlotAction(action){
     const newName = document.getElementById('transferName').value.trim();
     const newExt = document.getElementById('transferExt').value.trim();
     const errEl = document.getElementById('transferErr');
-    if(!newName || !/^\d{5}$/.test(newExt)){
-      errEl.textContent = 'Enter name and 5-digit extension.';
+    if(!newName){
+      errEl.textContent = 'Enter their Vocera name.';
       errEl.style.display = 'block';
       return;
     }
-    const newNurseName = `${toTitleCase(newName)} (${newExt})`;
+    const newNurseName = toTitleCase(newName); // Build 563 (this modal is unreachable — kept consistent)
     const transferBtn = document.getElementById('manageTransferBtn');
     if(transferBtn){ transferBtn.disabled = true; transferBtn.textContent = 'Processing…'; }
     try {
@@ -12513,7 +12515,7 @@ function onNameExtInput(){
   renderSlotsFromCache();
   // When ext is complete, also do a background refresh to catch race conditions
   const ext = document.getElementById('nurseExt').value.trim();
-  if(/^[0-9]{5}$/.test(ext)) loadSlots(true);
+  if(lockOk(ext)) loadSlots(true);
 }
 
 function clearExtOnNameChange(){
@@ -12533,6 +12535,7 @@ function clearNameExt(){
 async function checkDuplicateExt(){
   const _nurseFirst = document.getElementById('nurseName').value.trim();
   const nurseExt  = document.getElementById('nurseExt').value.trim();
+  return; // Build 563: codes are not extensions — nothing to collide with (kept for the record; no caller)
   if(!_nurseFirst || !/^\d{5}$/.test(nurseExt)) return;
   const dt = shiftDate(S.shift);
   try {
@@ -13015,10 +13018,10 @@ async function _loadSummaryInner(mySeq, ctx){
         html += `<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
           <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
           <div class="summ-unit">${b.Unit}</div>
-          <div class="summ-nurse">${b.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}</div>
+          <div class="summ-nurse">${escHTML(bareName(b.NurseName))}</div>
           <div class="summ-bn">${bnUnavailable
             ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
-            : (bn ? firstName(bn) + (bnExt ? ` · ${bnExt}` : '') : '')
+            : (bn ? firstName(bn) : '') // Build 563: no BN ext
           }</div>
         </div>`;
       }
@@ -14572,21 +14575,28 @@ function toTitleCase(str){
   return str.toLowerCase().replace(/\b\w/g, c => c.toUpperCase());
 }
 
-// Format a NurseName string ("First (12345)") + Unit for display in messages
-// Output: "First (12345) on 7N" or "First on 7N" if no ext
+// ── Build 563 (Tomas, Nov 6 — Spectra → Vocera Vina): a staff nurse is her VOCERA NAME (as it appears in Vina) plus a
+// 3-character code she chooses, case-insensitive, never shown. Stored as "Vocera Name (code)" — the same shape the
+// extension used, so the sheet and the parser keep one rule; legacy rows keep their 5-digit ext as the code. The code
+// only unlocks Manage; rows made FOR a nurse (transfer, the BN's + Log) are stored keyless — "Name" with no parens —
+// and are not manageable from Sign Up: the row says "Call <BN> to cancel or transfer" and the BN does it in My Shift.
+const LOCK_RE = /^\S{3}$/;                                   // any 3 non-space characters
+function normLock(s){ return String(s || '').trim().toLowerCase(); }
+function lockOk(s){ return LOCK_RE.test(normLock(s)) || /^\d{5}$/.test(normLock(s)); } // 5 digits = a pre-Vocera ext, still honoured
+function parseNurse(stored){ const m = String(stored || '').match(/^(.*?)\s*\(([^()]*)\)\s*$/); return m ? { name: m[1].trim(), key: normLock(m[2]) } : { name: String(stored || '').trim(), key: '' }; }
+function nurseKey(name, lock){ return `${String(name || '').trim()} (${normLock(lock)})`; } // the stored identity of a self-made claim
+function bareName(stored){ return parseNurse(stored).name; }                               // display: the name, never the code
+function sameNurse(a, b){ const A = parseNurse(a), B = parseNurse(b); return !!A.name && A.name.toLowerCase() === B.name.toLowerCase() && A.key === B.key; }
+function sameBareName(stored, typed){ return !!typed && bareName(stored).toLowerCase() === String(typed || '').trim().toLowerCase(); }
+
+// Format a stored NurseName + Unit for display in messages — the name only (563)
 function formatNurseUnit(nurseName, unit){
-  const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
-  const name = m ? escHTML(m[1].trim()) : escHTML(nurseName||'');
-  const ext  = m ? m[2] : '';
-  return ext ? `${name} ${ext} on ${escHTML(unit)}` : `${name} on ${escHTML(unit)}`;
+  return `${escHTML(bareName(nurseName))} on ${escHTML(unit)}`;
 }
 
-// Format just name+ext without unit
+// Format a stored NurseName for display — the name only (563)
 function formatNurse(nurseName){
-  const m = (nurseName||'').match(/^(.+?)\s*\((\d{5})\)$/);
-  const name = m ? escHTML(m[1].trim()) : escHTML(nurseName||'');
-  const ext  = m ? m[2] : '';
-  return ext ? `${name} ${ext}` : name;
+  return escHTML(bareName(nurseName));
 }
 
 // Build 107 (2026-05-25): Choice modal shown when a unit reopens MID-SHIFT
@@ -14760,8 +14770,7 @@ function showRestoreModal(cancelled){
     cancelled.forEach((b, i) => {
       if(!seenNurse[b.NurseName]){
         seenNurse[b.NurseName] = groups.length;
-        const m = b.NurseName.match(/^(.+?)\s*\((\d{5})\)$/);
-        groups.push({ name: m ? m[1].trim() : b.NurseName, ext: m ? m[2] : '', unit: b.Unit === 'C_PAIR' ? '3C/4C' : b.Unit, slots: [] });
+        groups.push({ name: bareName(b.NurseName), ext: '', unit: b.Unit === 'C_PAIR' ? '3C/4C' : b.Unit, slots: [] });
       }
       groups[seenNurse[b.NurseName]].slots.push({ b, i });
     });
@@ -18701,11 +18710,6 @@ function stageClaimFromInputs(slotTime){
     nameInput?.focus();
     return;
   }
-  if(ext && !/^\d{5}$/.test(ext)){
-    toast('Ext must be 5 digits (or leave blank)', true);
-    extInput?.focus();
-    return;
-  }
 
   // Cross-unit primary-slot conflict check: if the user picked a unit
   // different from this slot's rotation unit, the primary slot might
@@ -18725,7 +18729,7 @@ function stageClaimFromInputs(slotTime){
       // Sign Up conflicts, fall back to the staff nurse name as before.
       const blockerLabel = conflict.CreatedBy
         ? `${firstName(conflict.CreatedBy)} already logged a break here`
-        : `claimed by ${conflict.NurseName.replace(/\s*\((\d{5})\)/, ' $1')}`;
+        : `claimed by ${bareName(conflict.NurseName)}`;
       toast(`${unit} at ${fmt12(slotTime)} — ${blockerLabel}`, true);
       return;
     }
@@ -18848,7 +18852,7 @@ async function submitStagedActions(){
         // toTitleCase the name so BN-logged breaks normalize the same way as
         // Sign Up claims — staff (and BNs) can manage them later without
         // re-typing the exact casing. Mirrors claimSlot's name handling.
-        const nurseDisplay = info.ext ? `${toTitleCase(info.nurseName)} (${info.ext})` : toTitleCase(info.nurseName);
+        const nurseDisplay = toTitleCase(info.nurseName); // Build 563: keyless
         // Only stamp the walk-up break taken if its slot start time has
         // already passed. A break logged for a FUTURE slot stays PENDING
         // (like a Sign-Up booking) so it (a) shows ✓Taken/✗Not-Taken/Cancel,
@@ -18870,7 +18874,7 @@ async function submitStagedActions(){
           const _crossTaken = _crossPool.find(b => isStaffBooking(b) && String(b.SlotTime).padStart(4,'0') === _pad &&
             (!_bnName || !b.CoveredBy || b.CoveredBy === _bnName)); // Build 288: stream-scoped for the +Log path
           if(_crossTaken){
-            const _by = String(_crossTaken.NurseName||'').replace(/\s*\((\d{5})\)/, ' $1');
+            const _by = bareName(_crossTaken.NurseName);
             throw new Error(`already taken by ${_by}`);
           }
         }
@@ -19026,7 +19030,7 @@ function handleQueueConflicts(freshBookings){
       const slot = action === 'claim' ? key.slice('unclaimed:'.length) : key.slice('add_break:'.length);
       const conflictBooking = info.unit ? staffByUnitSlot.get(`${info.unit}|${normSlot(slot)}`) : null;
       if(conflictBooking){
-        const claimerFirst = conflictBooking.NurseName.replace(/\s*\((\d{5})\)/, ' $1');
+        const claimerFirst = bareName(conflictBooking.NurseName);
         const when = fmt12(slot);
         if(action === 'claim'){
           toasts.push(`${claimerFirst} claimed ${when} while ${info.nurseName} was in queue`);
@@ -20023,7 +20027,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
           if(stagedClaim){
             // Staged walk-up claim — teal border, compact display, Unstage button
             extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal)';
-            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ${stagedClaim.nurseName}${stagedClaim.ext ? ` ${stagedClaim.ext}` : ''}</span>
+            centerHtml = `<span style="color:var(--teal-dk);font-weight:600">queued · ${escHTML(stagedClaim.nurseName)}</span>
               <span style="color:var(--muted);font-size:.78rem"> ${unitLabel}</span>`;
             actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageClaim('${slot}')" style="color:var(--muted)">↺ Undo</button>`;
           } else if(_prodLogExpanded.has(slot)){
@@ -20074,9 +20078,8 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
               <div style="display:flex;gap:4px;margin-top:6px;align-items:center">
                 <select id="claimUnit_${slot}" style="width:70px;padding:4px 6px;font-size:.8rem;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)">${_unitOpts}</select>
                 <input type="text" id="claimName_${slot}" placeholder="Nurse name" autocomplete="off" value="${escHTML(savedInputs.name)}" oninput="_prodLogCaptureInputs('${slot}')" style="flex:1;min-width:60px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
-                <input type="text" id="claimExt_${slot}" placeholder="Ext" maxlength="5" autocomplete="off" value="${escHTML(savedInputs.ext)}" oninput="_prodLogCaptureInputs('${slot}')" style="width:64px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
               </div>
-              <div style="font-size:.7rem;color:var(--muted);margin-top:4px">Ext enables the staff nurse to manage their break from the Sign Up tab.</div>
+              <div style="font-size:.7rem;color:var(--muted);margin-top:4px">Their Vocera name. A break you log for someone is yours to cancel or move — they'll call you.</div>
               <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.78rem;color:var(--muted);cursor:pointer">
                 <input type="checkbox" id="applyMoreCheck_${slot}" onchange="toggleApplyMore('${slot}')" style="cursor:pointer">
                 Apply to more unbooked times
