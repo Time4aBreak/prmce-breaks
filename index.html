@@ -382,7 +382,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
 
     <!-- Sub-tab content -->
-    <div id="subtab-summary" class="subtab active">
+    <div id="subtab-summary" class="subtab" style="display:none"><!-- Build 562: starts hidden — My Shift is the opening panel (554 moved the button's active class, not the panel's) -->
 
 
   <!-- Build 452 (Tomas): the Coverage tab is a LIVE board — the shift(s) with an open claim
@@ -431,7 +431,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
 <!-- ═══════════ BREAK NURSE TAB ═══════════ -->
 
-    <div id="subtab-bn" class="subtab" style="display:none">
+    <div id="subtab-bn" class="subtab active"><!-- Build 562 -->
 
 
   <!-- Breakers panel — no gate needed, portal handles auth -->
@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-06-561'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-07-562'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6169,6 +6169,7 @@ function showTab(name, btn){
       renderImportedEntriesSummary();
       checkForRestorableSuggestions();
       show3CDefaultToggle(); showAppVersionLine(); update3CToggle();
+      showSubTab('bn', document.getElementById('st-bn')); // Build 562 (Tomas): the DEV_MODE door skipped 554's opening tab — the button said My Shift, the panel showed Coverage
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
