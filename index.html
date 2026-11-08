@@ -185,6 +185,7 @@ body{overflow-x:hidden} /* Build 537: nothing may widen the page past the screen
 .pw-gate p{font-size:.85rem;color:var(--muted);margin-bottom:20px}
 .pw-gate input{margin-bottom:10px}
 .row{display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap}
+#nurseExt::placeholder{font-size:.78rem} /* Build 564: the code field's placeholder is a sentence */
 .field{flex:1;min-width:120px}
 .field label{display:block;font-size:.75rem;font-weight:600;color:var(--muted);letter-spacing:.06em;text-transform:uppercase;margin-bottom:5px}
 
@@ -306,18 +307,15 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
 
   <!-- Name & extension -->
   <div class="card" id="nameCard" style="display:none">
-    <div class="card-label">Who you are</div><!-- Build 563: Vocera name + a 3-character code of your own -->
+    <!-- Build 563/564: Vocera name + a 3-character code of your own; the words live inside the fields -->
     <div class="row">
       <div class="field">
-        <label>Vocera Name</label>
-        <input type="text" id="nurseName" placeholder="As it appears in Vina" maxlength="40" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
+        <input type="text" id="nurseName" placeholder="Vocera Name" maxlength="40" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
-      <div class="field" style="max-width:150px">
-        <label>Your code</label>
-        <input type="text" id="nurseExt" placeholder="3 characters" maxlength="5" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="validateExt(this);onNameExtInput()"/>
+      <div class="field" style="min-width:270px">
+        <input type="text" id="nurseExt" placeholder="Enter a 3 character code you'll remember to manage breaks" maxlength="3" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="validateExt(this);onNameExtInput()"/>
       </div>
     </div>
-    <div style="font-size:.75rem;color:var(--muted);margin-top:6px">Enter any 3 characters you'll remember — they let you manage your breaks later. Nobody else sees them.</div>
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
       ⚠ Your Vocera name and your 3 characters are both required.
     </div>
@@ -2342,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-07-563'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-07-564'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5849,8 +5847,8 @@ function pill(label, key, active){
 }
 
 function validateExt(input){
-  // Build 563: any 3 non-space characters (a legacy 5-digit ext still passes)
-  input.value = input.value.replace(/\s/g, '').slice(0, 5);
+  // Build 563/564: any 3 non-space characters
+  input.value = input.value.replace(/\s/g, '').slice(0, 3);
   const valid = lockOk(input.value);
   input.style.borderColor = input.value.length > 0 && !valid ? 'var(--red)' : '';
   // Hide hint once valid
@@ -8233,7 +8231,7 @@ async function _loadSlotsCore(silent=false){
       const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
       if(ext) bnExtMap[s.BreakNurseName] = ext;
     });
-    const formatBNName = (name) => firstName(name); // Build 563: the BN is her name in Vina — no ext
+    const formatBNName = (name) => bnVoceraName(name); // Build 563/564: the BN's Vocera name, no ext
 
     const mainBNNames = [...new Set(coveringForDisplay
       .filter(s => s.Status !== 'inactive')
@@ -8417,7 +8415,7 @@ async function _loadSlotsCore(silent=false){
     }
 
     // Build slot→BN map from rotations for per-slot BN display
-    const _getBNFirst = bnDisplayName; // Build 239: single source of truth
+    const _getBNFirst = bnVoceraName; // Build 239: single source of truth · 564: the Vocera name on Sign Up
     const _slotBNMap = {};
     // Build 287: streams — same rotation walks, but PUSH per slot instead of
     // last-writer-wins, keeping raw names for CoveredBy stamping/matching.
@@ -8576,7 +8574,7 @@ async function _loadSlotsCore(silent=false){
         nameCellHtml = `${formatNurse(booking.NurseName)} ⚠`;
       } else if(booking){
         // Build 563: a row made FOR this nurse (transfer / the BN's + Log) carries no code — it isn't hers to manage here
-        const _kl = !parseNurse(booking.NurseName).key && sameBareName(booking.NurseName, document.getElementById('nurseName').value);
+        const _kl = !LOCK_RE.test(parseNurse(booking.NurseName).key); // Build 564: shown to everyone; a pre-Vocera 5-digit key counts as keyless too
         const _klBN = _st.disp || _slotBNMap[slot] || 'your break nurse';
         nameCellHtml = _kl ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_klBN)} to cancel or transfer</span>` : formatNurse(booking.NurseName);
       } else {
@@ -9535,6 +9533,7 @@ async function submitClaims(){
   if(results.transferred.length) successParts.push(`${results.transferred.length} transferred`);
   if(results.failed.length === 0){
     toast(`✓ ${successParts.join(', ')}!`);
+    try { document.getElementById('nurseExt').value = ''; } catch(e){} // Build 564 (Tomas): the code is re-entered to manage — never left sitting in the field
   } else {
     const ok = successParts.length ? `${successParts.join(', ')}. ` : '';
     const fail = results.failed.map(f => `${f.label}: ${f.reason}`).join(' | ');
@@ -9835,8 +9834,8 @@ async function loadOtherSlots(silent=false){
     });
     const hasDay = allEntries.some(e => e.armShift === 'Day');
     const hasNoc = allEntries.some(e => e.armShift === 'Noc');
-    const activeDayBN = hasDay ? filterFrozenSupps(dayCovering).map(s => firstName(s.BreakNurseName)).join(', ') : '';
-    const activeNocBN = hasNoc ? filterFrozenSupps(nocCovering).map(s => firstName(s.BreakNurseName)).join(', ') : '';
+    const activeDayBN = hasDay ? filterFrozenSupps(dayCovering).map(s => bnVoceraName(s.BreakNurseName)).join(', ') : ''; // 564: Vocera names on Sign Up
+    const activeNocBN = hasNoc ? filterFrozenSupps(nocCovering).map(s => bnVoceraName(s.BreakNurseName)).join(', ') : '';
 
     _otherSlotRenderCache = {
       entries: allEntries,
@@ -14428,6 +14427,12 @@ let PREFERRED_NAMES = {...PREFERRED_NAMES_DEFAULTS};
 // preferred name if mapped, else the first-name token from "Last, First".
 // Storage/identity everywhere stays the full "Last, First" string; only
 // what the eye sees changes. Full name remains on hover + in diagnostics.
+// Build 564 (Tomas): on the Sign Up tab a break nurse is shown by her VOCERA NAME — "First Last" from the stored
+// "Last, First" — so staff can find her in Vina. Preferred names and first-name shortening are for the portal only.
+function bnVoceraName(n){
+  const str = String(n || '').trim(); const i = str.indexOf(',');
+  return i > 0 ? `${str.slice(i + 1).trim()} ${str.slice(0, i).trim()}`.replace(/\s+/g, ' ').trim() : str;
+}
 function bnDisplayName(n){
   if(PREFERRED_NAMES[n]) return PREFERRED_NAMES[n];
   const m = (n || '').match(/,\s*(\S+)/);
@@ -14582,7 +14587,7 @@ function toTitleCase(str){
 // and are not manageable from Sign Up: the row says "Call <BN> to cancel or transfer" and the BN does it in My Shift.
 const LOCK_RE = /^\S{3}$/;                                   // any 3 non-space characters
 function normLock(s){ return String(s || '').trim().toLowerCase(); }
-function lockOk(s){ return LOCK_RE.test(normLock(s)) || /^\d{5}$/.test(normLock(s)); } // 5 digits = a pre-Vocera ext, still honoured
+function lockOk(s){ return LOCK_RE.test(normLock(s)); } // Build 564: exactly 3 — the 5-digit allowance is gone (Spectra is gone before launch)
 function parseNurse(stored){ const m = String(stored || '').match(/^(.*?)\s*\(([^()]*)\)\s*$/); return m ? { name: m[1].trim(), key: normLock(m[2]) } : { name: String(stored || '').trim(), key: '' }; }
 function nurseKey(name, lock){ return `${String(name || '').trim()} (${normLock(lock)})`; } // the stored identity of a self-made claim
 function bareName(stored){ return parseNurse(stored).name; }                               // display: the name, never the code
@@ -20079,7 +20084,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
                 <select id="claimUnit_${slot}" style="width:70px;padding:4px 6px;font-size:.8rem;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text)">${_unitOpts}</select>
                 <input type="text" id="claimName_${slot}" placeholder="Nurse name" autocomplete="off" value="${escHTML(savedInputs.name)}" oninput="_prodLogCaptureInputs('${slot}')" style="flex:1;min-width:60px;padding:4px 8px;font-size:.8rem;border:1px solid var(--border);border-radius:6px">
               </div>
-              <div style="font-size:.7rem;color:var(--muted);margin-top:4px">Their Vocera name. A break you log for someone is yours to cancel or move — they'll call you.</div>
+
               <label style="display:flex;align-items:center;gap:6px;margin-top:8px;font-size:.78rem;color:var(--muted);cursor:pointer">
                 <input type="checkbox" id="applyMoreCheck_${slot}" onchange="toggleApplyMore('${slot}')" style="cursor:pointer">
                 Apply to more unbooked times
