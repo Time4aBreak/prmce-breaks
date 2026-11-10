@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-10-566'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-10-567'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9030,7 +9030,10 @@ function _renderSingleSlotRow(slot){
   } else {
     // Build 287 rider: the mirror used to label plain 'Available' while the
     // core showed 'Available · BN' — surgical repaints dropped the name.
-    nameCell = canClaim ? `Available${_st.disp ? ` · <span style="color:var(--muted)">covered by ${escHTML(_st.disp)}</span>` : ''}` : (lockReason || 'Available'); // Build 565
+    // Build 567: the lock texts carry "covered by" too — the full render had it since 565, this repaint didn't, so
+    // typing a 2-character code flipped "Enter name + code · covered by Anna Canoy" to a bare "Enter name + code".
+    const _cov = _st.disp ? ` · <span style="color:var(--muted)">covered by ${escHTML(_st.disp)}</span>` : '';
+    nameCell = `${canClaim ? 'Available' : (lockReason || 'Available')}${_cov}`; // Build 565/567
   }
   // Action cell — depends on staging state
   const slotIsPast = isPast(slot, shift);
@@ -18723,20 +18726,24 @@ function stageClaimFromInputs(slotTime){
   // clear error so they can switch units or pick a different slot.
   const cache = _bnConfirmCache;
   if(cache){
-    const conflict = (cache.allBookings || []).find(b =>
-      isStaffBooking(b) &&
-      b.Unit === unit &&
-      String(b.SlotTime).padStart(4,'0') === slotTime
-    );
-    if(conflict){
-      // Surface WHO blocked this slot so the toast makes sense even when
-      // the conflicting booking is hidden from this BN's My Shift view
-      // (attributed cross-unit manual break by another BN). For legacy /
-      // Sign Up conflicts, fall back to the staff nurse name as before.
-      const blockerLabel = conflict.CreatedBy
-        ? `${firstName(conflict.CreatedBy)} already logged a break here`
-        : `claimed by ${bareName(conflict.NurseName)}`;
-      toast(`${unit} at ${fmt12(slotTime)} — ${blockerLabel}`, true);
+    // Build 567 (Tomas, Nov 9: "why shouldn't Anna be able to book a slot if she is available?"): a slot is taken PER
+    // STREAM, not per unit — the Jul 16 ruling (282) that Sign Up has drawn one row per BN since 287, and the rule the
+    // claim path already applies (288: stream-scoped, same nurse always blocks). Two BNs on one unit may each give a
+    // break at the same time; what can't happen is the same staff nurse on two breaks at once, or two bookings in one
+    // BN's stream at one time. This check used to block on ANY booking at unit+time, so after Anna handed 4A 5:55 to
+    // Ashley, Anna's own log refused her a 5:55 on 4A for anyone ("Ashley already logged a break here").
+    const _resp = new Set(); (cache.scheds || []).forEach(r => { if(r.BreakNurseName !== BNS.name || r.Status === 'inactive') return; try { JSON.parse(r.Units || '[]').forEach(u => _resp.add(u)); } catch(e){} });
+    const _atSlot = (cache.allBookings || []).filter(b => isStaffBooking(b) && b.Unit === unit && String(b.SlotTime).padStart(4,'0') === slotTime);
+    const sameNurse = _atSlot.find(b => sameBareName(b.NurseName, nurseName));
+    const inStream = _atSlot.find(b => bnOwns(b, _resp, BNS.name));
+    if(sameNurse && !bnOwns(sameNurse, _resp, BNS.name)){
+      const _giver = sameNurse.CoveredBy || sameNurse.CreatedBy || '';
+      toast(`${bareName(sameNurse.NurseName)} already has a ${fmt12(slotTime)} break on ${unit}${_giver ? ` · ${firstName(_giver)} gives it` : ''}`, true);
+      return;
+    }
+    if(inStream || sameNurse){
+      const c = inStream || sameNurse;
+      toast(`${unit} at ${fmt12(slotTime)} — claimed by ${bareName(c.NurseName)}`, true);
       return;
     }
   }
@@ -20062,16 +20069,12 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             // SlotDate === dt): allBookings is widened +1 day for Noc, so without the
             // date check the next shift's pre-midnight breaks would ghost in.
             // Unit-agnostic — same chip set regardless of which unit is picked.
-            const _claimedAnywhere = new Set(
-              (allBookings || [])
-                .filter(b => isStaffBooking(b)
-                  || (isBNBreak(b) && b.NurseName === BNS.name && (b.SlotDate || '').slice(0,10) === dt))
-                .map(b => String(b.SlotTime).padStart(4,'0'))
-            );
-            const _allSlotsInShift = generateSlots(shift).filter(s => getSlotTier(s, shift) !== 'hardBlocked');
+            // Build 567: "occupied" is per STREAM — this BN's own bookings (bookingBySlot, via bnOwns) and her own
+            // breaks, which is exactly compatibleUnclaimed, computed above for this purpose. The set this replaced
+            // took every staff booking on the date, any unit, any BN — Tinsley's 8N claims hid Anna's chips.
             const _anchorKey = sortKey(slot, shift);
-            const chipHtml = _allSlotsInShift
-              .filter(s => s !== slot && !_claimedAnywhere.has(s))
+            const chipHtml = compatibleUnclaimed
+              .filter(s => s !== slot && getSlotTier(s, shift) !== 'hardBlocked')
               .map(s => {
                 const _after = sortKey(s, shift) > _anchorKey;
                 const _bg = _after ? 'var(--noc-lt)' : 'var(--bg)';
