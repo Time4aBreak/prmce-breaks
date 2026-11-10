@@ -313,7 +313,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <input type="text" id="nurseName" placeholder="Vocera Name" maxlength="40" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="onNameInput();clearExtOnNameChange()"/>
       </div>
       <div class="field" style="min-width:270px">
-        <input type="text" id="nurseExt" placeholder="Enter a 3 character code you'll remember to manage breaks" maxlength="3" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="validateExt(this);onNameExtInput()"/>
+        <input type="text" id="nurseExt" placeholder="Enter a 3 character code you'll remember" maxlength="3" autocomplete="off" autocorrect="off" autocapitalize="none" spellcheck="false" oninput="validateExt(this);onNameExtInput()"/>
       </div>
     </div>
     <div id="nameExtHint" style="display:none;font-size:.75rem;color:var(--day);margin-top:6px;font-weight:500">
@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-07-564'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-10-565'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8527,7 +8527,7 @@ async function _loadSlotsCore(silent=false){
       if(!isTaken && !isMine){
         if(_pastPreview)                  { canClaim=false; lockReason='Past day'; } // Build 561
         else if(!shiftWindowOpen)         { canClaim=false; lockReason=openLabel; }
-        else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter your name + code above'; }
+        else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + code'; }
         else if(!canClaimMore)            { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
         else                              { canClaim=true; }
       }
@@ -8579,7 +8579,8 @@ async function _loadSlotsCore(silent=false){
         nameCellHtml = _kl ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_klBN)} to cancel or transfer</span>` : formatNurse(booking.NurseName);
       } else {
         const _dispBN = _st.disp || _slotBNMap[slot] || '';
-        nameCellHtml = canClaim ? `Available${_dispBN ? ` · ${_dispBN}` : ''}` : (lockReason === openLabel ? (_dispBN || lockReason) : `${lockReason}${_dispBN ? ` · ${_dispBN}` : ''}`);
+        const _cov = _dispBN ? ` · <span style="color:var(--muted)">covered by ${escHTML(_dispBN)}</span>` : ''; // Build 565: a bare name is a claimant; the break nurse is "covered by"
+        nameCellHtml = canClaim ? `Available${_cov}` : (lockReason === openLabel ? (_dispBN ? `${openLabel}${_cov}` : lockReason) : `${lockReason}${_cov}`);
       }
       // Action cell — owned slots route through the new picker; others unchanged
       let actionHtml = '';
@@ -8994,7 +8995,7 @@ function _renderSingleSlotRow(slot){
   let canClaim = false, lockReason = '';
   if(!isTaken && !isMine){
     if(!shiftWindowOpen)               { canClaim=false; lockReason=openLabel; }
-    else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter your name + code above'; }
+    else if(!nurseName||!nurseExtValid){ canClaim=false; lockReason='Enter name + code'; }
     else if(!canClaimMore)             { canClaim=false; lockReason = _rampAllow < _rampMax ? rampCheckBackLine(shift, _rampShiftDate(shift)) : `Max ${_rampMax} slots reached`; }
     else                               { canClaim=true; }
   }
@@ -9029,7 +9030,7 @@ function _renderSingleSlotRow(slot){
   } else {
     // Build 287 rider: the mirror used to label plain 'Available' while the
     // core showed 'Available · BN' — surgical repaints dropped the name.
-    nameCell = canClaim ? `Available${_st.disp ? ` · ${_st.disp}` : ''}` : (lockReason || 'Available');
+    nameCell = canClaim ? `Available${_st.disp ? ` · <span style="color:var(--muted)">covered by ${escHTML(_st.disp)}</span>` : ''}` : (lockReason || 'Available'); // Build 565
   }
   // Action cell — depends on staging state
   const slotIsPast = isPast(slot, shift);
@@ -9960,7 +9961,7 @@ function renderOtherSlotsFromCache(){
       const bnLabel = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN);
       return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">
       <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
-      <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · ${bnLabel}` : 'Available')}</div>
+      <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · <span style="color:var(--muted)">covered by ${escHTML(bnLabel)}</span>` : 'Available')}</div>
       <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">${isPending?'↺ Undo':'+  Select'}</button>
     </div>`;
     };
