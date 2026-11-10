@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-10-567'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-10-568'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6184,13 +6184,11 @@ function showTab(name, btn){
       syncedLS.refresh('appVersion')
     ]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
 
-    // If a BN is already signed in to My Shift, refresh their view so any
-    // changes made on the Sign Up tab (or by other users) while they were
-    // away surface immediately. Staged Productivity Log actions and typed
-    // claim-form inputs survive the re-render via _prodLogStaged / _prodLogInputs.
-    if(BNS && BNS.name){
-      loadBNConfirm();
-    }
+    // Build 568: restart whichever sub-tab's poller showTab stopped on the way out (the My Shift one refreshes
+    // immediately, revision-gated, so changes made on Sign Up or by other users surface now; staged Productivity Log
+    // actions and typed claim-form inputs survive via _prodLogStaged / _prodLogInputs). Before 568 this was a one-shot
+    // loadBNConfirm() with no restart — the log then froze until a sub-tab tap or an app switch.
+    restartActivePoller();
   }
 }
 
@@ -11093,8 +11091,9 @@ This is a future shift. Coverage on ${firstName(bnName)}'s units will be reduced
   // uncovered MUST match the executor's filter exactly (isStaffBooking + on
   // BN's units + NOT already confirmed + this-shift-or-later + future slot) so
   // the plan corresponds to what the executor will commit.
+  const _bnUnitSet = new Set(bnUnits);
   const uncovered = allBookings.filter(b =>
-    isStaffBooking(b) && bnUnits.includes(b.Unit) &&
+    isStaffBooking(b) && bnOwns(b, _bnUnitSet, bnName) && // Build 568: HER stream, not "any booking on her units" — a teammate's rows on a shared unit stay put; a break handed to her on a foreign unit IS re-homed
     !isConfirmed(b) &&
     b.SlotDate >= shiftDate(shift) && sortKey(b.SlotTime, shift) > nowKey(shift)
   );
@@ -11785,14 +11784,14 @@ function buildAbsorptionContext(candidates, ctx){
     const claimedSet = new Set();
     allBookings.forEach(b => {
       if(isBNBreak(b)) return;
-      // Build 224: CreatedBy-pinned bookings on FOREIGN units count as busy
-      // too — a previously kept/transferred break commits this BN at that
-      // slot even though the unit isn't theirs. Applies to absorption and
-      // transfer eligibility alike (strictly more conservative).
-      const pinnedToMe = b.CreatedBy === bnName2;
-      if(!respUnits.has(b.Unit) && !pinnedToMe) return;
+      // Build 568 (per STREAM — the Jul 16 ruling, 282): a booking commits THIS nurse only if it is hers — CoveredBy
+      // first, then CreatedBy (224's pin for kept/transferred breaks on foreign units), then unit membership for
+      // stamp-less legacy rows. It used to be "any staff booking on any unit she holds", which with two nurses on one
+      // unit made each of them busy for the other's breaks (a receiver refused for a claim that isn't hers), and kept
+      // the giver busy at a slot she had handed off. One nurse per unit: identical to before.
+      if(!bnOwns(b, respUnits, bnName2)) return;
       busy.add(b.SlotTime);
-      if(respUnits.has(b.Unit)) claimedSet.add(`${b.Unit}|${b.SlotTime}`);
+      claimedSet.add(`${b.Unit}|${b.SlotTime}`); // 433: "is she due SOMEWHERE at T+1?" — her own claims, any unit
     });
     bnBusySlotTimes[bnName2] = busy;
     bnClaimedByUnitSlot[bnName2] = claimedSet;
@@ -12334,9 +12333,10 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // ── Current shift: existing absorption logic continues below ──
     // Only future uncovered claimed staff breaks on BN-A's units
     // Must check SlotDate using shiftDate — Noc bookings use the shift start date (yesterday)
+    const _bnAUnitSet = new Set(bnAUnits);
     const uncovered = allBookings.filter(b =>
       isStaffBooking(b) &&
-      bnAUnits.includes(b.Unit) &&
+      bnOwns(b, _bnAUnitSet, bnName) && // Build 568: her stream (see the planner's filter — the two MUST match)
       !isConfirmed(b) &&
       b.SlotDate >= shiftDate(shift) &&  // exclude dates before this shift started
       sortKey(b.SlotTime, shift) > nowKey(shift)
@@ -18434,23 +18434,30 @@ if(typeof window !== 'undefined' && !window._pollVisStarted){
       stopCoveragePolling();
       stopSchedulePolling();
     } else {
-      // Re-check which subtab is active and restart the appropriate poller.
-      const activeSub = document.querySelector('.subtab.active');
-      if(activeSub){
-        if(activeSub.id === 'subtab-bn' && BNS && BNS.name){
-          // Immediate refresh then start polling
-          silentRefreshProdLog();
-          startProdLogPolling();
-        } else if(activeSub.id === 'subtab-summary'){
-          silentRefreshCoverage();
-          startCoveragePolling();
-        } else if(activeSub.id === 'subtab-admin'){
-          silentRefreshSchedule();
-          startSchedulePolling();
-        }
-      }
+      restartActivePoller();
     }
   });
+}
+
+// Build 568 (Tomas, Nov 10 3:54 AM, laptop: "3 minutes later still there" — a teardown's deletes never reached the log;
+// the diag read `timer armed: false`). Leaving the Portal for Sign Up stops the sub-tab pollers (showTab), and coming
+// back to an already-unlocked Portal did a one-shot loadBNConfirm() and never restarted them — only a sub-tab tap or an
+// app switch (visibilitychange) did. A break nurse who peeks at Sign Up and returns to My Shift had a frozen log: new
+// claims didn't appear and nothing said so. Coverage and Schedule froze the same way. The visibility handler already had
+// the right logic; it is now this helper, and Portal re-entry calls it too.
+function restartActivePoller(){
+  const activeSub = document.querySelector('.subtab.active');
+  if(!activeSub) return;
+  if(activeSub.id === 'subtab-bn' && BNS && BNS.name){
+    silentRefreshProdLog();      // immediate refresh, then the 5 s revision-gated beat
+    startProdLogPolling();
+  } else if(activeSub.id === 'subtab-summary'){
+    silentRefreshCoverage();
+    startCoveragePolling();
+  } else if(activeSub.id === 'subtab-admin'){
+    silentRefreshSchedule();
+    startSchedulePolling();
+  }
 }
 
 function _prodLogCountEl(){ return document.getElementById('prodLogCount'); }
