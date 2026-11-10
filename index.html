@@ -2340,7 +2340,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-10-565'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-10-566'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20260,7 +20260,15 @@ async function handOffClaim(id){
       && (() => { try { return JSON.parse(r.Units || '[]').flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : u).some(u => getUnitWing(u) === wing); } catch(e){ return false; } })());
     // Build 487: runs move whole (D1) — the run containing this claim, not the slot alone
     const runs = groupBookingsIntoRuns(bookings.filter(x => isStaffBooking(x) && String(x.IsCancelled) !== '1' && !isNotTaken(x)), shift);
-    const run = runs.find(r => r.some(x => String(x.Id) === String(id))) || [b];
+    const runWhole = runs.find(r => r.some(x => String(x.Id) === String(id))) || [b];
+    // Build 566 (Tomas, Nov 9 5:03 PM: "no BN was free to cover a 5:15 hand-off from Anna, but Ashley is free on A wing"):
+    // the run moves whole, but only from NOW forward. Bhbhb's 4:55 + 5:15 run asked the receiver to be free at 4:55 — a
+    // slot already come around, which no receiver's free set can hold — so every candidate failed and the toast blamed
+    // 5:15. The slots already come around stay with the outgoing nurse (she is giving them); the future tail is what is
+    // handed off, and it still passes the same eligibility (free at every slot; T+1 buffer on a single slot). Mark
+    // Unavailable already splits an in-progress run at now — its uncovered set is future-only — so this matches it.
+    const run = runWhole.filter(x => _slotIsAhead(String(x.SlotDate || '').slice(0, 10), x.SlotTime, shift));
+    const stays = runWhole.filter(x => !run.includes(x));
     const runIds = new Set(run.map(x => String(x.Id)));
     const ctx = buildAbsorptionContext(cands, { allBookings: bookings.filter(x => !runIds.has(String(x.Id))), allScheds: scheds, shift });
     const elig = [...new Set(cands.map(r => r.BreakNurseName))].filter(bn => bnCanTakeRun(bn, run, ctx));
@@ -20268,7 +20276,7 @@ async function handOffClaim(id){
     hideBusy(); // Build 557: the picker is the user's turn
     const target = await new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal'), msgEl = document.getElementById('customConfirmMsg'), okBtn = document.getElementById('customConfirmOk'), cancelBtn = document.getElementById('customConfirmCancel');
-      msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${run.map(x => fmt12(x.SlotTime)).join(' + ')}${run.length > 1 ? ` · ${run.length} slots` : ''}</div><div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
+      msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${run.map(x => fmt12(x.SlotTime)).join(' + ')}${run.length > 1 ? ` · ${run.length} slots` : ''}</div>${stays.length ? `<div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">${stays.map(x => fmt12(x.SlotTime)).join(' + ')} already came around and stays with you.</div>` : ''}<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
         + `<select id="handOffSel" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem">${elig.map(bn => `<option value="${bn}">${bnDisplayName(bn)}</option>`).join('')}</select>`;
       okBtn.textContent = 'Hand off'; cancelBtn.textContent = 'Keep it';
       const done = v => { modal.style.display = 'none'; okBtn.onclick = null; cancelBtn.onclick = null; resolve(v); };
