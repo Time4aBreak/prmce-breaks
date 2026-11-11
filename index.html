@@ -715,44 +715,12 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- Import Schedule -->
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;cursor:pointer" onclick="toggleImportInput()">
-        <div class="card-label" style="margin:0">📸 Import Schedule from UKG</div>
-        <div style="display:flex;align-items:center;gap:8px"><span style="font-size:.7rem;color:var(--muted)">AI-powered</span><span id="importChevron" style="font-size:.85rem;color:var(--muted)">▼</span></div>
-      </div>
-      <div id="importInputBody" style="display:none">
-
-
-      <div id="dropZone" onclick="document.getElementById('schedFile').click()"
-        style="border:2px dashed var(--border);border-radius:12px;padding:28px 20px;text-align:center;cursor:pointer;transition:all .2s;background:var(--bg)"
-        ondragover="event.preventDefault();this.style.borderColor='var(--teal)'"
-        ondragleave="this.style.borderColor='var(--border)'"
-        ondrop="handleDrop(event)">
-        <div style="font-size:2rem;margin-bottom:6px">📅</div>
-        <div style="font-size:.875rem;font-weight:600;color:var(--teal-dk)">Add image of UKG PRO Break Relief Schedule per week here (PNG or JPG)</div>
-      </div>
-      <input type="file" id="schedFile" accept="image/*" style="display:none" onchange="handleFileSelect(event)"/>
-
-      <div id="importPreview" style="display:none;margin-top:12px">
-        <img id="previewImg" style="max-width:100%;border-radius:10px;border:1px solid var(--border);margin-bottom:12px"/>
-        <!-- Build 218 (F2 checksum): declared BEFORE extraction so the count is
-             a real pre-commitment, not anchored by the AI's own output. -->
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
-          <label for="impExpectedCount" style="font-size:.82rem;font-weight:600;flex:1;min-width:200px">Shifts scheduled this week: <span style="font-weight:400;color:var(--muted)"></span></label>
-          <input id="impExpectedCount" type="number" min="1" inputmode="numeric" placeholder="e.g. 37" style="width:90px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:.9rem;text-align:center"/>
-        </div>
-        <button class="btn btn-primary extract-action-btn" style="width:100%" onclick="runImport()">
-          <span id="importBtnTxt">✨ Extract Schedule</span>
-          <span id="importSpinner" style="display:none"><div class="spinner" style="border-top-color:white;width:16px;height:16px;display:inline-block"></div></span>
-        </button>
-      </div>
-      </div><!-- /importInputBody (Build 437: collapsed by default) -->
-
-      <div id="importResults" style="display:none;margin-top:14px">
+    <!-- Review &amp; Assign — the cards the Schedule grid's Review fills (build 570: the AI screenshot extractor that
+         once fed them, its drop zone, expected-count gate and restore banner, is gone; this card is the grid's). -->
+    <div class="card" id="importResults" style="display:none">
         <div id="importReplacementNotice" style="display:none;background:var(--day-lt);border:1.5px solid var(--day);border-radius:8px;padding:10px 14px;font-size:.82rem;color:var(--day);font-weight:500;margin-bottom:10px;line-height:1.5"></div>
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;cursor:pointer" onclick="toggleExtractedRows()">
-          <div id="importResultsTitle" style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Extracted — Review &amp; Assign Units</div>
+          <div id="importResultsTitle" style="font-size:.75rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Review &amp; Assign Units</div>
           <div style="display:flex;align-items:center;gap:8px">
             <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();resuggestAll()" style="font-size:.72rem">↺ Re-suggest All</button>
             <button class="btn btn-ghost btn-sm import-action-btn" onclick="event.stopPropagation();clearAllImportSels()" style="font-size:.72rem">🗑 Clear All Assignments</button>
@@ -760,11 +728,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           </div>
         </div>
         <div id="importRowsWrap">
-          <div id="f2MirrorWrap" style="display:none;margin-bottom:12px"></div>
-          <div id="importRestoreBanner" style="display:none;padding:10px 12px;background:var(--teal-lt);border-radius:8px;font-size:.82rem;color:var(--teal-dk);margin-bottom:10px;display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap">
-            <span id="importRestoreMsg"></span>
-            <span style="display:flex;gap:6px"><button class="btn btn-ghost btn-sm" onclick="restoreLastImport()">↺ Restore suggestions</button><button class="btn btn-ghost btn-sm" onclick="discardLastImport()" title="Forget these unsaved suggestions">✕ Discard</button></span>
-          </div>
           <div id="wgStaleNote"></div><!-- Build 493: what Save All will ALSO remove (grid batches) — full width, above the button it describes -->
           <div id="acceptBarTop" style="margin-bottom:12px;display:none;justify-content:flex-end">
             <button class="btn btn-success accept-all-btn" onclick="acceptAllAndSave()" style="font-size:.85rem;padding:8px 18px">✅ SAVE ALL</button>
@@ -776,7 +739,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           </div>
           <div id="acceptAllStatus" style="display:none;margin-top:8px;font-size:.8rem;color:var(--green);font-weight:600"></div>
         </div>
-      </div>
     </div>
 
     <!-- Build 523 (step 3 of the master grid): the Edit form is no longer a card on the page. It is docked here
@@ -965,19 +927,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       </div>
     </div>
 
-    <!-- Imported schedule summary — collapsible, at bottom -->
-    <div class="card">
-      <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="toggleImportedEntries()">
-        <div class="card-label" style="margin:0">📅 Imported Staffing Record</div>
-        <div style="display:flex;align-items:center;gap:8px">
-          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation();clearAllImportedEntries()" style="font-size:.72rem">Clear All</button>
-          <span id="importedEntriesChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
-        </div>
-      </div>
-      <div id="importedEntriesBody" style="display:none;margin-top:10px">
-        <div id="importedEntriesSummary" style="font-size:.8rem;color:var(--muted)">Loading...</div>
-      </div>
-    </div>
 
     <!-- Build 516 (Tomas): Data Management sits last on Settings -->
     <!-- Sim mode controls (only visible in simulation mode) -->
@@ -1458,7 +1407,7 @@ function isUnitOpenForShift(unit, date, shift){
 //   • Past shift         → status at shift-start (historical accuracy)
 //
 // Display-only callers (NOW semantic):
-//   updateAdminUnitGrid, loadAssignments tag dim, restoreLastImport,
+//   updateAdminUnitGrid, loadAssignments tag dim,
 //   renderImportRows, toggleIU modal, suggestedSlotCount, saveImportRow
 //   wing-split warning, promptReassignBN, manual grid tap handler.
 //
@@ -2340,7 +2289,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-10-568'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-10-570'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3904,14 +3853,14 @@ async function _3CTick(){
     const _bn = (typeof BNS !== 'undefined' && BNS.name) ? BNS.name : '';
     _changedKeys = await syncedLS.refreshMany([
       'unit3CDefault', 'unit3CSchedule', 'unitStatuses', 'unitSchedules', 'appVersion',
-      'bnImportedNames', 'bnImportedEntries',
+      'bnImportedNames',
       _bn ? `bnDefault_${_bn}_Day` : '', _bn ? `bnDefault_${_bn}_Noc` : ''
     ]);
   } catch{}
   // Build 215: targeted re-renders on cross-device deltas — same pattern as
   // the 3C flip handling below: repaint only what changed, never mid-edit.
   try {
-    if(_changedKeys.includes('bnImportedNames') || _changedKeys.includes('bnImportedEntries')){
+    if(_changedKeys.includes('bnImportedNames')){
       let n = syncedLS.get('bnImportedNames');
       if(typeof n === 'string'){ try { n = JSON.parse(n); } catch{} }
       if(Array.isArray(n)) importedNames = n;
@@ -5906,8 +5855,6 @@ function unlockPortal(){
     if(PORTAL.level === 'admin'){
       loadAdminData();
       renderImportedNamesList();
-      renderImportedEntriesSummary();
-      checkForRestorableSuggestions();
       show3CDefaultToggle();
       showAppVersionLine();
       update3CToggle();
@@ -5979,7 +5926,6 @@ function showSubTab(name, btn){
     try { refreshUnitStatusGrid(); } catch(e){}
     try { initRampCard(); initAcuityCard(); } catch(e){}
     try { renderImportedNamesList(); } catch(e){}
-    try { renderImportedEntriesSummary(); } catch(e){}
   }
   if(name==='summary'){
     // Auto-select current shift and date each time Covering tab is opened
@@ -6087,8 +6033,6 @@ function showSubTab(name, btn){
       loadAdminData();
       renderImportedNamesList();
       populateNurseDropdown();
-      renderImportedEntriesSummary();
-      checkForRestorableSuggestions();
       update3CToggle();
       // Build 125 (2026-05-26): Start schedule polling so the Schedule
       // tab reflects cross-device changes (Mark Unavailable, manual
@@ -6166,8 +6110,6 @@ function showTab(name, btn){
       populateBNDropdown();
       loadAdminData();
       renderImportedNamesList();
-      renderImportedEntriesSummary();
-      checkForRestorableSuggestions();
       show3CDefaultToggle(); showAppVersionLine(); update3CToggle();
       showSubTab('bn', document.getElementById('st-bn')); // Build 562 (Tomas): the DEV_MODE door skipped 554's opening tab — the button said My Shift, the panel showed Coverage
     }
@@ -12557,15 +12499,6 @@ async function checkDuplicateExt(){
 }
 
 
-// Build 437 (Tomas): the import card's input half is collapsed by default; the
-// review cards below it stay visible whenever a batch exists (the grid uses them).
-function toggleImportInput(){
-  const body = document.getElementById('importInputBody'), chev = document.getElementById('importChevron');
-  if(!body) return;
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : 'block';
-  if(chev) chev.textContent = open ? '▼' : '▲';
-}
 function toggleAssignForm(){ // Build 523: the form has no collapsed state any more — open means "in the overlay"
   const body = document.getElementById('assignFormBody');
   if(body) body.style.display = 'block';
@@ -12624,9 +12557,9 @@ function expandExtractedRows(){
 // Re-running Re-suggest / Clear / Save All would either no-op or act on stale
 // state. Disable the three controls until a fresh extraction populates new
 // entries. Re-enabled by setImportActionsActive(true) which fires at the
-// start of each new extraction batch (renderImportRows / restoreLastImport).
+// start of each new batch (renderImportRows).
 function setImportActionsActive(active){
-  document.querySelectorAll('.import-action-btn, .accept-all-btn, .extract-action-btn').forEach(b => { // Build 541: the Extract button follows too
+  document.querySelectorAll('.import-action-btn, .accept-all-btn').forEach(b => { // Build 541: the Extract button follows too
     b.disabled = !active;
     b.style.opacity = active ? '' : '.5';
     b.style.cursor = active ? '' : 'not-allowed';
@@ -13050,7 +12983,6 @@ function unlock(){
       loadAdminData();
       renderImportedNamesList();
       populateNurseDropdown();
-      renderImportedEntriesSummary();
       Promise.all([
         syncedLS.refresh('unit3CDefault'),
         syncedLS.refresh('unit3CSchedule'),
@@ -14307,7 +14239,7 @@ async function clearSimData(){
       k.startsWith('unit3C_') || k.startsWith('bnExt_') || k.startsWith('bnStart_') ||
       k.startsWith('slotNotify_') || k.startsWith('slotNotifyDismissed_') ||
       k.startsWith('bnBreakCancelled_') ||
-      k === 'bnImportedEntries' || k === 'bnImportedNames' ||
+      k === 'bnImportedNames' ||
       k === 'unit3CDefault' || k === 'unit3CSchedule' ||
       k === 'unitStatuses' || k === 'unitSchedules' || k === 'unitSubLog' ||
       k === 'bnLastImportBatch' || k === '_syncedLSRetryQueue' ||
@@ -14330,7 +14262,7 @@ async function clearSimData(){
     localStorage.removeItem('sim_BNState');
     localStorage.removeItem('sim_idCounter');
     _simIdCounter = 1000;
-    importEntries = []; importedNames = [];
+    importedNames = [];
     toast('All data cleared. Reloading…');
     setTimeout(() => location.reload(), 700);
     return;
@@ -14958,560 +14890,16 @@ function updateProgressBar(container, done, total, label){
   if(lbl && label) lbl.textContent = label;
 }
 
-// Build 298: NO CALLERS since the R3 inform-and-flag policy — warnings now
-// banner beside the cards and the Save-All count gate covers occlusion
-// shortfalls. Kept (one screen, zero risk) in case a hard-failure path
-// ever wants a blocking version again.
-function _showExtractionRejected(warnings){
-  const items = (warnings || []).map(w => `<li style="margin-bottom:6px;line-height:1.5">${escHTML(String(w))}</li>`).join('');
-  const wrap = document.createElement('div');
-  wrap.id = 'extractionRejectModal';
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
-  wrap.innerHTML = `
-    <div style="background:var(--card);border-radius:14px;padding:22px 24px;max-width:480px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;color:#bf360c">
-        <span style="font-size:1.4rem">⚠</span>
-        <span style="font-size:1.05rem;font-weight:700;color:var(--text)">Screenshot needs re-upload</span>
-      </div>
-      <div style="font-size:.88rem;color:var(--text);line-height:1.5;margin-bottom:12px">
-        The AI couldn't fully process this screenshot:
-      </div>
-      <ul style="margin:0 0 14px 0;padding-left:22px;font-size:.85rem;color:var(--text);background:#fff8e1;border-radius:8px;padding:12px 12px 12px 32px;border:1px solid #ffb300">${items}</ul>
-      <div style="font-size:.82rem;color:var(--muted);line-height:1.5;margin-bottom:18px">
-        Re-take the screenshot with no tooltips, popups, or overlays visible, then try again. Any previously-saved assignments are unaffected.
-      </div>
-      <div style="display:flex;justify-content:flex-end;gap:10px">
-        <button class="btn btn-ghost btn-sm" onclick="document.getElementById('extractionRejectModal').remove()" style="font-size:.85rem">Close</button>
-      </div>
-    </div>`;
-  // Close on backdrop click
-  wrap.addEventListener('click', (e) => { if(e.target === wrap) wrap.remove(); });
-  document.body.appendChild(wrap);
-}
 
 // ═══════════════════════════════════════════════════════
 // AI SCHEDULE IMPORT
 // ═══════════════════════════════════════════════════════
-let importImageB64 = null;
-let importImageType = null;
 
-function handleDrop(e){
-  e.preventDefault();
-  document.getElementById('dropZone').style.borderColor = 'var(--border)';
-  const file = e.dataTransfer.files[0];
-  if (file) loadImportFile(file);
-}
 
-function handleFileSelect(e){
-  const file = e.target.files[0];
-  if (file) loadImportFile(file);
-  try { e.target.value = ''; } catch(err){} // let the same file be picked again after a refusal
-}
 
-// Build 439 (Tomas): after a successful Save All the last screenshot is cleared —
-// image, preview, count — so the next import starts clean. The review cards are
-// NOT collapsed; they stay as the record of what was just saved.
-function _clearImportPreview(){
-  try {
-    importImageB64 = null; importImageType = null;
-    const img = document.getElementById('previewImg'); if(img) img.removeAttribute('src');
-    const pv = document.getElementById('importPreview'); if(pv) pv.style.display = 'none';
-    const f = document.getElementById('schedFile'); if(f) f.value = '';
-    const c = document.getElementById('impExpectedCount'); if(c) c.value = '';
-  } catch(e){}
-}
-function loadImportFile(file){
-  // Build 411 (polish #5): ONE gate for both entry points. Drop already
-  // refused non-images silently; the picker trusted accept="image/*", which
-  // is only a hint — "All files" lets a PDF through to the extractor, which
-  // fails with a backend error instead of a plain message.
-  if(!file.type || !file.type.startsWith('image/')){
-    toast('Please choose a PNG or JPG screenshot.', true);
-    return;
-  }
-  importImageType = file.type;
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    importImageB64 = e.target.result.split(',')[1];
-    document.querySelectorAll('.extract-action-btn').forEach(b => { b.disabled = false; b.style.opacity = ''; b.style.cursor = ''; }); // Build 541: a fresh image is a fresh extraction — never greyed by an earlier save
-    document.getElementById('previewImg').src = e.target.result;
-    document.getElementById('importPreview').style.display = 'block';
-    document.getElementById('importResults').style.display = 'none';
-    document.getElementById('importRows').innerHTML = '';
-    updateAcceptBars();
-  };
-  reader.readAsDataURL(file);
-}
 
-// Build 233 (Finding 6, extraction consensus): one extraction pass through
-// the GAS proxy. scanMode 'byRow' = the original prompt; 'byColumn' asks the
-// backend for the transposed column-major variant. Old backends ignore
-// scanMode and answer row-major — both passes then trivially agree (import
-// works, just without consensus protection) — so either deploy order is safe.
-// Throws on any failure; the caller treats a thrown pass as unavailable.
-async function _extractPass(scanMode){
-  const response = await fetch(GAS_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      action: 'extractSchedule',
-      imageData: importImageB64,
-      mediaType: importImageType,
-      scanMode: scanMode,
-      token: REQUEST_TOKEN
-    }).toString()
-  });
-  const responseText = await response.text();
-  let data;
-  try { data = JSON.parse(responseText); }
-  catch(e){ throw new Error('Apps Script returned non-JSON: ' + responseText.slice(0, 100)); }
-  if(data.error) throw new Error(data.error.message || (typeof data.error === 'string' ? data.error : JSON.stringify(data.error)));
-  const raw = data.result || (data.content || []).map(c => c.text || '').join('');
-  if(!raw.trim()) throw new Error('AI returned an empty response. Check your API key and try again.');
-  const clean = raw.replace(/```json|```/g, '').trim();
-  let entries = null, warnings = [];
-  try {
-    const objMatch = clean.match(/\{[\s\S]*\}/);
-    if(objMatch){
-      const parsed = JSON.parse(objMatch[0]);
-      if(parsed && Array.isArray(parsed.entries)){
-        entries = parsed.entries;
-        warnings = Array.isArray(parsed.warnings) ? parsed.warnings : [];
-      }
-    }
-  } catch(e){ /* fall through to array attempt */ }
-  if(entries == null){
-    const arrMatch = clean.match(/\[[\s\S]*?\]/s);
-    if(!arrMatch){
-      console.error('[extraction] no JSON in response (' + scanMode + '):', clean.slice(0, 300));
-      throw new Error('AI responded but returned no JSON. Try a screenshot showing only the schedule grid.');
-    }
-    entries = JSON.parse(arrMatch[0]);
-  }
-  // Build 298 (R1+R4): normalize every entry ONCE at birth — dates padded,
-  // shifts exactly Day/Noc, names trimmed — so the cards, the gate, and the
-  // save can never disagree about the same text (the 8/18 gate-blindness
-  // class). Then the arithmetic vote: the start time outvotes the reader's
-  // shift label (the Janice 20:00→'Day' class, both passes agreeing).
-  // Because this runs BEFORE consensus keys form, a vote-corrected shift
-  // HEALS cross-pass disagreement instead of spawning duplicate cards;
-  // corrections are flagged downstream for human eyes.
-  entries = (entries || []).map(e => {
-    if(!e || typeof e !== 'object') return e;
-    if(typeof e.name === 'string') e.name = e.name.trim().replace(/\s+/g, ' ');
-    if(e.date != null){
-      const dm = String(e.date).trim().match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
-      if(dm){
-        // Build 391: YEAR-SNAP — the screenshot shows no year, and the model
-        // twice completed these dates to 2025 (its training-era prior),
-        // re-deriving every DOW and slipping a year-old batch past every
-        // guard with perfect internal consistency; only the Save confirm's
-        // human pause caught it. Month+day are faithful; the year is a
-        // guess — so any year putting the date >200 days from today is
-        // overridden by whichever of last/this/next year lands nearest.
-        // (200-day threshold leaves deliberate historical test imports,
-        // like the April artifact, untouched.)
-        let yy = parseInt(dm[1], 10);
-        const mm = dm[2].padStart(2, '0'), dd = dm[3].padStart(2, '0');
-        const nowMs = Date.now(), thisY = new Date().getFullYear();
-        if(Math.abs(new Date(`${yy}-${mm}-${dd}T12:00:00`) - nowMs) > 200 * 86400e3){
-          let best = yy, bestD = Infinity;
-          [thisY - 1, thisY, thisY + 1].forEach(cy => {
-            const dist = Math.abs(new Date(`${cy}-${mm}-${dd}T12:00:00`) - nowMs);
-            if(dist < bestD){ bestD = dist; best = cy; }
-          });
-          yy = best;
-        }
-        e.date = `${yy}-${mm}-${dd}`;
-      }
-    }
-    if(typeof e.shift === 'string'){
-      const s = e.shift.trim().toLowerCase();
-      e.shift = s.startsWith('d') ? 'Day' : (s.startsWith('n') ? 'Noc' : e.shift.trim());
-    }
-    if(e.startTime != null){
-      const st = String(e.startTime).replace(/\D/g, '');
-      if(st.length >= 3 && st.length <= 4) e.startTime = st.padStart(4, '0');
-    }
-    if(typeof e.startTime === 'string' && /^\d{4}$/.test(e.startTime)
-       && e.startTime !== '0000' && Number(e.hours) !== 0){
-      const h = parseInt(e.startTime.slice(0, 2), 10);
-      const byTime = (h >= 8 && h < 20) ? 'Day' : 'Noc';
-      if((e.shift === 'Day' || e.shift === 'Noc') && e.shift !== byTime){
-        e._timeVote = `shift corrected ${e.shift}→${byTime} from start time ${e.startTime}`;
-        e.shift = byTime;
-      } else if(e.shift !== 'Day' && e.shift !== 'Noc'){
-        e.shift = byTime;
-      }
-    }
-    return e;
-  });
-  return { entries, warnings };
-}
 
-async function runImport(){
-  if (!importImageB64) return;
 
-  // Build 218 (F2): the expected-shift count is REQUIRED before extraction.
-  const _expFld = document.getElementById('impExpectedCount');
-  const _expVal = parseInt((_expFld && _expFld.value) || '', 10);
-  if(!isFinite(_expVal) || _expVal < 1){
-    toast('Count the shifts on the screenshot first — enter the number above Extract.', true);
-    if(_expFld) _expFld.focus();
-    return;
-  }
-
-  // Warn if there are unsaved unit selections
-  const unsavedCount = Object.keys(importUnitSel).filter(i => {
-    const saved = document.getElementById(`saved-${i}`);
-    return saved && saved.style.display === 'none' && (importUnitSel[i]||[]).length > 0;
-  }).length;
-
-  if (unsavedCount > 0) {
-    const go = await customConfirm(
-      `You have ${unsavedCount} unsaved assignment${unsavedCount!==1?'s':''} from the previous import.\n\n` +
-      `Import anyway and lose these selections?\n\n` +
-      `Click Cancel to go back and save them first.`,
-      'Import Anyway', 'Cancel'
-    );
-    if (!go) return;
-  }
-
-  // Reset selections for new import
-  Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
-
-  const btn = document.getElementById('importBtnTxt');
-  const spin = document.getElementById('importSpinner');
-  btn.style.display = 'none'; spin.style.display = 'inline-block';
-
-  try {
-    // Build 233 (Finding 6): dual-pass consensus. Two independent reads of
-    // the same image — the original row-major prompt and a transposed
-    // column-major variant — fired in parallel (wall-clock ~= the slower
-    // pass, not the sum). A row-attribution slip (the Traljo 2026-07-25
-    // phantom, real import 2026-07-11) almost never reproduces under a
-    // transposed scan, so it surfaces as a flagged disagreement instead of
-    // a silent extra card. If one pass fails, degrade to single-pass with a
-    // loud banner — reliability is never worse than the pre-233 behavior.
-    const settled = await Promise.allSettled([_extractPass('byRow'), _extractPass('byColumn')]);
-    const passA = settled[0].status === 'fulfilled' ? settled[0].value : null;
-    const passB = settled[1].status === 'fulfilled' ? settled[1].value : null;
-
-    if(!passA && !passB){
-      const msg = (settled[0].reason && settled[0].reason.message) || 'both extraction passes failed';
-      // Build 390: the raw API voice ("...base64.media_type...") confused more
-      // than it explained — translate the common cause, keep the rest verbatim.
-      toast(/media_type|image\.source/i.test(msg)
-        ? 'That file type could not be read — use a PNG or JPG screenshot.'
-        : 'Extraction error: ' + msg, true);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
-    }
-
-    let entries, warnings;
-    // Build 416 (Tomas, 6/21 week: Deepi's Thu/Fri/Sat each extracted TWICE,
-    // unflagged — 7 cards for 3 shifts): consensus matched keys ACROSS the two
-    // passes but never collapsed a key repeated WITHIN one pass, so a model
-    // stutter rode in as agreeing twins. One key = one entry, first read wins.
-    const keyOf = e => `${String(e.name || '').trim().replace(/\s+/g, ' ').toLowerCase()}|${e.date}|${e.shift}`;
-    const _uniqByKey = (arr, label) => {
-      const seen = new Set(); let dropped = 0;
-      const out = arr.filter(e => { const k = keyOf(e); if(seen.has(k)){ dropped++; return false; } seen.add(k); return true; });
-      if(dropped) console.warn(`[extraction] ${label}: ${dropped} duplicate read(s) collapsed`);
-      return out;
-    };
-    if(passA) passA.entries = _uniqByKey(passA.entries, 'row-read');
-    if(passB) passB.entries = _uniqByKey(passB.entries, 'column-read');
-    if(passA && passB){
-      const keysA = new Set(passA.entries.map(keyOf));
-      const mapB = new Map(passB.entries.map(e => [keyOf(e), e]));
-      entries = passA.entries.map(e => {
-        const b = mapB.get(keyOf(e));
-        if(!b){ e._consensus = 'row-read only'; return e; }
-        const dStart = String(e.startTime || '') !== String(b.startTime || '');
-        const dHours = String(e.hours) !== String(b.hours);
-        if(dStart || dHours) e._consensus = 'reads disagree on ' + [dStart ? 'start' : '', dHours ? 'hours' : ''].filter(Boolean).join(' + ');
-        return e;
-      });
-      passB.entries.forEach(e => {
-        if(!keysA.has(keyOf(e))){ e._consensus = 'column-read only'; entries.push(e); }
-      });
-      warnings = [...new Set([...passA.warnings, ...passB.warnings])];
-      const _cFlagged = entries.filter(e => e._consensus).length;
-      console.log('[extraction] consensus:', entries.length - _cFlagged, 'agreed ·', _cFlagged, 'disagreement(s)');
-      entries.filter(e => e._consensus).forEach(e =>
-        console.log('[extraction] disagreement:', e.name, e.date, e.shift, '·', e._consensus));
-    } else {
-      const only = passA || passB;
-      entries = only.entries;
-      warnings = only.warnings;
-      toast('⚠ One extraction pass failed — consensus check unavailable for this import. Review the cards extra carefully against the source.', true);
-      console.warn('[extraction] consensus unavailable:', ((settled[0].reason || settled[1].reason) || {}).message);
-    }
-
-    // Build 298 (R3): warnings INFORM instead of rejecting the batch. The
-    // old policy threw away a whole good extraction over one doubted cell
-    // (the Jul-26 false rejection) while the true occlusion protection
-    // already lives downstream: the AI extracts everything it CAN see, and
-    // the Save-All count gate catches the shortfall. So: banner the
-    // warnings next to the cards; let the count gate do its job.
-    window._lastExtractionWarnings = warnings;
-    { const _rows = document.getElementById('importRows');
-      let _wb = document.getElementById('impWarnBanner');
-      if(warnings.length){
-        if(!_wb && _rows && _rows.parentNode){
-          _wb = document.createElement('div');
-          _wb.id = 'impWarnBanner';
-          // Build 299: insert against the row container's ACTUAL parent —
-          // assuming importRows was a direct child of importResults crashed
-          // the whole extraction on the first real warnings batch.
-          _rows.parentNode.insertBefore(_wb, _rows);
-        }
-        if(_wb){
-          _wb.style.cssText = 'background:#fff8eb;border:1.5px solid #f3d68a;border-radius:10px;padding:10px 14px;margin-bottom:10px;font-size:.85rem;color:#a06a00;line-height:1.5';
-          _wb.innerHTML = `⚠️ The reader reported:<ul style="margin:6px 0 6px 18px;padding:0">${warnings.map(w => `<li>${escHTML(String(w))}</li>`).join('')}</ul>Review the affected rows against the screenshot — the Save-All count check will also catch anything hidden.`;
-        }
-      } else if(_wb){ _wb.remove(); } }
-
-    // Client-side validation pass: filter entries the AI flagged as non-Break,
-    // and tag partial (short-duration) Break shifts for special handling.
-    //
-    // The AI returns an `isBreakShift` boolean per entry, based on whether the
-    // entry has both visual markers of a real Break-relief shift:
-    //   - blue vertical bar on the left edge of the cell
-    //   - two-arrows transfer icon visible
-    // Entries lacking either marker get isBreakShift=false (green bars, no
-    // transfer icon, calendar markers, meetings, etc.) and are filtered here.
-    //
-    // Partial shifts (BNs picking up extra hours, < 12 hr) share the same
-    // visual markers as full Break shifts but cover only part of the day.
-    // We tag them so the suggester treats them as supplementary coverage
-    // rather than a regular slot.
-    //
-    // We only filter on `isBreakShift === false` (strict equality). Entries
-    // missing the field — e.g. from an older Apps Script deployment — pass
-    // through unchanged for backward compatibility.
-    const _validEntries = [];
-    const _filterReasons = [];
-    let _partialCount = 0;
-    let _flagCount = 0;
-    // Build 233 (Finding 6): consensus disagreements arrive as e._consensus.
-    // Flag them for forced review — flagged cards can't Save until resolved
-    // (assign units to confirm a real shift, or ✕ Discard a phantom). Entries
-    // the hours filter rejects below drop out naturally, so disagreements on
-    // non-Break cells (regular shifts, off-days) never surface as noise.
-    entries.forEach(e => {
-      if((e._consensus || e._timeVote) && !e.isFlagged){
-        e.isFlagged = true;
-        // Build 235 (Tomas): plain language on the card — nurses don't know
-        // what a transposed scan is. The row/column direction stays in the
-        // console (logged below) for diagnostics. Build 298: start-time
-        // corrections ride the same lane with their own wording.
-        e.flagReason = e._timeVote
-          ? 'shift corrected from the start time — verify against the source'
-          : 'needs verification — check the source screenshot';
-        _flagCount++;
-        if(e._timeVote) console.log('[extraction] time vote:', e.name, e.date, '·', e._timeVote);
-      }
-    });
-    entries.forEach(e => {
-      // Hours-only classification with startTime as a flag-trigger for staff
-      // pickups. transferIcon proved unreliable in both directions (over-
-      // detected → over-detected → under-detected as we tuned the prompt), so
-      // it's now diagnostic only — we still log it but don't filter on it.
-      //
-      // Hours pattern (per Tomas's domain knowledge):
-      //   12.50 exactly → full Break shift
-      //   0 < hours < 12 → partial Break shift
-      //   12.00 exactly → regular nursing shift (NOT Break)
-      //   0.00 exactly → off-day marker (NOT a real shift)
-      //
-      // Start times:
-      //   0800 / 2000 → standard Break starts
-      //   0630 / 1830 → BN-as-staff pickup (flag for review)
-      //   other → typically partial Break (handled by hours band)
-      const hoursNum = typeof e.hours === 'number'
-        ? e.hours
-        : (e.hours != null ? parseFloat(e.hours) : NaN);
-      const hoursValid = !isNaN(hoursNum);
-
-      // Normalize startTime to 4-digit HHMM regardless of format the AI returned.
-      const startTimeStr = String(e.startTime || '').replace(/[:.]/g, '').padStart(4, '0');
-      const isStaffPickupTime = startTimeStr === '0630' || startTimeStr === '1830';
-
-      if(!hoursValid){
-        // Can't classify without hours — flag for review.
-        e.isFlagged = true;
-        e.flagReason = `hours: ?`;
-        _flagCount++;
-      } else if(hoursNum === 0 || hoursNum === 12){
-        // Off-day or regular shift — reject cleanly.
-        _filterReasons.push(`${e.name || '?'} on ${e.date || '?'} — hours=${hoursNum} (regular shift or off-day)`);
-        return;
-      } else if(isStaffPickupTime){
-        // Hours look Break-y but start time suggests staff pickup — flag.
-        e.isFlagged = true;
-        e.flagReason = `start ${startTimeStr.slice(0,2)}:${startTimeStr.slice(2)} — possible staff pickup`;
-        _flagCount++;
-      }
-      // else: clean keep — fall through to partial detection
-
-      // Partial detection (applies to both clean keeps and flagged entries
-      // whose hours happen to be partial-shaped — if the user later accepts
-      // a flagged partial via Suggest, it gets sized correctly).
-      if(hoursValid && hoursNum > 0 && hoursNum < 12){
-        e.isPartial = true;
-        // Build 303: "For each partial shift assign U units per H hours" —
-        // capped so no configuration can hand a partial more than the
-        // largest full-timer quota for that shift.
-        const _pc = _covCfg().partial;
-        const _covMax = Math.max(...(_covCfg()[e.shift === 'Day' ? 'Day' : 'Noc'].byTeam));
-        e.partialUnitCount = Math.min(
-          Math.max(1, Math.ceil(hoursNum / _pc.perHours) * _pc.units),
-          Math.max(1, _covMax));
-        _partialCount++;
-      }
-      _validEntries.push(e);
-    });
-
-    // Anomaly check: partial-shift entry on a date+shift that already has 3+
-    // full BNs. Per current policy, three full BNs is the standard maximum
-    // coverage for a shift — a fourth BN (especially a partial) is unusual
-    // and worth review. Could indicate (a) the AI mis-classified hours so
-    // a full shift is appearing as partial, (b) a one-off pickup that the
-    // BN actually wants assigned manually rather than auto-suggested, or
-    // (c) a legitimate overflow situation. Flagging surfaces the decision.
-    const _fullByDateShift = {};
-    _validEntries.forEach(e => {
-      if(e.isPartial) return;
-      const key = `${e.date}|${e.shift}`;
-      _fullByDateShift[key] = (_fullByDateShift[key] || 0) + 1;
-    });
-    _validEntries.forEach(e => {
-      if(!e.isPartial) return;
-      if(e.isFlagged) return; // already flagged for another reason
-      const key = `${e.date}|${e.shift}`;
-      if((_fullByDateShift[key] || 0) >= 3){
-        e.isFlagged = true;
-        e.flagReason = `partial on ${e.shift} with ${_fullByDateShift[key]} full BNs — unusual coverage level`;
-        _flagCount++;
-      }
-    });
-
-    // Always log a summary + the first raw entry. Cheap, but lets us diagnose
-    // when the AI omits/mistypes fields. Surface anything suspicious here.
-    console.log('[extraction] AI returned', entries.length, 'entries · kept', _validEntries.length - _flagCount, '· flagged', _flagCount, '· partials tagged', _partialCount);
-    if(entries.length){
-      const sample = entries[0];
-      console.log('[extraction] First entry sample (raw from AI):', sample,
-        '· hours:', sample.hours, '· startTime:', sample.startTime, '· transferIcon (diagnostic only):', sample.transferIcon);
-    }
-    if(_filterReasons.length){
-      console.log('[extraction] Filtered non-Break entries:', _filterReasons);
-      toast(`Filtered ${_filterReasons.length} non-Break entr${_filterReasons.length === 1 ? 'y' : 'ies'}. Check console for details.`);
-    }
-    if(_flagCount){
-      console.log('[extraction] Flagged for review (signals disagree):', _validEntries.filter(e => e.isFlagged));
-      toast(`🔍 ${_flagCount} flagged for review — resolve before saving.`);
-    }
-    if(_partialCount){
-      console.log('[extraction] Tagged partial shifts:', _validEntries.filter(e => e.isPartial));
-    }
-    entries = _validEntries;
-
-    // Remap entries whose `name` matches UKG row-header text. UKG renders the
-    // logged-in user's row as "My Schedule" instead of their actual name.
-    // For now this assumes Tomas is the uploader — when manager begins
-    // uploading from her UKG view, this remap becomes incorrect (her row
-    // would get assigned to Tomas) and needs to be revisited (see memory).
-    const _UKG_HEADER_NAMES = new Set(['my schedule','my','myschedule','schedule']);
-    const _UPLOADER_NAME = 'Reyes, Tomas';
-    let _remappedCount = 0;
-    entries.forEach(e => {
-      const n = String(e.name || '').trim().toLowerCase();
-      if(_UKG_HEADER_NAMES.has(n)){
-        e.name = _UPLOADER_NAME;
-        _remappedCount++;
-      }
-    });
-    if(_remappedCount > 0){
-      toast(`📝 Mapped ${_remappedCount} "My Schedule" row${_remappedCount!==1?'s':''} → ${_UPLOADER_NAME}.`);
-    }
-
-    if (!Array.isArray(entries) || entries.length === 0) {
-      toast('No schedule entries found in that image. Try a less cropped screenshot.', true);
-      btn.style.display = 'inline'; spin.style.display = 'none';
-      return;
-    }
-
-    // Build 218 (F2): snapshot the roster BEFORE renderImportRows auto-adds
-    // extracted names (feeds the gate's new-names INFO check), and record the
-    // declared count — accumulating across multiple screenshots in one
-    // staged batch, resetting when the batch starts empty.
-    window._impRosterBefore = new Set(importedNames || []);
-    // Build 221: key the set-vs-accumulate decision on the CURRENT review
-    // batch, not bnImportedEntries — that's the PERMANENT record and is never
-    // empty after the first-ever import, so 218's test made every future
-    // import inherit the previous week's expected count (false gate, found
-    // by desk-check before it fired live). Accumulate only while a review
-    // session already has a batch on screen (multi-screenshot week).
-    const _batchNow = (typeof _currentImportEntries !== 'undefined' && _currentImportEntries.length) ? _currentImportEntries.length : 0;
-    _impExpectedSet(_batchNow ? _impExpectedGet() + _expVal : _expVal);
-    // Build 237 (Tomas): clear the expected-count FIELD only — the STORED
-    // value (line above) persists for this batch's chips + Save All
-    // checksum. The empty field re-arms the build-218 pre-extraction gate,
-    // so the next Extract demands a freshly counted number: a stale count
-    // from a prior import can't leak forward (the 05:34 Σ33/31 incident).
-    // Failed extractions never reach this line, so a retry keeps the typed
-    // count. Multi-screenshot batches improve too: each screenshot now
-    // forces its own count, and the store accumulates them.
-    const _expFld = document.getElementById('impExpectedCount');
-    if(_expFld) _expFld.value = '';
-    _impGateAcks = new Set();
-
-    window._wgDeleteIds = []; window._wgDeleteRows = []; // Build 503: removals belong to a grid review only
-    { const t = document.getElementById('importResultsTitle'); if(t) t.textContent = 'Extracted — Review & Assign Units'; } // Build 423
-    renderImportRows(entries);
-
-  } catch(e) {
-    const isTimeout = e.message && e.message.includes('timed out');
-    const isKey = e.message && e.message.includes('401');
-    const msg = isTimeout ? 'Request timed out — the AI service may be slow. Try again.'
-      : isKey ? 'Invalid API key — check your key in the Schedule tab.'
-      : 'AI extraction failed: ' + e.message;
-    toast(msg, true);
-    console.error('Import exception:', e);
-  }
-
-  btn.style.display = 'inline'; spin.style.display = 'none';
-}
-
-// Store extracted entries so shift can be toggled after render
-// Build 260: ONE guarded accessor for bnImportedEntries. A corrupt or
-// double-encoded value (caught live 07-14: a console script pre-stringified
-// the value into syncedLS.set, which stringifies internally) crashed BOOT
-// via this module-level init and tab navigation via the summary renderer.
-// Every reader routes through here; non-array and parse-error both land []
-// — corrupt state degrades, never detonates.
-function getImportedEntries(){
-  try {
-    const r = JSON.parse(localStorage.getItem('bnImportedEntries') || '[]');
-    return Array.isArray(r) ? r : [];
-  } catch(e){ return []; }
-}
-let importEntries = getImportedEntries();
-// Async refresh from backend on load
-(async () => {
-  try {
-    const remote = await getState('bnImportedEntries');
-    if(remote && Array.isArray(remote)){
-      importEntries = remote;
-      localStorage.setItem('bnImportedEntries', JSON.stringify(remote));
-      populateBNDropdown();
-      renderImportedEntriesSummary();
-    }
-  } catch(e){ /* use localStorage cache */ }
-})();
 
 
 // ═══════════════════════════════════════════════════════
@@ -15519,7 +14907,6 @@ let importEntries = getImportedEntries();
 // ═══════════════════════════════════════════════════════
 
 // Key for storing the last processed batch separately from full history
-const LAST_BATCH_KEY = 'bnLastImportBatch';
 
 // Expand 'C_PAIR' slot tokens to explicit ['3C','4C'] units. The suggestion
 // algorithm picks slot tokens (where C_PAIR represents 3C+4C as one paired
@@ -15535,40 +14922,6 @@ function expandSuggestionUnits(slots){
   return slots.flatMap(s => s === 'C_PAIR' ? ['3C','4C'] : [s]);
 }
 
-function saveLastBatch(entries){
-  // Build 500 (Tomas): the stash exists so an EXPENSIVE batch (an extraction) survives a refresh. A grid
-  // batch is two taps to redo and the grid keeps its own draft, so it never stashes — and a grid review
-  // drops any stash that is lying around. Before, a reviewed-then-reverted grid week came back as a
-  // "N unsaved suggestions — restore to review?" banner that nothing on the panel could dismiss.
-  if(!entries || !entries.length || entries.every(e => e && e._source === 'grid')){ clearLastBatch(); return; }
-  try { localStorage.setItem(LAST_BATCH_KEY, JSON.stringify(entries)); } catch{}
-  saveImportSide();
-}
-// Build 389 (polish 6/8/9 root): the batch persisted but its RESOLUTIONS and
-// the human's declared count never did — restores woke amnesiac (Σ 36/0) and
-// re-flagged confirmed shifts. The side key carries both; the F2 observer's
-// debounced repaint calls this on every chip tap.
-function saveImportSide(){
-  try {
-    if(!localStorage.getItem(LAST_BATCH_KEY)) return; // Build 500: the side key belongs to a stash — none, no side
-    let exp = null; try { exp = _impExpectedGet(); } catch(e){}
-    localStorage.setItem(LAST_BATCH_KEY + ':side', JSON.stringify({ sel: importUnitSel, expected: exp }));
-  } catch(e){}
-}
-function hydrateImportSide(){
-  try {
-    const side = JSON.parse(localStorage.getItem(LAST_BATCH_KEY + ':side') || 'null');
-    if(!side) return;
-    if(side.sel && Object.keys(importUnitSel).length === 0){
-      Object.entries(side.sel).forEach(([k, v]) => { if(Array.isArray(v)) importUnitSel[k] = v; });
-    }
-    if(side.expected){
-      try { _impExpectedSet(side.expected); } catch(e){}
-      const f = document.getElementById('impExpectedCount');
-      if(f && !f.value) f.value = side.expected;
-    }
-  } catch(e){}
-}
 
 // Build 389 (polish 6/9): THE canonical resolution predicate — a flagged
 // entry is unresolved until THE HUMAN'S HAND writes its selection map.
@@ -15578,15 +14931,7 @@ function hydrateImportSide(){
 function _entryUnresolved(e, i){
   return !!(e && e.isFlagged && (importUnitSel[i] === undefined || importUnitSel[i].length === 0));
 }
-function loadLastBatch(){
-  try { return JSON.parse(localStorage.getItem(LAST_BATCH_KEY) || 'null'); } catch { return null; }
-}
 
-function clearLastBatch(){
-  localStorage.removeItem(LAST_BATCH_KEY);
-  try { localStorage.removeItem(LAST_BATCH_KEY + ':side'); } catch(e){}
-  window._f2Batch = null; // Build 376: mirror scope dies with the batch
-}
 
 // Called on admin load — check if there's a restorable batch
 // Build 233 (Finding 6, review layer): per-nurse staged-count chips + a total
@@ -15612,7 +14957,6 @@ function _renderImportCountChips(){
   const names = Object.keys(byName).sort((a,b) => byName[a].disp.localeCompare(byName[b].disp));
   if(!names.length){ box.style.display = 'none'; box.innerHTML = ''; return; }
   let expected = null;
-  try { expected = _impExpectedGet(); } catch(_e){ /* field absent */ }
   const total = names.reduce((s, n) => s + byName[n].n, 0);
   const hasExp = expected != null && expected !== '' && !isNaN(Number(expected));
   const totalOk = hasExp && Number(expected) === total;
@@ -15657,204 +15001,7 @@ function updateAcceptBars(){
   if(bot) bot.style.display = show ? 'flex' : 'none';
 }
 
-function checkForRestorableSuggestions(){
-  const batch = loadLastBatch();
-  const banner = document.getElementById('importRestoreBanner');
-  const msg = document.getElementById('importRestoreMsg');
-  if(!banner || !msg) return;
 
-  // Always hide first — only show after confirming assignments don't already exist
-  banner.style.display = 'none';
-
-  if(batch && batch.length > 0){
-    const dates = [...new Set(batch.map(e => e.date))].sort();
-    const first = dates[0], last = dates[dates.length-1];
-    const range = first === last ? first : `${first} to ${last}`;
-
-    spGet(LISTS.schedule, `ShiftDate ge '${first}' and ShiftDate le '${last}'`)
-      .then(existing => {
-        if(existing && existing.length > 0){
-          // Assignments already saved — clear stale batch silently
-          clearLastBatch();
-        } else {
-          // No assignments found — genuine unsaved suggestions
-          msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
-          banner.style.display = 'flex';
-          document.getElementById('importResults').style.display = 'block';
-          updateAcceptBars();
-        }
-      })
-      .catch(() => {
-        // On error, show banner conservatively
-        msg.textContent = `${batch.length} unsaved suggestion${batch.length!==1?'s':''} from ${range} — restore to review?`;
-        banner.style.display = 'flex';
-      });
-  }
-}
-
-// Build 500: the banner's way out. Forgets the stash; no shift on the schedule is touched.
-function discardLastImport(){
-  const batch = loadLastBatch(); const n = Array.isArray(batch) ? batch.length : 0;
-  clearLastBatch();
-  const banner = document.getElementById('importRestoreBanner'); if(banner) banner.style.display = 'none';
-  const rows = document.getElementById('importRows');
-  if(!rows || !rows.children.length){ const p = document.getElementById('importResults'); if(p) p.style.display = 'none'; }
-  updateAcceptBars();
-  toast(n ? `Discarded ${n} unsaved suggestion${n === 1 ? '' : 's'}` : 'Nothing to discard');
-}
-async function restoreLastImport(){
-  const batch = loadLastBatch();
-  if(!batch || !batch.length){
-    toast('No previous import to restore', true);
-    return;
-  }
-  // Restored batch → re-enable Re-suggest / Clear / Save All.
-  setImportActionsActive(true);
-  clearCoverageCountsCache(); // fresh fetch, then cache for duration
-  const banner = document.getElementById('importRestoreBanner');
-  if(banner) banner.style.display = 'none';
-
-  // Re-run suggestions on the saved batch without triggering replacement prompt
-  window._wgDeleteIds = []; window._wgDeleteRows = []; // Build 503: a restored (extractor) batch carries no grid removals
-  _currentImportEntries = batch;
-  window._lastEntriesToProcess = batch;
-
-  // Clear importUnitSel
-  Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
-
-  // Re-run fairness algorithm
-  const byDateShift = {};
-  const partialsByDateShift = {};
-  batch.forEach(e => {
-    const key = `${e.date}|${e.shift}`;
-    // Flagged entries are left to user-decision (Suggest button or manual)
-    if(e.isFlagged) return;
-    if(e.isPartial){
-      if(!partialsByDateShift[key]) partialsByDateShift[key] = [];
-      partialsByDateShift[key].push(e);
-    } else {
-      if(!byDateShift[key]) byDateShift[key] = [];
-      if(!byDateShift[key].includes(e.name)) byDateShift[key].push(e.name);
-    }
-  });
-
-  // Show progress while computing suggestions
-  const _importWrap = document.getElementById('importRows');
-  const _totalDateShifts = new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)]).size;
-  if(_importWrap) renderProgressBar(_importWrap, '✨ Restoring suggestions', _totalDateShifts);
-  document.getElementById('importResults').style.display = 'block';
-
-  // Build 234 (Finding 8): open the staging batch + refresh every WH key
-  // this batch will touch — ONE batched round trip. Gives suggestions a
-  // fresh fairness base AND purges any device-local tentative entries left
-  // by a previously abandoned staging session (warmMany is fill-absent-only
-  // and would otherwise read them as history).
-  _stagingWHBatch = {};
-  {
-    const _whKeys = new Set();
-    Object.keys(byDateShift).forEach(k => {
-      const sh = k.split('|')[1];
-      (byDateShift[k] || []).forEach(n => _whKeys.add(`bnWingHistory_${n}_${sh}`));
-    });
-    Object.keys(partialsByDateShift).forEach(k => {
-      const sh = k.split('|')[1];
-      (partialsByDateShift[k] || []).forEach(pe => _whKeys.add(`bnWingHistory_${pe.name}_${sh}`));
-    });
-    if(_whKeys.size) await syncedLS.refreshMany([..._whKeys]);
-  }
-  const allSuggestions = {};
-  const batchCountOverlay = {};
-  const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
-  let _progressDone = 0;
-  for(const key of sortedKeys){
-    const nurses = byDateShift[key] || [];
-    const partials = partialsByDateShift[key] || [];
-    const [date, shift] = key.split('|');
-    if(nurses.length){
-      const suggestions = await suggestAssignments(nurses, shift, date, batchCountOverlay, _stagingWHBatch);
-      for(const [name, slots] of Object.entries(suggestions)){
-        allSuggestions[`${name}|${date}|${shift}`] = slots;
-        slots.forEach(slot => {
-          batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
-        });
-      }
-    }
-    for(const pe of partials){
-      const _partner = pe._splitPartnerKey && allSuggestions[pe._splitPartnerKey]; // Build 449: same units on both halves
-      const slots = (_partner && _partner.length) ? _partner.slice(0, Math.max(1, pe.partialUnitCount)) : await _pickPartialSlots(shift, date, pe.partialUnitCount, batchCountOverlay);
-      allSuggestions[`${pe.name}|${date}|${shift}`] = slots;
-      // Persist wing history so the partial's coverage feeds back into their
-      // own per-BN fairness next time they appear in the suggester.
-      await _savePartialWingHistory(pe.name, shift, date, slots, _stagingWHBatch);
-      slots.forEach(slot => {
-        batchCountOverlay[`${slot}|${shift}`] = (batchCountOverlay[`${slot}|${shift}`] || 0) + 1;
-      });
-    }
-    _progressDone++;
-    if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
-    await new Promise(r => requestAnimationFrame(r));
-  }
-
-  // Populate importUnitSel — expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
-  for(let i = 0; i < batch.length; i++){
-    const e = batch[i];
-    importUnitSel[i] = expandSuggestionUnits(allSuggestions[`${e.name}|${e.date}|${e.shift}`] || []);
-  }
-
-  // Render rows
-  const wrap = document.getElementById('importRows');
-  wrap.innerHTML = batch.map((e, i) => {
-    const suggested = importUnitSel[i] || [];
-    const uPerN = unitsPerNurse(e.shift, batch.filter(x => x.date===e.date && x.shift===e.shift).length);
-    return `
-    <div data-row="${i}" style="background:var(--bg);border:1px solid var(--border);border-radius:10px;padding:12px 14px;margin-bottom:8px">
-      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px">
-        <span style="font-weight:600;font-size:.9rem" title="${escHTML(e.name)}">${escHTML(bnDisplayName(e.name))}</span>
-        <span style="font-family:'DM Mono',monospace;font-size:.8rem;color:var(--muted)">${e.date}</span>${(() => { const h = Number(e.hours || 0); if(!(e.startTime && h > 0 && h < 12)) return ''; const st = String(e.startTime).replace(/[:.]/g,'').padStart(4,'0'); return `<span style="background:#fff3e0;border:1px solid #ffb74d;color:#bf360c;border-radius:99px;padding:1px 8px;font-size:.72rem;font-weight:600;white-space:nowrap">⏱ ${fmt12(st)} · ${h}h</span>`; })()}
-        <div style="display:flex;gap:5px;margin-left:auto">
-          <div class="toggle-opt ${e.shift==='Day'?'active':''}" id="isd-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Day')" style="display:inline-flex;align-items:center;gap:3px">${sunSVG(12)} Day</div>
-          <div class="toggle-opt ${e.shift==='Noc'?'active':''}" id="isn-${i}" style="padding:3px 10px;font-size:.75rem;cursor:pointer" onclick="setImportShift(${i},'Noc')" style="display:inline-flex;align-items:center;gap:3px">${moonSVG(12, e.date)} Noc</div>
-        </div>
-      </div>
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-        <div style="font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--muted)">Units to Cover</div>
-        <div style="font-size:.72rem;color:var(--teal-dk);font-weight:600">
-          <span id="suggest-count-${i}">✨ ${suggestedSlotCount(suggested, e.date, e.shift)} suggested · target ${uPerN}</span>
-          <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" onclick="clearImportSel(${i})">Clear</button>
-          ${_entryUnresolved(e, i) ? '' : `<button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px" onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>`}
-          <button style="background:none;border:none;color:#c0392b;font-size:.7rem;cursor:pointer;margin-left:4px" onclick="discardImportEntry(${i})">🗑 Discard</button>
-        </div>
-      </div>
-      <div id="unitgrid-${i}" style="margin-bottom:10px">
-        ${_wingRowsHtml(u => {
-          // Gray closed units so admin sees they're closed but can still tap
-          // them — tapping a closed unit shows a toast directing admin to the
-          // Unit Status card on the Schedule tab — single decision point.
-          // All unit status changes happen in one place.
-          const isClosed = !isUnitOpenForShiftEffective(u, e.date, e.shift);
-          const dimStyle = isClosed ? 'opacity:.45' : '';
-          return `<div class="uc${suggested.includes(u)?' on':''}" id="iu-${i}-${u}" style="${dimStyle}" onclick="toggleIU(${i},'${u}',this)">${u==='C_PAIR'?'3C/4C':u}</div>`;
-        })}
-      </div>
-      <button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
-      <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
-      <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
-    </div>`;
-  }).join('');
-
-  document.getElementById('importResults').style.display = 'block';
-    updateAcceptBars();
-  toast(`↺ Restored ${batch.length} suggestion${batch.length!==1?'s':''}`);
-    expandExtractedRows();
-
-  // Apply on classes
-  for(let i = 0; i < batch.length; i++){
-    (importUnitSel[i] || []).forEach(u => {
-      const el = document.getElementById(`iu-${i}-${u}`);
-      if(el) el.classList.add('on');
-    });
-  }
-}
 
 // Builds the HTML for the imported-entries review rows. Extracted from
 // renderImportRows so resuggestAll can also re-render the rows after the
@@ -16028,10 +15175,6 @@ function discardFlaggedRow(i){
   // Build 415: drop it from the history archive too — 405 gave the mirror's
   // splice-discard this sync; the card's mark-discard never had it (Leo Jun 9).
   try {
-    const _k = x => `${x.name}|${x.date}|${x.shift}`;
-    const _before = importEntries.length;
-    importEntries = importEntries.filter(x => _k(x) !== _k(e));
-    if(importEntries.length !== _before){ localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{}); }
   } catch(err){}
   const wrap = document.getElementById('importRows');
   if(wrap){
@@ -16092,7 +15235,6 @@ async function renderImportRows(entries, forceReplace = false){
       Object.assign(importUnitSel, newSel);
     }
   }
-  window._f2Batch = entries; // Build 376: the mirror mirrors exactly the cards' batch
   // The try-catch is intentional: surfaces unhandled errors as toasts via the
   // catch block at the bottom. Without it, async failures here would swallow
   // silently and present as "nothing happened after extraction" — a class of
@@ -16103,32 +15245,8 @@ async function renderImportRows(entries, forceReplace = false){
   setImportActionsActive(true);
   // Build 493: the status line belongs to the save that wrote it — a new batch starts blank
   { const _st = document.getElementById('acceptAllStatus'); if(_st){ _st.textContent = ''; _st.style.display = 'none'; } }
-  // Build 513 (archive retirement, reader 4 of 5): the overlap check asks the SHEET, and the archive is no longer
-  // merged or written here (this was the ~50 KB write that failed silently on every Review since Sep 12).
-  // A GRID batch skips the check — the grid is a view of the sheet and Save All upserts. An EXTRACTOR batch is
-  // warned when dates already hold shifts, since Save All will update the matching ones.
-  let replacementNotice = '';
-  const _isGrid = entries.length > 0 && entries.every(e => e && e._source === 'grid');
-  if(!forceReplace && !_isGrid && entries.length){
-    const newDates = [...new Set(entries.map(e => e.date).filter(Boolean))].sort();
-    let overlappingDates = [];
-    try {
-      const rows = await spGet(LISTS.schedule, `ShiftDate ge '${newDates[0]}' and ShiftDate le '${newDates[newDates.length - 1]}T23'`);
-      const have = new Set(rows.filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1').map(r => String(r.ShiftDate || '').slice(0, 10)));
-      overlappingDates = newDates.filter(d => have.has(d));
-    } catch(e){ console.warn('[import] overlap read failed:', e && e.message); }
-    if(overlappingDates.length){
-      const first = overlappingDates[0], last = overlappingDates[overlappingDates.length - 1];
-      const dateRange = first === last ? first : `${first} to ${last}`;
-      const proceed = await customConfirm(
-        `The schedule already has shifts on some of these dates (${dateRange}). Continue? Save All updates the matching shifts; shifts not in this batch are left as they are.`,
-        'Continue',
-        'Cancel import'
-      );
-      if(!proceed){ toast('Import cancelled.'); return; }
-      replacementNotice = `Existing shifts on ${dateRange} will be updated — review and save the suggestions below.`;
-    }
-  }
+  // Build 570: every batch is a GRID batch now (the extractor is gone) — the grid is a view of the sheet and Save All
+  // upserts, so the extractor's overlap prompt and replacement notice went with it.
 
   // Auto-populate the name roster from extracted entries. addNamesToRoster
   // returns a rename map for any names the user chose to snap to existing
@@ -16144,7 +15262,7 @@ async function renderImportRows(entries, forceReplace = false){
 
   const wrap = document.getElementById('importRows');
   if (!entries.length) {
-    wrap.innerHTML = '<div class="empty">No schedule entries found. Try a clearer screenshot.</div>';
+    wrap.innerHTML = '<div class="empty">Nothing to review.</div>';
     document.getElementById('importResults').style.display = 'block';
     updateAcceptBars();
     return;
@@ -16250,7 +15368,6 @@ async function renderImportRows(entries, forceReplace = false){
   // Store authoritative entry list for this DOM render
   window._lastEntriesToProcess = entriesToProcess; // keep for compatibility
   _currentImportEntries = entriesToProcess;
-  saveLastBatch(entriesToProcess); // persist for restore after refresh
 
   // Pre-populate importUnitSel with suggestions for new entries only —
   // expand C_PAIR to ['3C','4C'] so render+toggle stay consistent
@@ -16265,19 +15382,6 @@ async function renderImportRows(entries, forceReplace = false){
   document.getElementById('importResults').style.display = 'block';
     updateAcceptBars();
     expandExtractedRows();
-  // Show replacement notice if applicable
-  const noticeEl = document.getElementById('importReplacementNotice');
-  if(noticeEl){
-    if(replacementNotice){
-      noticeEl.textContent = '⚠️ ' + replacementNotice;
-      noticeEl.style.display = 'block';
-      // Auto-scroll to extracted section
-      setTimeout(() => noticeEl.scrollIntoView({ behavior:'smooth', block:'start' }), 200);
-    } else {
-      noticeEl.style.display = 'none';
-    }
-  }
-  renderImportedEntriesSummary(); // refresh summary after import
 
   // Explicitly apply 'on' class to pre-selected units after DOM is built
   for(let i = 0; i < entriesToProcess.length; i++){
@@ -16299,13 +15403,6 @@ async function renderImportRows(entries, forceReplace = false){
 function setImportShift(i, sh){
   // Update in _currentImportEntries (the DOM-indexed array)
   if(_currentImportEntries[i]) _currentImportEntries[i].shift = sh;
-  // Also update in importEntries for persistence
-  const e = _currentImportEntries[i];
-  if(e){
-    const match = importEntries.find(x => x.name===e.name && x.date===e.date);
-    if(match) match.shift = sh;
-    localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-  }
   document.getElementById(`isd-${i}`).classList.toggle('active', sh==='Day');
   document.getElementById(`isn-${i}`).classList.toggle('active', sh==='Noc');
 }
@@ -16387,25 +15484,6 @@ function suggestedSlotCount(units, date, shift){
 // the miss made visible in a side-by-side glance. Save All stays locked
 // until the admin taps the acknowledgment; ANY batch change (fingerprint
 // mismatch) silently re-locks it, so the ack can never go stale.
-let _f2AckedFp = null;
-function _f2ReviewEntries(){
-  // Build 376 (first-witness fix): the mirror drinks from the CARDS' batch,
-  // not the cumulative imported-record archive — 375 rendered the whole
-  // history (witnessed live: March→July week-tables on a one-week import;
-  // no per-entry committed flag exists, importEntries is the archive by
-  // design). Source of truth = renderImportRows' live argument, falling
-  // back to the persisted last batch (the restore path); empty when neither
-  // exists, which correctly hides the mirror pre-extraction and post-clear.
-  const b = (typeof window._f2Batch !== 'undefined' && window._f2Batch) || (() => { const lb = loadLastBatch(); if(lb) hydrateImportSide(); return lb; })();
-  // Build 415 (Tomas, 06/07 week): a card ✕ Discard MARKS isDiscarded (the
-  // mirror's discard splices) — the mirror kept showing the discarded shift
-  // because this returned the batch unfiltered. The gate (_impGateEntries)
-  // already filters; now the mirror, its Σ chips and its fingerprint agree
-  // with the cards. The fingerprint moving on a discard re-asks for the ✓
-  // acknowledgment — correct, the picture being confirmed changed.
-  const arr = Array.isArray(b) ? b : (b && Array.isArray(b.entries) ? b.entries : []);
-  return arr.filter(e => e && !e.isDiscarded);
-}
 // ── Build 382 (Option C, Tomas Sep 2): the correction verbs ──
 // Detection without correction is half a guard — witnessed live within hours
 // of the pick: the mirror caught a phantom Tue 4/7 shift for Jhaiz on its
@@ -16432,261 +15510,17 @@ async function discardImportEntry(i){
     const e = _currentImportEntries[i];
     _currentImportEntries.splice(i, 1);
     _382Rekey(i);
-    saveLastBatch(_currentImportEntries);
-    // Build 405 (the ghost desync, Sep 4): the forced re-render below skips
-    // renderImportRows' archive replacement (gated by !forceReplace), so the
-    // dedup re-merged the discarded shift back into bnImportedEntries —
-    // cards 27, history 28. Drop it from the archive here by key, the same
-    // sync the shift toggle already does (15437). Save All was never affected
-    // (reads _currentImportEntries); the week summary, the Portal's shift
-    // guess, and the Manual-Assign 'scheduled' group were.
-    const _k = x => `${x.name}|${x.date}|${x.shift}`;
-    const _before = importEntries.length;
-    importEntries = importEntries.filter(x => _k(x) !== _k(e));
-    if(importEntries.length !== _before){
-      localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-    }
     toast(`Discarded ${bnDisplayName(e.name)} · ${e.date} ${e.shift} — "+ Add missed shift" is the undo`);
     await renderImportRows(_currentImportEntries, true);
   } catch(err){ console.warn('discard failed:', err && err.message); }
 }
-function _382ResolvePreview(){
-  const t = document.getElementById('f2AddName');
-  const p = document.getElementById('f2AddResolved');
-  if(!t || !p) return;
-  const raw = (t.value || '').trim();
-  if(!raw){ p.textContent = ''; return; }
-  const c = (typeof canonicalizeBNName === 'function') ? canonicalizeBNName(raw) : null;
-  p.textContent = c ? `→ will add: ${c}` : `→ will add as typed: "${raw}"`;
-}
-async function f2AddMissedShift(){
-  try {
-    if(typeof _currentImportEntries === 'undefined' || !Array.isArray(_currentImportEntries)){ toast('Extract a batch first', true); return; }
-    const t = document.getElementById('f2AddName'), d = document.getElementById('f2AddDate'), sh = document.getElementById('f2AddShift');
-    const raw = t && (t.value || '').trim(); let date = d && d.value; // Build 448: date may shift for a post-midnight Noc partial
-    if(!raw || !date){ toast('Name and date are required to add a missed shift', true); return; }
-    const name = ((typeof canonicalizeBNName === 'function') && canonicalizeBNName(raw)) || raw;
-    const st = document.getElementById('f2AddStart'), en = document.getElementById('f2AddEnd');
-    let startTime = '', hours = '', shift = sh ? sh.value : 'Day';
-    if(shift === 'Partial'){
-      // Build 417: a partial needs both clocks; its shift follows the extractor's
-      // own vote (start hour 8–19 → Day, else Noc, ~14388) so the card, the
-      // mirror cell and the save all classify it the same way.
-      if(!(st && en && st.value && en.value)){ toast('A partial shift needs both a start and an end time', true); return; }
-      const toM = v => { const [h,m] = v.split(':').map(Number); return h*60 + m; };
-      let mins = toM(en.value) - toM(st.value); if(mins <= 0) mins += 1440;
-      startTime = st.value.replace(':',''); hours = String(Math.round(mins/0.6)/100); // Build 446
-      const inf = inferPartialShift(startTime, Number(hours)); // Build 448: by grid overlap
-      shift = inf ? inf.shift : 'Day';
-      if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta);
-    }
-    _currentImportEntries.push({ name, date, shift, startTime, hours, units: [] });
-    saveLastBatch(_currentImportEntries);
-    toast(`Added ${bnDisplayName(name)} · ${date} — assign units on its card below`);
-    if(t) t.value = ''; _382ResolvePreview();
-    await renderImportRows(_currentImportEntries, true);
-  } catch(err){ console.warn('add missed shift failed:', err && err.message); }
-}
 
-function _f2Fp(){
-  try {
-    // Build 381 (Tomas, Sep 2 — the boundary): the ack attests EXTRACTION
-    // FIDELITY — the fields the paper can verify: name, date, shift, window.
-    // UNITS ARE DELIBERATELY EXCLUDED: they aren't on the paper, assigning
-    // them is the review's ordinary bulk work ("several changes, one save"),
-    // and unit edits invalidate nothing the ✓ attested to. (380 briefly
-    // fingerprinted units; wrong boundary, reverted. Units keep their own
-    // guards: the no-units Save All predicate, count chips, closed-unit
-    // blocks.) Shift/name/date/window edits DO re-lock — those change what
-    // the mirror shows against the paper.
-    const list = (typeof _currentImportEntries !== 'undefined' && Array.isArray(_currentImportEntries) && _currentImportEntries.length)
-      ? _currentImportEntries : _f2ReviewEntries();
-    return JSON.stringify(list.map(e => [e.name, e.date, e.shift,
-      String(e.startTime||''), String(e.hours||'')])
-      .sort((a,b) => JSON.stringify(a) < JSON.stringify(b) ? -1 : 1));
-  } catch(err){ return 'fp-error'; }
-}
-function _f2CellHtml(e){
-  const h = Number(e.hours || 0);
-  const partial = h > 0 && h < 12;
-  const st = partial ? String(e.startTime||'').replace(/[:.]/g,'').padStart(4,'0') : (e.shift==='Day' ? '0800' : '2000');
-  const end = partial ? addMinHHMM(st, Math.round(h*60)) : (e.shift==='Day' ? '2030' : '0830');
-  const col = e.shift==='Day' ? 'var(--day)' : 'var(--teal-dk)';
-  // Build 378: the paper speaks 24-hour ("20:00 - 08:30 [12.50]") — matching
-  // it is truer to verbatim AND ~30% narrower, which matters because a
-  // horizontally-scrolling mirror defeats absence-visibility outright: an
-  // off-screen filled cell reads identical to a miss (Tomas, Sep 2).
-  const t24 = v => `${v.slice(0,2)}:${v.slice(2)}`;
-  return `<div style="border-left:3px solid ${col};background:var(--bg);border-radius:4px;padding:1px 4px;margin:1px 0;font-size:.66rem;white-space:nowrap">`
-    + `${t24(st)}–${t24(end)}${partial ? ` <span style="color:#bf360c">⏱${h}h</span>` : ''}`
-    + ` <span style="color:${col};font-weight:700">${e.shift==='Day'?'D':'N'}</span></div>`;
-}
-function renderF2Mirror(){
-  const host = document.getElementById('f2MirrorWrap');
-  if(!host) return;
-  const use = _f2ReviewEntries();
-  if(!use.length){ host.style.display='none'; host.innerHTML=''; _f2PaintSaveButtons(); return; }
-  // Build 427 (Tomas): a batch entered on the Weekly Schedule grid needs no
-  // mirror — it would be a picture of what was just tapped, and its ack is
-  // self-signed. Hide the whole block (mirror, ✓, add-missed-shift); the
-  // extractor's batches keep it, since a machine did that reading.
-  if(use.every(e => e._source === 'grid')){ host.style.display='none'; host.innerHTML=''; _f2PaintSaveButtons(); return; }
-  // Sunday-keyed weeks spanning the batch (the Kronos grid runs Sun–Sat).
-  const sunKey = ds => { const d = new Date(ds+'T12:00:00'); d.setDate(d.getDate()-d.getDay()); return d.toISOString().slice(0,10); };
-  const byWeek = {};
-  use.filter(e => !e._splitTail).forEach(e => { (byWeek[sunKey(e.date)] ||= []).push(e); }); // Build 449
-  const names = [...new Set(use.map(e => e.name))].sort((a,b) => a.localeCompare(b));
-  let html = '';
-  // Build 391: date-sanity banner — a batch far from today should SCREAM
-  // before any review effort is spent, not whisper at the save dialog.
-  {
-    const nowMs = Date.now();
-    const far = use.filter(e => { const t = new Date((e.date || '') + 'T12:00:00');
-      return isFinite(t) && (nowMs - t > 21 * 86400e3 || t - nowMs > 60 * 86400e3); });
-    if(far.length){
-      html += `<div style="background:#fdecec;border:1.5px solid #c0392b;border-radius:8px;padding:8px 12px;margin-bottom:8px;font-size:.8rem;color:#7f1d1d"><b>⚠ Check the dates:</b> ${far.length} of ${use.length} entries are far from today (e.g. ${far[0].date}).</div>`;
-    }
-  }
-  Object.keys(byWeek).sort().forEach(sun => {
-    const wk = byWeek[sun];
-    const days = [...Array(7)].map((_,i) => { const d = new Date(sun+'T12:00:00'); d.setDate(d.getDate()+i); return d.toISOString().slice(0,10); });
-    const dow = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-    html += `<div style="overflow-x:auto;margin-bottom:8px"><table style="border-collapse:collapse;width:100%;font-size:.72rem">`
-      + `<tr><th style="text-align:left;padding:4px 6px;border-bottom:1.5px solid var(--border)">Nurse</th>`
-      + days.map((d,i) => { const yTag = d.slice(0,4) !== String(new Date().getFullYear()) ? `/${d.slice(2,4)}` : ''; return `<th style="padding:4px 6px;border-bottom:1.5px solid var(--border);white-space:nowrap${yTag ? ';color:#bf360c' : ''}">${dow[i]} ${Number(d.slice(5,7))}/${Number(d.slice(8,10))}${yTag}</th>`; }).join('') + `</tr>`;
-    names.forEach(n => {
-      const mine = wk.filter(e => e.name === n);
-      if(!mine.length) return; // nurse not in this week
-      // Build 379 (Tomas, Sep 2): PREFERRED names as labels — the name column
-      // was the widest block and Saturday still clipped. Load-bearing detail:
-      // the SORT stays on the full "Last, First" string, so row ORDER still
-      // matches the paper positionally; only the label shortens. Full name
-      // rides the title attr for hover disambiguation (first-name collisions
-      // are a known case — the two-Tinsley affair).
-      html += `<tr><td style="padding:4px 4px;border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600" title="${escHTML(n)}">${escHTML(typeof bnDisplayName === 'function' ? bnDisplayName(n) : n)}</td>`
-        + days.map(d => { const cells = mine.filter(e => e.date === d);
-            return `<td style="padding:1px 2px;border-bottom:1px solid var(--border);border-left:1px dashed var(--border);vertical-align:top">${cells.map(_f2CellHtml).join('') || ''}</td>`; }).join('')
-        + `</tr>`;
-    });
-    html += `</table></div>`;
-  });
-  const acked = _f2AckedFp === _f2Fp();
-  html += `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">`
-    + `<button class="btn btn-sm" onclick="f2Ack()" style="background:${acked ? 'var(--green)' : 'var(--teal)'};color:#fff;font-weight:700">✓ Extraction Matches Schedule</button>`
-    + `<span style="font-size:.75rem;color:${acked ? 'var(--green)' : 'var(--muted)'}">${acked
-        ? ''
-        : 'Confirm the extraction matches to unlock Save All button'}</span></div>`;
-  // Build 382: the add bar — sits exactly where the reviewer stands when a
-  // hole is found. Values preserved across observer-driven re-renders so a
-  // half-typed form never gets wiped by an unrelated card repaint.
-  html += `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-top:8px;font-size:.75rem">`
-    + `<span style="font-weight:700">+ Add missed shift:</span>`
-    + `<input id="f2AddName" list="f2AddRoster" placeholder="Nurse" style="width:150px;font-size:.75rem;padding:3px 6px" oninput="_382ResolvePreview()">`
-    + `<datalist id="f2AddRoster">${((typeof importedNames !== 'undefined' && Array.isArray(importedNames)) ? importedNames : []).map(n => `<option value="${escHTML(n)}">`).join('')}</datalist>`
-    + `<input id="f2AddDate" type="date" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:150px">`
-    + `<select id="f2AddShift" onchange="_f2AddShiftChanged()" style="font-size:.75rem;padding:3px 6px;width:auto;max-width:90px"><option>Day</option><option>Noc</option><option>Partial</option></select>`
-    + `<span id="f2AddClocks" style="display:none;align-items:center;gap:6px">`
-    + _tpHtml('f2AddStart', '')
-    + `<span style="color:var(--muted)">–</span>`
-    + _tpHtml('f2AddEnd', '') + `</span>`
-    + `<button class="btn btn-sm" onclick="f2AddMissedShift()" style="font-weight:700">Add</button>`
-    + `<span id="f2AddResolved" style="color:var(--muted)"></span></div>`;
-  saveImportSide(); // Build 389: every observed batch mutation persists the resolutions
-  const _keep = ['f2AddName','f2AddDate','f2AddShift','f2AddStart','f2AddEnd'].map(id => [id, (document.getElementById(id) || {}).value]);
-  host.innerHTML = html; host.style.display = '';
-  _keep.forEach(([id, v]) => { const el = document.getElementById(id); if(el && v) el.value = v; });
-  _f2AddShiftChanged();
-  _382ResolvePreview();
-  _f2PaintSaveButtons();
-}
-// Build 417 (Tomas, the 7/09 Leo add): Day / Noc mean the BN's full shift
-// (08:00–20:30 / 20:00–08:30) and need no clocks; only Partial shows them.
-function _f2AddShiftChanged(){
-  const sel = document.getElementById('f2AddShift'), clocks = document.getElementById('f2AddClocks');
-  if(sel && clocks) clocks.style.display = sel.value === 'Partial' ? 'inline-flex' : 'none';
-}
-function _f2PaintSaveButtons(){
-  const locked = _f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp();
-  document.querySelectorAll('.accept-all-btn').forEach(b => {
-    b.style.opacity = locked ? '.45' : '';
-    b.title = locked ? 'Confirm the extraction mirror first' : '';
-  });
-}
-function f2Ack(){ _f2AckedFp = _f2Fp(); renderF2Mirror(); }
 // Re-render on every batch paint: one observer on the rows host replaces a
 // dozen fragile call-site hooks — extraction, re-suggest, clears, restores
 // all rewrite #importRows, and the mirror + lock state follow automatically.
-(function(){
-  const arm = () => { const h = document.getElementById('importRows');
-    if(!h) return setTimeout(arm, 800);
-    // Build 380: childList-only slept through in-card mutations (chip class
-    // toggles) — subtree+attributes now fire it, debounced; the mirror is a
-    // SIBLING of #importRows so its own repaints can't loop the observer.
-    let _f2T = null;
-    new MutationObserver(() => { clearTimeout(_f2T); _f2T = setTimeout(() => { try { renderF2Mirror(); } catch(e){} }, 150); })
-      .observe(h, { childList:true, subtree:true, attributes:true, attributeFilter:['class'] });
-    try { renderF2Mirror(); } catch(e){} };
-  document.readyState === 'loading' ? document.addEventListener('DOMContentLoaded', arm) : arm();
-})();
 
-function renderImportedEntriesSummary(){
-  const el = document.getElementById('importedEntriesSummary');
-  if (!el) return;
-  // Build 259: intake guard — a corrupt or double-encoded bnImportedEntries
-  // (caught live 07-14: a console script double-stringified the key and tab
-  // navigation crashed on entries.forEach) must degrade to "no entries",
-  // never take down showTab. Parse errors and non-array shapes both land
-  // in the safe branch.
-  const entries = getImportedEntries(); // Build 260: shared guarded accessor
-  if (!entries.length){
-    el.innerHTML = 'No schedule entries imported yet.';
-    return;
-  }
-  // Group by week
-  const byWeek = {};
-  entries.forEach(e => {
-    const d = new Date(e.date + 'T12:00:00');
-    const mon = new Date(d); mon.setDate(d.getDate() - ((d.getDay()+6)%7));
-    const wk = localDate(mon);
-    if (!byWeek[wk]) byWeek[wk] = [];
-    byWeek[wk].push(e);
-  });
-  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  el.innerHTML = Object.entries(byWeek).sort().map(([wk, wEntries]) => {
-    const d = new Date(wk + 'T12:00:00');
-    const end = new Date(d); end.setDate(d.getDate() + 6);
-    const label = `${months[d.getMonth()]} ${d.getDate()} – ${months[end.getMonth()]} ${end.getDate()}`;
-    const nurses = [...new Set(wEntries.map(e=>e.name))].length;
-    const shifts = wEntries.length;
-    return `<div style="display:flex;align-items:center;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-      <span style="font-weight:500">${label}</span>
-      <span style="color:var(--muted);font-size:.75rem">${nurses} nurses · ${shifts} shifts</span>
-      <button class="btn btn-ghost btn-sm" onclick="clearWeekEntries('${wk}')">Remove week</button>
-    </div>`;
-  }).join('') + `<div style="margin-top:8px;font-size:.75rem;color:var(--muted)">${entries.length} total entries across ${Object.keys(byWeek).length} week(s)</div>`;
-}
 
-function clearWeekEntries(weekStart){
-  const d = new Date(weekStart + 'T12:00:00');
-  const end = new Date(d); end.setDate(d.getDate() + 6);
-  const endStr = localDate(end);
-  importEntries = importEntries.filter(e => e.date < weekStart || e.date > endStr);
-  localStorage.setItem('bnImportedEntries', JSON.stringify(importEntries)); setState('bnImportedEntries', importEntries).catch(()=>{});
-  renderImportedEntriesSummary();
-  populateNurseDropdown();
-  toast('Week removed.');
-}
 
-async function clearAllImportedEntries(){
-  if(!await customConfirm('Remove ALL imported schedule entries? This cannot be undone.','Remove All','Cancel')) return;
-  importEntries = [];
-  localStorage.removeItem('bnImportedEntries'); deleteState('bnImportedEntries').catch(()=>{});
-  // Build 218: the gate's state dies with the batch.
-  _impExpectedSet(0); _impGateAcks = new Set(); window._impRosterBefore = null;
-  renderImportedEntriesSummary();
-  populateNurseDropdown();
-  toast('All imported entries cleared.');
-}
 
 
 async function clearAllImportSels(){
@@ -16832,7 +15666,6 @@ async function _resuggestAllCore(){
 // New-names INFO needs the pre-extract roster snapshot; after a reload +
 // restoreLastImport the snapshot is gone and that check silently skips.
 
-const _IMP_EXP_KEY = 'bnImportExpectedCount';
 const _impFmtD = ds => { try { const d = new Date(ds + 'T12:00:00');
   return ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][d.getMonth()] + ' ' + d.getDate(); } catch { return ds; } };
 let _impGateAcks = new Set();
@@ -16841,14 +15674,6 @@ let _impGateAcks = new Set();
 // blocking confirm guarded a fait accompli. Checksum catches fabricated
 // extras; the rename prompt catches typo-variants.
 
-function _impExpectedGet(){
-  const v = parseInt(localStorage.getItem(_IMP_EXP_KEY) || '0', 10);
-  return isFinite(v) && v > 0 ? v : 0;
-}
-function _impExpectedSet(n){
-  if(isFinite(n) && n > 0) localStorage.setItem(_IMP_EXP_KEY, String(n));
-  else localStorage.removeItem(_IMP_EXP_KEY);
-}
 
 function _impGateEntries(){
   // Build 298 (R2): ONE source of truth. The old fallback to a leftover
@@ -16862,11 +15687,8 @@ function _impGateEntries(){
 function _runImportGateChecks(){
   const active = _impGateEntries();
   const staged = active.length;
-  const expected = _impExpectedGet();
+  const expected = 0; // Build 570: the declared count was the extractor's checksum; the structural checks below stay
   const errors = [];
-  if(expected > 0 && staged !== expected){
-    errors.push({ key:'count', kind:'count', text:'' }); // rendered inline on the summary row
-  }
   if(active.length){
     const dates = active.map(e => e.date).sort();
     const min = dates[0], max = dates[dates.length-1];
@@ -16917,15 +15739,6 @@ function _impGateAck(key){
   _impGateRender();
 }
 
-function _impGateAdjust(){
-  const inp = document.getElementById('impGateExpInput');
-  const v = parseInt((inp && inp.value) || '', 10);
-  if(!isFinite(v) || v < 1){ toast('Enter a whole number of shifts.', true); return; }
-  _impExpectedSet(v);
-  const fld = document.getElementById('impExpectedCount');
-  if(fld) fld.value = String(v);
-  _impGateRender();
-}
 
 function _impGateAddOpen(date, shift){
   const wrap = document.getElementById('impGateAddWrap');
@@ -16977,7 +15790,7 @@ function _impGateRender(){
   if(!body) return;
   // Build 220: copy diet (Tomas). One count row (summary + its controls merged),
   // no subtitle, no narration line, short labels, new-names informational only.
-  const countAnom = res.errors.find(a => a.kind === 'count');
+  const countAnom = null; // Build 570
   const open = res.errors.filter(a => a.kind !== 'count' && !_impGateAcks.has(a.key));
   const acked = res.errors.filter(a => a.kind !== 'count' && _impGateAcks.has(a.key));
   const line = a => `
@@ -16986,12 +15799,7 @@ function _impGateRender(){
       <button class="btn btn-ghost btn-sm" onclick="_impGateAddOpen('${a.date}','${a.shift}')" style="font-size:.75rem">+ Add</button>
       <button class="btn btn-ghost btn-sm" onclick="_impGateAck('${a.key}')" style="font-size:.75rem">${_impGateAcks.has(a.key)?'Undo':'Accept'}</button>
     </div>`;
-  const countAcked = countAnom && _impGateAcks.has('count');
-  const countRow = `
-    <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.9rem;margin-bottom:12px;${countAcked?'opacity:.55':''}">
-      <span>Expected <strong>${res.expected||'—'}</strong> · staged <strong>${res.staged}</strong> ${(!countAnom)?'✓':'✗'}</span>
-      ${countAnom ? `<input id="impGateExpInput" type="number" min="1" value="${res.expected||''}" style="width:64px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:.85rem"/><button class="btn btn-ghost btn-sm" onclick="_impGateAdjust()" style="font-size:.75rem">Update Miscount</button><button class="btn btn-ghost btn-sm" onclick="_impGateAck('count')" style="font-size:.75rem">${countAcked?'Undo':'Accept Mismatch'}</button>` : ''}
-    </div>`;
+  const countRow = `<div style="font-size:.9rem;margin-bottom:12px">Staged <strong>${res.staged}</strong></div>`; // Build 570: no declared count to compare against
   const namesBlock = res.newNames.length
     ? `<div style="font-size:.8rem;color:var(--muted);margin-top:10px">New this batch: ${res.newNames.map(escHTML).join(' · ')}</div>`
     : '';
@@ -17045,11 +15853,6 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   // here, so any change since the ✓ tap — re-extract, rename, unit edit,
   // discard — re-locks automatically. The mirror re-renders on refusal so
   // the reviewer lands on a fresh picture, not a stale one.
-  if(_f2ReviewEntries().length > 0 && _f2AckedFp !== _f2Fp()){
-    try { renderF2Mirror(); } catch(e){}
-    toast('Confirm the extraction matches to unlock Save All button', true);
-    return;
-  }
   // Build 389 (polish 3): the app's biggest write gets a one-tap seatbelt —
   // born of the mis-tap that committed 35 April rows through a ragged bar.
   // Build 414 (Tomas, first real week on 413): the dialog said 31, the save wrote
@@ -17106,7 +15909,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   // Disable Re-suggest All + Clear All Assignments + Extract Schedule
   // immediately. Their work is moot during/after Save All. Re-enabled in
   // the catch block on error.
-  document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
+  document.querySelectorAll('.import-action-btn').forEach(b => {
     b.disabled = true;
     b.style.opacity = '.5';
     b.style.cursor = 'not-allowed';
@@ -17165,7 +15968,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     // Bug #1 fix: also re-enable the import/extract action buttons so the
     // user can clear and re-extract without refreshing. Mirrors the catch
     // branch's recovery below.
-    document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
+    document.querySelectorAll('.import-action-btn').forEach(b => {
       b.disabled = false;
       b.style.opacity = '';
       b.style.cursor = '';
@@ -17384,20 +16187,12 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
     } else {
       if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
-      _clearImportPreview(); // Build 439
     }
     // Save All success: hide the entire Extracted card. The batch is committed;
     // showing stale rows invites confusion and a tap of Save All on nothing.
     // Card returns on next extraction (renderImportRows shows it) or restore.
     const importResults = document.getElementById('importResults');
     if(fullySaved && importResults) importResults.style.display = 'none';
-    // Re-enable the Extract Schedule button (currently hidden in importPreview)
-    // so the next upload's extraction works without staying greyed out.
-    document.querySelectorAll('.extract-action-btn').forEach(b => {
-      b.disabled = false;
-      b.style.opacity = '';
-      b.style.cursor = '';
-    });
     // Clear in-memory batch + DOM rows so a manual re-show would be empty.
     // Build 206: only on a fully-verified save — on a partial/unverified result we KEEP
     // the batch + card so the user can re-tap SAVE ALL to retry the dropped shifts (the
@@ -17410,7 +16205,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       setImportActionsActive(false);
       // Build 221: a fully-verified save closes the review session — the
       // expected-count checksum and any acknowledgments die with it.
-      _impExpectedSet(0); _impGateAcks = new Set(); window._impRosterBefore = null;
+      _impGateAcks = new Set(); window._impRosterBefore = null;
       // Build 488: the grid re-reads the sheet; edits that landed prune themselves, any that didn't stay marked unsaved
       if(_gridBatch488 && _wgWeek){ try { wgSetWeek(_wgWeek); } catch(e){} }
     }
@@ -17463,7 +16258,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     }
   } catch(e) {
     // Re-enable the ghost + extract buttons so user can try again or clear and retry.
-    document.querySelectorAll('.import-action-btn, .extract-action-btn').forEach(b => {
+    document.querySelectorAll('.import-action-btn').forEach(b => {
       b.disabled = false;
       b.style.opacity = '';
       b.style.cursor = '';
@@ -17481,7 +16276,6 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
         if(status) status.textContent = `⚠ Save could not be confirmed (${(e && e.message) || e || 'unknown error'}). Reload to check, or re-run SAVE ALL.`;
       } else if(missing.length === 0){
         if(status) status.textContent = `✓ ${records.length} saved (confirmed by read-back)`;
-        _clearImportPreview(); // Build 439
       } else if(missing.length < records.length){
         if(status) status.textContent = `⚠ ${records.length - missing.length} of ${records.length} saved — ${missing.length} did NOT save`;
         toast(`⚠ ${missing.length} shift${missing.length === 1 ? '' : 's'} did NOT save: ${fmtMissing(missing)}. Re-run SAVE ALL to retry.`, true);
@@ -17671,7 +16465,6 @@ async function saveImportRow(i){
       const sv = document.getElementById(`saved-${idx}`);
       return sv && sv.style.display !== 'none';
     });
-    if(allSaved) clearLastBatch();
     loadAssignments();
     notifyProdLogChanged(name);
     try { if(entry && entry._source === 'grid' && _wgWeek) wgSetWeek(_wgWeek); } catch(err){} // Build 539: the grid re-reads so the saved cell goes solid (Save All already did this)
@@ -22129,7 +20922,9 @@ let _wgFilter = new Set(); try { const f = JSON.parse(localStorage.getItem('bnWe
 // editable grid as before; the weeks after it stack beneath, read-only, from their own sheet reads. Tapping any
 // cell in a stacked week makes that week the active one (one tap to get there, a second opens the chooser).
 // Editing, the draft, kept cells and the removal set stay single-week — nothing in that model changes.
-let _wgWeeks = 1; try { const w = parseInt(localStorage.getItem('bnWeeklyGridWeeks') || '1', 10); if([1, 2, 4].includes(w)) _wgWeeks = w; } catch(e){}
+// Build 569 (Tomas): every device starts at 4 weeks — the current week active, the next three stacked below. The toggle
+// still remembers a per-device choice, under a new key so devices that had "1" stored start at the new default.
+let _wgWeeks = 4; try { const w = parseInt(localStorage.getItem('bnWeeklyGridWeeks2') || '4', 10); if([1, 2, 4].includes(w)) _wgWeeks = w; } catch(e){}
 let _wgStackData = {}; // week → {cells, former} | 'loading' | 'failed'
 // Build 531: tapping a stacked cell makes that week active AND brings the active grid into view — otherwise the
 // page kept its scroll height while the stack shrank, and landed on whatever card was now at that height.
@@ -22141,7 +20936,7 @@ let _wgScrollAfterRender = false;
 let _wgPendingTap = null;
 function wgGoWeek(wk, name, date){ _wgScrollAfterRender = true; _wgPendingTap = (name && date) ? { name, date, wk } : null; const seed = _wgStackData[wk]; return wgSetWeek(wk, (seed && typeof seed === 'object') ? seed : undefined); } // Build 536: seeded from the stack
 function _wgScrollToBar(){ const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
-function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
+function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks2', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
 function _wgRenderWeeksToggle(){ const t = document.getElementById('wgWeeksToggle'); if(!t) return; t.innerHTML = [1, 2, 4].map(n => `<button type="button" class="bn-pill${_wgWeeks === n ? ' active' : ''}" onclick="wgSetWeeks(${n})" style="padding:3px 9px">${n}</button>`).join(''); }
 async function _wgLoadStack(seq){
   const host = document.getElementById('wgStack'); if(!host) return;
@@ -22376,20 +21171,11 @@ function toggleWeeklyGrid(){
   const host = document.getElementById('wgGrid'); if(host) host.innerHTML = '<div class="empty" style="padding:14px 0">Reading the schedule…</div>';
   _wgDefaultWeek().then(wk => { if(!_wgWeek) wgSetWeek(wk); });
 }
-// Build 426 (Tomas): open on the NEXT EMPTY WEEK — the Sunday after the latest
-// date in the history archive (every entered week is in it); next week if empty.
+// Build 569 (Tomas): open on the CURRENT week, with the next three stacked below (the default weeks count is 4).
+// 426/510 opened on the next EMPTY week — the Sunday after the latest scheduled week, found by a sheet read — which
+// suited entering schedules but hid the week in progress. The date picker and ‹ › still reach any week.
 async function _wgDefaultWeek(){
-  // Build 510: reads the sheet, not the archive (frozen Sep 12 → the grid opened on Sep 27 while the schedule
-  // ran to Nov 7). The Sunday after the latest scheduled week; next week if nothing is scheduled ahead or the
-  // read fails.
-  const today = localDate(new Date());
-  let latest = '';
-  try {
-    const rows = await spGet(LISTS.schedule, `ShiftDate ge '${today}'`);
-    rows.forEach(r => { if(r.Status !== 'inactive' && String(r.IsSupplemental) !== '1'){ const d = String(r.ShiftDate || '').slice(0, 10); if(d > latest) latest = d; } });
-  } catch(e){ console.warn('[grid] default-week read failed:', e && e.message); }
-  if(!latest || latest < today) return _wgSunday(_wgAddDays(today, 7));
-  return _wgAddDays(_wgSunday(latest), 7);
+  return _wgSunday(localDate(new Date()));
 }
 async function wgSetWeek(ds, seed){
   if(!ds) return;
@@ -22541,6 +21327,9 @@ function wgRender(){
 function wgTap(name, date){
   const key = `${name}|${date}`;
   if(_wgBaseState !== 'ok') return;
+  // Build 569: the current week is the default now, so past days sit under the thumb — an empty cell on a day that
+  // has passed takes no new shift (a saved cell still opens its chooser: Units, Mark Available, Remove).
+  if(!_wgCells[key] && date < localDate(new Date())){ toast(`${Number(date.slice(5, 7))}/${Number(date.slice(8, 10))} has passed`, true); return; }
   if(!_wgCells[key]){ _wgEdit(key, { shift: bnShiftDefault(name), startTime: '', hours: '' }); return; }
   _wgChooser(name, date);
 }
@@ -22694,8 +21483,7 @@ async function wgReview(){
     }
     return e;
   }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
-  _impExpectedSet(entries.length);
-  _impGateAcks = new Set();
+  _impGateAcks = new Set(); // Build 570: no declared count any more (wgReview used to set it to the batch size)
   // Build 484 (Tomas): Save All is an upsert keyed nurse|date|shift — it can't remove a row for a
   // cell that was cleared or moved to the other shift. Find those rows now (today forward) so
   // the save can delete them and the sheet ends up matching the grid.
@@ -22734,7 +21522,6 @@ async function wgReview(){
   }
   hideBusy(); // Build 555
   try { const note = document.getElementById('wgStaleNote'); if(note) note.innerHTML = _staleNote; } catch(e){} // Build 493: static home in the markup (484 had squeezed it into the flex header row)
-  try { _f2AckedFp = _f2Fp(); renderF2Mirror(); _f2PaintSaveButtons(); } catch(e){}
   const res = document.getElementById('importResults'); if(res){ res.style.display = 'block'; res.scrollIntoView({ behavior: 'smooth', block: 'start' }); }
 }
 
@@ -23274,14 +22061,6 @@ function toggleBNList(){
   if(chevron) chevron.textContent = open ? '▼' : '▲';
 }
 
-function toggleImportedEntries(){
-  const body = document.getElementById('importedEntriesBody');
-  const chevron = document.getElementById('importedEntriesChevron');
-  if(!body) return;
-  const open = body.style.display !== 'none';
-  body.style.display = open ? 'none' : 'block';
-  if(chevron) chevron.textContent = open ? '▼' : '▲';
-}
 
 function toggleManualName(){
   const row = document.getElementById('manualNameRow');
