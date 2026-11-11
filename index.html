@@ -2289,7 +2289,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-10-571'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-11-572'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15028,6 +15028,20 @@ function _impEntryUnchanged(e, i){
   return a === b;
 }
 let _impKeptShown = false; // per render: the folded kept cards, opened by the "show" link
+// Build 572 (Tomas, Nov 11: "the unchanged cards remain after saving the changed shift even if hidden"): the review
+// session ends when nothing in the batch is left to write — after a verified Save All, after the last changed card's
+// own ✓ Save, or when Save All finds only kept-unchanged cards. Same exit every time: panel closed, batch dropped,
+// the changed week re-read with the stack back below it, page to the top of the grid.
+function _impCloseGridSession(statusText){
+  const _ir = document.getElementById('importResults'); if(_ir) _ir.style.display = 'none';
+  _currentImportEntries.length = 0; Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]);
+  const rowsEl = document.getElementById('importRows'); if(rowsEl) rowsEl.innerHTML = '';
+  window._wgDeleteIds = []; window._wgDeleteRows = [];
+  _impGateAcks = new Set(); window._impRosterBefore = null;
+  setImportActionsActive(false); updateAcceptBars();
+  if(statusText) toast(statusText);
+  if(_wgWeek){ try { _wgScrollAfterRender = true; wgSetWeek(_wgWeek); } catch(e){} }
+}
 function toggleImportKept(){
   _impKeptShown = !_impKeptShown;
   document.querySelectorAll('#importRows .imp-kept').forEach(el => { el.style.display = _impKeptShown ? '' : 'none'; });
@@ -15996,6 +16010,8 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       b.style.cursor = '';
     });
     if(status) status.textContent = keptN && !skipped ? `Nothing changed — ${keptN} shift${keptN === 1 ? '' : 's'} kept as saved` : `Nothing to save (${skipped} skipped)`;
+    // Build 572: a grid batch with nothing changed is a finished session, not a warning
+    if(!skipped && keptN && entriesToProcess.every(e => e.isDiscarded || e._source === 'grid')){ _impCloseGridSession(`Nothing changed — ${keptN} shift${keptN === 1 ? '' : 's'} kept as saved`); return; }
     // Toast so the user gets visible feedback. The status element below the
     // import card is easy to miss when the user is scrolled near the buttons.
     toast(skipped > 0
@@ -16497,8 +16513,10 @@ async function saveImportRow(i){
       if(entry && entry._source === 'grid'){
         const idx = _currentImportEntries.indexOf(entry);
         if(idx >= 0){ _currentImportEntries.splice(idx, 1); _382Rekey(idx); }
-        if(_currentImportEntries.length){ await renderImportRows(_currentImportEntries, true); }
-        else { const _ir = document.getElementById('importResults'); if(_ir) _ir.style.display = 'none'; window._wgDeleteIds = []; window._wgDeleteRows = []; updateAcceptBars(); }
+        // Build 572: kept-unchanged cards don't keep the panel open — the last changed card's save ends the session
+        const _left = _currentImportEntries.filter((x, j) => x && !x.isDiscarded && !_impEntryUnchanged(x, j)).length;
+        if(_left || (window._wgDeleteIds || []).length){ await renderImportRows(_currentImportEntries, true); }
+        else { _impCloseGridSession(); }
       }
     } catch(err){ console.warn('card removal after save failed:', err && err.message); }
   } catch(e) { toast(e.message, true); }
