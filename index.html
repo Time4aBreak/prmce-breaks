@@ -447,16 +447,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <!-- Build 557 (Tomas): on a phone the log card's "Finding next scheduled shift…" sits below the fold, and the first
            selection showed nothing at all — this line lives under the picker and clears when the log paints -->
       <div id="bnNameStatus" style="display:none;margin-top:8px;font-size:.8rem;color:var(--muted);align-items:center;gap:8px"><span class="spinner" style="width:14px;height:14px;flex:none"></span><span id="bnNameStatusText"></span></div>
-      <div style="margin-top:10px;display:none;gap:10px;align-items:flex-end;flex-wrap:wrap"><!-- Build 563: no BN extension in Vina — field hidden, its sync plumbing left dormant -->
-        <div style="flex:1">
-          <label style="font-size:.75rem;color:var(--muted);display:block;margin-bottom:4px">EXTENSION</label>
-          <input type="text" id="bnExtInput" placeholder="— — — — —" maxlength="5" inputmode="numeric"
-            style="width:100%;padding:8px 10px;border-radius:8px;border:1px solid var(--border);background:var(--card);color:var(--text);font-size:.875rem;letter-spacing:.15em"
-            onfocus="if(this.value===''){this.style.letterSpacing='.05em'}"
-            onblur="if(this.value===''){this.style.letterSpacing='.15em'}"
-            oninput="validateExt(this);onBNExtInput()">
-        </div>
-      </div>
 
     </div>
 
@@ -2289,7 +2279,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-11-572'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-11-573'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2810,7 +2800,7 @@ async function deleteState(key){
 //
 // Use this for any cross-device key. Direct localStorage access is reserved
 // for: per-device preferences, transient UI state, sim-mode test data, and
-// caches whose source-of-truth lives in another sheet (e.g. BNSchedule.Ext).
+// caches whose source-of-truth lives in another sheet.
 
 const _SYNCED_RETRY_QUEUE_KEY = '_syncedLSRetryQueue';
 const _SYNCED_RETRY_TOAST_THRESHOLD = 3; // attempts before user-visible toast
@@ -5942,15 +5932,9 @@ function showSubTab(name, btn){
   }
   if(name==='bn'){
     populateBNDropdown();
-    // Build 265 (BN half of the persistence ruling): lazy identity restore
-    // at tab entry — staff users never pay for it. The ext token
-    // (bnExt_{name}_{date}_{shift}, written per shift by the login flow) is
-    // the restore gate: fresh name pref + a token for the DETECTED live
-    // shift = they already logged in THIS shift → walk the canonical door
-    // (fill the two fields, call loadBNView — exactly what a tap does).
-    // No token → pre-select the name in the dropdown only; the ext is a
-    // required per-shift input, so the picker flow proceeds as normal.
-    // Expiry is implicit and exact: a new shift means a new token key.
+    // Build 265 (BN half of the persistence ruling): lazy identity restore at tab entry — staff users never pay
+    // for it. A fresh name pref pre-selects the nurse and walks the canonical door (loadBNView — exactly what a
+    // tap does). Build 573: the Spectra ext token that once pre-filled a second field is gone with the field.
     if(!BNS.name){
       const _pn = _devicePref('bnNamePref', 50400000);
       const _sel = document.getElementById('bnNameSelect');
@@ -5958,20 +5942,8 @@ function showSubTab(name, btn){
         _sel.value = _pn;
         (async () => {
           try {
-            const live = await detectBNShiftForName(_pn);
-            const _tok = live ? localStorage.getItem(`bnExt_${_pn}_${live.date}_${live.shift}`) : null;
-            if(live && _tok){
-              const _ei = document.getElementById('bnExtInput');
-              if(_ei) _ei.value = _tok;
-            }
-            // Build 278: restore must equal a manual pick. Setting the
-            // select programmatically fires no change handler, and 265
-            // only loaded the view in the token branch — live-caught: a
-            // remembered name with no token left the tab EMPTY until the
-            // user switched names away and back (the manual handler
-            // firing). The token decides whether the ext is pre-filled;
-            // it does not decide whether the view loads. loadBNView
-            // handles the no-live-shift case itself (the forward-scan).
+            // Build 278: restore must equal a manual pick. Setting the select programmatically fires no change
+            // handler, so load the view here; loadBNView handles the no-live-shift case itself (the forward-scan).
             loadBNView();
           } catch(e){}
         })();
@@ -8165,12 +8137,6 @@ async function _loadSlotsCore(silent=false){
     const canClaimMore = (effectiveOwnedCount + pendingClaimSameShift) < _rampAllow;
 
     // Build BN name label — include both main and overlap BNs
-    // Look up BN extensions — from schedule record first, fall back to localStorage
-    const bnExtMap = {};
-    [...covering, ...oppCovering].forEach(s => {
-      const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-      if(ext) bnExtMap[s.BreakNurseName] = ext;
-    });
     const formatBNName = (name) => bnVoceraName(name); // Build 563/564: the BN's Vocera name, no ext
 
     const mainBNNames = [...new Set(coveringForDisplay
@@ -8706,10 +8672,7 @@ async function silentRefreshSlots(){
     }).join('|') +
     // Append watched bnStart values so cross-device updates wake the renderer.
     '||' + watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|') +
-    // Build 126 (2026-05-26): Append BN ext values for covering BNs so the
-    // "Break nurse for {unit}: {BN} · Ext. {ext}" header refreshes when ext
-    // is updated on another device.
-    '||' + covering.map(s => `${s.BreakNurseName}:${s.Ext||''}`).sort().join('|');
+    '||' + covering.map(s => s.BreakNurseName).sort().join('|');
 
     // Only trigger full re-render if state changed
     if(list.dataset.fingerprint !== fingerprint){
@@ -12477,26 +12440,6 @@ function clearNameExt(){
   if(S.unit) loadSlots(true);
 }
 
-async function checkDuplicateExt(){
-  const _nurseFirst = document.getElementById('nurseName').value.trim();
-  const nurseExt  = document.getElementById('nurseExt').value.trim();
-  return; // Build 563: codes are not extensions — nothing to collide with (kept for the record; no caller)
-  if(!_nurseFirst || !/^\d{5}$/.test(nurseExt)) return;
-  const dt = shiftDate(S.shift);
-  try {
-    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
-    const conflict = scheds.find(s =>
-      s.Status !== 'inactive' && s.Ext === nurseExt &&
-      s.BreakNurseName && firstName(s.BreakNurseName).toLowerCase() !== _nurseFirst.toLowerCase()
-    );
-    if(conflict){
-      if(!await customConfirm(`Ext. ${nurseExt} is currently assigned to ${firstName(conflict.BreakNurseName)}.`,'Take over extension','Cancel')){
-        document.getElementById('nurseExt').value = '';
-        document.getElementById('nurseExt').focus();
-      }
-    }
-  } catch(e){ /* non-critical */ }
-}
 
 
 function toggleAssignForm(){ // Build 523: the form has no collapsed state any more — open means "in the overlay"
@@ -12750,7 +12693,7 @@ async function _loadSummaryInner(mySeq, ctx){
     // getBNForBooking. Attribution must align with the rotation, which is
     // built at shift-start. A mid-shift closure must not orphan bookings
     // that were validly claimed before closure.
-    const unitBN={}, unitBNExt={}, oppUnitBN={}, oppUnitBNExt={};
+    const unitBN={}, oppUnitBN={};
     scheds.forEach(s=>{
       try{
         const sDate = s.ShiftDate.slice(0,10);
@@ -12758,8 +12701,6 @@ async function _loadSummaryInner(mySeq, ctx){
           // Only overwrite if no active BN assigned yet, or this record is active
           if(!unitBN[u] || s.Status !== 'inactive'){
             unitBN[u] = s.BreakNurseName;
-            const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-            if(ext) unitBNExt[u] = ext;
           }
         });
       }catch{}
@@ -12770,8 +12711,6 @@ async function _loadSummaryInner(mySeq, ctx){
         filterClosedUnits(JSON.parse(s.Units||'[]'), sDate, s.ShiftType).forEach(u=>{
           if(!oppUnitBN[u] || s.Status !== 'inactive'){
             oppUnitBN[u] = s.BreakNurseName;
-            const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-            if(ext) oppUnitBNExt[u] = ext;
           }
         });
       }catch{}
@@ -12782,40 +12721,25 @@ async function _loadSummaryInner(mySeq, ctx){
     // redistribution, or dual assignments) we must consult each BN's rotation
     // to see which slots belong to whom.
     // Key format: `${unit}|${slotTime}` → BN name / ext
-    const slotOwnerBN = {}, slotOwnerExt = {};
-    const oppSlotOwnerBN = {}, oppSlotOwnerExt = {};
-    const fillSlotOwner = (schedList, targetBN, targetExt, dateForRot, shiftForRot) => {
+    const slotOwnerBN = {};
+    const oppSlotOwnerBN = {};
+    const fillSlotOwner = (schedList, targetBN, dateForRot, shiftForRot) => {
       schedList.forEach(s => {
         if(s.Status === 'inactive') return;
         const rot = loadRotation(s.BreakNurseName, dateForRot, shiftForRot);
         if(!rot) return;
-        const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
         Object.entries(rot).forEach(([slot, u]) => {
           const key = `${u}|${String(slot).padStart(4,'0')}`;
           // First active BN whose rotation assigns this slot to this unit wins
           if(!targetBN[key]){
             targetBN[key] = s.BreakNurseName;
-            if(ext) targetExt[key] = ext;
           }
         });
       });
     };
-    fillSlotOwner(scheds, slotOwnerBN, slotOwnerExt, dt, shift);
-    fillSlotOwner(oppScheds, oppSlotOwnerBN, oppSlotOwnerExt, oppDt, oppShift);
+    fillSlotOwner(scheds, slotOwnerBN, dt, shift);
+    fillSlotOwner(oppScheds, oppSlotOwnerBN, oppDt, oppShift);
 
-    // BN-name → ext lookup. Built from all scheds (active + inactive,
-    // main + opposite shift) so CreatedBy attribution can resolve the
-    // CREATOR's ext directly, not the unit BN's. Previously the ext
-    // lookup was unit-based, which made attributed bookings show the
-    // covering BN's ext (e.g. Tomas's manual break on Janice's unit
-    // appeared as "Tomas · {Janice's ext}").
-    const bnNameExt = {};
-    [...scheds, ...oppScheds].forEach(s => {
-      const ext = s.Ext || localStorage.getItem(`bnExt_${s.BreakNurseName}_${s.ShiftDate}_${s.ShiftType}`);
-      if(ext && s.BreakNurseName && !bnNameExt[s.BreakNurseName]){
-        bnNameExt[s.BreakNurseName] = ext;
-      }
-    });
 
     // Build N+4 (2026-05-24): inactive-main lookup for historical-attribution.
     // When a BN is marked unavailable mid-shift, bookings BEFORE the outage
@@ -12863,25 +12787,6 @@ async function _loadSummaryInner(mySeq, ctx){
         return oppSlotOwnerBN[key] || oppUnitBN[b.Unit] || unitBN[b.Unit];
       }
       return slotOwnerBN[key] || unitBN[b.Unit];
-    };
-    const getBNExtForBooking = (b) => {
-      // Mirror getBNForBooking: CreatedBy attribution wins. Look up the
-      // creator's ext directly so the displayed BN name and ext agree.
-      if(b.CoveredBy) return bnNameExt[b.CoveredBy] || ''; // Build 289: stream stamp first
-      if(b.CreatedBy) return bnNameExt[b.CreatedBy] || '';
-      // Build N+4: same historical-attribution rule — past bookings on
-      // an outage'd unit show the inactive BN's ext.
-      const inactive = inactiveMainByUnit[b.Unit];
-      if(inactive && slotEventTime(b) < inactive.endedAtMs){
-        return bnNameExt[inactive.bnName] || '';
-      }
-      const m = toMin(b.SlotTime);
-      const isOverlap = m >= overlapMin && m < overlapMax;
-      const key = `${b.Unit}|${String(b.SlotTime).padStart(4,'0')}`;
-      if(isOverlap){
-        return oppSlotOwnerExt[key] || oppUnitBNExt[b.Unit] || unitBNExt[b.Unit];
-      }
-      return slotOwnerExt[key] || unitBNExt[b.Unit];
     };
 
     // Populate BN filter dropdown
@@ -12949,7 +12854,6 @@ async function _loadSummaryInner(mySeq, ctx){
         </div>`;
       } else {
         const bn = getBNForBooking(b);
-        const bnExt = getBNExtForBooking(b);
         const bnUnavailable = bn && inactiveBNs.has(bn) && !isPast(b.SlotTime, shift);
         html += `<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
           <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
@@ -16567,13 +16471,10 @@ async function _loadBNViewCore(){
   const _myGen = ++_bnViewGen;
   const name = document.getElementById('bnNameSelect').value.trim();
   if (!name) { toast('Select your name first', true); return; }
-  const ext = document.getElementById('bnExtInput').value.trim();
   _bnStatus(`Finding ${firstName(name)}'s shift…`); // Build 557: cleared when the log paints (or says there is no shift)
 
-  // Clear ext and slot display immediately when switching to a different BN
+  // Clear the slot display immediately when switching to a different BN
   if(BNS.name && BNS.name !== name){
-    document.getElementById('bnExtInput').value = '';
-    document.getElementById('bnExtInput').style.borderColor = '';
     // Instantly clear Prod Log and show finding indicator (fills the same space
     // BB used to fill — now the only visible BN card is Prod Log).
     const _cw = document.getElementById('bnConfirmWrap');
@@ -16612,36 +16513,7 @@ async function _loadBNViewCore(){
     _resolvedFrom += '→fallback-shiftDate';
   }
 
-  // Source-of-truth ext resolution:
-  //   1. Whatever the user just typed (`ext`), if any
-  //   2. The remote BNSchedule.Ext for the live shift (cross-device truth)
-  //   3. localStorage cache (fast path; may be stale across devices)
-  //   4. Empty
-  // Without (2), a device that received a cross-device update would keep
-  // showing its own stale localStorage value forever (Phase 8.3 fail).
-  const remoteExt = (resolvedSched && resolvedSched.Ext) ? String(resolvedSched.Ext).trim() : '';
-  const savedExt = localStorage.getItem(`bnExt_${name}_${resolvedDate}_${resolvedShift}`);
-  const resolvedExt = ext || remoteExt || savedExt || '';
-
-  // If BNSchedule's value differs from our cache, the remote won. Update
-  // cache to match so subsequent reads hit the right value.
-  if(remoteExt && remoteExt !== savedExt){
-    localStorage.setItem(`bnExt_${name}_${resolvedDate}_${resolvedShift}`, remoteExt);
-  }
-
-  // Require ext — prompt if not entered and not saved
-  // Ext is optional for viewing — only required for saving to schedule record
-  if(!resolvedExt){
-    document.getElementById('bnExtInput').style.borderColor = '';
-  }
-  document.getElementById('bnExtInput').style.borderColor = '';
-
-  if(resolvedExt && !ext){
-    document.getElementById('bnExtInput').value = resolvedExt;
-  }
-
   BNS.name  = name;
-  BNS.ext   = resolvedExt;
   _saveDevicePref('bnNamePref', name); // Build 265: identity committed
   BNS.shift = resolvedShift;
   BNS.date  = resolvedDate;
@@ -16653,16 +16525,6 @@ async function _loadBNViewCore(){
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
 
-  // Build 117 (2026-05-26): Removed the auto-save+patch block here. The
-  // new design saves ext only via onBNExtInput → saveExtForLiveShift,
-  // gated to the BN's CURRENT live shift. loadBNView still populates
-  // the input from localStorage cache for visual continuity, but it
-  // no longer pushes that cache value to BNSchedule (which would
-  // silently fail or write to the wrong record when the user has the
-  // date picker on a non-live shift).
-  // Build 118 (2026-05-26): Refresh ext input enable/disable + cached
-  // value based on whether BNS.date+shift is live right now.
-  updateBNExtInputState();
   // Set date picker to shift start date (handles Noc shifts that started yesterday)
   const dp = document.getElementById('bnDate');
   if (dp) dp.value = BNS.date;
@@ -16743,13 +16605,6 @@ async function _loadBNViewCore(){
             const dp = document.getElementById('bnDate');
             if(dp) dp.value = BNS.date;
             renderBNShiftPill();
-            // Build 118 (2026-05-26): Forward-scan changed BNS.date/shift to
-            // a future record. The earlier updateBNExtInputState() call (at
-            // the top of loadBNView, before this async forward-scan) ran
-            // against the FALLBACK shift, which is typically live "now" —
-            // so the field was enabled. Re-evaluate now that we've jumped
-            // to a likely-not-live future shift.
-            updateBNExtInputState();
           }
         }
       }
@@ -16787,98 +16642,8 @@ function isShiftLiveNow(date, shift){
   return false;
 }
 
-// Disable the Spectra ext input unless the BN's currently-selected
-// (BNS.date, BNS.shift) is live right now. Day BNs can enter their ext
-// from 08:00 (until 20:30); Noc BNs from 20:00 (until 08:30 next day).
-// Outside those windows the field is disabled — no typing possible,
-// placeholder explains why.
-function updateBNExtInputState(){
-  const input = document.getElementById('bnExtInput');
-  if(!input) return;
-  const live = isShiftLiveNow(BNS.date, BNS.shift);
-  input.disabled = !live;
-  if(live){
-    input.placeholder = '— — — — —';
-    // Populate with this shift's cached ext if not currently being edited
-    if(!input.value && BNS.name){
-      const saved = localStorage.getItem(`bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`);
-      if(saved) input.value = saved;
-    }
-  } else {
-    input.placeholder = 'Available during your shift';
-    input.value = '';
-  }
-}
 
-async function onBNExtInput(){
-  const ext = document.getElementById('bnExtInput').value.trim();
-  if(!/^\d{5}$/.test(ext)) return;
-  const name = document.getElementById('bnNameSelect').value.trim();
-  if(!name) return;
-  // Build 118 (2026-05-26): Defensive — the input is disabled outside
-  // live shifts via updateBNExtInputState, so reaching here implies a
-  // live shift. Re-detect anyway in case of an edge case (input fired
-  // before disabled state propagated).
-  let live;
-  try { live = await detectBNShiftForName(name); }
-  catch(e){ toast('Could not verify your shift: ' + e.message, true); return; }
 
-  if(!live){
-    toast(`No active shift for ${firstName(name)} right now. Day BNs can enter ext from 08:00, Noc from 20:00.`, true);
-    return;
-  }
-
-  await saveExtForLiveShift(name, ext, live).catch(e => {
-    console.warn('saveExtForLiveShift failed:', e.message);
-    toast('Failed to save ext: ' + e.message, true);
-  });
-}
-
-// Save ext for the BN's LIVE current shift. Patches BNSchedule.Ext so
-// the value syncs across devices. Within the shift, warns (but allows
-// with confirm) if another BN is using the same ext — sometimes two BNs
-// deliberately share a phone (handoff, training), so operational reality
-// wins over strict uniqueness.
-async function saveExtForLiveShift(name, ext, live){
-  // Fetch live-shift schedule records to find this BN's own row AND
-  // check for collisions with other BNs on the same shift.
-  const scheds = await spGet(LISTS.schedule,
-    `ShiftDate ge '${live.date}' and ShiftDate le '${live.date}T23' and ShiftType eq '${live.shift}'`);
-  const active = scheds.filter(s => s.Status !== 'inactive');
-
-  const collisions = active.filter(s => s.BreakNurseName !== name && (s.Ext || '').trim() === ext);
-  if(collisions.length){
-    const names = collisions.map(s => firstName(s.BreakNurseName)).join(', ');
-    if(!await customConfirm(
-      `Ext ${ext} is already in use this shift by ${names}.\n\nUse it anyway?`,
-      'Use anyway', 'Cancel'
-    )){
-      // Restore previous ext value in input (or clear if none)
-      document.getElementById('bnExtInput').value = BNS.ext || '';
-      return;
-    }
-  }
-
-  const myRec = active.find(s => s.BreakNurseName === name);
-
-  // Update local state to match live shift
-  BNS.name = name;
-  BNS.date = live.date;
-  BNS.shift = live.shift;
-  _saveDevicePref('bnNamePref', name); // Build 265: identity committed
-  BNS.ext = ext;
-  localStorage.setItem(`bnExt_${name}_${live.date}_${live.shift}`, ext);
-
-  if(myRec){
-    await spPatch(LISTS.schedule, myRec.Id, { Ext: ext });
-    toast(`Ext saved · ${live.shift} ${live.date}`);
-  } else {
-    // BN is in a live window but has no schedule record — unusual (BN
-    // would have had to be added without a schedule row). Save locally
-    // but flag that cross-device sync won't work.
-    toast(`Saved locally, but no ${live.shift} schedule on ${live.date} for ${firstName(name)} — won't sync across devices.`, true);
-  }
-}
 
 let _bnDateSeq = 0; // Build 511: a slow read for a date you already left must not set the shift
 async function onBNDateChange(){
@@ -16899,10 +16664,6 @@ async function onBNDateChange(){
       if(row && (row.ShiftType === 'Day' || row.ShiftType === 'Noc') && row.ShiftType !== BNS.shift){ BNS.shift = row.ShiftType; renderBNShiftPill(); }
     }
   } catch(e){ console.warn('[portal] shift auto-detect read failed:', e && e.message); }
-  // Build 118 (2026-05-26): Re-evaluate ext input live state. A future or
-  // past date selection disables the field; switching back to today re-
-  // enables it.
-  updateBNExtInputState();
   loadBNConfirm(true); // Build 281: navigation door — scroll to NOW
   // Start background polling so cross-device updates (other devices changing
   // bnDefault, bnStart, bookings, schedule) propagate within ~10s while
@@ -16919,8 +16680,6 @@ function flipBNShift(){
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across shifts.
   _prodLogResetShiftState();
   renderBNShiftPill();
-  // Build 118 (2026-05-26): Re-evaluate ext input live state.
-  updateBNExtInputState();
   loadBNConfirm(true); // Build 281: navigation door — scroll to NOW
 }
 
@@ -18036,14 +17795,12 @@ async function silentRefreshProdLog(){
     // would compare queued actions against pre-delete state.
     const bookings = reconcileBookings(bookingsRaw);
 
-    // Build fingerprint from booking fields + this BN's schedule status/units/ext
+    // Build fingerprint from booking fields + this BN's schedule status/units
     // + watched BNState values (so cross-device changes wake the renderer).
-    // Build 123 (2026-05-26): Added s.Ext so cross-device ext updates are
-    // picked up by the existing 10s prodlog poll — no new HTTP call.
     const bookFp = bookings.map(b =>
       `${b.Id}:${normSlot(b.SlotTime)}:${b.Unit}:${b.BreakStatus||''}:${b.IsCompleted||''}:${b.IsBNBreak||''}`
     ).sort().join('|');
-    const schedFp = scheds.map(s => `${s.Id}:${s.Status||''}:${s.Units||''}:${s.Ext||''}`).sort().join('|');
+    const schedFp = scheds.map(s => `${s.Id}:${s.Status||''}:${s.Units||''}`).sort().join('|');
     const stateFp = watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`).join('|');
     const fp = bookFp + '||' + schedFp + '||' + stateFp;
 
@@ -18068,28 +17825,6 @@ async function silentRefreshProdLog(){
       _prodLogLastFingerprint = fp;
       _didFullReload = true;
       loadBNConfirm();
-      // Build 123 (2026-05-26): If this BN's schedule.Ext changed (likely
-      // a cross-device update from another phone/desktop), reflect it in
-      // the input + cache. Skip if user is currently typing — don't clobber
-      // mid-edit. Only updates when the input is empty or shows the prior
-      // cached value (i.e., no in-flight edit).
-      const mySched = scheds.find(s => s.Status !== 'inactive');
-      if(mySched){
-        const remoteExt = (mySched.Ext != null) ? String(mySched.Ext).trim() : '';
-        const cacheKey = `bnExt_${BNS.name}_${BNS.date}_${BNS.shift}`;
-        const cached = localStorage.getItem(cacheKey) || '';
-        if(remoteExt && remoteExt !== cached){
-          const input = document.getElementById('bnExtInput');
-          // Only auto-sync the visible field if it's empty, disabled, or
-          // matches the prior cached value (no mid-edit). Otherwise
-          // respect the user's in-progress typing.
-          if(input && (input.disabled || !input.value || input.value === cached)){
-            input.value = remoteExt;
-          }
-          localStorage.setItem(cacheKey, remoteExt);
-          BNS.ext = remoteExt;
-        }
-      }
       // If a watched bnDefault_* changed, repaint the normal-breaks grid too
       // — it lives outside the Prod Log proper and isn't refreshed by loadBNConfirm.
       // Build 216: honor the dirty flag. This was the SECOND watcher on
@@ -18174,9 +17909,8 @@ async function silentRefreshCoverage(){
     await syncedLS.refreshMany(watchedKeys);
     const fp = [
       ...bookings.map(b => `${b.Id}:${b.Unit}:${normSlot(b.SlotTime)}:${b.BreakStatus||''}:${b.IsCompleted||''}`),
-      // Build 126 (2026-05-26): include s.Ext so the "Ext. {N}" badges in
       // coverage rows update when a BN changes their ext on another device.
-      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}:${s.Ext||''}`),
+      ...scheds.map(s => `${s.Id}:${s.BreakNurseName}:${s.Units}:${s.Status||''}`),
       ...watchedKeys.map(k => `${k}:${localStorage.getItem(k) || ''}`)
     ].sort().join('|');
     if(fp !== _coverageLastFingerprint){
@@ -18243,7 +17977,7 @@ async function silentRefreshSchedule(){
     // Fingerprint covers the fields that affect display: BN identity,
     // date/shift, units, status, ext. Order-independent via sort.
     const fp = scheds.map(s =>
-      `${s.Id}:${s.BreakNurseName}:${(s.ShiftDate||'').slice(0,10)}:${s.ShiftType}:${s.Units||''}:${s.Status||''}:${s.Ext||''}`
+      `${s.Id}:${s.BreakNurseName}:${(s.ShiftDate||'').slice(0,10)}:${s.ShiftType}:${s.Units||''}:${s.Status||''}`
     ).sort().join('|');
     if(fp !== _scheduleLastFingerprint){
       _scheduleLastFingerprint = fp;
