@@ -903,11 +903,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <div id="importedNamesList"><div class="empty" style="padding:10px 0">Add shifts on Schedule tab</div></div>
         <div id="manualNameRow" style="display:none;margin-top:10px">
           <div style="display:flex;flex-direction:column;gap:6px">
-            <div class="row" style="gap:6px">
-              <input type="text" id="manualLastName" placeholder="Last name (as in Vina)" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
-              <input type="text" id="manualFirstName" placeholder="First name (as in Vina)" style="flex:1" autocomplete="off" oninput="updateManualAddState()"/>
-            </div>
-            <div style="font-size:.72rem;color:var(--muted);line-height:1.3">Their Vocera name, as it appears in Vina. Both fields required; saved as <em>Lastname, Firstname</em>.</div><!-- Build 563 -->
+            <input type="text" id="manualVoceraName" placeholder="Vocera Name" autocomplete="off" autocorrect="off" autocapitalize="words" spellcheck="false" oninput="updateManualAddState()" onkeydown="if(event.key === 'Enter') addManualName()"/>
+            <div style="font-size:.72rem;color:var(--muted);line-height:1.3">Type it as Vina shows it — <em>First Last</em>. The button shows how it will be saved; if that looks wrong (a two-word surname), type <em>Last, First</em> with the comma.</div><!-- Build 576 -->
             <div class="row" style="gap:6px;justify-content:flex-end">
               <button id="manualAddBtn" class="btn btn-success btn-sm" onclick="addManualName()" disabled>Add</button>
               <button class="btn btn-ghost btn-sm" onclick="toggleManualName()">✕</button>
@@ -2279,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-11-573'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-12-576'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7948,13 +7945,13 @@ async function _loadSlotsCore(silent=false){
     const unitBNNames = [...new Set([
       ...coveringForDisplay
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
-        .map(c => firstName(c.BreakNurseName)),
+        .map(c => bnVoceraName(c.BreakNurseName)), // Build 576: Sign Up shows Vocera names (this is the banner's fallback)
       // Only include opp BN in meta during the overlap window
       ...(overlapWindowActive(shift) ? oppCovering
         .filter(s => { try{ return JSON.parse(s.Units||'[]').includes(S.unit); }catch{ return false; } })
-        .map(c => firstName(c.BreakNurseName)) : [])
+        .map(c => bnVoceraName(c.BreakNurseName)) : [])
     ])].join(', ');
-    const bnNames = unitBNNames || [...new Set(coveringForDisplay.map(c=>firstName(c.BreakNurseName)))].join(', ');
+    const bnNames = unitBNNames || [...new Set(coveringForDisplay.map(c=>bnVoceraName(c.BreakNurseName)))].join(', ');
     const _nurseFirst = document.getElementById('nurseName').value.trim();
     const nurseExt  = document.getElementById('nurseExt').value.trim();
     const nurseName = _nurseFirst && lockOk(nurseExt) ? nurseKey(toTitleCase(_nurseFirst), nurseExt) : '';
@@ -9598,7 +9595,7 @@ async function loadOtherSlots(silent=false){
           const p = normSlot(sl);
           (streams[p] = streams[p] || []);
           if(!streams[p].some(e => e.raw === sched.BreakNurseName))
-            streams[p].push({ raw: sched.BreakNurseName, disp: firstName(sched.BreakNurseName), sched });
+            streams[p].push({ raw: sched.BreakNurseName, disp: bnVoceraName(sched.BreakNurseName), sched }); // Build 576: Sign Up shows the Vocera name, never the portal nickname
         });
       }
       const streamSlots = new Set(Object.keys(streams));
@@ -9713,7 +9710,7 @@ async function loadOtherSlots(silent=false){
         let _absNote = '';
         if(dayArm.absorbed || nocArm.absorbed){
           const _absNames = [...new Set([...dayArm.suppCovering, ...nocArm.suppCovering]
-            .map(s => firstName(s.BreakNurseName)))].join(' and ');
+            .map(s => bnVoceraName(s.BreakNurseName)))].join(' and '); // Build 576: Sign Up shows the Vocera name
           const _absShift = [dayArm.absorbed ? 'Day' : '', nocArm.absorbed ? 'Noc' : ''].filter(Boolean).join(' & ');
           _absNote = `<div style="font-size:.8rem;margin-top:6px;opacity:.9">&#x26a0;&#xfe0f; ${escHTML(S.unit)}'s ${escHTML(_absShift)} Break Nurse is unavailable — ${escHTML(_absNames)} can only cover the slots shown.</div>`;
         }
@@ -16459,6 +16456,19 @@ function populateBNDropdown(){
 let _bnViewGen = 0; // Build 280: generation counter — see guard notes inside loadBNView
 function _bnStatus(text){ const el = document.getElementById('bnNameStatus'), t = document.getElementById('bnNameStatusText'); if(!el) return; if(text){ if(t) t.textContent = text; el.style.display = 'flex'; } else el.style.display = 'none'; } // Build 557
 async function loadBNView(){ try { await _loadBNViewCore(); } catch(e){ _bnStatus(null); throw e; } } // Build 557: the status never outlives a failed load
+// Build 574 (Tomas, Nov 11: "it stays on the last selected BN's log"): the blank option is a sign-out. The log, shift
+// row and defaults section hide, polling stops, BNS clears, and the device forgets the remembered name — otherwise the
+// next open (265's restore) would put her straight back.
+function _bnSignOut(){
+  ++_bnViewGen; // a load still in flight for the previous nurse may not touch BNS
+  stopProdLogPolling();
+  BNS.name = ''; BNS.shift = null; BNS.date = ''; BNS.defaultShift = null; BNS.contextNext = false; BNS.contextNone = false;
+  _prodLogResetShiftState();
+  _bnStatus(null);
+  ['bnShiftWrap', 'bnConfirmWrap', 'bnDefaultWrap'].forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
+  const cl = document.getElementById('bnConfirmList'); if(cl) cl.innerHTML = '';
+  try { localStorage.removeItem('bnNamePref'); } catch(e){}
+}
 async function _loadBNViewCore(){
   // Build 280: the _loadSlotsGen lesson applied to the view's OWN state.
   // Live-reproduced tonight with 279's honest labels: loadBNView ran twice
@@ -16470,7 +16480,7 @@ async function _loadBNViewCore(){
   // flight may not touch BNS.
   const _myGen = ++_bnViewGen;
   const name = document.getElementById('bnNameSelect').value.trim();
-  if (!name) { toast('Select your name first', true); return; }
+  if (!name) { _bnSignOut(); return; } // Build 574: "— Select your name —" signs out instead of toasting over the last nurse's log
   _bnStatus(`Finding ${firstName(name)}'s shift…`); // Build 557: cleared when the log paints (or says there is no shift)
 
   // Clear the slot display immediately when switching to a different BN
@@ -21850,31 +21860,43 @@ function toggleManualName(){
   const row = document.getElementById('manualNameRow');
   row.style.display = row.style.display === 'none' ? 'block' : 'none';
   if (row.style.display === 'block'){
-    document.getElementById('manualLastName').value = '';
-    document.getElementById('manualFirstName').value = '';
+    document.getElementById('manualVoceraName').value = '';
     updateManualAddState();
-    document.getElementById('manualLastName').focus();
+    document.getElementById('manualVoceraName').focus();
   }
 }
 
-// Enable Add button only when both Last and First name fields have content.
-// Inline validation prevents saving partial names that would break the
-// canonical "Lastname, Firstname" format other code relies on.
+// Build 576 (Tomas): ONE field — the nurse's Vocera name as Vina shows it ("Ashley Muhammad"). Storage stays the
+// canonical "Last, First" every row, stamp and sort key relies on: the last word is the surname, the rest the given
+// name(s) ("Christlyne J Rivera" → "Rivera, Christlyne J"). A typed comma means "I know my surname has spaces" and is
+// stored as typed ("De La Cruz, Maria"). Each word gets a capital first letter; the rest is kept as typed (McDonald).
+// Preferred names (the nickname shown in the portal) stay on the roster row, untouched.
+function _voceraToCanonical(raw){
+  const tc = w => w ? w.charAt(0).toUpperCase() + w.slice(1) : w;
+  const tcWords = str => str.trim().split(/\s+/).filter(Boolean).map(tc).join(' ');
+  const v = String(raw || '').replace(/\s+/g, ' ').trim();
+  if(!v) return null;
+  if(v.includes(',')){
+    const i = v.indexOf(','); const last = tcWords(v.slice(0, i)), first = tcWords(v.slice(i + 1));
+    return last && first ? `${last}, ${first}` : null;
+  }
+  const words = v.split(' ');
+  if(words.length < 2) return null;
+  const last = tc(words.pop()); const first = words.map(tc).join(' ');
+  return `${last}, ${first}`;
+}
+
+// The Add button previews the stored form as you type; it is enabled only when the name splits into two parts.
 function updateManualAddState(){
-  const last = (document.getElementById('manualLastName')||{}).value || '';
-  const first = (document.getElementById('manualFirstName')||{}).value || '';
+  const raw = (document.getElementById('manualVoceraName')||{}).value || '';
+  const canonical = _voceraToCanonical(raw);
   const btn = document.getElementById('manualAddBtn');
-  if(btn) btn.disabled = !(last.trim() && first.trim());
+  if(btn){ btn.disabled = !canonical; btn.textContent = canonical ? `Add ${canonical}` : 'Add'; }
 }
 
 function addManualName(){
-  const last = document.getElementById('manualLastName').value.trim();
-  const first = document.getElementById('manualFirstName').value.trim();
-  if (!last || !first) return;
-  // Title-case each part, then assemble canonical "Lastname, Firstname"
-  const lastTC = last.charAt(0).toUpperCase() + last.slice(1).toLowerCase();
-  const firstTC = first.charAt(0).toUpperCase() + first.slice(1).toLowerCase();
-  const canonical = `${lastTC}, ${firstTC}`;
+  const canonical = _voceraToCanonical((document.getElementById('manualVoceraName')||{}).value);
+  if(!canonical) return;
   addNamesToRoster([canonical]);
   toggleManualName();
   toast(`${canonical} added.`);
