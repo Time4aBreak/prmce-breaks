@@ -131,6 +131,9 @@ body{overflow-x:hidden} /* Build 537: nothing may widen the page past the screen
 .range-btn{padding:6px 14px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
 .range-btn:hover{border-color:var(--teal);color:var(--teal)}
 .range-btn.active{background:var(--teal);border-color:var(--teal);color:white}
+.rpt-year-group{display:flex;flex-direction:column;gap:5px}
+.rpt-year{font-size:.68rem;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--muted);padding-left:4px}
+.rpt-year-months{display:flex;gap:6px;flex-wrap:wrap}
 .bn-pill{padding:4px 11px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.75rem;font-weight:500;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Sans',sans-serif}
 .bn-pill:hover{border-color:var(--teal);color:var(--teal)}
 .bn-pill.active{background:var(--teal);border-color:var(--teal);color:white}
@@ -608,7 +611,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         <button class="range-btn"        id="rb-mtd"  onclick="setRange('mtd',this)">Month to Date</button>
       </div>
       <!-- Build 458 (Tomas): months as pills, multi-select; replaces the custom From/To -->
-      <div id="rptMonths" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px"></div>
+      <div id="rptMonths" style="display:flex;gap:6px 16px;flex-wrap:wrap;align-items:flex-start;margin-bottom:6px"></div>
       <div id="rptRangeLabel" style="font-size:.78rem;color:var(--muted);margin-top:4px"></div>
     </div>
 
@@ -2276,7 +2279,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-12-576'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-12-578'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12368,8 +12371,10 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       } catch(e){
         console.warn('Wing history write for absorber failed (non-fatal):', e);
       }
-      // Update rotation to include new units
-      recalculateRotation(assignedBN, date, shift).catch(e => console.warn('Rotation recalc failed:', e.message));
+      // Build 577: no rotation recompute here. Absorption is booking-level (Option B, May 24): the absorber's main
+      // units are unchanged and the absorbed slots ride on the supplemental row via getAbsorbedSlots. The old
+      // "update rotation to include new units" call (Option A) had been recomputing her unchanged units and
+      // re-phasing her future blocks around own breaks added under 375's no-reshuffle rule (year sim, Nov 12).
     }
 
     // Show results
@@ -19163,14 +19168,18 @@ function _rptMonthList(){
   // Build 461: the SCHEDULE on file decides the last month, not the archive (console-inserted rows never enter the archive)
   try { if(RPT.schedMax){ const d2 = new Date(RPT.schedMax + 'T12:00:00'); const lm2 = new Date(d2.getFullYear(), d2.getMonth(), 1); if(lm2 > last) last = lm2; } } catch(e){}
   const out = []; const cur = new Date(start);
-  while(cur <= last && out.length < 24){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
+  while(cur <= last && out.length < 120){ out.push(`${cur.getFullYear()}-${String(cur.getMonth() + 1).padStart(2, '0')}`); cur.setMonth(cur.getMonth() + 1); }
   return out;
 }
 function _rptPaintMonths(){
   const host = document.getElementById('rptMonths'); if(!host) return;
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
   const sel = RPT.months || new Set();
-  host.innerHTML = _rptMonthList().map(m => `<button class="range-btn${sel.has(m) ? ' active' : ''}" style="padding:5px 11px;font-size:.74rem" onclick="toggleRptMonth('${m}')">${MON[Number(m.slice(5, 7)) - 1]} ${m.slice(2, 4)}</button>`).join('');
+  // Build 578 (Tomas): pills carry the month NAME only; the year sits as a caption above its own group of months
+  // ("Nov 26" read as a date). Groups flow side by side while they fit and stack on a phone.
+  const byYear = new Map();
+  _rptMonthList().forEach(m => { const y = m.slice(0, 4); if(!byYear.has(y)) byYear.set(y, []); byYear.get(y).push(m); });
+  host.innerHTML = [...byYear.entries()].map(([y, ms]) => `<div class="rpt-year-group"><div class="rpt-year">${y}</div><div class="rpt-year-months">${ms.map(m => `<button class="range-btn${sel.has(m) ? ' active' : ''}" style="padding:5px 11px;font-size:.74rem" onclick="toggleRptMonth('${m}')">${MON[Number(m.slice(5, 7)) - 1]}</button>`).join('')}</div></div>`).join('');
 }
 function toggleRptMonth(m){
   if(!RPT.months) RPT.months = new Set();
