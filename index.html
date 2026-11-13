@@ -44,7 +44,10 @@ body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--text);min
 .nav-tab{padding:0 22px;background:none;border:none;border-bottom:3px solid transparent;color:rgba(255,255,255,.6);font-family:'DM Sans',sans-serif;font-size:.875rem;font-weight:500;cursor:pointer;display:flex;align-items:center;gap:7px;transition:all .15s;white-space:nowrap}
 .nav-tab:hover{color:white;background:rgba(255,255,255,.06)}
 .nav-tab.active{color:white;border-bottom-color:var(--day)}
-.nav-time{margin-left:auto;padding:0 16px;display:flex;align-items:center;font-family:'DM Mono',monospace;font-size:.8rem;color:rgba(255,255,255,.5)}
+.nav-time{margin-left:auto;padding:0 16px;display:flex;align-items:center;font-family:'DM Mono',monospace;font-size:1.05rem;font-weight:700;letter-spacing:.02em;color:rgba(255,255,255,.95)} /* Build 580 (Tomas): the clock reads at a glance — was .8rem at 50% white */
+/* Build 580: on a phone the nav row was wider than the screen (brand + two tabs + clock ≈ 490px on a 390px phone), so the clock sat clipped
+   or off the right edge under 537's overflow-x:hidden. The brand block steps aside below 520px; the tabs and the clock then fit. */
+@media (max-width:520px){ .nav-brand{display:none} .nav-tab{padding:0 14px;font-size:.85rem} .nav-time{font-size:.95rem;padding:0 12px} }
 
 /* ── Tabs ── */
 .tab{display:none;padding:20px 16px 60px;max-width:800px;margin:0 auto}
@@ -155,6 +158,10 @@ body{overflow-x:hidden} /* Build 537: nothing may widen the page past the screen
 .pill{padding:5px 13px;border-radius:99px;border:1.5px solid var(--border);background:var(--bg);font-size:.78rem;font-weight:600;cursor:pointer;color:var(--muted);transition:all .15s;font-family:'DM Mono',monospace}
 .pill:hover{border-color:var(--teal);color:var(--teal)}
 .pill.active{background:var(--teal);border-color:var(--teal);color:white}
+/* Build 579 (Tomas): the Coverage filter reads like the Sign Up picker — covered units tinted in the shift's colour, paused units dimmed */
+#summFilter .pill.cov{background:var(--cov-lt,var(--bg));border-color:var(--cov,var(--border));color:var(--cov,var(--muted));font-weight:800}
+#summFilter .pill.cov.active{background:var(--teal);border-color:var(--teal);color:white}
+#summFilter .pill.paused{opacity:.45}
 
 /* ── Admin ── */
 .roster-row{display:flex;align-items:center;justify-content:space-between;padding:9px 12px;border-radius:8px;background:var(--bg);margin-bottom:6px}
@@ -2279,7 +2286,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-12-578'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-12-580'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12567,7 +12574,9 @@ let _summaryLoadChain = Promise.resolve();
 // 8:30 AM by default); both during the overlaps.
 function _summLiveShifts(){
   const now = new Date(); const m = now.getHours() * 60 + now.getMinutes();
-  const toM = t => { const [h, mm] = String(t || '').split(':').map(Number); return isFinite(h) ? h * 60 + (mm || 0) : null; };
+  // Build 579 rider (bed-caught): with no openAt saved yet, toM('') returned 0, so BOTH windows read as open all day and the
+  // Live board showed tonight's Noc list beside the Day list from the morning on. An unset time now falls to the default.
+  const toM = t => { if(!t) return null; const [h, mm] = String(t).split(':').map(Number); return isFinite(h) ? h * 60 + (mm || 0) : null; };
   let dOpen = 450, nOpen = 1170; try { const r = _rampCfg(); dOpen = toM(r.Day.openAt) ?? dOpen; nOpen = toM(r.Noc.openAt) ?? nOpen; } catch(e){}
   const out = [];
   if(m >= dOpen && m <= BN_CLOCKOUT_DAY) out.push({ shift: 'Day', dt: localDate(now) });
@@ -12596,13 +12605,41 @@ function loadSummary(){
     if(shifts[1]){
       if(el2) el2.style.display = '';
       _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq, { dt: shifts[1].dt, shift: shifts[1].shift, elId: 'summList2', heading: fmt(shifts[1]) })).catch(()=>{});
-    } else if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; }
+    } else if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; delete _summCov.summList2; }
   } else {
     if(label) label.textContent = 'Look Back';
-    if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; }
+    if(el2){ el2.style.display = 'none'; el2.innerHTML = ''; } delete _summCov.summList2;
     _summaryLoadChain = _summaryLoadChain.then(() => _loadSummaryInner(mySeq)).catch(()=>{});
   }
   return _summaryLoadChain;
+}
+// Build 579 (Tomas): the Filter by Unit pills carry the same "tinted = covered" language as the Sign Up picker (377) —
+// covered on the date+shift the board shows (both shifts in the overlap windows: the union, coloured by the first),
+// main or supplemental coverage, inactive rows excluded (unitCoveredBy, the calendar-dot predicate); a unit paused at
+// that shift's start is dimmed (the 517 leftover). Each board list notes its set; the row is repainted from the union.
+const _summCov = {};
+function _summNoteCoverage(elId, dt, shift, scheds){
+  try {
+    const set = new Set();
+    (scheds || []).filter(r => r.Status !== 'inactive').forEach(r => { STAFF_UNITS.forEach(u => { if(!set.has(u) && unitCoveredBy(r, u, dt, shift)) set.add(u); }); });
+    const paused = new Set(); const at = shiftStartDateTime(dt, shift);
+    STAFF_UNITS.forEach(u => { try { if(!isUnitOpenAt(u, at)) paused.add(u); } catch(e){} });
+    _summCov[elId] = { dt, shift, set, paused };
+    _decorateSummFilter();
+  } catch(e){ /* decoration is a courtesy; never break the board */ }
+}
+function _decorateSummFilter(){
+  const sf = document.getElementById('summFilter'); if(!sf) return;
+  const el2 = document.getElementById('summList2'); const two = !!(el2 && el2.style.display !== 'none' && _summCov.summList2);
+  const parts = [_summCov.summList, two ? _summCov.summList2 : null].filter(Boolean); if(!parts.length) return;
+  const covered = new Set(), paused = new Set();
+  parts.forEach(p => p.set.forEach(u => covered.add(u)));
+  STAFF_UNITS.forEach(u => { if(parts.every(p => p.paused.has(u))) paused.add(u); });
+  const noc = parts[0].shift === 'Noc';
+  sf.style.setProperty('--cov', noc ? '#3b6cb7' : '#d97706'); sf.style.setProperty('--cov-lt', noc ? '#eaf0fb' : '#fef3e2');
+  sf.querySelectorAll('.pill').forEach(p => { const u = p.textContent.trim(); if(u === 'All Units') return;
+    p.classList.toggle('cov', covered.has(u)); p.classList.toggle('paused', paused.has(u));
+    p.title = paused.has(u) ? `${u} isn't being covered ${parts[0].dt === staffShiftDate(parts[0].shift) ? 'today' : 'that day'}` : (covered.has(u) ? `${u} has a Break Nurse` : ''); });
 }
 async function _loadSummaryInner(mySeq, ctx){
   // Superseded by a newer call queued behind us — skip without touching DOM.
@@ -12666,6 +12703,7 @@ async function _loadSummaryInner(mySeq, ctx){
     // Build 143: if a newer loadSummary was queued while we awaited the
     // fetch, abandon this render so we don't paint stale data.
     if(mySeq !== _summaryRenderSeq) return;
+    _summNoteCoverage(el.id, dt, shift, scheds); // Build 579: tint the filter pills for what this board shows
     const bookings = reconcileBookings(bookingsRaw);
     const oppBookings = reconcileBookings(oppBookingsRaw);
 
