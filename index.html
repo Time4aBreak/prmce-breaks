@@ -1871,10 +1871,12 @@ async function applyCoverageLimitsToUpcoming(){
     hideBusy();
     toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
     loadAssignments();
+    try { if(_wgWeek){ _lastSchedRev = null; wgSetWeek(_wgWeek); } } catch(e){} // Build 584: the grid re-reads so the ⚖ badges reflect the new deal
   } catch(e){
     hideBusy();
     toast(`Couldn't finish the re-deal${_at ? ` at ${_at}` : ''} — ${(e && e.message) || e || 'unknown error'}. Running Re-deal upcoming again will finish the job.`, true);
     loadAssignments();
+    try { if(_wgWeek){ _lastSchedRev = null; wgSetWeek(_wgWeek); } } catch(e){} // Build 584
   } finally { _redealInFlight = false; } // Build 556
 }
 
@@ -2272,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-14-583'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-14-584'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5967,7 +5969,8 @@ function showSubTab(name, btn){
   }
   if(name==='admin'){
     // Build 539: the grid is open by default — its first read happens here, not on a card tap
-    try { if(!_wgWeek){ const host = document.getElementById('wgGrid'); if(host && !host.innerHTML) host.innerHTML = '<div class="empty" style="padding:14px 0">Reading the schedule…</div>'; _wgDefaultWeek().then(wk => { if(!_wgWeek) wgSetWeek(wk); }); } } catch(e){}
+    try { if(!_wgWeek){ const host = document.getElementById('wgGrid'); if(host && !host.innerHTML) host.innerHTML = '<div class="empty" style="padding:14px 0">Reading the schedule…</div>'; _wgDefaultWeek().then(wk => { if(!_wgWeek) wgSetWeek(wk); }); }
+      else if(!Object.keys(_wgEdits || {}).length && !(_currentImportEntries || []).length){ wgSetWeek(_wgWeek); } } catch(e){} // Build 584: every entry re-reads (488), unless this device is mid-edit
     // Refresh assign form date/shift to current on each open
     const curSh = detectShift();
     document.getElementById('aDate').value = shiftDate(curSh);
@@ -17977,10 +17980,27 @@ async function silentRefreshSchedule(){
   // Timestamp-based: self-heals if an edit is abandoned (no cancel hooks).
   // saveAssign's tail refresh restores truth at the end.
   if(Date.now() < _schedulePollHoldUntil) return;
-  const el = document.getElementById('assignList');
-  if(!el) return;
   const activeSub = document.querySelector('.subtab.active');
   if(!activeSub || activeSub.id !== 'subtab-admin') return;
+  const el = document.getElementById('assignList');
+  // Build 584: the list this poller fed retired in 538, so the Schedule tab had no live refresh at all — a re-deal from
+  // Settings or a deal from another device sat invisible until a week nav. Without the list, a changed BNSchedule
+  // revision re-reads the GRID instead — unless this device is mid-edit (unsaved taps or an open Review batch), which
+  // the next poll after Save All / Discard catches.
+  if(!el){
+    if(!_wgWeek) return;
+    try {
+      const _r = await gasCallPost({ action: 'getRevision' });
+      const _revNow = _r && _r.BNSchedule ? String(_r.BNSchedule) : null;
+      if(_revNow && _lastSchedRev && _revNow === _lastSchedRev){ window._schedPollStats.skipped++; return; }
+      const busy = (Object.keys(_wgEdits || {}).length > 0) || ((_currentImportEntries || []).length > 0) || (typeof _wgDeleteIds !== 'undefined' && (_wgDeleteIds || []).length > 0);
+      if(busy) return; // leave the marker alone: re-read once the edit is over
+      if(_revNow) _lastSchedRev = _revNow;
+      window._schedPollStats.fetched++;
+      wgSetWeek(_wgWeek);
+    } catch(e){ console.warn('[schedule poll] grid refresh failed:', e.message); }
+    return;
+  }
   try {
     // Build 247 (Finding 10, client half): ask the backend's revision counter
     // before fetching. Unchanged revision = skip the full-table read; the 10s
