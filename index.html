@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-14-585'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-14-586'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20974,7 +20974,7 @@ function _wgOrientPick(name, date, cur){
         <button type="button" class="btn ${sh === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:10px" id="wgoDay">☀️ Day</button>
         <button type="button" class="btn ${sh === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:10px" id="wgoNoc">🌙 Noc</button>
       </div>
-      <div style="font-size:.78rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${escHTML(firstName(name))} follows the preceptor. No units or break slots are dealt to her, and nothing else in the app changes — the cell shows the preceptor's name.</div>
+      <div style="font-size:.78rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${escHTML(firstName(name))} follows the preceptor. No units or break slots are dealt to ${escHTML(firstName(name))}, and nothing else in the app changes — the cell shows the preceptor's name.</div>
       <div style="display:flex;gap:8px">
         <button type="button" class="btn btn-primary btn-sm" id="wgoSet" style="flex:1">${curP ? 'Save' : 'Set orientation'}</button>
         <button type="button" class="btn btn-ghost btn-sm" id="wgoCancel" style="flex:1">Cancel</button>
@@ -21193,7 +21193,7 @@ function _wgOutChooser(name, date, cur){
     <div style="background:var(--card);border-radius:14px;padding:20px 22px;max-width:380px;width:100%;box-shadow:0 12px 40px rgba(0,0,0,.25)">
       <div style="font-size:1rem;font-weight:700;margin-bottom:2px">${escHTML(bnDisplayName(name))}</div>
       <div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${_WG_DOW[d.getDay()]} ${Number(date.slice(5,7))}/${Number(date.slice(8,10))} · ${escHTML(_wgCellLabel(cur))} · 🏠 marked unavailable${units.length ? ' · ' + units.join(', ') : ''}</div>
-      <div style="font-size:.8rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${canBack ? 'Her breaks may have been absorbed by another nurse while she is out. Mark Available runs the return flow and asks what to do with them.' : 'This shift is over — the record stays as it is.'}</div>
+      <div style="font-size:.8rem;color:var(--muted);line-height:1.45;margin-bottom:14px">${canBack ? `${escHTML(firstName(name))}'s breaks may have been absorbed by another nurse while ${escHTML(firstName(name))} is out. Mark Available runs the return flow and asks what to do with them.` : 'This shift is over — the record stays as it is.'}</div>
       <div style="display:flex;gap:8px">
         ${canBack ? '<button type="button" class="btn btn-primary btn-sm" id="wgoBack" style="flex:1">✅ Mark Available</button>' : ''}
         <button type="button" class="btn btn-ghost btn-sm" id="wgoCancel" style="flex:1">Cancel</button>
@@ -21230,7 +21230,7 @@ function _wgChooser(name, date){
         <button type="button" class="btn ${!isPart && cur.shift === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcDay">☀️ Day</button>
         <button type="button" class="btn ${!isPart && cur.shift === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcNoc">🌙 Noc</button>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="wgcOrient" style="width:100%;margin-bottom:10px" title="She follows a preceptor: no units, no slots">🎓 ${cur.orientation ? `Orientation with ${escHTML(bnDisplayName(cur.preceptor || ''))} · change` : 'Orientation — pick a preceptor'}</button><!-- Build 550 -->
+      <button type="button" class="btn btn-ghost btn-sm" id="wgcOrient" style="width:100%;margin-bottom:10px" title="${escHTML(firstName(name))} follows a preceptor: no units, no slots">🎓 ${cur.orientation ? `Orientation with ${escHTML(bnDisplayName(cur.preceptor || ''))} · change` : 'Orientation — pick a preceptor'}</button><!-- Build 550 -->
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
         <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -21265,7 +21265,7 @@ function _wgChooser(name, date){
   // Build 550: a shift chosen on an orientation cell takes the marker off first (its own write), then stages as usual
   const set = async c => { close(); if(cur.orientation){ if(c === null){ await _wgOrientClear(key, false); return; } await _wgOrientClear(key, true); } _wgEdit(key, c); };
   wrap.querySelector('#wgcOrient').onclick = () => { // Build 550
-    if(_savedRow){ toast('She has a saved shift that day — Remove now first, then set the orientation', true); return; }
+    if(_savedRow){ toast(`${firstName(name)} has a saved shift that day — Remove now first, then set the orientation`, true); return; }
     close(); _wgOrientPick(name, date, cur);
   };
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
