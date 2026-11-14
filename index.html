@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-14-584'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-14-585'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -17009,6 +17009,7 @@ let _scheduleLastFingerprint = null;
 // Build 247 (Finding 10, client half): last-seen backend revision for
 // BNSchedule (riders deploy 02:50 Jul 13) + observable poll stats.
 let _lastSchedRev = null;
+let _lastStateRevGrid = null; // Build 585
 window._schedPollStats = { skipped: 0, fetched: 0 };
 let _schedulePollHoldUntil = 0; // Build 240 (Finding 10): editAssign/saveAssign quiet window
 
@@ -17992,10 +17993,17 @@ async function silentRefreshSchedule(){
     try {
       const _r = await gasCallPost({ action: 'getRevision' });
       const _revNow = _r && _r.BNSchedule ? String(_r.BNSchedule) : null;
-      if(_revNow && _lastSchedRev && _revNow === _lastSchedRev){ window._schedPollStats.skipped++; return; }
+      const _stNow = _r && _r.BNState ? String(_r.BNState) : null; // Build 585: orientation markers live in BNState (550), not BNSchedule
+      const schedChanged = !!_revNow && _revNow !== _lastSchedRev, stateChanged = !!_stNow && _stNow !== _lastStateRevGrid; // a null marker reads as changed: one silent re-read after entry, nothing missed in between
+      if(!schedChanged && !stateChanged){ window._schedPollStats.skipped++; return; }
       const busy = (Object.keys(_wgEdits || {}).length > 0) || ((_currentImportEntries || []).length > 0) || (typeof _wgDeleteIds !== 'undefined' && (_wgDeleteIds || []).length > 0);
-      if(busy) return; // leave the marker alone: re-read once the edit is over
-      if(_revNow) _lastSchedRev = _revNow;
+      if(busy) return; // leave the markers alone: re-read once the edit is over
+      if(stateChanged && !schedChanged){ // BNState moves on every rotation save — only an orientation change earns a re-read
+        const before = JSON.stringify(_wgOrientMap()); try { await syncedLS.refresh(_WG_ORIENT_KEY); } catch(e){}
+        _lastStateRevGrid = _stNow;
+        if(JSON.stringify(_wgOrientMap()) === before){ window._schedPollStats.skipped++; return; }
+      }
+      if(_revNow) _lastSchedRev = _revNow; if(_stNow) _lastStateRevGrid = _stNow;
       window._schedPollStats.fetched++;
       wgSetWeek(_wgWeek);
     } catch(e){ console.warn('[schedule poll] grid refresh failed:', e.message); }
