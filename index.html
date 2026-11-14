@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-14-586'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-14-587'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21230,14 +21230,18 @@ function _wgChooser(name, date){
         <button type="button" class="btn ${!isPart && cur.shift === 'Day' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcDay">☀️ Day</button>
         <button type="button" class="btn ${!isPart && cur.shift === 'Noc' ? 'btn-primary' : 'btn-ghost'}" style="flex:1;padding:12px" id="wgcNoc">🌙 Noc</button>
       </div>
-      <button type="button" class="btn btn-ghost btn-sm" id="wgcOrient" style="width:100%;margin-bottom:10px" title="${escHTML(firstName(name))} follows a preceptor: no units, no slots">🎓 ${cur.orientation ? `Orientation with ${escHTML(bnDisplayName(cur.preceptor || ''))} · change` : 'Orientation — pick a preceptor'}</button><!-- Build 550 -->
+      <!-- Build 587 (Tomas): Partial sits above Orientation and is folded by default — the header toggles it; a cell that already
+           holds a partial opens unfolded so its window is visible. -->
       <div style="border:1.5px solid var(--border);border-radius:10px;padding:10px 12px;margin-bottom:10px">
-        <div style="font-size:.8rem;font-weight:600;margin-bottom:6px">⏱ Partial</div>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <button type="button" id="wgcPartHead" aria-expanded="${isPart ? 'true' : 'false'}" style="width:100%;display:flex;align-items:center;justify-content:space-between;background:none;border:0;padding:0;font:inherit;font-size:.8rem;font-weight:600;color:inherit;cursor:pointer">
+          <span>⏱ Partial${isPart ? ` <span style="font-weight:500;color:var(--muted)">· ${escHTML(_wgCellLabel(cur) || '')}</span>` : ''}</span><span id="wgcPartChev" style="color:var(--muted);font-size:.72rem">${isPart ? '▲' : '▼'}</span>
+        </button>
+        <div id="wgcPartBody" style="display:${isPart ? 'flex' : 'none'};align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
           ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">for</span>${_durHtml('wgcDur', isPart ? cur.hours : '')}
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
+      <button type="button" class="btn btn-ghost btn-sm" id="wgcOrient" style="width:100%;margin-bottom:10px" title="${escHTML(firstName(name))} follows a preceptor: no units, no slots">🎓 ${cur.orientation ? `Orientation with ${escHTML(bnDisplayName(cur.preceptor || ''))} · change` : 'Orientation — pick a preceptor'}</button><!-- Build 550 -->
       ${_savedRow ? `<div style="border-top:1px solid var(--border);margin:2px 0 10px;padding-top:10px">
         <div style="font-size:.72rem;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin-bottom:6px">Saved shift · acts right away</div>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -21264,6 +21268,8 @@ function _wgChooser(name, date){
   const close = () => wrap.remove();
   // Build 550: a shift chosen on an orientation cell takes the marker off first (its own write), then stages as usual
   const set = async c => { close(); if(cur.orientation){ if(c === null){ await _wgOrientClear(key, false); return; } await _wgOrientClear(key, true); } _wgEdit(key, c); };
+  { const hd = wrap.querySelector('#wgcPartHead'), bd = wrap.querySelector('#wgcPartBody'), ch = wrap.querySelector('#wgcPartChev'); // Build 587
+    if(hd && bd) hd.onclick = () => { const open = bd.style.display === 'none'; bd.style.display = open ? 'flex' : 'none'; hd.setAttribute('aria-expanded', open ? 'true' : 'false'); if(ch) ch.textContent = open ? '▲' : '▼'; }; }
   wrap.querySelector('#wgcOrient').onclick = () => { // Build 550
     if(_savedRow){ toast(`${firstName(name)} has a saved shift that day — Remove now first, then set the orientation`, true); return; }
     close(); _wgOrientPick(name, date, cur);
