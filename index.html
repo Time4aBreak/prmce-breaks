@@ -1729,7 +1729,7 @@ function initRampCard(){
     row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:76px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
-      <span style="color:var(--muted)">slot timing follows each slot's home shift</span>
+      <span style="color:var(--muted)">one total across Day and Noc slots — no per-shift limits or open times (Build 369)</span>
     </div>
     ${hdr('UNITS PER SHIFT', '', true)}` +
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-14-587'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-15-588'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9845,9 +9845,15 @@ function renderOtherSlotsFromCache(){
       if(booking){
         // Build 201: show the claimant's name so the owner can recognize the
         // slot; entering name+ext flips this row to the mine/Manage path.
+        // Build 588 (Other audit): the 563/564 keyless note, mirrored from the
+        // standard row — a row made FOR this nurse (transfer / the BN's + Log)
+        // carries no code and isn't hers to manage here; the BN does it in My Shift.
+        const _kl = !LOCK_RE.test(parseNurse(booking.NurseName).key);
+        const _klBN = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN) || 'your break nurse';
+        const _nameCell = _kl ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_klBN)} to cancel or transfer</span>` : formatNurse(booking.NurseName);
         return `<div class="slot-row taken" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
-        <div class="slot-name filled">${formatNurse(booking.NurseName)}</div>
+        <div class="slot-name filled">${_nameCell}</div>
       </div>`;
       }
       const pendingKey = _claimKey(time, armShift, st.raw, srcDt);
