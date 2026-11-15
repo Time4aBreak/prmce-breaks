@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-15-590'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-15-591'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -8472,7 +8472,8 @@ async function _loadSlotsCore(silent=false){
       } else if(isPending){
         nameCellHtml = '\u2713 Selected';
       } else if(isOtherShiftClaim){
-        nameCellHtml = `${formatNurse(booking.NurseName)} ⚠`;
+        const _klO = !LOCK_RE.test(parseNurse(booking.NurseName).key); // Build 591: the keyless note on an other-shift row too
+        nameCellHtml = `${formatNurse(booking.NurseName)} ⚠${_klO ? ` <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_st.disp || _slotBNMap[slot] || 'your break nurse')} to cancel or transfer</span>` : ''}`;
       } else if(booking){
         // Build 563: a row made FOR this nurse (transfer / the BN's + Log) carries no code — it isn't hers to manage here
         const _kl = !LOCK_RE.test(parseNurse(booking.NurseName).key); // Build 564: shown to everyone; a pre-Vocera 5-digit key counts as keyless too
@@ -8922,9 +8923,11 @@ function _renderSingleSlotRow(slot){
   } else if(isPending){
     nameCell = '\u2713 Selected';
   } else if(isOtherShiftClaim){
-    nameCell = `${formatNurse(booking.NurseName)} ⚠`;
+    const _klO = !LOCK_RE.test(parseNurse(booking.NurseName).key); // Build 591
+    nameCell = `${formatNurse(booking.NurseName)} ⚠${_klO ? ` <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_st.disp || 'your break nurse')} to cancel or transfer</span>` : ''}`;
   } else if(booking){
-    nameCell = formatNurse(booking.NurseName);
+    const _klM = !LOCK_RE.test(parseNurse(booking.NurseName).key); // Build 591: the mirror paints the 563/564 note too
+    nameCell = _klM ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_st.disp || 'your break nurse')} to cancel or transfer</span>` : formatNurse(booking.NurseName);
   } else {
     // Build 287 rider: the mirror used to label plain 'Available' while the
     // core showed 'Available · BN' — surgical repaints dropped the name.
@@ -17017,6 +17020,36 @@ const _prodLogExpanded = new Set();
 //   Map<slotTime, {name, ext}>
 const _prodLogInputs = new Map();
 
+// Build 591 (Tomas, option A): "→ Transfer" on a pending row — a different STAFF nurse takes this break. Staged like
+// the row's other actions and written on Submit as a NurseName-only patch (keyless, 563), keeping CoveredBy /
+// CreatedBy / IsOtherShift / the slot. Before 591 the BN did Cancel + "+ Log", which lost those stamps.
+//   _prodLogXferOpen: Set<bookingId> rows showing the name box · _prodLogXferName: Map<bookingId, typed name>
+const _prodLogXferOpen = new Set();
+const _prodLogXferName = new Map();
+function openLogTransfer(id){
+  const key = String(id);
+  if(_prodLogXferOpen.has(key)) _prodLogXferOpen.delete(key); else _prodLogXferOpen.add(key);
+  if(!_renderBNConfirm()) loadBNConfirm();
+  if(_prodLogXferOpen.has(key)){ try { const el = document.getElementById(`xferName_${key}`); if(el) el.focus(); } catch(e){} }
+}
+function onLogTransferInput(id, el){ _prodLogXferName.set(String(id), el.value); }
+function stageLogTransfer(id, nurseName, slotTime, unit){
+  const key = String(id);
+  const raw = (_prodLogXferName.get(key) || '').trim();
+  if(!raw){ toast('Enter the name of the nurse taking this break', true); return; }
+  const toName = toTitleCase(raw);
+  if(bareName(toName).toLowerCase() === bareName(nurseName).toLowerCase()){ toast(`${bareName(nurseName)} already has this break`, true); return; }
+  _prodLogStaged.set(key, { action: 'transfer', nurseName, slotTime, unit, toName });
+  _prodLogXferOpen.delete(key); _prodLogXferName.delete(key);
+  _prodLogUpdateHeader();
+  if(!_renderBNConfirm()) loadBNConfirm();
+}
+function unstageLogTransfer(id){
+  _prodLogStaged.delete(String(id));
+  _prodLogUpdateHeader();
+  if(!_renderBNConfirm()) loadBNConfirm();
+}
+
 // ── Background polling ────────────────────────────────────
 // Productivity Log and Coverage tabs poll every 10s while visible to surface
 // changes other users make (staff claiming slots, admins cancelling, etc.).
@@ -17172,7 +17205,7 @@ function _prodLogUpdateHeader(){
       bar.style.display = 'flex';
       if(label){
         // Summarize staged actions for the bar label.
-        let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0;
+        let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0, xfer = 0;
         _prodLogStaged.forEach(info => {
           if(info.action === 'confirmed')        taken++;
           else if(info.action === 'not_taken')   notTaken++;
@@ -17180,11 +17213,13 @@ function _prodLogUpdateHeader(){
           else if(info.action === 'claim')       claim++;
           else if(info.action === 'add_break')   addBreak++;
           else if(info.action === 'remove_break') removeBreak++;
+          else if(info.action === 'transfer')    xfer++; // Build 591
         });
         const parts = [];
         if(taken)       parts.push(`${taken} taken`);
         if(notTaken)    parts.push(`${notTaken} not taken`);
         if(cancel)      parts.push(`${cancel} cancel`);
+        if(xfer)        parts.push(`${xfer} transfer${xfer!==1?'s':''}`);
         if(claim)       parts.push(`${claim} claim${claim!==1?'s':''}`);
         if(addBreak)    parts.push(`${addBreak} my break${addBreak!==1?'s':''}`);
         if(removeBreak) parts.push(`${removeBreak} remove`);
@@ -17513,6 +17548,24 @@ async function submitStagedActions(){
           if(!/not found|404/i.test(e.message || '')) throw e;
         }
         trackDelete(id);
+      } else if(info.action === 'transfer'){
+        // Build 591: the Sign Up transfer's write, from the log. NurseName only — the stream stamps, the flag and the
+        // slot stay; the receiver is keyless and manages the break through this BN (563). The staff side hears about
+        // it through the same slotNotify entry Sign Up writes, keyed by the BOOKING's own date and shift (an overlap
+        // claim on this log can be stored under the other shift).
+        const toName = toTitleCase(info.toName);
+        const _bk = ((_bnConfirmCache && _bnConfirmCache.allBookings) || []).find(x => String(x.Id) === String(id)) || {};
+        const _nDt = String(_bk.SlotDate || _bnDate).slice(0,10), _nSh = _bk.ShiftType || _bnShift;
+        try {
+          const nk = `slotNotify_${_nDt}_${_nSh}`;
+          let notes = []; try { notes = JSON.parse(localStorage.getItem(nk) || '[]'); } catch(e){}
+          notes.push({ type: 'transfer', unit: info.unit, slotTime: info.slotTime, fromNurse: info.nurseName, toNurse: toName, ts: Date.now() });
+          localStorage.setItem(nk, JSON.stringify(notes));
+          setState(nk, notes).catch(()=>{});
+        } catch(e){}
+        await spPatch(LISTS.bookings, id, { NurseName: toName });
+        trackPatch(id, { NurseName: toName });
+        if(_bk && _bk.Id) _bk.NurseName = toName;
       } else if(info.action === 'claim'){
         // Walk-up claim: create a new booking record, already confirmed.
         // Build 139: use captured _bnDate/_bnShift/_bnName instead of live
@@ -17631,7 +17684,7 @@ async function submitStagedActions(){
   _prodLogUpdateHeader();
   if(failCount === 0){
     // Count each action type to build an accurate toast.
-    let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0;
+    let taken = 0, notTaken = 0, cancel = 0, claim = 0, addBreak = 0, removeBreak = 0, xfer = 0;
     entries.forEach(([, info]) => {
       if(info.action === 'confirmed')        taken++;
       else if(info.action === 'not_taken')   notTaken++;
@@ -17639,11 +17692,13 @@ async function submitStagedActions(){
       else if(info.action === 'claim')       claim++;
       else if(info.action === 'add_break')   addBreak++;
       else if(info.action === 'remove_break') removeBreak++;
+      else if(info.action === 'transfer')    xfer++; // Build 591
     });
     const parts = [];
     if(taken)       parts.push(`${taken} taken`);
     if(notTaken)    parts.push(`${notTaken} not taken`);
     if(cancel)      parts.push(`${cancel} cancelled`);
+    if(xfer)        parts.push(`${xfer} transferred`);
     if(claim)       parts.push(`${claim} manual claim${claim!==1?'s':''}`);
     if(addBreak)    parts.push(`${addBreak} break${addBreak!==1?'s':''} added`);
     if(removeBreak) parts.push(`${removeBreak} break${removeBreak!==1?'s':''} removed`);
@@ -17772,6 +17827,7 @@ function handleQueueConflicts(freshBookings){
     const nowNotTaken  = isNotTaken(booking);
     let conflict = false;
     if(action === 'cancelled' && (nowConfirmed || nowNotTaken)) conflict = true;
+    else if(action === 'transfer' && (nowConfirmed || nowNotTaken || booking.NurseName !== info.nurseName)) conflict = true; // Build 591: taken, or moved by someone else, while queued
     else if(action === 'not_taken' && nowConfirmed)             conflict = true;
     else if(action === 'confirmed' && (nowConfirmed || nowNotTaken)){
       // If it's already confirmed, queue is redundant/moot. If now not_taken,
@@ -18690,6 +18746,23 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
           } else {
             // Pending — staging buttons
             const stagedAction = staged ? staged.action : null;
+            const _xferOpen = _prodLogXferOpen.has(String(b.Id)); // Build 591
+            if(stagedAction === 'transfer'){ // Build 591: queued transfer — teal like a queued claim, Undo unstages
+              extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal)';
+              centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>
+                <div style="font-size:.78rem;color:var(--teal-dk);font-weight:600;margin-top:3px">→ Transfer to ${escHTML(staged.toName)}</div>`;
+              actionHtml = `<button class="btn btn-ghost btn-sm" onclick="unstageLogTransfer(${b.Id})" style="color:var(--muted)">↺ Undo</button>`;
+            } else if(_xferOpen){ // Build 591: the name box — name only (563), Enter or ✓ queues, ✕ closes
+              const _typed = _prodLogXferName.get(String(b.Id)) || '';
+              extraStyle = 'background:var(--teal-lt);border:1.5px solid var(--teal)';
+              centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>
+                <div style="display:flex;align-items:center;gap:6px;margin-top:6px;flex-wrap:wrap">
+                  <span style="font-size:.78rem;color:var(--teal-dk);font-weight:600;white-space:nowrap">→ Transfer to</span>
+                  <input id="xferName_${b.Id}" type="text" placeholder="Vocera Name" value="${escHTML(_typed)}" autocomplete="off" oninput="onLogTransferInput(${b.Id}, this)" onkeydown="if(event.key==='Enter'){ event.preventDefault(); stageLogTransfer(${b.Id},'${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}'); }" style="flex:1 1 140px;min-width:120px;padding:6px 8px;font-size:.85rem;border:1px solid var(--border);border-radius:6px">
+                </div>`;
+              actionHtml = `<button class="btn btn-primary btn-sm" onclick="stageLogTransfer(${b.Id},'${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')">✓ Queue</button>
+                <button class="btn btn-ghost btn-sm" onclick="openLogTransfer(${b.Id})" style="color:var(--muted)">✕</button>`;
+            } else {
             const takenCls   = stagedAction === 'confirmed' ? 'btn-success' : 'btn-ghost';
             const notTakenCls = stagedAction === 'not_taken' ? 'btn-primary' : 'btn-ghost';
             const cancelCls  = stagedAction === 'cancelled' ? 'btn-danger' : 'btn-ghost';
@@ -18705,8 +18778,10 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             const _notYet = !isPast; const _gate = _notYet ? ' disabled title="' + fmt12(slot) + " hasn't happened yet\"" : '';
             actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px${_notYet ? ';opacity:.45' : ''}"${_gate}>✓ Taken</button>
               <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}${_notYet ? ';opacity:.45' : ''}"${_gate}>✗ Not Taken</button>
-              <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>`
-              + (_notYet ? `<button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="handOffClaim(${b.Id})" title="Another break nurse gives this break">→ Hand off</button>` : ''); // Build 486
+              <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>
+              <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="openLogTransfer(${b.Id})" title="A different staff nurse takes this break">→ Transfer</button>`
+              + (_notYet ? `<button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="handOffClaim(${b.Id})" title="Another break nurse gives this break">→ Hand off</button>` : ''); // Build 486 · Build 591 adds → Transfer
+            }
           }
         }
         // ── State 4: Unclaimed ─────────────────────────────────────────────
