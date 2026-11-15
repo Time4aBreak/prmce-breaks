@@ -1528,7 +1528,7 @@ function initAcuityCard(){
   const c = _acuityCfg();
   const chip = u => `<div class="uc${c.high.includes(u) ? ' on' : ''}" data-u="${u}" onclick="this.classList.toggle('on')" title="${c.high.includes(u) ? 'High — tap to make Standard' : 'tap to mark High'}">${u}</div>`;
   const tog = sh => `<span class="toggle" style="font-size:.8rem"><span class="toggle-opt${c.cap[sh] ? ' active' : ''}" data-cap="${sh}" data-on="1" onclick="_acuitySetCap('${sh}',true)">On</span><span class="toggle-opt${c.cap[sh] ? '' : ' active'}" data-cap="${sh}" data-on="0" onclick="_acuitySetCap('${sh}',false)">Off</span></span>`;
-  body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tap the units where patients and staff require more of the break nurse. A capped shift never puts two of them on one BN.</div>
+  body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">Tap the units where patients and staff require more of the break nurse.</div>
     <div id="acuityGrid" style="margin-bottom:12px">${_wingRowsHtml(chip)}</div>
     <div style="display:flex;align-items:flex-start;gap:8px;font-size:.85rem">
       <strong style="width:76px;flex:none;line-height:34px">Cap</strong>
@@ -1729,7 +1729,6 @@ function initRampCard(){
     row('Day', 'rampDay', c.Day) + row('Noc', 'rampNoc', c.Noc) +
     `<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:.85rem;margin-bottom:12px">
       <strong style="width:76px">Other</strong> total max ${num('rampOtherTot', c.otherTotal, 8)}
-      <span style="color:var(--muted)">one total across Day and Noc slots — no per-shift limits or open times (Build 369)</span>
     </div>
     ${hdr('UNITS PER SHIFT', '', true)}` +
     covRow('Day', 'covDay', cov.Day.byTeam) + covRow('Noc', 'covNoc', cov.Noc.byTeam) +
@@ -2274,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-15-588'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-15-589'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
