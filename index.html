@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-602'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-604'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19974,9 +19974,9 @@ function _rptRenderTally(T, rangeLabel){
   Object.entries(T.counts).forEach(([k, row]) => { const sh = k.split('|')[1]; Object.values(row).forEach(v => total[sh] += v); });
   card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
     + `<h3 style="margin:0">📊 Break Tally</h3>`
-    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button><button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="rptBreakRNStatsXLSX()" title="The Break RN Stats workbook's layout — an Excel file, cell-for-cell, sized to fit the screen, rows coloured by how many break nurses worked the shift">⬇ Break RN Stats</button></div>`
+    + `<button class="btn btn-ghost btn-sm" onclick="rptBreakRNStatsXLSX()" title="The Break RN Stats workbook's layout — an Excel file, cell-for-cell, sized to fit the screen, rows coloured by how many break nurses worked the shift">⬇ Break RN Stats</button></div>`
     + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks</div>`
-    + _rptTallyBand(T)
+    // Build 604 (Tomas): the weekly shift-eq band (440/441 — shift-eq, per eq, comparable, winner) is hidden; _rptTallyBand kept.
     + _rptTallyTable(T, 'Day') + _rptTallyTable(T, 'Noc');
   card.style.display = 'block';
   window._rptTallyData = T;
