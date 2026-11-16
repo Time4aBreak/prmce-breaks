@@ -2273,7 +2273,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-15-591'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-15-592'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20880,13 +20880,18 @@ function wgGoWeek(wk, name, date){ _wgScrollAfterRender = true; _wgPendingTap = 
 function _wgScrollToBar(){ const pick = document.getElementById('wgWeekPick'); const row = pick && pick.parentElement; if(row && row.scrollIntoView) row.scrollIntoView({ block: 'start' }); }
 function wgSetWeeks(n){ _wgWeeks = n; try { localStorage.setItem('bnWeeklyGridWeeks2', String(n)); } catch(e){} _wgRenderWeeksToggle(); _wgLoadStack(_wgLoadSeq); }
 function _wgRenderWeeksToggle(){ const t = document.getElementById('wgWeeksToggle'); if(!t) return; t.innerHTML = [1, 2, 4].map(n => `<button type="button" class="bn-pill${_wgWeeks === n ? ' active' : ''}" onclick="wgSetWeeks(${n})" style="padding:3px 9px">${n}</button>`).join(''); }
-async function _wgLoadStack(seq){
+async function _wgLoadStack(seq, quiet){
   const host = document.getElementById('wgStack'); if(!host) return;
   if(_wgWeeks <= 1 || !_wgWeek){ _wgStackData = {}; host.innerHTML = ''; return; }
   const weeks = Array.from({ length: _wgWeeks - 1 }, (_, i) => _wgAddDays(_wgWeek, 7 * (i + 1)));
-  _wgStackData = {}; weeks.forEach(w => { _wgStackData[w] = 'loading'; }); _wgRenderStack();
-  await Promise.all(weeks.map(async w => { let r = 'failed'; try { r = await _wgFetchBase(w); } catch(e){ console.warn('[grid] stacked week read failed:', w, e && e.message); } if(seq === _wgLoadSeq && _wgStackData[w] !== undefined) _wgStackData[w] = r; }));
-  if(seq === _wgLoadSeq) _wgRenderStack();
+  // Build 592: when the same stacked weeks are already drawn, keep them up and swap in the new rows in one repaint
+  const keep = !!quiet && weeks.every(w => _wgStackData[w] && typeof _wgStackData[w] === 'object');
+  if(!keep){ _wgStackData = {}; weeks.forEach(w => { _wgStackData[w] = 'loading'; }); _wgRenderStack(); }
+  const fresh = {};
+  await Promise.all(weeks.map(async w => { let r = 'failed'; try { r = await _wgFetchBase(w); } catch(e){ console.warn('[grid] stacked week read failed:', w, e && e.message); } fresh[w] = r; }));
+  if(seq !== _wgLoadSeq) return;
+  weeks.forEach(w => { if(_wgStackData[w] === undefined) return; if(keep && (fresh[w] === 'failed' || !fresh[w])) return; _wgStackData[w] = fresh[w]; }); // a failed quiet read keeps the week it had
+  _wgRenderStack();
 }
 function _wgRenderStack(){
   const host = document.getElementById('wgStack'); if(!host) return;
@@ -21121,11 +21126,17 @@ async function _wgDefaultWeek(){
 }
 async function wgSetWeek(ds, seed){
   if(!ds) return;
+  // Build 592 (Tomas: "a schedule will appear then disappear and reappear"): a re-read of the week ALREADY on screen —
+  // tab entry (584), the poller (584/585), after Save All / Units / Remove / Re-deal — is QUIET: the grid and the
+  // stacked weeks stay up while the sheet is read and repaint once with the new rows. Only a week change or the first
+  // read shows "Reading…". A failed quiet re-read keeps what is on screen and says so once.
+  const quiet = !seed && _wgWeek === _wgSunday(ds) && _wgBaseState === 'ok';
   _wgWeek = _wgSunday(ds);
   document.getElementById('wgWeekPick').value = _wgWeek;
   const seq = ++_wgLoadSeq, wk = _wgWeek;
-  _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseRows = []; _wgBaseState = 'loading';
-  try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
+  if(!quiet){ _wgBase = {}; _wgCells = {}; _wgEdits = {}; _wgFormer = {}; _wgBaseRows = []; _wgBaseState = 'loading';
+    try { const d = JSON.parse(localStorage.getItem(_wgDraftKey()) || 'null'); if(d && typeof d === 'object' && !Array.isArray(d)) _wgEdits = d; } catch(e){}
+  }
   // Build 536 (Tomas): coming from a stacked week, that week's data is already in memory — start from it at once
   // (scroll, replay the tap) and refresh from the sheet quietly afterwards, instead of making the tap wait for a read.
   if(seed && seed.cells){
@@ -21133,17 +21144,18 @@ async function wgSetWeek(ds, seed){
     wgRender();
     if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); }
     if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; wgTap(t.name, t.date); }
-  } else wgRender();
+  } else if(!quiet) wgRender();
   let base = null;
   try { await syncedLS.refresh(_WG_ORIENT_KEY); } catch(e){} // Build 550: one pull per week change; _wgFetchBase and the stack read LS
   try { base = await _wgFetchBase(wk); } catch(e){ console.warn('[grid] week read failed:', e && e.message); }
   if(seq !== _wgLoadSeq) return; // a later week change owns the grid now
   if(base){ _wgBase = base.cells; _wgFormer = base.former; _wgBaseRows = base.rows; _wgDups = base.dups || new Set(); _wgBaseState = 'ok'; _wgMerge(); _wgSaveDraft(); } // 556: dups // the pruned draft is written back only after a good read
+  else if(quiet){ toast("Couldn't refresh the schedule — showing the last read", true); _wgLoadStack(seq, true); return; } // Build 592: keep the screen
   else if(!(seed && seed.cells)) _wgBaseState = 'failed'; // Build 536: a seeded week keeps its seed if the refresh fails
   wgRender();
   if(_wgScrollAfterRender){ _wgScrollAfterRender = false; _wgScrollToBar(); } // Build 532
   if(_wgPendingTap && _wgPendingTap.wk === wk){ const t = _wgPendingTap; _wgPendingTap = null; if(_wgBaseState === 'ok') wgTap(t.name, t.date); } // Build 533
-  _wgLoadStack(seq); // Build 530: the weeks after this one
+  _wgLoadStack(seq, quiet); // Build 530: the weeks after this one · 592: quietly when they are already up
 }
 function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * n)); }
 // Build 438 (Tomas): a saved week can't be "cleared" here — deleting saved shifts is
