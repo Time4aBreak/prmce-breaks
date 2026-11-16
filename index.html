@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-597'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-598'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20226,28 +20226,33 @@ function _rptHeat(bookings){
 let _rptHeatOpen = false; // per load, collapsed by default (Tomas)
 function _rptToggleHeat(){ _rptHeatOpen = !_rptHeatOpen; const b = document.getElementById('rptHeatBody'), ch = document.getElementById('rptHeatChev'); if(b) b.style.display = _rptHeatOpen ? 'block' : 'none'; if(ch) ch.textContent = _rptHeatOpen ? '▲' : '▼'; const hd = document.getElementById('rptHeatHead'); if(hd) hd.setAttribute('aria-expanded', _rptHeatOpen ? 'true' : 'false'); }
 function _rptRenderHeat(H, rangeLabel){
+  // Build 598 (Tomas): a LINE over the 24-hour day, 7 AM → 7 AM, taken breaks only (not-taken and never-marked left
+  // out). Day and Noc rows are summed per slot hour; the night half (7 PM → 7 AM) sits on a faint band.
   const card = document.getElementById('rptHeatCard');
   if(!card) return;
-  const total = H.taken + H.notTaken + H.open;
-  const h12 = h => { const x = h % 12 || 12; return `${x} ${h < 12 ? 'AM' : 'PM'}`; };
-  const cell = (c) => {
-    if(!c || (!c.taken && !c.notTaken && !c.open)) return `<td style="padding:4px 6px;text-align:center;color:var(--muted);border:1px solid var(--border);font-size:.78rem">·</td>`;
-    const a = H.max ? Math.max(0.08, c.taken / H.max) : 0;
-    const bg = `rgba(11,112,112,${(a * 0.85).toFixed(2)})`; const fg = a > 0.5 ? '#fff' : 'var(--text)';
-    const nt = c.notTaken ? `<span style="color:${a > 0.5 ? '#ffd3d3' : 'var(--red)'};font-weight:700"> ·${c.notTaken}</span>` : '';
-    const op = c.open ? `<span style="color:${a > 0.5 ? '#e6e6e6' : 'var(--muted)'}"> ·${c.open}?</span>` : '';
-    return `<td style="padding:4px 6px;text-align:center;border:1px solid var(--border);background:${bg};color:${fg};font-size:.78rem;white-space:nowrap"><b>${c.taken}</b>${nt}${op}</td>`;
-  };
-  let rows = '';
-  for(let i = 0; i < 14; i++){ const dh = 6 + i, nh = (18 + i) % 24; rows += `<tr><td style="padding:4px 6px;white-space:nowrap;color:var(--muted);border:1px solid var(--border);font-size:.78rem">${h12(dh)}</td>${cell(H.Day[dh])}<td style="padding:4px 6px;white-space:nowrap;color:var(--muted);border:1px solid var(--border);font-size:.78rem">${h12(nh)}</td>${cell(H.Noc[nh])}</tr>`; }
+  const hours = Array.from({ length: 24 }, (_, i) => (7 + i) % 24);
+  const vals = hours.map(h => ((H.Day[h] || {}).taken || 0) + ((H.Noc[h] || {}).taken || 0));
+  const max = Math.max(1, ...vals), total = vals.reduce((a, b) => a + b, 0);
+  const W = 720, Hh = 230, L = 36, R = 12, Tp = 18, B = 34; const iw = W - L - R, ih = Hh - Tp - B;
+  const x = i => L + (i * iw) / 23, y = v => Tp + ih - (v * ih) / max;
+  const h12 = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
+  // y grid: 4 lines at round steps
+  const step = max <= 4 ? 1 : max <= 10 ? 2 : max <= 25 ? 5 : max <= 50 ? 10 : max <= 100 ? 20 : max <= 250 ? 50 : 100;
+  let grid = '';
+  for(let v = 0; v <= max; v += step) grid += `<line x1="${L}" x2="${W - R}" y1="${y(v).toFixed(1)}" y2="${y(v).toFixed(1)}" stroke="var(--border)" stroke-width="1"/><text x="${L - 6}" y="${(y(v) + 3.5).toFixed(1)}" text-anchor="end" font-size="10" fill="var(--muted)">${v}</text>`;
+  const night = `<rect x="${x(12).toFixed(1)}" y="${Tp}" width="${(x(23) - x(12)).toFixed(1)}" height="${ih}" fill="#3b6cb7" opacity="0.06"/>`; // 7 PM → 6 AM
+  const path = vals.map((v, i) => `${i ? 'L' : 'M'}${x(i).toFixed(1)},${y(v).toFixed(1)}`).join(' ');
+  const area = `${path} L${x(23).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
+  const dots = vals.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="#fff" stroke="var(--teal)" stroke-width="2"><title>${h12(hours[i])} – ${h12((hours[i] + 1) % 24)}: ${v} taken</title></circle>`).join('');
+  const peak = vals.indexOf(Math.max(...vals));
+  const peakLbl = total ? `<text x="${x(peak).toFixed(1)}" y="${(y(vals[peak]) - 8).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--teal-dk)">${vals[peak]}</text>` : '';
+  const ticks = hours.map((h, i) => (i % 3 === 0 || i === 23) ? `<text x="${x(i).toFixed(1)}" y="${Hh - B + 16}" text-anchor="middle" font-size="10" fill="var(--muted)">${h12(h)}</text>` : '').join('');
+  const svg = `<svg viewBox="0 0 ${W} ${Hh}" width="100%" style="display:block;max-width:${W}px;font-family:inherit" role="img" aria-label="Taken breaks by hour, 7 AM to 7 AM">${night}${grid}<path d="${area}" fill="var(--teal)" opacity="0.10"/><path d="${path}" fill="none" stroke="var(--teal)" stroke-width="2.5" stroke-linejoin="round"/>${dots}${peakLbl}${ticks}<text x="${(x(12) + x(23)) / 2}" y="${Tp + 11}" text-anchor="middle" font-size="9.5" fill="#3b6cb7" opacity="0.7">night</text></svg>`;
   card.innerHTML = `<button type="button" id="rptHeatHead" onclick="_rptToggleHeat()" aria-expanded="${_rptHeatOpen ? 'true' : 'false'}" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px">`
-    + `<h3 style="margin:0">🕒 Breaks by Hour <span style="font-size:.75rem;color:var(--muted);font-weight:400">${total ? `${H.taken} taken · ${H.notTaken} not taken${H.open ? ` · ${H.open} unresolved` : ''}` : 'no staff breaks in range'}</span></h3>`
+    + `<h3 style="margin:0">🕒 Breaks by Hour <span style="font-size:.75rem;color:var(--muted);font-weight:400">${total ? `${total} taken · peak ${h12(hours[peak])} (${vals[peak]})` : 'no taken breaks in range'}</span></h3>`
     + `<span id="rptHeatChev" style="color:var(--muted);font-size:.85rem">${_rptHeatOpen ? '▲' : '▼'}</span></button>`
     + `<div id="rptHeatBody" style="display:${_rptHeatOpen ? 'block' : 'none'};margin-top:8px">`
-    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">Taken breaks per hour of the shift, darker = busier — ${rangeLabel}. <span style="color:var(--red);font-weight:700">·n</span> = not taken at that hour · <span style="color:var(--muted)">·n?</span> = claimed, never marked.</div>`
-    + `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.78rem">`
-    + `<tr><th style="padding:3px 6px;text-align:left;border-bottom:1.5px solid var(--border)">☀️ Day</th><th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">taken</th><th style="padding:3px 6px;text-align:left;border-bottom:1.5px solid var(--border)">🌙 Noc</th><th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">taken</th></tr>`
-    + rows + `</table></div></div>`;
+    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:6px">Taken breaks per hour of the day, 7 AM → 7 AM, both shifts — ${rangeLabel}.</div>${svg}</div>`;
   card.style.display = 'block';
 }
 
