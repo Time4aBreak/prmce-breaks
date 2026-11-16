@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-594'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-595'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20028,7 +20028,8 @@ function rptBreakRNStatsXLSX(){
   const put = (c, r, v, t, st) => { if(v === undefined || v === null || v === '') return; cells[`${col(c)}${r + 1}`] = { v, t: t || 's', s: st || 0 }; };
   const cnt = (ds, sh, u) => { const cov = T.covered && T.covered[ds + '|' + sh]; if(!cov || !cov.has(u)) return null; return (T.counts[ds + '|' + sh] || {})[u] || 0; };
   // row 1: the legend, tinted
-  put(0, 0, '3 RNs', 's', S.legend1); put(1, 0, '2 RNs', 's', S.legend2); put(2, 0, '1 RN', 's', S.legend3); put(3, 0, '4+ RNs', 's', S.legend4);
+  // 595: "1 RN" sits in a narrow unit column and may overflow into D1, so the 4+ swatch goes to the first wide column (R1)
+  put(0, 0, '3 RNs', 's', S.legend1); put(1, 0, '2 RNs', 's', S.legend2); put(2, 0, '1 RN', 's', S.legend3); put(totDay - 1, 0, '4+ RNs', 's', S.legend4);
   // row 2: headers
   put(0, 1, 'DAYS', 's', S.bold); HDR.forEach((h, i) => put(dayC0 + i, 1, h, 's', S.bold)); put(nocD, 1, 'NOCS', 's', S.bold); HDR.forEach((h, i) => put(nocC0 + i, 1, h, 's', S.bold));
   const sun = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); };
