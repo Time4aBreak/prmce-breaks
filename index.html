@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-595'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-596'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19997,7 +19997,7 @@ function _xlsxSheetXml(cells, colWidths, freeze, zoom){
   const colIdx = ref => { const L = ref.replace(/\d+$/, ''); let n = 0; for(const ch of L) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
   const rows = Object.keys(byRow).map(Number).sort((a, b) => a - b).map(r => {
     const cs = byRow[r].sort((a, b) => colIdx(a) - colIdx(b)).map(ref => { const c = cells[ref]; const st = c.s ? ` s="${c.s}"` : '';
-      if(c.t === 'f') return `<c r="${ref}"${st}><f>${_xlsxEsc(c.v.replace(/^=/, ''))}</f></c>`;
+      if(c.t === 'f') return `<c r="${ref}"${st}><f>${_xlsxEsc(c.v.replace(/^=/, ''))}</f>${c.cv !== undefined ? `<v>${c.cv}</v>` : ''}</c>`; // 596: cached value so the totals show before any recalc
       if(c.t === 'n' || c.t === 'd') return `<c r="${ref}"${st}><v>${c.v}</v></c>`;
       return `<c r="${ref}"${st} t="inlineStr"><is><t>${_xlsxEsc(c.v)}</t></is></c>`; }).join('');
     return `<row r="${r}">${cs}</row>`; }).join('');
@@ -20009,7 +20009,7 @@ function _xlsxBlob(sheetName, cells, colWidths, freeze, zoom){
   const files = [
     { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
     { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
-    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${_xlsxEsc(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${_xlsxEsc(sheetName)}" sheetId="1" r:id="rId1"/></sheets><calcPr fullCalcOnLoad="1"/></workbook>` },
     { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
     { name: 'xl/styles.xml', text: _xlsxStylesXml() },
     { name: 'xl/worksheets/sheet1.xml', text: _xlsxSheetXml(cells, colWidths, freeze, zoom) }
@@ -20025,7 +20025,7 @@ function rptBreakRNStatsXLSX(){
   const dayC0 = 2, dayC1 = dayC0 + 14, totDay = dayC1 + 2, nocD = totDay + 1, nocC0 = nocD + 2, nocC1 = nocC0 + 14, totNoc = nocC1 + 2, tot24 = totNoc + 3;
   const S = _XLSX_STYLES; const tone = n => n >= 4 ? 4 : n; // 1/2/3/4+
   const cells = {};
-  const put = (c, r, v, t, st) => { if(v === undefined || v === null || v === '') return; cells[`${col(c)}${r + 1}`] = { v, t: t || 's', s: st || 0 }; };
+  const put = (c, r, v, t, st, cv) => { if(v === undefined || v === null || v === '') return; cells[`${col(c)}${r + 1}`] = { v, t: t || 's', s: st || 0, cv }; }; // 596: cv = cached value for a formula
   const cnt = (ds, sh, u) => { const cov = T.covered && T.covered[ds + '|' + sh]; if(!cov || !cov.has(u)) return null; return (T.counts[ds + '|' + sh] || {})[u] || 0; };
   // row 1: the legend, tinted
   // 595: "1 RN" sits in a narrow unit column and may overflow into D1, so the 4+ swatch goes to the first wide column (R1)
@@ -20035,25 +20035,27 @@ function rptBreakRNStatsXLSX(){
   const sun = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); };
   const weeks = [...new Set(T.dates.map(sun))].sort();
   weeks.forEach((w, wi) => {
-    const r0 = 2 + wi * 11;
+    const r0 = 2 + wi * 11; const wkD = U.map(() => 0), wkN = U.map(() => 0); // 596: the week's per-unit sums (cached values)
     for(let i = 0; i < 7; i++){
       const d = new Date(w + 'T12:00:00'); d.setDate(d.getDate() + i); const ds = localDate(d); const r = r0 + i; const xl = r + 1;
       const hd = (T.heads || {})[ds + '|Day'] || 0, hn = (T.heads || {})[ds + '|Noc'] || 0;
       const fD = hd ? S.fill[tone(hd)] : 0, fDd = hd ? S.fillDate[tone(hd)] : S.date, fDb = hd ? S.fillBold[tone(hd)] : S.bold;
       const fN = hn ? S.fill[tone(hn)] : 0, fNd = hn ? S.fillDate[tone(hn)] : S.date, fNb = hn ? S.fillBold[tone(hn)] : S.bold;
+      let sumD = 0, sumN = 0;
       put(0, r, _xlsxSerial(ds), 'd', fDd); put(1, r, DOW[i], 's', fD);
-      U.forEach((u, j) => { const v = cnt(ds, 'Day', u); if(v === null) put(dayC0 + j, r, 'n/a', 's', hd ? fD : S.na); else put(dayC0 + j, r, v, 'n', fD); });
-      put(totDay - 1, r, 'Total/Day', 's', fD); put(totDay, r, `=SUM(${col(dayC0)}${xl}:${col(dayC1)}${xl})`, 'f', fDb);
+      U.forEach((u, j) => { const v = cnt(ds, 'Day', u); if(v === null) put(dayC0 + j, r, 'n/a', 's', hd ? fD : S.na); else { put(dayC0 + j, r, v, 'n', fD); sumD += v; wkD[j] += v; } });
+      put(totDay - 1, r, 'Total/Day', 's', fD); put(totDay, r, `=SUM(${col(dayC0)}${xl}:${col(dayC1)}${xl})`, 'f', fDb, sumD);
       put(nocD, r, _xlsxSerial(ds), 'd', fNd); put(nocD + 1, r, DOW[i], 's', fN);
-      U.forEach((u, j) => { const v = cnt(ds, 'Noc', u); if(v === null) put(nocC0 + j, r, 'n/a', 's', hn ? fN : S.na); else put(nocC0 + j, r, v, 'n', fN); });
-      put(totNoc - 1, r, 'Total/Night', 's', fN); put(totNoc, r, `=SUM(${col(nocC0)}${xl}:${col(nocC1)}${xl})`, 'f', fNb);
-      put(tot24 - 1, r, 'Total/24hrs', 's', 0); put(tot24, r, `=SUM(${col(totDay)}${xl}+${col(totNoc)}${xl})`, 'f', S.bold);
+      U.forEach((u, j) => { const v = cnt(ds, 'Noc', u); if(v === null) put(nocC0 + j, r, 'n/a', 's', hn ? fN : S.na); else { put(nocC0 + j, r, v, 'n', fN); sumN += v; wkN[j] += v; } });
+      put(totNoc - 1, r, 'Total/Night', 's', fN); put(totNoc, r, `=SUM(${col(nocC0)}${xl}:${col(nocC1)}${xl})`, 'f', fNb, sumN);
+      put(tot24 - 1, r, 'Total/24hrs', 's', 0); put(tot24, r, `=SUM(${col(totDay)}${xl}+${col(totNoc)}${xl})`, 'f', S.bold, sumD + sumN);
     }
     const rt = r0 + 8, xl0 = r0 + 1, xl1 = r0 + 7, xlt = rt + 1;
-    put(0, rt, 'Total/week', 's', S.bold); put(1, rt, `=SUM(${col(dayC0)}${xlt}:${col(dayC1)}${xlt})`, 'f', S.bold);
-    U.forEach((u, j) => { const c = col(dayC0 + j); put(dayC0 + j, rt, `=SUM(${c}${xl0}:${c}${xl1})`, 'f', S.bold); const cn = col(nocC0 + j); put(nocC0 + j, rt, `=SUM(${cn}${xl0}:${cn}${xl1})`, 'f', S.bold); });
-    put(nocD, rt, 'Total/week', 's', S.bold); put(nocD + 1, rt, `=SUM(${col(nocC0)}${xlt}:${col(nocC1)}${xlt})`, 'f', S.bold);
-    put(tot24 - 1, rt + 1, 'Total/week', 's', S.bold); put(tot24, rt + 1, `=SUM(${col(1)}${xlt},${col(nocD + 1)}${xlt})`, 'f', S.bold);
+    const wD = wkD.reduce((a, b) => a + b, 0), wN = wkN.reduce((a, b) => a + b, 0);
+    put(0, rt, 'Total/week', 's', S.bold); put(1, rt, `=SUM(${col(dayC0)}${xlt}:${col(dayC1)}${xlt})`, 'f', S.bold, wD);
+    U.forEach((u, j) => { const c = col(dayC0 + j); put(dayC0 + j, rt, `=SUM(${c}${xl0}:${c}${xl1})`, 'f', S.bold, wkD[j]); const cn = col(nocC0 + j); put(nocC0 + j, rt, `=SUM(${cn}${xl0}:${cn}${xl1})`, 'f', S.bold, wkN[j]); });
+    put(nocD, rt, 'Total/week', 's', S.bold); put(nocD + 1, rt, `=SUM(${col(nocC0)}${xlt}:${col(nocC1)}${xlt})`, 'f', S.bold, wN);
+    put(tot24 - 1, rt + 1, 'Total/week', 's', S.bold); put(tot24, rt + 1, `=SUM(${col(1)}${xlt},${col(nocD + 1)}${xlt})`, 'f', S.bold, wD + wN);
   });
   const widths = []; for(let c = 0; c <= tot24; c++) widths[c] = 4.6;
   widths[0] = 9.5; widths[1] = 10; widths[totDay - 1] = 9; widths[nocD] = 9.5; widths[nocD + 1] = 10; widths[totNoc - 1] = 10; widths[tot24 - 1] = 10.5; widths[totDay] = 5.5; widths[totNoc] = 5.5; widths[tot24] = 5.5;
