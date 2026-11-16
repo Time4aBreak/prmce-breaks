@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-599'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-602'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19586,8 +19586,8 @@ function _rptRenderRotation(rot){
   co.innerHTML = _conc
     ? `⚠️ <strong>${escHTML(flag.u)}</strong> went to ${escHTML(bnDisplayName(flag.bn))} ${flag.top} of ${flag.total} assignments — next closest is ${flag.second}.`
     : `✅ No unit is concentrated on a single break nurse in this range.`;
-  const td = 'padding:5px 7px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
-  const th = 'padding:5px 7px;font-size:.66rem;color:var(--muted);text-align:center;font-family:\'DM Mono\',monospace';
+  const td = 'padding:4px 6px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.76rem'; // 602: a touch tighter so the grid fits beside the table
+  const th = 'padding:4px 6px;font-size:.64rem;color:var(--muted);text-align:center;font-family:\'DM Mono\',monospace';
   // Build 459 (Tomas: option 1): the per-nurse fairness numbers as a compact table;
   // the nurse × unit grid stays behind a toggle for when the callout sends you to it.
   const row = bn => { const total = Object.values(rot.grid[bn] || {}).reduce((a, c) => a + c, 0);
@@ -19597,17 +19597,20 @@ function _rptRenderRotation(rot){
   const sth = 'padding:5px 9px;font-size:.66rem;color:var(--muted);text-align:center;text-transform:uppercase;letter-spacing:.05em';
   const std = 'padding:5px 9px;text-align:center;font-family:\'DM Mono\',monospace;font-size:.8rem';
   // Build 583 (Tomas): the two-High column is gone — the cap is enforced by the dealer (Settings), not reported here
-  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">Even shares settle near <strong>43% A / 57% D</strong> (D has 8 of 14 units) · span = floors stretched per assignment</div>`
-    + `<table style="border-collapse:collapse"><tr><th style="${sth};text-align:left">Nurse</th><th style="${sth}">Shifts</th><th style="${sth}">A-wing</th><th style="${sth}">D-wing</th><th style="${sth}">Span</th></tr>`
+  // Build 602 (Tomas): the Span column is gone; the per-nurse table and the unit grid sit side by side when the card is
+  // wide enough (the grid stacks beneath on a phone), so the card's right half is no longer empty.
+  body.innerHTML = `<div style="font-size:.72rem;color:var(--muted);margin-bottom:8px;line-height:1.4">Even shares settle near <strong>43% A / 57% D</strong> (D has 8 of 14 units)</div>`
+    + `<div style="display:flex;flex-wrap:wrap;gap:8px 28px;align-items:flex-start"><div style="flex:0 0 auto">`
+    + `<table style="border-collapse:collapse"><tr><th style="${sth};text-align:left">Nurse</th><th style="${sth}">Shifts</th><th style="${sth}">A-wing</th><th style="${sth}">D-wing</th></tr>`
     + rows.map(r => `<tr style="border-top:1px solid var(--border)"><td style="${std};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(r.bn))}</strong>${r.split ? `<span style="font-size:.62rem;color:#a06a00;margin-left:6px">split-wing ${r.split}</span>` : ''}</td>`
-      + `<td style="${std}">${r.shifts}</td><td style="${std}">${r.aPct}%</td><td style="${std}">${r.dPct}%</td><td style="${std}">${r.span}</td></tr>`).join('')
+      + `<td style="${std}">${r.shifts}</td><td style="${std}">${r.aPct}%</td><td style="${std}">${r.dPct}%</td></tr>`).join('')
     + `</table>`
-    + `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="const g=document.getElementById('rptRotationGrid');const o=g.style.display==='none';g.style.display=o?'':'none';this.textContent=o?'Hide unit grid':'Show unit grid'">Show unit grid</button>`
-    + `<div id="rptRotationGrid" style="display:none;overflow-x:auto;margin-top:8px"><table style="border-collapse:collapse">
+    + `<button type="button" class="btn btn-ghost btn-sm" style="margin-top:10px" onclick="const g=document.getElementById('rptRotationGrid');const o=g.style.display==='none';g.style.display=o?'':'none';this.textContent=o?'Hide unit grid':'Show unit grid'">Show unit grid</button></div>`
+    + `<div id="rptRotationGrid" style="display:none;flex:1 1 400px;min-width:0;overflow-x:auto"><table style="border-collapse:collapse">
     <tr><th style="${th};text-align:left">Nurse</th>${units.map(u => `<th style="${th}">${escHTML(u)}</th>`).join('')}</tr>
     ${bns.map(bn => `<tr style="border-top:1px solid var(--border)"><td style="${td};text-align:left;white-space:nowrap"><strong>${escHTML(bnDisplayName(bn))}</strong></td>`
       + units.map(u => { const c = rot.grid[bn] && rot.grid[bn][u] || 0; return `<td style="${td};color:${c ? 'var(--text)' : 'var(--border)'}">${c || ''}</td>`; }).join('') + `</tr>`).join('')}
-  </table></div>`;
+  </table></div></div>`;
   document.getElementById('rptRotationCard').style.display = 'block';
   return !_conc; // Build 292: snapshot consumes the verdict
 }
@@ -19851,17 +19854,29 @@ function _rptTallyBand(T){
 // "show all days" opens every week. The 420 header repeat stays every 4th week. Weekly Avg, the day-of-week averages,
 // the staffing line and the unresolved line are unchanged.
 const _rptTallyOpen = { Day: new Set(), Noc: new Set() }; // open week keys per shift, this load only
-function _rptTallyToggleWeek(shift, key){
-  const set = _rptTallyOpen[shift]; set.has(key) ? set.delete(key) : set.add(key);
-  const open = set.has(key);
+// 600 (Tomas: "the show all days / collapse all switch is not consistent"): the link's words always follow the real
+// state — "collapse all" only when every week is open, "show all days" otherwise — after single-week taps too, and on
+// every copy of the link (the 420 header repeat carries one per 4 weeks).
+function _rptTallySyncAll(shift){
+  const set = _rptTallyOpen[shift];
+  document.querySelectorAll(`#rptTallyCard [data-twall="${shift}"]`).forEach(lnk => {
+    let keys = []; try { keys = JSON.parse(lnk.dataset.twkeys || '[]'); } catch(e){}
+    lnk.textContent = keys.length && keys.every(k => set.has(k)) ? 'collapse all' : 'show all days';
+  });
+}
+function _rptTallyShowWeek(shift, key, open){
   document.querySelectorAll(`#rptTallyCard tr[data-tw="${shift}|${key}"]`).forEach(tr => { tr.style.display = open ? '' : 'none'; });
   const chev = document.querySelector(`#rptTallyCard [data-twchev="${shift}|${key}"]`); if(chev) chev.textContent = open ? '▾' : '▸';
 }
+function _rptTallyToggleWeek(shift, key){
+  const set = _rptTallyOpen[shift]; set.has(key) ? set.delete(key) : set.add(key);
+  _rptTallyShowWeek(shift, key, set.has(key));
+  _rptTallySyncAll(shift);
+}
 function _rptTallyToggleAll(shift, keys){
-  const set = _rptTallyOpen[shift]; const allOpen = keys.every(k => set.has(k));
-  keys.forEach(k => { if(allOpen) set.delete(k); else set.add(k); });
-  keys.forEach(k => { const open = set.has(k); document.querySelectorAll(`#rptTallyCard tr[data-tw="${shift}|${k}"]`).forEach(tr => { tr.style.display = open ? '' : 'none'; }); const chev = document.querySelector(`#rptTallyCard [data-twchev="${shift}|${k}"]`); if(chev) chev.textContent = open ? '▾' : '▸'; });
-  const lnk = document.querySelector(`#rptTallyCard [data-twall="${shift}"]`); if(lnk) lnk.textContent = allOpen ? 'show all days' : 'collapse all';
+  const set = _rptTallyOpen[shift]; const allOpen = keys.length > 0 && keys.every(k => set.has(k));
+  keys.forEach(k => { if(allOpen) set.delete(k); else set.add(k); _rptTallyShowWeek(shift, k, set.has(k)); });
+  _rptTallySyncAll(shift);
 }
 function _rptTallyTable(T, shift){
   const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
@@ -19874,7 +19889,7 @@ function _rptTallyTable(T, shift){
   const keys = weeks.map(w => w.key);
   const allOpen = keys.length > 0 && keys.every(k => _rptTallyOpen[shift].has(k));
   const span = w => { const a = w.days[0], b = w.days[w.days.length - 1]; const ma = MON[Number(a.slice(5, 7)) - 1], mb = MON[Number(b.slice(5, 7)) - 1]; return a === b ? `${ma} ${Number(a.slice(8, 10))}` : `${ma} ${Number(a.slice(8, 10))}–${ma === mb ? '' : mb + ' '}${Number(b.slice(8, 10))}`; };
-  const headerRow = `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border);white-space:nowrap">${shift === 'Day' ? 'DAYS' : 'NOCS'} <a href="#" data-twall="${shift}" onclick="event.preventDefault(); _rptTallyToggleAll('${shift}', ${JSON.stringify(keys).replace(/"/g, '&quot;')})" style="font-weight:400;color:var(--teal-dk);margin-left:6px">${allOpen ? 'collapse all' : 'show all days'}</a></th>`
+  const headerRow = `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border);white-space:nowrap">${shift === 'Day' ? 'DAYS' : 'NOCS'} <a href="#" data-twall="${shift}" data-twkeys="${JSON.stringify(keys).replace(/"/g, '&quot;')}" onclick="event.preventDefault(); _rptTallyToggleAll('${shift}', JSON.parse(this.dataset.twkeys))" style="font-weight:400;color:var(--teal-dk);margin-left:6px">${allOpen ? 'collapse all' : 'show all days'}</a></th>`
     + T.units.map(u => `<th style="padding:3px 4px;border-bottom:1.5px solid var(--border)">${u}</th>`).join('')
     + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Total</th></tr>`;
   let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.7rem">` + headerRow;
@@ -19911,6 +19926,10 @@ function _rptTallyTable(T, shift){
       + T.units.map(u => { const a = (rangeTotals[u] || 0) / weekCount; const d = a.toFixed(1); return `<td style="text-align:center;padding:3px 4px;color:var(--teal-dk)">${a ? (d.endsWith('.0') ? d.slice(0, -2) : d) : ''}</td>`; }).join('')
       + `<td style="text-align:center;padding:3px 5px;color:var(--teal-dk)">${(rangeSum / weekCount).toFixed(1)}</td></tr>`;
   }
+  // 601 (Tomas: "let's hide it all"): the day-of-week averages, the staffing line and the unresolved line are hidden —
+  // the table ends after Weekly Avg. The code stays behind _RPT_TALLY_FOOT for restoration.
+  const _RPT_TALLY_FOOT = false;
+  if(!_RPT_TALLY_FOOT){ html += `</table></div>`; return html; }
   const dowAgg = {};
   T.dates.forEach(ds => {
     const dw = new Date(ds + 'T12:00:00').getDay();
