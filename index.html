@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-598'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-599'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20233,7 +20233,7 @@ function _rptRenderHeat(H, rangeLabel){
   const hours = Array.from({ length: 24 }, (_, i) => (7 + i) % 24);
   const vals = hours.map(h => ((H.Day[h] || {}).taken || 0) + ((H.Noc[h] || {}).taken || 0));
   const max = Math.max(1, ...vals), total = vals.reduce((a, b) => a + b, 0);
-  const W = 720, Hh = 230, L = 36, R = 12, Tp = 18, B = 34; const iw = W - L - R, ih = Hh - Tp - B;
+  const W = 720, Hh = 230, L = 36, R = 12, Tp = 24, B = 34; const iw = W - L - R, ih = Hh - Tp - B; // 599: a little headroom for the point labels
   const x = i => L + (i * iw) / 23, y = v => Tp + ih - (v * ih) / max;
   const h12 = h => `${h % 12 || 12}${h < 12 ? 'a' : 'p'}`;
   // y grid: 4 lines at round steps
@@ -20245,8 +20245,9 @@ function _rptRenderHeat(H, rangeLabel){
   const area = `${path} L${x(23).toFixed(1)},${y(0).toFixed(1)} L${x(0).toFixed(1)},${y(0).toFixed(1)} Z`;
   const dots = vals.map((v, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(v).toFixed(1)}" r="3" fill="#fff" stroke="var(--teal)" stroke-width="2"><title>${h12(hours[i])} – ${h12((hours[i] + 1) % 24)}: ${v} taken</title></circle>`).join('');
   const peak = vals.indexOf(Math.max(...vals));
-  const peakLbl = total ? `<text x="${x(peak).toFixed(1)}" y="${(y(vals[peak]) - 8).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="700" fill="var(--teal-dk)">${vals[peak]}</text>` : '';
-  const ticks = hours.map((h, i) => (i % 3 === 0 || i === 23) ? `<text x="${x(i).toFixed(1)}" y="${Hh - B + 16}" text-anchor="middle" font-size="10" fill="var(--muted)">${h12(h)}</text>` : '').join('');
+  // 599 (Tomas): every point carries its total (the peak in bold); the hour ticks are the odd hours, 7a 9a 11a … 5a
+  const peakLbl = total ? vals.map((v, i) => `<text x="${x(i).toFixed(1)}" y="${(y(v) - 7).toFixed(1)}" text-anchor="middle" font-size="${i === peak ? 10 : 9}" font-weight="${i === peak ? 700 : 500}" fill="${i === peak ? 'var(--teal-dk)' : 'var(--text)'}" stroke="#fff" stroke-width="3" paint-order="stroke" stroke-linejoin="round">${v}</text>`).join('') : ''; // a white halo keeps the figure legible where the line crosses it
+  const ticks = hours.map((h, i) => (i % 2 === 0) ? `<text x="${x(i).toFixed(1)}" y="${Hh - B + 16}" text-anchor="middle" font-size="10" fill="var(--muted)">${h12(h)}</text>` : '').join('');
   const svg = `<svg viewBox="0 0 ${W} ${Hh}" width="100%" style="display:block;max-width:${W}px;font-family:inherit" role="img" aria-label="Taken breaks by hour, 7 AM to 7 AM">${night}${grid}<path d="${area}" fill="var(--teal)" opacity="0.10"/><path d="${path}" fill="none" stroke="var(--teal)" stroke-width="2.5" stroke-linejoin="round"/>${dots}${peakLbl}${ticks}<text x="${(x(12) + x(23)) / 2}" y="${Tp + 11}" text-anchor="middle" font-size="9.5" fill="#3b6cb7" opacity="0.7">night</text></svg>`;
   card.innerHTML = `<button type="button" id="rptHeatHead" onclick="_rptToggleHeat()" aria-expanded="${_rptHeatOpen ? 'true' : 'false'}" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px">`
     + `<h3 style="margin:0">🕒 Breaks by Hour <span style="font-size:.75rem;color:var(--muted);font-weight:400">${total ? `${total} taken · peak ${h12(hours[peak])} (${vals[peak]})` : 'no taken breaks in range'}</span></h3>`
