@@ -644,7 +644,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     </div>
 
     <div class="card" id="rptTallyCard" style="display:none"></div>
-    <div class="card" id="rptVsCard" style="display:none"></div>
+    <div class="card" id="rptHeatCard" style="display:none"></div><!-- Build 593: breaks by hour -->
+    <div class="card" id="rptVsCard" style="display:none"></div><!-- Build 593: hidden for now (Tomas) — _rptRenderVs kept -->
   </div><!-- /rptPanel -->
     </div><!-- /subtab-reports -->
 
@@ -2273,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-15-592'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-594'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19930,7 +19931,7 @@ function _rptRenderTally(T, rangeLabel){
   Object.entries(T.counts).forEach(([k, row]) => { const sh = k.split('|')[1]; Object.values(row).forEach(v => total[sh] += v); });
   card.innerHTML = `<div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">`
     + `<h3 style="margin:0">📊 Break Tally</h3>`
-    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button><button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="rptBreakRNStatsCSV()" title="The Break RN Stats workbook's layout — opens in Excel cell-for-cell on a month tab">⬇ Break RN Stats</button></div>`
+    + `<button class="btn btn-ghost btn-sm" onclick="rptTallyCSV()">⬇ CSV</button><button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="rptBreakRNStatsXLSX()" title="The Break RN Stats workbook's layout — an Excel file, cell-for-cell, sized to fit the screen, rows coloured by how many break nurses worked the shift">⬇ Break RN Stats</button></div>`
     + `<div style="font-size:.8rem;margin:4px 0 10px">${rangeLabel}: <b>${total.Day}</b> Day + <b>${total.Noc}</b> Noc = <b>${total.Day + total.Noc}</b> confirmed breaks</div>`
     + _rptTallyBand(T)
     + _rptTallyTable(T, 'Day') + _rptTallyTable(T, 'Noc');
@@ -19941,7 +19942,127 @@ function _rptRenderTally(T, rangeLabel){
 // row 2 her unit order, then each Sunday week as 7 date rows (Day block · Total/Day · Noc block ·
 // Total/Night · Total/24hrs) and a Total/week row at her 11-row stride, formulas as formulas.
 // Opened in Excel it lands cell-for-cell on a month tab: select rows 3 down, paste at A3.
-function rptBreakRNStatsCSV(){
+// ═══ Build 594 (Tomas: "A, is there a way to apply the colors") — the Break RN Stats export is a real .xlsx ═══════════
+// Same cells in the same places as the CSV (465: her workbook's geometry, formulas included) — her paste-special
+// workflow is untouched — but the file opens fitted: narrow unit columns, frozen headers (rows 1–2, cols A–B), zoom 80,
+// "n/a" dimmed, totals bold, and every date row tinted by that shift's break-nurse headcount — the Breaks Per Unit
+// palette (547): 1 RN red · 2 RNs blue · 3 RNs green · 4+ magenta — with the legend in row 1. No library: an .xlsx is a
+// zip of small XML files, and Excel accepts uncompressed ("stored") entries, so _xlsxZip writes the zip by hand.
+function _xlsxCrc32(bytes){
+  if(!_xlsxCrc32.T){ const T = new Uint32Array(256); for(let n = 0; n < 256; n++){ let c = n; for(let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; T[n] = c >>> 0; } _xlsxCrc32.T = T; }
+  const T = _xlsxCrc32.T; let c = 0xFFFFFFFF;
+  for(let i = 0; i < bytes.length; i++) c = T[(c ^ bytes[i]) & 0xFF] ^ (c >>> 8);
+  return (c ^ 0xFFFFFFFF) >>> 0;
+}
+function _xlsxZip(files){ // files: [{ name, text }] → Blob (zip, method 0 = stored)
+  const enc = new TextEncoder(); const parts = []; const central = []; let offset = 0;
+  const u16 = n => [n & 0xFF, (n >>> 8) & 0xFF], u32 = n => [n & 0xFF, (n >>> 8) & 0xFF, (n >>> 16) & 0xFF, (n >>> 24) & 0xFF];
+  const dosTime = 0, dosDate = (1 << 5) | 1 | ((2026 - 1980) << 9); // a fixed stamp; Excel ignores it
+  files.forEach(f => {
+    const name = enc.encode(f.name), data = enc.encode(f.text), crc = _xlsxCrc32(data);
+    const local = new Uint8Array([0x50, 0x4B, 0x03, 0x04, ...u16(20), ...u16(0), ...u16(0), ...u16(dosTime), ...u16(dosDate), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0)]);
+    parts.push(local, name, data);
+    central.push(new Uint8Array([0x50, 0x4B, 0x01, 0x02, ...u16(20), ...u16(20), ...u16(0), ...u16(0), ...u16(dosTime), ...u16(dosDate), ...u32(crc), ...u32(data.length), ...u32(data.length), ...u16(name.length), ...u16(0), ...u16(0), ...u16(0), ...u16(0), ...u32(0), ...u32(offset)]), name);
+    offset += local.length + name.length + data.length;
+  });
+  const cdStart = offset; let cdLen = 0; central.forEach(c => { cdLen += c.length; });
+  const eocd = new Uint8Array([0x50, 0x4B, 0x05, 0x06, ...u16(0), ...u16(0), ...u16(files.length), ...u16(files.length), ...u32(cdLen), ...u32(cdStart), ...u16(0)]);
+  return new Blob([...parts, ...central, eocd], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+}
+const _XLSX_STYLES = { // index into cellXfs below
+  text: 0, na: 1, bold: 2, date: 3, num: 4, legend1: 5, legend2: 6, legend3: 7, legend4: 8,
+  fill: { 1: 9, 2: 10, 3: 11, 4: 12 }, fillDate: { 1: 13, 2: 14, 3: 15, 4: 16 }, fillBold: { 1: 17, 2: 18, 3: 19, 4: 20 }
+};
+function _xlsxStylesXml(){
+  // fills: 0 none, 1 gray125 (required), 2 red tint, 3 blue tint, 4 green tint, 5 magenta tint
+  const fills = ['<fill><patternFill patternType="none"/></fill>', '<fill><patternFill patternType="gray125"/></fill>',
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFF8D7D7"/></patternFill></fill>', '<fill><patternFill patternType="solid"><fgColor rgb="FFD6E6FA"/></patternFill></fill>',
+    '<fill><patternFill patternType="solid"><fgColor rgb="FFD9F0DC"/></patternFill></fill>', '<fill><patternFill patternType="solid"><fgColor rgb="FFF5D8EE"/></patternFill></fill>'];
+  // fonts: 0 normal, 1 bold, 2 dimmed (n/a)
+  const fonts = ['<font><sz val="10"/><name val="Aptos Narrow"/></font>', '<font><b/><sz val="10"/><name val="Aptos Narrow"/></font>', '<font><sz val="10"/><color rgb="FFB0B0B0"/><name val="Aptos Narrow"/></font>'];
+  const xf = (font, fill, numFmt) => `<xf numFmtId="${numFmt || 0}" fontId="${font}" fillId="${fill}" borderId="0" xfId="0"${numFmt ? ' applyNumberFormat="1"' : ''}${fill ? ' applyFill="1"' : ''}${font ? ' applyFont="1"' : ''}><alignment horizontal="center"/></xf>`;
+  const xfs = [xf(0, 0), xf(2, 0), xf(1, 0), xf(0, 0, 14), xf(0, 0),
+    xf(1, 4), xf(1, 3), xf(1, 2), xf(1, 5),                 // legend: 3 RNs green, 2 RNs blue, 1 RN red, 4+ magenta
+    xf(0, 2), xf(0, 3), xf(0, 4), xf(0, 5),                 // tinted cells by headcount 1/2/3/4+
+    xf(0, 2, 14), xf(0, 3, 14), xf(0, 4, 14), xf(0, 5, 14), // tinted date cells
+    xf(1, 2), xf(1, 3), xf(1, 4), xf(1, 5)];                // tinted bold (totals)
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><fonts count="${fonts.length}">${fonts.join('')}</fonts><fills count="${fills.length}">${fills.join('')}</fills><borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs><cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles></styleSheet>`;
+}
+function _xlsxEsc(x){ return String(x).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+function _xlsxSerial(ds){ return Math.round((new Date(ds + 'T00:00:00Z') - Date.UTC(1899, 11, 30)) / 86400000); }
+// cells: { 'A1': { v, t:'s'|'n'|'f'|'d', s: styleIndex } } → sheet XML
+function _xlsxSheetXml(cells, colWidths, freeze, zoom){
+  const col = i => { let s = ''; i += 1; while(i > 0){ const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const byRow = {}; Object.keys(cells).forEach(ref => { const r = parseInt(ref.replace(/^[A-Z]+/, ''), 10); (byRow[r] ||= []).push(ref); });
+  const colIdx = ref => { const L = ref.replace(/\d+$/, ''); let n = 0; for(const ch of L) n = n * 26 + (ch.charCodeAt(0) - 64); return n; };
+  const rows = Object.keys(byRow).map(Number).sort((a, b) => a - b).map(r => {
+    const cs = byRow[r].sort((a, b) => colIdx(a) - colIdx(b)).map(ref => { const c = cells[ref]; const st = c.s ? ` s="${c.s}"` : '';
+      if(c.t === 'f') return `<c r="${ref}"${st}><f>${_xlsxEsc(c.v.replace(/^=/, ''))}</f></c>`;
+      if(c.t === 'n' || c.t === 'd') return `<c r="${ref}"${st}><v>${c.v}</v></c>`;
+      return `<c r="${ref}"${st} t="inlineStr"><is><t>${_xlsxEsc(c.v)}</t></is></c>`; }).join('');
+    return `<row r="${r}">${cs}</row>`; }).join('');
+  const cols = colWidths.map((w, i) => `<col min="${i + 1}" max="${i + 1}" width="${w}" customWidth="1"/>`).join('');
+  const pane = freeze ? `<pane xSplit="${freeze.x}" ySplit="${freeze.y}" topLeftCell="${col(freeze.x)}${freeze.y + 1}" activePane="bottomRight" state="frozen"/>` : '';
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheetViews><sheetView workbookViewId="0" zoomScale="${zoom || 100}"${freeze ? '' : ' tabSelected="1"'}>${pane}</sheetView></sheetViews><sheetFormatPr defaultRowHeight="14"/><cols>${cols}</cols><sheetData>${rows}</sheetData></worksheet>`;
+}
+function _xlsxBlob(sheetName, cells, colWidths, freeze, zoom){
+  const files = [
+    { name: '[Content_Types].xml', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>' },
+    { name: '_rels/.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>' },
+    { name: 'xl/workbook.xml', text: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${_xlsxEsc(sheetName)}" sheetId="1" r:id="rId1"/></sheets></workbook>` },
+    { name: 'xl/_rels/workbook.xml.rels', text: '<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>' },
+    { name: 'xl/styles.xml', text: _xlsxStylesXml() },
+    { name: 'xl/worksheets/sheet1.xml', text: _xlsxSheetXml(cells, colWidths, freeze, zoom) }
+  ];
+  return _xlsxZip(files);
+}
+function rptBreakRNStatsXLSX(){
+  const T = window._rptTallyData; if(!T) return;
+  const U = ['3A','3C','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
+  const HDR = ['3A','3C/FP','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
+  const DOW = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  const col = i => { let s = ''; i += 1; while(i > 0){ const m = (i - 1) % 26; s = String.fromCharCode(65 + m) + s; i = Math.floor((i - 1) / 26); } return s; };
+  const dayC0 = 2, dayC1 = dayC0 + 14, totDay = dayC1 + 2, nocD = totDay + 1, nocC0 = nocD + 2, nocC1 = nocC0 + 14, totNoc = nocC1 + 2, tot24 = totNoc + 3;
+  const S = _XLSX_STYLES; const tone = n => n >= 4 ? 4 : n; // 1/2/3/4+
+  const cells = {};
+  const put = (c, r, v, t, st) => { if(v === undefined || v === null || v === '') return; cells[`${col(c)}${r + 1}`] = { v, t: t || 's', s: st || 0 }; };
+  const cnt = (ds, sh, u) => { const cov = T.covered && T.covered[ds + '|' + sh]; if(!cov || !cov.has(u)) return null; return (T.counts[ds + '|' + sh] || {})[u] || 0; };
+  // row 1: the legend, tinted
+  put(0, 0, '3 RNs', 's', S.legend1); put(1, 0, '2 RNs', 's', S.legend2); put(2, 0, '1 RN', 's', S.legend3); put(3, 0, '4+ RNs', 's', S.legend4);
+  // row 2: headers
+  put(0, 1, 'DAYS', 's', S.bold); HDR.forEach((h, i) => put(dayC0 + i, 1, h, 's', S.bold)); put(nocD, 1, 'NOCS', 's', S.bold); HDR.forEach((h, i) => put(nocC0 + i, 1, h, 's', S.bold));
+  const sun = ds => { const d = new Date(ds + 'T12:00:00'); d.setDate(d.getDate() - d.getDay()); return localDate(d); };
+  const weeks = [...new Set(T.dates.map(sun))].sort();
+  weeks.forEach((w, wi) => {
+    const r0 = 2 + wi * 11;
+    for(let i = 0; i < 7; i++){
+      const d = new Date(w + 'T12:00:00'); d.setDate(d.getDate() + i); const ds = localDate(d); const r = r0 + i; const xl = r + 1;
+      const hd = (T.heads || {})[ds + '|Day'] || 0, hn = (T.heads || {})[ds + '|Noc'] || 0;
+      const fD = hd ? S.fill[tone(hd)] : 0, fDd = hd ? S.fillDate[tone(hd)] : S.date, fDb = hd ? S.fillBold[tone(hd)] : S.bold;
+      const fN = hn ? S.fill[tone(hn)] : 0, fNd = hn ? S.fillDate[tone(hn)] : S.date, fNb = hn ? S.fillBold[tone(hn)] : S.bold;
+      put(0, r, _xlsxSerial(ds), 'd', fDd); put(1, r, DOW[i], 's', fD);
+      U.forEach((u, j) => { const v = cnt(ds, 'Day', u); if(v === null) put(dayC0 + j, r, 'n/a', 's', hd ? fD : S.na); else put(dayC0 + j, r, v, 'n', fD); });
+      put(totDay - 1, r, 'Total/Day', 's', fD); put(totDay, r, `=SUM(${col(dayC0)}${xl}:${col(dayC1)}${xl})`, 'f', fDb);
+      put(nocD, r, _xlsxSerial(ds), 'd', fNd); put(nocD + 1, r, DOW[i], 's', fN);
+      U.forEach((u, j) => { const v = cnt(ds, 'Noc', u); if(v === null) put(nocC0 + j, r, 'n/a', 's', hn ? fN : S.na); else put(nocC0 + j, r, v, 'n', fN); });
+      put(totNoc - 1, r, 'Total/Night', 's', fN); put(totNoc, r, `=SUM(${col(nocC0)}${xl}:${col(nocC1)}${xl})`, 'f', fNb);
+      put(tot24 - 1, r, 'Total/24hrs', 's', 0); put(tot24, r, `=SUM(${col(totDay)}${xl}+${col(totNoc)}${xl})`, 'f', S.bold);
+    }
+    const rt = r0 + 8, xl0 = r0 + 1, xl1 = r0 + 7, xlt = rt + 1;
+    put(0, rt, 'Total/week', 's', S.bold); put(1, rt, `=SUM(${col(dayC0)}${xlt}:${col(dayC1)}${xlt})`, 'f', S.bold);
+    U.forEach((u, j) => { const c = col(dayC0 + j); put(dayC0 + j, rt, `=SUM(${c}${xl0}:${c}${xl1})`, 'f', S.bold); const cn = col(nocC0 + j); put(nocC0 + j, rt, `=SUM(${cn}${xl0}:${cn}${xl1})`, 'f', S.bold); });
+    put(nocD, rt, 'Total/week', 's', S.bold); put(nocD + 1, rt, `=SUM(${col(nocC0)}${xlt}:${col(nocC1)}${xlt})`, 'f', S.bold);
+    put(tot24 - 1, rt + 1, 'Total/week', 's', S.bold); put(tot24, rt + 1, `=SUM(${col(1)}${xlt},${col(nocD + 1)}${xlt})`, 'f', S.bold);
+  });
+  const widths = []; for(let c = 0; c <= tot24; c++) widths[c] = 4.6;
+  widths[0] = 9.5; widths[1] = 10; widths[totDay - 1] = 9; widths[nocD] = 9.5; widths[nocD + 1] = 10; widths[totNoc - 1] = 10; widths[tot24 - 1] = 10.5; widths[totDay] = 5.5; widths[totNoc] = 5.5; widths[tot24] = 5.5;
+  const blob = _xlsxBlob('Break RN Stats', cells, widths, { x: 2, y: 2 }, 80);
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'Break_RN_Stats_' + T.dates[0] + '_' + T.dates[T.dates.length - 1] + '.xlsx';
+  a.click(); URL.revokeObjectURL(a.href);
+}
+function rptBreakRNStatsCSV(){ // kept for reference (465); the button calls rptBreakRNStatsXLSX since 594
   const T = window._rptTallyData; if(!T) return;
   const U = ['3A','3C','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
   const HDR = ['3A','3C/FP','4C','4A','5A','6A','7A','6N','7N','8N','8S','9N','9S','10N','10S'];
@@ -20055,6 +20176,54 @@ function _rptVs(scheds, T, bookings){
   });
   return { days, months, perBN };
 }
+// ═══ Build 593: Breaks by Hour — a heat map of taken and not-taken breaks per hour of each shift ═══════════════════
+// Staff breaks only (own breaks excluded), cancelled rows excluded, gaps credits NOT applied (a cell is "breaks at
+// this hour", the Tally's "counts as" rule belongs to the Tally). Hours run in shift order: Day 6 AM → 7 PM, Noc 6 PM
+// → 7 AM, side by side; the overlap hours (6–7 AM, 6–7 PM) appear in both columns, each under the shift that STORED
+// the row. Colour = taken count against the busiest hour of the range; a red figure is the not-taken count.
+function _rptHeat(bookings){
+  const H = { Day: {}, Noc: {}, max: 0, taken: 0, notTaken: 0, open: 0 };
+  (bookings || []).forEach(b => {
+    if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
+    const sh = b.ShiftType === 'Noc' ? 'Noc' : 'Day';
+    const hh = parseInt(normSlot(b.SlotTime).slice(0, 2), 10); if(!Number.isFinite(hh)) return;
+    const c = H[sh][hh] = H[sh][hh] || { taken: 0, notTaken: 0, open: 0 };
+    if(isConfirmed(b)){ c.taken++; H.taken++; }
+    else if(b.BreakStatus === 'not_taken'){ c.notTaken++; H.notTaken++; }
+    else { c.open++; H.open++; } // claimed, never resolved (a pending row on a past date)
+  });
+  Object.keys(H.Day).forEach(h => { H.max = Math.max(H.max, H.Day[h].taken); });
+  Object.keys(H.Noc).forEach(h => { H.max = Math.max(H.max, H.Noc[h].taken); });
+  return H;
+}
+let _rptHeatOpen = false; // per load, collapsed by default (Tomas)
+function _rptToggleHeat(){ _rptHeatOpen = !_rptHeatOpen; const b = document.getElementById('rptHeatBody'), ch = document.getElementById('rptHeatChev'); if(b) b.style.display = _rptHeatOpen ? 'block' : 'none'; if(ch) ch.textContent = _rptHeatOpen ? '▲' : '▼'; const hd = document.getElementById('rptHeatHead'); if(hd) hd.setAttribute('aria-expanded', _rptHeatOpen ? 'true' : 'false'); }
+function _rptRenderHeat(H, rangeLabel){
+  const card = document.getElementById('rptHeatCard');
+  if(!card) return;
+  const total = H.taken + H.notTaken + H.open;
+  const h12 = h => { const x = h % 12 || 12; return `${x} ${h < 12 ? 'AM' : 'PM'}`; };
+  const cell = (c) => {
+    if(!c || (!c.taken && !c.notTaken && !c.open)) return `<td style="padding:4px 6px;text-align:center;color:var(--muted);border:1px solid var(--border);font-size:.78rem">·</td>`;
+    const a = H.max ? Math.max(0.08, c.taken / H.max) : 0;
+    const bg = `rgba(11,112,112,${(a * 0.85).toFixed(2)})`; const fg = a > 0.5 ? '#fff' : 'var(--text)';
+    const nt = c.notTaken ? `<span style="color:${a > 0.5 ? '#ffd3d3' : 'var(--red)'};font-weight:700"> ·${c.notTaken}</span>` : '';
+    const op = c.open ? `<span style="color:${a > 0.5 ? '#e6e6e6' : 'var(--muted)'}"> ·${c.open}?</span>` : '';
+    return `<td style="padding:4px 6px;text-align:center;border:1px solid var(--border);background:${bg};color:${fg};font-size:.78rem;white-space:nowrap"><b>${c.taken}</b>${nt}${op}</td>`;
+  };
+  let rows = '';
+  for(let i = 0; i < 14; i++){ const dh = 6 + i, nh = (18 + i) % 24; rows += `<tr><td style="padding:4px 6px;white-space:nowrap;color:var(--muted);border:1px solid var(--border);font-size:.78rem">${h12(dh)}</td>${cell(H.Day[dh])}<td style="padding:4px 6px;white-space:nowrap;color:var(--muted);border:1px solid var(--border);font-size:.78rem">${h12(nh)}</td>${cell(H.Noc[nh])}</tr>`; }
+  card.innerHTML = `<button type="button" id="rptHeatHead" onclick="_rptToggleHeat()" aria-expanded="${_rptHeatOpen ? 'true' : 'false'}" style="all:unset;cursor:pointer;display:flex;align-items:center;justify-content:space-between;width:100%;gap:8px">`
+    + `<h3 style="margin:0">🕒 Breaks by Hour <span style="font-size:.75rem;color:var(--muted);font-weight:400">${total ? `${H.taken} taken · ${H.notTaken} not taken${H.open ? ` · ${H.open} unresolved` : ''}` : 'no staff breaks in range'}</span></h3>`
+    + `<span id="rptHeatChev" style="color:var(--muted);font-size:.85rem">${_rptHeatOpen ? '▲' : '▼'}</span></button>`
+    + `<div id="rptHeatBody" style="display:${_rptHeatOpen ? 'block' : 'none'};margin-top:8px">`
+    + `<div style="font-size:.75rem;color:var(--muted);margin-bottom:8px">Taken breaks per hour of the shift, darker = busier — ${rangeLabel}. <span style="color:var(--red);font-weight:700">·n</span> = not taken at that hour · <span style="color:var(--muted)">·n?</span> = claimed, never marked.</div>`
+    + `<div style="overflow-x:auto"><table style="border-collapse:collapse;font-size:.78rem">`
+    + `<tr><th style="padding:3px 6px;text-align:left;border-bottom:1.5px solid var(--border)">☀️ Day</th><th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">taken</th><th style="padding:3px 6px;text-align:left;border-bottom:1.5px solid var(--border)">🌙 Noc</th><th style="padding:3px 6px;border-bottom:1.5px solid var(--border)">taken</th></tr>`
+    + rows + `</table></div></div>`;
+  card.style.display = 'block';
+}
+
 function _rptRenderVs(V, rangeLabel){
   const card = document.getElementById('rptVsCard');
   if(!card) return;
@@ -20140,7 +20309,7 @@ async function loadReports(){
   const { from, to } = getRangeDates();
   document.getElementById('rptRangeLabel').textContent = fmtDateRange(from, to);
   const status = document.getElementById('rptStatus');
-  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptTallyCard','rptVsCard']
+  ['rptSnapshotCard','rptCovScoreCard','rptDeliveredCard','rptRotationCard','rptTallyCard','rptHeatCard','rptVsCard']
     .forEach(id => { const el = document.getElementById(id); if(el) el.style.display = 'none'; });
   status.innerHTML = '<div class="empty"><div class="spinner"></div></div>';
   try {
@@ -20200,7 +20369,9 @@ async function loadReports(){
     // functions remain inert for easy restoration if ever wanted.
     const T383 = _rptTally(_pastScheds, _pastBookings, from, _pastTo); // Build 383 · 460: past part only
     _rptRenderTally(T383, fmtDateRange(from, _pastTo) + (_future ? ' · confirmed breaks to date' : ''));
-    _rptRenderVs(_rptVs(_pastScheds, T383, _pastBookings), fmtDateRange(from, _pastTo)); // Builds 385+387
+    _rptRenderHeat(_rptHeat(_pastBookings), fmtDateRange(from, _pastTo)); // Build 593: breaks by hour, collapsed by default
+    // Build 593 (Tomas, Nov 15): the Day vs Night card is hidden for now — _rptVs/_rptRenderVs stay for restoration.
+    // _rptRenderVs(_rptVs(_pastScheds, T383, _pastBookings), fmtDateRange(from, _pastTo)); // Builds 385+387
 
   } catch(e){
     const isTimeout = /timeout/i.test(e.message || '');
