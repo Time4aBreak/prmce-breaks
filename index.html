@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-596'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-597'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -19845,41 +19845,65 @@ function _rptTallyBand(T){
   html += `</table><div style="font-size:.68rem;color:var(--muted);margin-top:4px">shift-eq: full shift = 1, partial = hours ÷ 11.25 (paid hours) · comparable = both sides within ¼ shift-eq · Δ = Day − Noc confirmed breaks · winner = higher breaks per shift-eq</div></div>`;
   return html;
 }
+// Build 597 (Tomas: "make the Break Tally easier on the eyes", option C): WEEKS FIRST, DAYS ON TAP. The table opens as
+// one row per week — its date span, per-unit totals, Total — tinted by the week's usual break-nurse headcount in the
+// workbook's palette (1 red · 2 blue · 3 green · 4+ magenta, 547/594); a tap on a week unfolds its days beneath it,
+// "show all days" opens every week. The 420 header repeat stays every 4th week. Weekly Avg, the day-of-week averages,
+// the staffing line and the unresolved line are unchanged.
+const _rptTallyOpen = { Day: new Set(), Noc: new Set() }; // open week keys per shift, this load only
+function _rptTallyToggleWeek(shift, key){
+  const set = _rptTallyOpen[shift]; set.has(key) ? set.delete(key) : set.add(key);
+  const open = set.has(key);
+  document.querySelectorAll(`#rptTallyCard tr[data-tw="${shift}|${key}"]`).forEach(tr => { tr.style.display = open ? '' : 'none'; });
+  const chev = document.querySelector(`#rptTallyCard [data-twchev="${shift}|${key}"]`); if(chev) chev.textContent = open ? '▾' : '▸';
+}
+function _rptTallyToggleAll(shift, keys){
+  const set = _rptTallyOpen[shift]; const allOpen = keys.every(k => set.has(k));
+  keys.forEach(k => { if(allOpen) set.delete(k); else set.add(k); });
+  keys.forEach(k => { const open = set.has(k); document.querySelectorAll(`#rptTallyCard tr[data-tw="${shift}|${k}"]`).forEach(tr => { tr.style.display = open ? '' : 'none'; }); const chev = document.querySelector(`#rptTallyCard [data-twchev="${shift}|${k}"]`); if(chev) chev.textContent = open ? '▾' : '▸'; });
+  const lnk = document.querySelector(`#rptTallyCard [data-twall="${shift}"]`); if(lnk) lnk.textContent = allOpen ? 'show all days' : 'collapse all';
+}
 function _rptTallyTable(T, shift){
   const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-  const tint = n => n >= 3 ? '#eaf6ea' : n === 2 ? '#fef7e6' : n === 1 ? '#fdecec' : 'transparent';
-  // Build 420 (Tomas): the unit-name header is re-listed after every 4th week so
-  // long ranges stay readable (a sticky row can't pin to the page from inside
-  // the horizontal-scroll wrapper).
-  const headerRow = `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border)">${shift === 'Day' ? 'DAYS' : 'NOCS'}</th>`
+  const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  const tint = n => n >= 4 ? '#f7e4f2' : n === 3 ? '#eaf6ea' : n === 2 ? '#e8f0fb' : n === 1 ? '#fdecec' : 'transparent';
+  const edge = n => n >= 4 ? '#c2189b' : n === 3 ? 'var(--green)' : n === 2 ? '#1f6fd6' : n === 1 ? 'var(--red)' : 'var(--border)';
+  // the weeks of the range (Sun → Sat; the first and last may be partial)
+  const weeks = []; let cur = null;
+  T.dates.forEach(ds => { const dow = new Date(ds + 'T12:00:00').getDay(); if(!cur || dow === 0){ cur = { key: ds, days: [] }; weeks.push(cur); } cur.days.push(ds); });
+  const keys = weeks.map(w => w.key);
+  const allOpen = keys.length > 0 && keys.every(k => _rptTallyOpen[shift].has(k));
+  const span = w => { const a = w.days[0], b = w.days[w.days.length - 1]; const ma = MON[Number(a.slice(5, 7)) - 1], mb = MON[Number(b.slice(5, 7)) - 1]; return a === b ? `${ma} ${Number(a.slice(8, 10))}` : `${ma} ${Number(a.slice(8, 10))}–${ma === mb ? '' : mb + ' '}${Number(b.slice(8, 10))}`; };
+  const headerRow = `<tr><th style="text-align:left;padding:3px 5px;border-bottom:1.5px solid var(--border);white-space:nowrap">${shift === 'Day' ? 'DAYS' : 'NOCS'} <a href="#" data-twall="${shift}" onclick="event.preventDefault(); _rptTallyToggleAll('${shift}', ${JSON.stringify(keys).replace(/"/g, '&quot;')})" style="font-weight:400;color:var(--teal-dk);margin-left:6px">${allOpen ? 'collapse all' : 'show all days'}</a></th>`
     + T.units.map(u => `<th style="padding:3px 4px;border-bottom:1.5px solid var(--border)">${u}</th>`).join('')
     + `<th style="padding:3px 5px;border-bottom:1.5px solid var(--border)">Total</th></tr>`;
   let html = `<div style="overflow-x:auto"><table style="border-collapse:collapse;width:100%;font-size:.7rem">` + headerRow;
-  let weekTotals = {}; let weekSum = 0; let anyWeekRow = false;
   const rangeTotals = {}; let rangeSum = 0; let weekCount = 0; // Build 387
-  const flushWeek = () => {
-    if(!anyWeekRow) return;
-    html += `<tr style="font-weight:700;background:var(--bg-alt)"><td style="padding:3px 5px">Total/week</td>`
-      + T.units.map(u => `<td style="text-align:center;padding:3px 4px">${weekTotals[u] || ''}</td>`).join('')
-      + `<td style="text-align:center;padding:3px 5px">${weekSum || ''}</td></tr>`;
+  weeks.forEach((w, wi) => {
+    const open = _rptTallyOpen[shift].has(w.key);
+    const weekTotals = {}; let weekSum = 0; const hcs = {}; let covered = 0;
+    const dayRows = w.days.map(ds => {
+      const dow = new Date(ds + 'T12:00:00').getDay();
+      const row = T.counts[ds + '|' + shift] || {};
+      const rowTotal = T.units.reduce((a, u) => a + (row[u] || 0), 0);
+      const hc = T.heads[ds + '|' + shift] || 0; if(hc){ hcs[hc] = (hcs[hc] || 0) + 1; covered++; }
+      weekSum += rowTotal;
+      return `<tr data-tw="${shift}|${w.key}" title="${hc} BN${hc === 1 ? '' : 's'} scheduled" style="display:${open ? '' : 'none'}${hc ? '' : ';color:var(--muted)'}">`
+        + `<td style="padding:2px 5px 2px 18px;white-space:nowrap;border-left:3px solid ${edge(hc)}">${DOW[dow]} ${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}</td>`
+        + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; return `<td style="text-align:center;padding:2px 4px">${v || ''}</td>`; }).join('')
+        + `<td style="text-align:center;padding:2px 5px;font-weight:600">${rowTotal || ''}</td></tr>`;
+    }).join('');
+    // the week's usual headcount: the most common non-zero count over its covered days (ties → the larger)
+    const usual = Object.keys(hcs).map(Number).sort((a, b) => hcs[b] - hcs[a] || b - a)[0] || 0;
+    const ttl = covered ? `${usual} BN${usual === 1 ? '' : 's'} on ${hcs[usual]} of ${covered} covered day${covered === 1 ? '' : 's'} · tap for the days` : 'no break nurse this week · tap for the days';
+    html += `<tr onclick="_rptTallyToggleWeek('${shift}','${w.key}')" title="${ttl}" style="font-weight:700;cursor:pointer;background:${tint(usual)};border-top:1.5px solid var(--border)">`
+      + `<td style="padding:4px 5px;white-space:nowrap;border-left:3px solid ${edge(usual)}"><span data-twchev="${shift}|${w.key}" style="display:inline-block;width:10px;color:var(--muted)">${open ? '▾' : '▸'}</span>${span(w)}${w.days.length < 7 ? `<span style="font-weight:400;color:var(--muted)"> · ${w.days.length}d</span>` : ''}</td>`
+      + T.units.map(u => `<td style="text-align:center;padding:4px 4px">${weekTotals[u] || ''}</td>`).join('')
+      + `<td style="text-align:center;padding:4px 5px">${weekSum || ''}</td></tr>` + dayRows;
     T.units.forEach(u => rangeTotals[u] = (rangeTotals[u] || 0) + (weekTotals[u] || 0));
     rangeSum += weekSum; weekCount++;
-    weekTotals = {}; weekSum = 0; anyWeekRow = false;
-    if(weekCount % 4 === 0) html += headerRow; // Build 420
-  };
-  T.dates.forEach(ds => {
-    const d = new Date(ds + 'T12:00:00'); const dow = d.getDay();
-    const row = T.counts[ds + '|' + shift] || {};
-    const rowTotal = T.units.reduce((a, u) => a + (row[u] || 0), 0);
-    const hc = T.heads[ds + '|' + shift] || 0;
-    html += `<tr title="${hc} BN${hc === 1 ? '' : 's'} scheduled">`
-      + `<td style="padding:2px 5px;white-space:nowrap">${DOW[dow]} ${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}</td>`
-      + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; return `<td style="text-align:center;padding:2px 4px">${v || ''}</td>`; }).join('')
-      + `<td style="text-align:center;padding:2px 5px;font-weight:600">${rowTotal || ''}</td></tr>`;
-    weekSum += rowTotal; anyWeekRow = true;
-    if(dow === 6) flushWeek();
+    if(weekCount % 4 === 0 && wi < weeks.length - 1) html += headerRow; // Build 420
   });
-  flushWeek();
   // Build 387 (piece 2): the workbook's per-unit "Weekly Avg" row — each
   // unit's range total averaged over the weeks in range.
   if(weekCount > 1){
