@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-604'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-605'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7084,6 +7084,25 @@ async function warmRotationCache(bnName, date, shift){
 }
 
 // Recalculate and save rotation for a BN on a given date/shift
+// Build 605 (Tomas, 11/16 Noc): a BN's own break rows are born with a unit from the fill rotation and were never
+// revisited — a re-deal (grid Save All, Edit card, roster cascade) left them on units the BN no longer held (rows on
+// 4C/3A and 7N after moves to 6N/7N and 9N/9S). Staff blocking is by name + time, so nothing broke, but the stored
+// unit must read true: every rotation rebuild re-points the BN's FUTURE break rows that sit outside the unit set onto
+// the fill rotation (applyDefaultToShift's picker). Past rows stay as written. No reads added; writes only on drift.
+async function _followBreakRows(bnName, date, shift, units, breaks, dateSeed){
+  if(!units || !units.length) return 0;
+  const off = (breaks || []).filter(b => isBNBreak(b) && !units.includes(b.Unit) && _slotIsAhead(date, b.SlotTime, shift));
+  if(!off.length) return 0;
+  const fill = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
+  let n = 0;
+  for(const b of off){
+    const slot = normSlot(b.SlotTime), unit = fill[slot] || units[0];
+    try { await spPatch(LISTS.bookings, b.Id, { Unit: unit, Title: `BN-${bnName}-${unit}-${date}-${slot}` }); b.Unit = unit; n++; }
+    catch(e){ console.warn('[followBreakRows] patch failed (non-fatal):', bnName, date, shift, slot, e && e.message); }
+  }
+  return n;
+}
+
 async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null){
   // Build 250 (249b): optional preloads {scheds, bookings} — SHIFT-WIDE lists
   // a caller already holds (saveAssign's post-write truth). Each is filtered
@@ -7128,6 +7147,7 @@ async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null
   // Date seed for fair starting unit rotation
   const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) +
     bnName.charCodeAt(0);
+  try { await _followBreakRows(bnName, date, shift, units, breaks, dateSeed); } catch(e){ console.warn('[followBreakRows]', e && e.message); } // Build 605
 
   // Build 242 (Finding 9): thread the partial window from the main
   // (non-supp, active) row — '' = full shift. Pins stay with the Build-226
@@ -10903,6 +10923,9 @@ async function bulkSaveUnitsAndRotations(updates){
       } catch{}
       localStorage.setItem(rotKey, JSON.stringify(normalized));
       rotationEntries.push({ key: rotKey, value: normalized });
+      // Build 605: the BN's break rows follow the re-dealt unit set (rows already in hand from the range fetch)
+      try { await _followBreakRows(u.bn, u.date, u.shift, filteredUnits, bnBreakBookings, dateSeed); }
+      catch(e){ console.warn('[bulkSaveUnitsAndRotations] followBreakRows failed (non-fatal):', u.bn, u.date, u.shift, e && e.message); }
     } catch(err){
       console.warn('[bulkSaveUnitsAndRotations] failed for', u.bn, u.date, u.shift, ':', err.message);
       failed++;
@@ -12914,11 +12937,12 @@ async function _loadSummaryInner(mySeq, ctx){
 
     allRows.forEach(({ b, kind }) => {
       if(kind === 'bn'){
+        // Build 605 (Tomas): a BN's own break is not on a unit — the mug replaces the unit chip.
         html += `<div class="summ-row" style="background:#fef9ec;border-color:#f0c040">
           <div class="summ-time" style="color:#b07800">${fmt12(b.SlotTime)}</div>
-          <div class="summ-unit">${b.Unit}</div>
+          <div class="summ-unit" style="background:transparent;padding:0;font-size:1rem" title="BN break">☕</div>
           <div class="summ-nurse" style="color:var(--muted);font-style:italic">${firstName(b.NurseName)}</div>
-          <div class="summ-bn" style="color:var(--muted)">🔒 BN break</div>
+          <div class="summ-bn" style="color:var(--muted)">BN break</div>
         </div>`;
       } else {
         const bn = getBNForBooking(b);
@@ -14028,11 +14052,14 @@ async function recalculateAllRotations(opts = {}){
   // heuristic already preserved dropped-unit Keeps from cache). Grouped by
   // covering BN|date|shift; failure degrades to pre-242 behavior.
   let _pinsByKey = {};
+  const _breaksByKey = {}; // Build 605: the BNs' own break rows, by name|date|shift — same fetch
+  let followed = 0;
   try {
     const _dates = active.map(s => (s.ShiftDate || '').slice(0,10)).sort();
     if(_dates.length){
       const _bk = await spGet(LISTS.bookings, `SlotDate ge '${_dates[0]}' and SlotDate le '${_dates[_dates.length - 1]}T23'`);
       _bk.forEach(b => {
+        if(isBNBreak(b)){ const kb = `${b.NurseName}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`; (_breaksByKey[kb] = _breaksByKey[kb] || []).push(b); return; }
         if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
         const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
         (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
@@ -14047,6 +14074,11 @@ async function recalculateAllRotations(opts = {}){
       if(!rawUnits.length) continue;
       const units = filterClosedUnits(expandCPair(rawUnits, s.ShiftDate, s.ShiftType), s.ShiftDate, s.ShiftType);
       const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
+      // Build 605: break rows follow the unit set (main rows only — a supplemental row's units are not the BN's own)
+      if(String(s.IsSupplemental) !== '1'){
+        try { followed += await _followBreakRows(s.BreakNurseName, String(s.ShiftDate).slice(0,10), s.ShiftType, units, _breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || [], dateSeed); }
+        catch(e){ console.warn('[recalcAll] followBreakRows failed (non-fatal):', e && e.message); }
+      }
       // Use existing BN default breaks if available
       const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
       const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
@@ -14121,8 +14153,9 @@ async function recalculateAllRotations(opts = {}){
 
   hideBusy();
   const done = rotationEntries.length;
-  if(failed > 0) toast(`↺ ${done} recalculated · ${failed} failed`, true);
-  else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated`);
+  const _fl = followed ? ` · ${followed} break row${followed !== 1 ? 's' : ''} moved to current units` : ''; // Build 605
+  if(failed > 0) toast(`↺ ${done} recalculated · ${failed} failed${_fl}`, true);
+  else toast(`✓ All ${done} rotation${done!==1?'s':''} recalculated${_fl}`);
 }
 
 async function dedupAssignments(){
@@ -16085,6 +16118,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     } catch(e){ console.warn('[Save All] bookings pre-fetch for pins failed:', e.message); }
     const rotationEntries = [];
     const defaultApplyPromises = [];
+    const _followPromises = []; // Build 605
     for(const i of indices){
       const { name, date, shift, startTime, hours } = entriesToProcess[i];
       const rawUnits = importUnitSel[i] || [];
@@ -16124,8 +16158,13 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
         // LS write is below in syncedLS.setMany. Just collect entries here so
         // the batch flushes in one round trip (vs N parallel set calls).
         rotationEntries.push({ key, value: rotation });
+        // Build 605: a template-less BN can still hold break rows (+ My Break, or rows born under earlier units) —
+        // this branch never reaches recalculateRotation, so the rows follow the new units from here. Same prefetch.
+        if(_bkOk) _followPromises.push(_followBreakRows(name, date, shift, units, (_bkByDS[`${date}|${shift}`] || []).filter(b => b.NurseName === name), dateSeed)
+          .catch(e => console.warn('[Save All] followBreakRows failed —', name, date, shift, '·', e && e.message)));
       }
     }
+    if(_followPromises.length) await Promise.all(_followPromises); // Build 605
     // Fire default applies concurrently, then batch-save plain rotations.
     // Wrap each promise so its completion updates the status counter — gives
     // the user visible progress through what can be the slowest phase
