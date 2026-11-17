@@ -2276,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-612'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-613'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21731,7 +21731,13 @@ async function wgReview(){
   const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.cell || r.date}|${r.shift}`] = r; }); // Build 545: by the drawn date; 610: the whole row (units + window)
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
-    let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
+    let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta){
+      // Build 613 (Tomas, 3:26 AM: 3:30–8:30 AM on Tess's Monday cell became Sunday night's Noc): on a cell that already holds a
+      // saved Noc, a post-midnight window is THAT shift's own morning — the row's date, whether the cell is the shift's start
+      // day or the morning cell a post-midnight partial is drawn on. An empty cell keeps 448's rule (the night before).
+      const own = (inf.shift === 'Noc' && _wgBase[k] && !_wgBase[k].orientation && !_wgBase[k].inactive) ? _wgBaseRows.find(r => r.name === name && (r.cell || r.date) === cellDate && r.shift === 'Noc') : null;
+      date = own ? own.date : _wgAddDays(date, inf.dateDelta);
+    } } } // Build 448
     const e = { name, date, shift: c.shift, startTime: c.startTime || '', hours: c.hours || '', units: [], _source: 'grid' };
     const h = Number(c.hours || 0);
     if(c.startTime && h > 0 && h < 12){
@@ -21743,7 +21749,8 @@ async function wgReview(){
     if(_wgBase[k] && !Object.prototype.hasOwnProperty.call(_wgEdits, k)){ // Build 519: untouched saved cell
       const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null; // Build 545: exact cell, no day-before fallback
       if(saved && saved.units.length){ e._keep = true; e._savedUnits = saved.units.slice(); }
-    } else if(e.isPartial && _wgBase[k] && !_wgBase[k].orientation && !_wgBase[k].inactive){
+    } else if((e.isPartial || (_wgBase[k] && _wgBase[k].startTime && Number(_wgBase[k].hours) > 0)) && _wgBase[k] && !_wgBase[k].orientation && !_wgBase[k].inactive){
+      // Build 613: the mirror — a saved PARTIAL tapped back to a full shift of the same type is also a change of hours
       // Build 610 (Tomas, "leaving at 4"): a Partial applied on a cell that already holds a saved shift is a change of HOURS,
       // not a new deal — she keeps her saved units (the dealer locks them, 519) and the new window is written (the unchanged
       // test sees _windowChanged). An empty cell still deals fresh.
@@ -22271,7 +22278,12 @@ async function onAssignContextChange(){
       && (typeof staffWindowOpen === 'function') && staffWindowOpen(sh);
     const blankNurse = !document.getElementById('aNurse').value
       && !((document.getElementById('aNurseText').value || '').trim());
-    if(active && blankNurse && !window._aPartialTouched){
+    // Build 613 (Tomas, 3:24 AM: Jhaiz's running Noc opened as "03:25–08:30" and saved so): the courtesy must not fire while
+    // an assignment is loaded for EDITING — editAssign stashes _editSource before setAShift fires this refresh, and fills the
+    // nurse only after it, so blankNurse was true at exactly the wrong moment. The comment above always said "no existing
+    // assignment is loaded"; now the code does.
+    const _editing = (typeof _editSource !== 'undefined') && !!_editSource;
+    if(active && blankNurse && !window._aPartialTouched && !_editing){
       const now = new Date();
       let m = now.getHours()*60 + now.getMinutes();
       m = Math.ceil(m/5)*5; // next 5-min boundary
