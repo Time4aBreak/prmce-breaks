@@ -772,10 +772,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             </div>
           </div>
           <div class="field" id="aPartTimes" style="display:none;flex:0 0 auto;min-width:0">
-            <label>Start · for</label>
+            <label>From · until</label>
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <span id="aPartStartHost"></span>
-              <span style="color:var(--muted)">for</span>
+              <span style="color:var(--muted)">until</span>
               <span id="aPartEndHost"></span>
               <span id="aInferredShift" style="font-size:.8rem;font-weight:600;color:var(--muted);white-space:nowrap"></span>
             </div>
@@ -2276,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-610'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-612'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5619,9 +5619,9 @@ function init(){
   // Admin unit check grid
   // Build 448: the Edit card's clocks are five-minute pickers
   { const sh = document.getElementById('aPartStartHost'), eh = document.getElementById('aPartEndHost');
-    if(sh) sh.innerHTML = _tpHtml('aPartStart', '20:00', 'oninput="_aDurToEnd();_aInferShift()"');
-    if(eh) eh.innerHTML = _durHtml('aPartDur', '', 'oninput="_aDurToEnd();_aInferShift()"') + '<input type="hidden" id="aPartEnd" value="">'; // Build 525: the stop is derived
-    _tpSync('aPartStart'); _durSync('aPartDur'); _aDurToEnd(); }
+    if(sh) sh.innerHTML = _tpHtml('aPartStart', '20:00', 'oninput="_aInferShift()"');
+    if(eh) eh.innerHTML = _tpHtml('aPartEnd', '', 'oninput="_aInferShift()"'); // Build 612 (Tomas, option A): the stop is PICKED — "from · until"; hours derived
+    _tpSync('aPartStart'); _tpSync('aPartEnd'); }
   const ag = document.getElementById('aUnits');
   ag.innerHTML = _wingRowsHtml(u => `<div data-slot="${u}"></div>`); // Build 444: wing rows, as on Settings
   [..._WING_ROW_A, ..._WING_ROW_D].forEach(u=>{
@@ -10426,15 +10426,14 @@ function splitStraddlingPartial(startHHMM, hours, calDate){
   const A = mk(s0, cut), B = mk(cut, e0);
   return (A && B) ? [A, B] : null;
 }
-// Build 525: stop = start + duration, written into the hidden aPartEnd every reader still uses
-function _aDurToEnd(){
-  const s = document.getElementById('aPartStart'), d = document.getElementById('aPartDur'), e = document.getElementById('aPartEnd');
-  if(!s || !d || !e) return;
-  const hrs = Number(d.value);
-  if(!/^\d{2}:\d{2}$/.test(s.value) || !(hrs > 0)){ e.value = ''; return; }
-  const m = (parseInt(s.value.slice(0, 2), 10) * 60 + parseInt(s.value.slice(3), 10) + Math.round(hrs * 60)) % 1440;
-  e.value = `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
-  if(d.dataset.userSet) e.dataset.userSet = '1';
+// Build 525 derived the stop from start + duration; Build 612 (Tomas): the stop is picked — "from · until" — and the
+// duration is derived (_hoursBetween), so this is a no-op kept for any stray caller.
+function _aDurToEnd(){}
+// Decimal hours from HH:MM to HH:MM across midnight, 2 decimals (the stored Hours shape).
+function _hoursBetween(a, b){
+  if(!/^\d{2}:\d{2}$/.test(a || '') || !/^\d{2}:\d{2}$/.test(b || '')) return 0;
+  const m = v => parseInt(v.slice(0, 2), 10) * 60 + parseInt(v.slice(3), 10);
+  return Math.round(((m(b) - m(a) + 1440) % 1440) / 0.6) / 100;
 }
 function _aPartialHours(){
   const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
@@ -10656,14 +10655,13 @@ async function editAssign(id){
     updateEditModeBar();
     // Build 307: partial rows prefill the Shift Length controls (end time
     // derived from start + hours; only Hours is stored).
-    { const _st = String(s.StartTime || '').replace(/\D/g, '');
+    { let _st = String(s.StartTime || '').replace(/\D/g, ''); if(/^\d{3}$/.test(_st)) _st = '0' + _st; // Build 612: a cell Sheets coerced ('0830' → 830) still prefills
       const _hr = Number(s.Hours) || 0;
       if(/^\d{4}$/.test(_st) && _hr > 0 && _hr < 12){
         setAPartial(true);
-        const sEl = document.getElementById('aPartStart'), dEl = document.getElementById('aPartDur');
+        const sEl = document.getElementById('aPartStart'), eEl = document.getElementById('aPartEnd');
         if(sEl){ sEl.value = `${_st.slice(0,2)}:${_st.slice(2)}`; _tpSync('aPartStart'); }
-        if(dEl){ dEl.value = String(_hr); _durSync('aPartDur'); } // Build 525: the row's Hours, as saved
-        _aDurToEnd();
+        if(eEl){ const en = addMinHHMM(_st, Math.round(_hr * 60)); eEl.value = `${en.slice(0,2)}:${en.slice(2)}`; _tpSync('aPartEnd'); } // Build 612: the row's stop, from its Hours
       } else setAPartial(false); }
     const allUnits = [...new Set(allBNScheds.flatMap(r => {
       try { return JSON.parse(r.Units||'[]'); } catch { return []; }
@@ -21626,7 +21624,10 @@ function _wgChooser(name, date){
   wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)';
   const d = new Date(date + 'T12:00:00');
   const isPart = cur.startTime && Number(cur.hours) > 0 && Number(cur.hours) < 12;
-  const st = isPart ? `${String(cur.startTime).padStart(4,'0').slice(0,2)}:${String(cur.startTime).padStart(4,'0').slice(2)}` : '';
+  // Build 612 (Tomas, "I selected 4am"): the window is FROM · UNTIL. A cell that already holds a shift pre-fills the shift's
+  // start (8:30 AM / 8:30 PM), so "leaving at 4" is one pick: until 4:00 AM. A partial pre-fills its own window.
+  const st = isPart ? `${String(cur.startTime).padStart(4,'0').slice(0,2)}:${String(cur.startTime).padStart(4,'0').slice(2)}` : (cur.shift === 'Noc' ? '20:30' : cur.shift === 'Day' ? '08:30' : '');
+  const en = isPart ? (() => { const x = addMinHHMM(String(cur.startTime).padStart(4,'0'), Math.round(Number(cur.hours) * 60)); return `${x.slice(0,2)}:${x.slice(2)}`; })() : '';
   // Build 495 (Tomas): the bottom-left button reads "Remove shift" on a SAVED shift (it comes off the schedule at the
   // next Save All) and "Clear" on a tap not yet saved — the app's two verbs, kept apart. Behaviour is unchanged.
   // Build 521 (step 2 of the master grid): a SAVED cell also offers the list's actions, reached from the cell —
@@ -21651,7 +21652,7 @@ function _wgChooser(name, date){
           <span>⏱ Partial${isPart ? ` <span style="font-weight:500;color:var(--muted)">· ${escHTML(_wgCellLabel(cur) || '')}</span>` : ''}</span><span id="wgcPartChev" style="color:var(--muted);font-size:.72rem">${isPart ? '▲' : '▼'}</span>
         </button>
         <div id="wgcPartBody" style="display:${isPart ? 'flex' : 'none'};align-items:center;gap:8px;flex-wrap:wrap;margin-top:8px">
-          ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">for</span>${_durHtml('wgcDur', isPart ? cur.hours : '')}
+          ${_tpHtml('wgcStart', st)}<span style="color:var(--muted)">until</span>${_tpHtml('wgcEnd', en)}
           <button type="button" class="btn btn-ghost btn-sm" id="wgcPart" style="margin-left:auto">Apply</button>
         </div>
       </div>
@@ -21678,7 +21679,7 @@ function _wgChooser(name, date){
       </div>
     </div>`;
   document.body.appendChild(wrap);
-  _tpSync('wgcStart'); _durSync('wgcDur'); // Build 448; 525: duration
+  _tpSync('wgcStart'); _tpSync('wgcEnd'); // Build 448; 612: from · until
   const close = () => wrap.remove();
   // Build 550: a shift chosen on an orientation cell takes the marker off first (its own write), then stages as usual
   const set = async c => { close(); if(cur.orientation){ if(c === null){ await _wgOrientClear(key, false); return; } await _wgOrientClear(key, true); } _wgEdit(key, c); };
@@ -21691,8 +21692,9 @@ function _wgChooser(name, date){
   wrap.querySelector('#wgcDay').onclick = () => set({ shift: 'Day', startTime: '', hours: '' });
   wrap.querySelector('#wgcNoc').onclick = () => set({ shift: 'Noc', startTime: '', hours: '' });
   wrap.querySelector('#wgcPart').onclick = () => {
-    const a = wrap.querySelector('#wgcStart').value, hours = Number(wrap.querySelector('#wgcDur').value); // Build 525: start + duration
-    if(!a || !(hours > 0)){ toast('A partial needs a start time and how long it runs', true); return; }
+    const a = wrap.querySelector('#wgcStart').value, b = wrap.querySelector('#wgcEnd').value, hours = _hoursBetween(a, b); // Build 612: from · until
+    if(!a || !b){ toast('A partial needs a start and an end time', true); return; }
+    if(!(hours > 0)){ toast('The end time is the same as the start', true); return; }
     if(hours >= 12){ toast('That is a full shift — use Day or Noc', true); return; }
     const inf = inferPartialShift(a.replace(':', ''), hours); // Build 448: by grid overlap
     if(inf && inf.daySlots === 0 && inf.nocSlots === 0){ toast('No break slots fall inside these times', true); return; }
@@ -21741,11 +21743,14 @@ async function wgReview(){
     if(_wgBase[k] && !Object.prototype.hasOwnProperty.call(_wgEdits, k)){ // Build 519: untouched saved cell
       const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null; // Build 545: exact cell, no day-before fallback
       if(saved && saved.units.length){ e._keep = true; e._savedUnits = saved.units.slice(); }
-    } else if(e.isPartial && _wgBase[k] && _wgBase[k].shift === c.shift && !_wgBase[k].orientation && !_wgBase[k].inactive){
-      // Build 610 (Tomas, "leaving at 4"): a Partial applied on a cell that already holds a saved shift of the SAME type is a
-      // change of HOURS, not a new deal — she keeps her saved units (the dealer locks them, 519) and the new window is
-      // written (the unchanged test sees _windowChanged). A different shift type, or an empty cell, still deals fresh.
-      const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null;
+    } else if(e.isPartial && _wgBase[k] && !_wgBase[k].orientation && !_wgBase[k].inactive){
+      // Build 610 (Tomas, "leaving at 4"): a Partial applied on a cell that already holds a saved shift is a change of HOURS,
+      // not a new deal — she keeps her saved units (the dealer locks them, 519) and the new window is written (the unchanged
+      // test sees _windowChanged). An empty cell still deals fresh.
+      // Build 611 (Tomas's 2:26 AM screenshot): the saved row is the one of the shift the window LANDS IN (e.date + e.shift
+      // after inferPartialShift), not the row behind the tapped cell — a 4:00 AM window on the 11/16 cell belongs to the
+      // 11/15 Noc, and 610 had borrowed the 11/16 Noc's units for it. No such row → a fresh deal, as before 610.
+      const saved = _wgBaseRows.find(r => r.name === name && r.date === e.date && r.shift === e.shift && !r.inactive) || null;
       if(saved && saved.units.length){
         e._keep = true; e._savedUnits = saved.units.slice();
         e._windowChanged = (String(saved.startTime || '') !== String(e.startTime || '')) || (String(saved.hours || '') !== String(e.hours || ''));
@@ -22272,10 +22277,9 @@ async function onAssignContextChange(){
       m = Math.ceil(m/5)*5; // next 5-min boundary
       const hh = String(Math.floor((m/60))%24).padStart(2,'0'), mm = String(m%60).padStart(2,'0');
       setAPartial(true, false);
-      const s = document.getElementById('aPartStart'), d = document.getElementById('aPartDur');
+      const s = document.getElementById('aPartStart'), e = document.getElementById('aPartEnd');
       if(s && !s.dataset.userSet){ s.value = `${hh}:${mm}`; _tpSync('aPartStart'); }
-      if(d && !d.dataset.userSet){ const endM = sh === 'Day' ? 20 * 60 + 30 : 8 * 60 + 30; const dur = ((endM - m) % 1440 + 1440) % 1440; d.value = String(Math.round(Math.min(11.75, Math.max(0.25, dur / 60)) * 4) / 4); _durSync('aPartDur'); } // Build 525: "until shift end", as before, but as a duration
-      _aDurToEnd();
+      if(e && !e.dataset.userSet){ e.value = sh === 'Day' ? '20:30' : '08:30'; _tpSync('aPartEnd'); } // Build 612: "until shift end", picked directly
     } else if(!window._aPartialTouched && (typeof _aPartial !== 'undefined') && _aPartial
               && !(typeof _editSource !== 'undefined' && _editSource)){
       // Build 408 (Tomas, Sep 7): WITHDRAW the courtesy when its condition
