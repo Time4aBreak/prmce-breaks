@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-614'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-616'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -12773,14 +12773,12 @@ async function _loadSummaryInner(mySeq, ctx){
       {sheet:LISTS.schedule, filter:`ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`},
       {sheet:LISTS.schedule, filter:`ShiftDate ge '${oppDt}' and ShiftDate le '${oppDt}T23' and ShiftType eq '${oppShift}'`}
     ];
-    let results;
-    if(SIM_MODE){
-      results = await Promise.all(queries.map(q => spGet(q.sheet, q.filter)));
-    } else {
-      // Sequential spGet — concurrent requests to Apps Script interfere
-      results = [];
-      for(const q of queries) results.push(await spGet(q.sheet, q.filter));
-    }
+    // Build 615 (Tomas's rush probe): ONE request — the comment above always said so, the loop under it ran the four reads
+    // one after another (~8 s per list, twice in the overlap windows). spBatchGet handles SIM_MODE itself since 614.
+    // The revision as of before this read seeds the poller's gate (as 614 did for Sign Up): the first tick after a load
+    // used to re-read the shift and then reload the whole board for nothing.
+    const _revP615 = fetchRevision().catch(() => null);
+    const results = await spBatchGet(queries);
     const [bookingsRaw, oppBookingsRaw, scheds, oppScheds] = results;
     // Build 143: if a newer loadSummary was queued while we awaited the
     // fetch, abandon this render so we don't paint stale data.
@@ -12990,6 +12988,7 @@ async function _loadSummaryInner(mySeq, ctx){
       }
     });
     el.innerHTML = _heading + html; // Build 452
+    _revP615.then(r => { if(mySeq !== _summaryRenderSeq || !r) return; if(r.BNBookings || r.BNSchedule) _covLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; }).catch(() => {}); // Build 615
   }catch(e){
     el.innerHTML=`<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
   } finally {
@@ -16030,13 +16029,45 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     indices.push(i);
   }
 
+  // Build 616 (Tomas, Lindsay Tue 11/17 — "I think I created orphans"): a kept-units / new-hours entry (610) whose nurse
+  // still covers claims OUTSIDE the new window is NOT written from the grid. Writing it left the claims stamped on her —
+  // Coverage and the claimant's Sign Up kept showing them, her own log hid the slots as "Outside scheduled hours" — and
+  // nobody came. The Edit card's save runs the 608 dialog (Cancel / Transfer) with its full apply path; the grid points
+  // there. One bookings read, only when a window changed; a failed read skips too — never write a window over claims
+  // that could not be seen. The cell stays an unsaved draft (its window differs from the sheet's).
+  const _winSkips = [];
+  { const _wIx = indices.filter(i => entriesToProcess[i]._windowChanged && entriesToProcess[i].startTime && Number(entriesToProcess[i].hours) > 0);
+    if(_wIx.length){
+      const _wd = _wIx.map(i => entriesToProcess[i].date).sort();
+      let _wbk = null;
+      try { _wbk = await spGet(LISTS.bookings, `SlotDate ge '${_wd[0]}' and SlotDate le '${_wd[_wd.length - 1]}T23'`); }
+      catch(e){ console.warn('[Save All] window-claims read failed:', e && e.message); }
+      const _dl = d => { const x = new Date(d + 'T12:00:00'); return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][x.getDay()]} ${x.getMonth() + 1}/${x.getDate()}`; };
+      for(const i of _wIx){
+        const e = entriesToProcess[i];
+        const st = String(e.startTime).replace(/[:.]/g, '').padStart(4, '0'), mins = Math.round(Number(e.hours) * 60);
+        const wS = sortKey(st, e.shift), wE = wS + mins; // constrainedRotation's test: start ≤ slot < start + hours
+        const uSet = new Set((importUnitSel[i] || []).flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]));
+        const outside = _wbk ? _wbk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1'
+          && String(b.SlotDate).slice(0, 10) === e.date && b.ShiftType === e.shift && bnOwns(b, uSet, e.name)
+          && _slotIsAhead(e.date, b.SlotTime, e.shift) && (k => k < wS || k >= wE)(sortKey(normSlot(b.SlotTime), e.shift))) : null;
+        if(outside === null || outside.length){
+          const ri = indices.indexOf(i); if(ri >= 0){ indices.splice(ri, 1); records.splice(ri, 1); } // parallel arrays, pushed together above
+          _winSkips.push(outside === null
+            ? `${firstName(e.name)} ${_dl(e.date)} ${e.shift} — couldn't read the shift's claims; try again`
+            : `${firstName(e.name)} ${_dl(e.date)} ${e.shift} — ${outside.length} claim${outside.length === 1 ? '' : 's'} outside ${fmt12(st)}–${fmt12(addMinHHMM(st, mins))} · change ${firstName(e.name)}'s hours from the Edit card to cancel or transfer them`);
+        }
+      }
+    }
+  }
+
   const skipped = entriesToProcess.length - indices.length - keptN; // Build 519: kept ones are not "skipped"
   if(!records.length){
     // Build 503 (Tomas): a grid review with nothing to save but shifts to remove (the week's last cell cleared).
     // Only a grid review sets _wgDeleteIds, and only the grid can review an empty batch. One confirm, then the
     // same delete + cleanup the normal path runs, under the overlay, then the grid re-reads.
     const _del = (window._wgDeleteIds || []).slice(), _delRows = (window._wgDeleteRows || []).filter(r => _del.includes(r.Id));
-    if(_del.length && _delRows.length === _del.length && entriesToProcess.every(e => e._keep || e.isDiscarded)){ // Build 519: kept entries may sit in the batch
+    if(_del.length && _delRows.length === _del.length && !_winSkips.length && entriesToProcess.every(e => e._keep || e.isDiscarded)){ // Build 519: kept entries may sit in the batch; 616: not with a window skip to explain
       const n = _del.length, what = `${n} saved shift${n === 1 ? '' : 's'}`;
       if(!confirm(`Remove ${what} from the live schedule? ${keptN ? `The ${keptN} unchanged shift${keptN === 1 ? '' : 's'} stay${keptN === 1 ? 's' : ''} as saved. ` : ''}Nothing else will be saved.`)){ btns.forEach(b => { b.disabled = false; b.textContent = '✅ SAVE ALL'; }); setImportActionsActive(true); return; } // Build 541
       showBusy(`Removing ${what}…`);
@@ -16065,6 +16096,11 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       b.style.opacity = '';
       b.style.cursor = '';
     });
+    if(_winSkips.length){ // Build 616: the only change was a window the grid will not write — say why, keep the draft
+      if(status) status.textContent = `⚠ Not saved — ${_winSkips.join(' · ')}`;
+      toast(`Not saved — ${_winSkips.join(' · ')}`, true);
+      return;
+    }
     if(status) status.textContent = keptN && !skipped ? `Nothing changed — ${keptN} shift${keptN === 1 ? '' : 's'} kept as saved` : `Nothing to save (${skipped} skipped)`;
     // Build 572: a grid batch with nothing changed is a finished session, not a warning
     if(!skipped && keptN && entriesToProcess.every(e => e.isDiscarded || e._source === 'grid')){ _impCloseGridSession(`Nothing changed — ${keptN} shift${keptN === 1 ? '' : 's'} kept as saved`); return; }
@@ -16288,6 +16324,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
     } else {
       if(status) status.textContent = `✓ ${records.length} saved${skipped > 0 ? ` · ${skipped} skipped` : ''}`;
     }
+    if(_winSkips.length && status) status.textContent += ` · not saved: ${_winSkips.join(' · ')}`; // Build 616
     // Save All success: hide the entire Extracted card. The batch is committed;
     // showing stale rows invites confusion and a tap of Save All on nothing.
     // Card returns on next extraction (renderImportRows shows it) or restore.
@@ -16388,6 +16425,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       if(status) status.textContent = `⚠ Batch failed: ${(e && e.message) || e || 'unknown error'}. Re-run SAVE ALL to retry.`;
     }
   } finally { _busyUp = false; hideBusy(); } // Build 494: every exit — saved, partly saved, failed
+  if(_winSkips.length) toast(`Not saved — ${_winSkips.join(' · ')}`, true); // Build 616: after the overlay (a toast under it is never seen)
   // Reload full assignment list with buttons after save
   loadAssignments();
   notifyProdLogChanged();
@@ -18116,10 +18154,10 @@ async function silentRefreshCoverage(){
   try {
     const dt = document.getElementById('summDate')?.value || today();
     const shift = S.summShift || detectShift();
-    const bookings = await spGet(LISTS.bookings,
-      `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'`);
-    const scheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'`);
+    // Build 615: one request (was two sequential reads)
+    const [bookings, scheds] = await spBatchGet([
+      { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'` },
+      { sheet: LISTS.schedule, filter: `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'` }]);
     // Watched: every covering BN's bnStart and rotation for this shift, plus
     // 3C state. Cross-device changes here affect slot visibility, claimability,
     // unit chip display, and whether 3C is included in coverage at all.
