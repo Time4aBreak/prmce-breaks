@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-616'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-617'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11468,6 +11468,50 @@ async function onBNStartTimeChange(){
     return;
   }
   const _sy1 = window.scrollY;
+  // Build 617 (Tomas, Lindsay 11/17 — the third door): a later start is a narrower window, and claims on this nurse's
+  // stream that are still ahead but BEFORE the new start would be orphaned by it — Sign Up and Coverage keep naming
+  // her, her own log hides them under "Before start time". They go through the same dialog as the Edit card's 608
+  // (Cancel / Transfer, no Keep — she is not there at that hour), applied the way the roster Remove path applies it;
+  // abort keeps the start as it was. Fails closed: if the claims can't be read, nothing changes.
+  let _tail617 = '';
+  if(val){
+    const _dt = BNS.date || today(), _sh = BNS.shift, _prev = syncedLS.get(key) || '';
+    const _restore = () => { if(sel) sel.value = _prev; };
+    showBusy(`Checking for claims before ${fmt12(val)}…`);
+    let _scheds, _bk;
+    try { [_scheds, _bk] = await spBatchGet([
+        { sheet: LISTS.schedule, filter: `ShiftDate ge '${_dt}' and ShiftDate le '${_dt}T23' and ShiftType eq '${_sh}'` },
+        { sheet: LISTS.bookings, filter: `SlotDate ge '${_dt}' and SlotDate le '${_dt}T23' and ShiftType eq '${_sh}'` }]); }
+    catch(e){ hideBusy(); _restore(); toast(`Couldn't check for claims before ${fmt12(val)} — the start time was not changed. Try again.`, true); return; }
+    const _mine = (_scheds || []).filter(r => r.BreakNurseName === BNS.name && String(r.IsSupplemental) !== '1' && (r.Status || '') !== 'inactive');
+    const _uSet = new Set(_mine.flatMap(r => { try { return JSON.parse(r.Units || '[]'); } catch(e){ return []; } }));
+    const _sK = sortKey(val, _sh);
+    const _before = (_bk || []).filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && bnOwns(b, _uSet, BNS.name)
+      && _slotIsAhead(_dt, b.SlotTime, _sh) && sortKey(normSlot(b.SlotTime), _sh) < _sK);
+    hideBusy();
+    if(_before.length){
+      const _winRow = _mine.find(r => r.StartTime && Number(r.Hours) > 0 && Number(r.Hours) < 12);
+      const _end = _winRow ? addMinHHMM(String(_winRow.StartTime).padStart(4, '0'), Math.round(Number(_winRow.Hours) * 60)) : (_sh === 'Day' ? '2030' : '0830');
+      const _byU = {}; _before.forEach(b => { (_byU[b.Unit] ||= []).push(b); });
+      const _dec = await promptBookingDecisions({ removedUnitsWithBookings: Object.entries(_byU).map(([unit, bookings]) => ({ unit, bookings, _window: { start: val, end: _end } })),
+        outgoingBN: BNS.name, date: _dt, shift: _sh, allScheds: _scheds, allBookings: _bk });
+      if(!_dec){ _restore(); loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' }))); return; }
+      showBusy('Updating claims…');
+      try {
+        const _cx = _dec.bookingsToCancel || [], _tr = (_dec.transfers || []).filter(t => t.targetBN && t.booking);
+        if(_cx.length) await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_cx.map(b => b.Id))) });
+        for(const t of _tr){ try { await spPatch(LISTS.bookings, t.booking.Id, { CreatedBy: t.targetBN, CoveredBy: t.targetBN }); } catch(e){ console.warn('transfer failed', t.booking.Id, e && e.message); } }
+        // the receiver's rotation is pinned to the unit at that slot (Build 373/374/508 — Sign Up stops offering her other unit then)
+        try { const _byT = {}; _tr.forEach(t => { (_byT[t.targetBN] ||= []).push(t); });
+          for(const [tbn, list] of Object.entries(_byT)){ const rot = loadRotation(tbn, _dt, _sh) || {}; list.forEach(t => { rot[String(t.booking.SlotTime).padStart(4, '0')] = t.booking.Unit; }); await saveRotation(tbn, _dt, _sh, rot); } }
+        catch(e){ console.warn('transfer rotation pin failed:', e && e.message); }
+        _tail617 = `${_cx.length ? ` · ${_cx.length} claim${_cx.length === 1 ? '' : 's'} cancelled` : ''}${_tr.length ? ` · ${_tr.length} transferred` : ''}`;
+      } catch(e){
+        hideBusy(); _restore(); toast(`Couldn't update the claims — the start time was not changed. ${(e && e.message) || e || ''}`, true);
+        loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' }))); return;
+      }
+    }
+  }
   // Full-screen busy overlay blocks all taps (dropdown, +Log, everything)
   // until the BNState write commits — same pattern as the rest of the app.
   showBusy(val ? 'Setting start time…' : 'Clearing start time…');
@@ -11481,7 +11525,7 @@ async function onBNStartTimeChange(){
     }
     hideBusy();
     loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' })));
-    toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff` : 'Start time cleared');
+    toast(val ? `Start time set to ${fmt12(val)} — earlier slots hidden from staff${_tail617}` : 'Start time cleared');
   } catch(e){
     hideBusy();
     // syncedLS already surfaced the network-error toast. Don't paint over it.
