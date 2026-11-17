@@ -2276,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-609'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-610'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -15056,6 +15056,7 @@ function updateAcceptBars(){
 // the others. Toggle any chip on a kept card and it stops being unchanged — and is written.
 function _impEntryUnchanged(e, i){
   if(!e || !e._keep || !e._savedUnits) return false;
+  if(e._windowChanged) return false; // Build 610: units kept, hours changed — Save All writes it
   const a = [...new Set((importUnitSel[i] || []).flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]))].sort().join();
   const b = [...new Set(e._savedUnits.flatMap(u => u === 'C_PAIR' ? ['3C','4C'] : [u]))].sort().join();
   return a === b;
@@ -15110,7 +15111,7 @@ function _buildImportRowsHTML(batch){
       : '';
 
     const borderColor = e.isFlagged ? ';border-color:#fb8c00' : (e.isPartial ? ';border-color:#ffb300' : '');
-    const keptBadge = e._keep ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="Saved units, not re-dealt. Change a chip or tap Re-suggest to change it.">saved · unchanged</span>` : ''; // Build 519
+    const keptBadge = e._keep ? `<span style="display:inline-flex;align-items:center;padding:2px 8px;border-radius:99px;background:var(--bg);border:1px solid var(--border);color:var(--muted);font-size:.7rem;font-weight:600;line-height:1.4;white-space:nowrap" title="${e._windowChanged ? 'Her saved units, kept; only the hours change. Change a chip or tap Re-suggest to re-deal.' : 'Saved units, not re-dealt. Change a chip or tap Re-suggest to change it.'}">${e._windowChanged ? 'units kept · new hours' : 'saved · unchanged'}</span>` : ''; // Build 519; 610
 
     // Action row depends on flagged-unresolved status.
     const actionRow = isFlaggedUnresolved
@@ -21261,7 +21262,7 @@ async function _wgFetchBase(wk){
     let d = String(r.ShiftDate || '').slice(0, 10);
     if(r.ShiftType === 'Noc' && part && parseInt(st, 10) < 1200) d = _wgAddDays(d, 1); // Build 448: show on the calendar date the nurse starts
     if(d < wk || d > end) return;
-    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [], part }); } // Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial); 553: part for the ⚖ headcount
+    if(!roster.size || roster.has(r.BreakNurseName)){ let u = []; try { u = JSON.parse(r.Units || '[]'); } catch(e){} baseRows.push({ Id: r.Id, name: r.BreakNurseName, date: String(r.ShiftDate || '').slice(0, 10), cell: d, shift: r.ShiftType, units: Array.isArray(u) ? u : [], part, startTime: part ? String(r.StartTime || '').replace(/[:.]/g, '').padStart(4, '0') : '', hours: part ? String(r.Hours) : '' }); } // Build 610: the saved window rides along · Build 492; 545: cell = the grid date it is drawn on (≠ date only for a post-midnight Noc partial); 553: part for the ⚖ headcount
     let _cu = []; try { _cu = JSON.parse(r.Units || '[]'); } catch(e){} // Build 526: the cell shows its units
     (perCell[`${r.BreakNurseName}|${d}`] ||= []).push({ shift: r.ShiftType === 'Noc' ? 'Noc' : 'Day', startTime: st, hours: part ? String(r.Hours) : '', units: Array.isArray(_cu) ? _cu.flatMap(u => u === 'C_PAIR' ? ['3C', '4C'] : [u]) : [], rowId: r.Id, skey: `${String(r.ShiftDate || '').slice(0, 10)}|${r.ShiftType}` }); // 556: rowId + the sheet key
   });
@@ -21725,7 +21726,7 @@ async function wgReview(){
   // Build 519 (step 1 of "the grid is the master"): a saved cell you did NOT touch keeps its units — Review
   // deals the new/changed cells AROUND it (the dealer's 300 lock overlay) instead of re-dealing the week, and
   // Save All skips it. Re-suggest All is still the explicit "re-deal this week".
-  const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.cell || r.date}|${r.shift}`] = r.units; }); // Build 545: by the drawn date
+  const _savedByKey = {}; _wgBaseRows.forEach(r => { _savedByKey[`${r.name}|${r.cell || r.date}|${r.shift}`] = r; }); // Build 545: by the drawn date; 610: the whole row (units + window)
   const entries = keys.map(k => {
     const [name, cellDate] = k.split('|'); const c = _wgCells[k];
     let date = cellDate; { const hh = Number(c.hours || 0); if(c.startTime && hh > 0 && hh < 12){ const inf = inferPartialShift(c.startTime, hh); if(inf && inf.dateDelta) date = _wgAddDays(date, inf.dateDelta); } } // Build 448
@@ -21739,7 +21740,16 @@ async function wgReview(){
     }
     if(_wgBase[k] && !Object.prototype.hasOwnProperty.call(_wgEdits, k)){ // Build 519: untouched saved cell
       const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null; // Build 545: exact cell, no day-before fallback
-      if(saved && saved.length){ e._keep = true; e._savedUnits = saved.slice(); }
+      if(saved && saved.units.length){ e._keep = true; e._savedUnits = saved.units.slice(); }
+    } else if(e.isPartial && _wgBase[k] && _wgBase[k].shift === c.shift && !_wgBase[k].orientation && !_wgBase[k].inactive){
+      // Build 610 (Tomas, "leaving at 4"): a Partial applied on a cell that already holds a saved shift of the SAME type is a
+      // change of HOURS, not a new deal — she keeps her saved units (the dealer locks them, 519) and the new window is
+      // written (the unchanged test sees _windowChanged). A different shift type, or an empty cell, still deals fresh.
+      const saved = _savedByKey[`${name}|${cellDate}|${c.shift}`] || null;
+      if(saved && saved.units.length){
+        e._keep = true; e._savedUnits = saved.units.slice();
+        e._windowChanged = (String(saved.startTime || '') !== String(e.startTime || '')) || (String(saved.hours || '') !== String(e.hours || ''));
+      }
     }
     return e;
   }).sort((a, b) => (a.date + a.shift + a.name).localeCompare(b.date + b.shift + b.name));
