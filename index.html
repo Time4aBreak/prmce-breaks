@@ -696,8 +696,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <button type="button" id="wgReviewBtn" class="btn btn-primary" onclick="wgReview()" disabled>✨ Suggest &amp; Review</button>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><!-- Build 538: from the retired list card -->
-          <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate assignments</button>
-          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate all rotations';})">↺ Recalculate all rotations</button>
+          <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate shifts — whole schedule</button><!-- Build 606: both buttons name their scope; they sit under a filtered view -->
+          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate rotations — every nurse, every upcoming shift';})">↺ Recalculate rotations — every nurse, every upcoming shift</button>
         </div>
       </div>
     </div>
@@ -2274,7 +2274,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-605'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-606'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14022,19 +14022,25 @@ async function _loadAssignmentsCore(preloadedScheds){
 // Build 223: deprecated confirmCloseUnit stub retired with the closeUnit family.
 async function recalculateAllRotations(opts = {}){
   const skipConfirm = !!opts.skipConfirm;
-  if(!skipConfirm && !await customConfirm('Recalculate rotations for all upcoming assignments?','Recalculate','Cancel')) return;
+  // Build 606 (Tomas): the button sits under a filtered grid, so the confirm states the scope in numbers — the read
+  // moves ahead of the dialog to count it. Nothing is written before the confirm.
+  const t = activeShiftFloor();
+  const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+  const active = scheds.filter(s => s.Status !== 'inactive');
+
+  if(!active.length){ toast('No upcoming assignments found', true); return; }
+  if(!skipConfirm){
+    const _ds = active.map(s => String(s.ShiftDate).slice(0,10)).sort();
+    const _nn = new Set(active.map(s => s.BreakNurseName)).size;
+    const _md = d => `${Number(d.slice(5,7))}/${Number(d.slice(8,10))}`;
+    if(!await customConfirm(`Rebuild the rotation for all ${active.length} upcoming shift${active.length !== 1 ? 's' : ''} — ${_nn} nurse${_nn !== 1 ? 's' : ''}, ${_md(_ds[0])} → ${_md(_ds[_ds.length - 1])} — not just the shifts shown here?\n\nElapsed slots and kept breaks are preserved.`, 'Recalculate', 'Cancel')) return;
+  }
 
   // Build 140 (2026-05-27): Busy overlay during the full recalc loop.
   // This runs ~40s for a full sheet; without the overlay, taps during
   // the loop could navigate or trigger other state changes. The overlay
   // also makes the long wait obvious to the user (vs. silent grinding).
   showBusy('Recalculating all rotations… (~40s)');
-
-  const t = activeShiftFloor();
-  const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
-  const active = scheds.filter(s => s.Status !== 'inactive');
-
-  if(!active.length){ hideBusy(); toast('No upcoming assignments found', true); return; }
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
 
