@@ -1161,11 +1161,7 @@ async function warm3CStatus(date, shift){
     // Schedule list — only warm if local doesn't have a valid list. After
     // the first set3CSchedule write, local is kept in sync with every edit,
     // so pulling from BNState could overwrite an in-flight write-not-yet-confirmed.
-    await Promise.all([
-      syncedLS.warm(overrideKey),
-      syncedLS.warm('unit3CDefault'),
-      syncedLS.warm('unit3CSchedule')
-    ]);
+    await syncedLS.warmMany([overrideKey, 'unit3CDefault', 'unit3CSchedule']); // Build 614: one request when cold, none when warm
     // One-shot self-heal: if the warmed schedule has redundant consecutive
     // same-status entries (legacy bug), rewrite it through set3CSchedule
     // which compacts. Cheap no-op if already clean.
@@ -2276,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-613'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-614'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2683,11 +2679,24 @@ async function spBatchSetState(entries){
 // Batch get: fetch multiple queries in one round trip
 // queries: [{sheet, filter}] — returns array of item arrays
 async function spBatchGet(queries){
+  if(SIM_MODE) return Promise.all(queries.map(q => spGet(q.sheet, q.filter || ''))); // Build 614: one shape for every caller
   const d = await gasCall({
     action: 'batchGet',
     queries: encodeURIComponent(JSON.stringify(queries))
   });
   return (d.results || []).map(r => r.items || []);
+}
+
+// Build 614 (Tomas's rush probe): ONE revision probe for every poller. The slot tick, the 3C tick, the log, Coverage and
+// the grid each asked the backend separately; concurrent asks within 2.5 s now share one request, so an idle phone costs
+// one execution per tick, not two or three. Fail-open like the callers: a failed probe is not memoised.
+let _revMemo = { at: -1e9, p: null };
+function fetchRevision(){
+  const now = performance.now(); // monotonic — a pinned Date (the bed, a device clock change) must not freeze the memo
+  if(_revMemo.p && now - _revMemo.at < 2500) return _revMemo.p;
+  _revMemo.at = now;
+  _revMemo.p = gasCallPost({ action: 'getRevision' }).catch(e => { _revMemo.p = null; throw e; });
+  return _revMemo.p;
 }
 
 async function _spPatchReal(list, id, data){
@@ -2856,9 +2865,16 @@ const syncedLS = {
     const _now = Date.now();
     const missing = keys.filter(k => k && localStorage.getItem(k) == null && !(syncedLS._absent[k] && (_now - syncedLS._absent[k]) < 300000));
     if(!missing.length) return;
-    // For small N, parallel single-key fetches are fine.
+    // Build 614: for small N, ONE batch request (was N parallel single-key reads — up to five executions per cold phone)
     if(missing.length <= 5){
-      await Promise.all(missing.map(k => syncedLS.warm(k)));
+      try {
+        const sets = await spBatchGet(missing.map(k => ({ sheet: LISTS.state, filter: `Key eq '${esc(k)}'` })));
+        missing.forEach((k, i) => {
+          if(localStorage.getItem(k) != null) return; // a write landed meanwhile — keep it
+          const it = (sets[i] || [])[0];
+          try { const parsed = it ? JSON.parse(it.Value || 'null') : null; if(parsed != null) localStorage.setItem(k, JSON.stringify(parsed)); } catch(e){}
+        });
+      } catch(e){ await Promise.all(missing.map(k => syncedLS.warm(k))); } // the old path, if the batch itself failed
       missing.forEach(k => { if(localStorage.getItem(k) == null) syncedLS._absent[k] = Date.now(); }); // Build 431
       return;
     }
@@ -3821,7 +3837,7 @@ async function _3CTick(){
   // semantics preserved: unchanged-while-asleep correctly skips. FAIL-OPEN.
   let _tkRevNow = null;
   try {
-    const _r = await gasCallPost({ action: 'getRevision' });
+    const _r = await fetchRevision(); // Build 614: shared probe
     _tkRevNow = (_r && _r.BNState) ? String(_r.BNState) : null;
     if(_tkRevNow && _tickLastRev && _tkRevNow === _tickLastRev) return;
   } catch(e){ /* fail-open */ }
@@ -7615,15 +7631,20 @@ async function _loadSlotsCore(silent=false){
     const _lb = new Date(_n.getFullYear(), _n.getMonth() - 1, 1);
     const _lbStr = `${_lb.getFullYear()}-${String(_lb.getMonth() + 1).padStart(2, '0')}-${String(_lb.getDate()).padStart(2, '0')}`;
     const schedFloor = _lbStr < _viewFloor ? _lbStr : _viewFloor;
-    const [allSchedsRaw, allBookingsRaw, oppBookingsRaw] = await Promise.all([
-      spGet(LISTS.schedule, `ShiftDate ge '${schedFloor}'`),
-      spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`).then(r => reconcileBookings(r)),
-      // Opposite-date bookings — needed for overlap BN breaks (e.g. Noc BN break
-      // at 7:55 AM is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
-      (oppDt !== dt)
-        ? spGet(LISTS.bookings, `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'`).then(r => reconcileBookings(r))
-        : Promise.resolve([])
-    ]);
+    // Build 614 (Tomas's rush probe: 70 phones × 5 executions hung for 90 s): the three reads are ONE request. Three
+    // parallel executions against one Apps Script contended with each other; one batchGet is one execution, and with the
+    // backend's read cache an identical request from the next phone is a hit.
+    // Opposite-date bookings — needed for overlap BN breaks (e.g. Noc BN break
+    // at 7:55 AM is stored with SlotDate=yesterday/Noc-date, not today/Day-date)
+    // Build 614: the revision as of BEFORE this read, so the first tick can tell "nothing changed since the load" and skip —
+    // every phone's first tick used to re-read the shift and then fully reload (the fingerprint baseline was unset).
+    // Probed before the read: a write landing in between makes the stored revision older than the data — one extra
+    // re-read at the first tick, never a missed change.
+    const _revP614 = fetchRevision().catch(() => null);
+    const _q614 = [{ sheet: LISTS.schedule, filter: `ShiftDate ge '${schedFloor}'` }, { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23'` }];
+    if(oppDt !== dt) _q614.push({ sheet: LISTS.bookings, filter: `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'` });
+    const _r614 = await spBatchGet(_q614);
+    const allSchedsRaw = _r614[0], allBookingsRaw = reconcileBookings(_r614[1]), oppBookingsRaw = oppDt !== dt ? reconcileBookings(_r614[2]) : [];
     _coverageScheds = allSchedsRaw;        // build 208: feed the coverage calendar (no extra fetch)
     if(_ep317 !== _slotLoadEpoch) return; // Build 317: a newer world took over mid-fetch — discard
     if(!silent) renderCoverageCalendar();  // repaint only on real loads; 10s refresh just updates data
@@ -7989,11 +8010,12 @@ async function _loadSlotsCore(silent=false){
     // (Apps Script serializes per-script execution; P253 caught 8 concurrent
     // warms inflating each other to 4-5s). warmMany parallels small N and
     // bulk-fetches past 5 in ONE trip (the Build-111 machinery, unchanged).
+    // Build 614: the rotation keys and the 3C keys (warm3CStatus) warm in ONE request
     await syncedLS.warmMany([
       ...covering.map(sched => rotationKey(sched.BreakNurseName, dt, shift)),
-      ...oppCovering.map(sched => rotationKey(sched.BreakNurseName, oppSchedDt, oppShift))
+      ...oppCovering.map(sched => rotationKey(sched.BreakNurseName, oppSchedDt, oppShift)),
+      `unit3C_${dt}_${shift}`, 'unit3CDefault', 'unit3CSchedule'
     ]).catch(()=>{});
-    warm3CStatus(dt, shift).catch(()=>{});
 
     // Load block rotation for each BN covering this unit. Uses
     // loadRotationWithFallback so staff Sign Up filtering still works when
@@ -8561,6 +8583,8 @@ async function _loadSlotsCore(silent=false){
       covering, oppCovering, shift, overlapRange,
       viewDate: dt // Build 347: the loader's date local is dt — 346 referenced a name that didn't exist (dateStr), crashing the render
     };
+    // Build 614: this load's baseline for the tick's gate (see _revP614 above)
+    _revP614.then(r => { if(_ep317 !== _slotLoadEpoch || !r) return; if(r.BNBookings || r.BNSchedule) _slotsLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; if(r.BNState) _slotsLastStateRev = String(r.BNState); }).catch(() => {});
 
     // Start silent background refresh timer
     clearInterval(S.refreshTmr);
@@ -8591,13 +8615,8 @@ async function silentRefreshSlots(){
   if(document.hidden) return; // Build 215: no polling while hidden
   // Build 325: statuses ride the staff poll — a closure reaches an open
   // Sign Up screen within one tick, and the grid repaints only on change.
-  try {
-    const _t325 = document.querySelector('.tab.active');
-    if(_t325 && _t325.textContent.includes('Sign Up')){
-      Promise.all([syncedLS.refresh('unitStatuses'), syncedLS.refresh('unitSchedules')])
-        .then(() => refreshStaffUnitGridIfChanged()).catch(()=>{});
-    }
-  } catch(e){}
+  // Build 614: the unit-status refreshes (325) moved below the revision probe and ride REV_BNState — they used to be two
+  // sheet reads on EVERY tick, whether or not anything had changed (70 phones ≈ the backend's whole capacity, idle).
   // Build 271: no slot polling while another MAIN tab is active — both P260
   // runs showed 15–25 background slot fetches during admin portal work
   // (pure waste that also contends with the import's own writes). This
@@ -8613,10 +8632,16 @@ async function silentRefreshSlots(){
   // Build 274 (247/273 idiom): byte-cheap revision check before the two
   // table reads. Slots depend on bookings + schedule; any claim, cancel,
   // transfer, assignment, or status flip bumps a counter. FAIL-OPEN.
-  let _slRevNow = null;
+  let _slRevNow = null, _stRevNow = null;
   try {
-    const _r = await gasCallPost({ action: 'getRevision' });
+    const _r = await fetchRevision(); // Build 614: shared probe
     _slRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
+    _stRevNow = (_r && _r.BNState) ? String(_r.BNState) : null;
+    // Build 614: unit statuses (325) only when BNState moved — or when the probe could not say (fail-open, as before)
+    if(!_stRevNow || _stRevNow !== _slotsLastStateRev){
+      if(_stRevNow) _slotsLastStateRev = _stRevNow;
+      try { const _t325 = document.querySelector('.tab.active'); if(_t325 && _t325.textContent.includes('Sign Up')){ syncedLS.refreshMany(['unitStatuses', 'unitSchedules']).then(() => refreshStaffUnitGridIfChanged()).catch(()=>{}); } } catch(e){}
+    }
     if(_slRevNow && _slotsLastRev && _slRevNow === _slotsLastRev) return;
   } catch(e){ /* fail-open */ }
   if(_slRevNow) _slotsLastRev = _slRevNow;
@@ -8631,9 +8656,8 @@ async function silentRefreshSlots(){
   try {
     const dt = staffShiftDate(S.shift), shift = S.shift;
 
-    // Sequential spGet: reliable vs concurrent requests to Apps Script
-    const allSchedsForSilent = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
-    const allBookingsRaw = await spGet(LISTS.bookings, `SlotDate ge '${dt}' and SlotDate le '${dt}T23'`);
+    // Build 614: one request (was two sequential reads)
+    const [allSchedsForSilent, allBookingsRaw] = await spBatchGet([{ sheet: LISTS.schedule, filter: `ShiftDate ge '${dt}'` }, { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23'` }]);
     const scheds = allSchedsForSilent.filter(s => s.ShiftDate.slice(0,10) === dt && s.ShiftType === shift);
     const bookings = allBookingsRaw.filter(b => b.Unit === S.unit && isStaffBooking(b));
     const allBNBreaks = allBookingsRaw.filter(b => isBNBreak(b));
@@ -17130,6 +17154,7 @@ const POLL_INTERVAL_MS = 10000;
 const PRODLOG_POLL_MS = 5000;
 let _prodLogLastRev = null;
 // Build 274: the same gate for the app's three remaining pollers.
+let _slotsLastStateRev = null; // Build 614
 let _slotsLastRev = null, _covLastRev = null, _tickLastRev = null;
 let _prodLogPollTmr = null;
 let _prodLogLastFingerprint = null;
@@ -17946,7 +17971,7 @@ async function silentRefreshProdLog(){
   // renders exact when a revision bumps on writes this view doesn't show.
   let _plRevNow = null;
   try {
-    const _r = await gasCallPost({ action: 'getRevision' });
+    const _r = await fetchRevision(); // Build 614: shared probe
     _plRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
     if(_plRevNow && _prodLogLastRev && _plRevNow === _prodLogLastRev) return;
   } catch(e){ /* fail-open */ }
@@ -18083,7 +18108,7 @@ async function silentRefreshCoverage(){
   // Build 274: same revision gate — coverage reads the same two sheets.
   let _cvRevNow = null;
   try {
-    const _r = await gasCallPost({ action: 'getRevision' });
+    const _r = await fetchRevision(); // Build 614: shared probe
     _cvRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
     if(_cvRevNow && _covLastRev && _cvRevNow === _covLastRev) return;
   } catch(e){ /* fail-open */ }
@@ -18149,7 +18174,7 @@ async function silentRefreshSchedule(){
   if(!el){
     if(!_wgWeek) return;
     try {
-      const _r = await gasCallPost({ action: 'getRevision' });
+      const _r = await fetchRevision(); // Build 614: shared probe
       const _revNow = _r && _r.BNSchedule ? String(_r.BNSchedule) : null;
       const _stNow = _r && _r.BNState ? String(_r.BNState) : null; // Build 585: orientation markers live in BNState (550), not BNSchedule
       const schedChanged = !!_revNow && _revNow !== _lastSchedRev, stateChanged = !!_stNow && _stNow !== _lastStateRevGrid; // a null marker reads as changed: one silent re-read after entry, nothing missed in between
@@ -18176,7 +18201,7 @@ async function silentRefreshSchedule(){
     // writes that don't change this view; layered gates keep renders exact.
     let _revNow = null;
     try {
-      const _r = await gasCallPost({ action: 'getRevision' });
+      const _r = await fetchRevision(); // Build 614: shared probe
       _revNow = _r && _r.BNSchedule ? String(_r.BNSchedule) : null;
       if(_revNow && _lastSchedRev && _revNow === _lastSchedRev){
         window._schedPollStats.skipped++;
