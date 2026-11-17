@@ -2276,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-608'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-609'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21504,7 +21504,8 @@ function _wgCellHtml(c, date){
   let _open = () => true;
   try { if(date){ const at = shiftStartDateTime(date, c.shift === 'Noc' ? 'Noc' : 'Day'); _open = u => isUnitOpenAt(u, at); } } catch(e){}
   const shown = units.filter(_open);
-  const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '')}</div>` : (shown.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
+  // Build 609 (Tomas): the cell shows the window only — "20:30–04:00 · 7.5h" overran the cell; the duration stays in the chooser
+  const head = part ? `<div style="font-size:.7rem;font-weight:700;white-space:nowrap">${_wgCellLabel(c).replace(/^[^\d]*/, '').replace(/\s*·\s*[\d.]+h$/, '')}</div>` : (shown.length ? '' : `<div>${_wgCellLabel(c)}</div>`);
   // Build 527: one span per unit so five units wrap between units instead of running off the cell
   const body = shown.length ? `<div style="display:flex;flex-wrap:wrap;justify-content:center;gap:0 5px;font-size:.7rem;font-weight:600;line-height:1.3">${shown.map(u => `<span style="white-space:nowrap">${u}</span>`).join('')}</div>` : '';
   return outHead + head + body;
