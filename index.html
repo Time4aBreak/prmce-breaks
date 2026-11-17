@@ -696,8 +696,10 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
           <button type="button" id="wgReviewBtn" class="btn btn-primary" onclick="wgReview()" disabled>✨ Suggest &amp; Review</button>
         </div>
         <div style="display:flex;gap:6px;flex-wrap:wrap;margin-top:14px;padding-top:10px;border-top:1px solid var(--border)"><!-- Build 538: from the retired list card -->
-          <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate shifts — whole schedule</button><!-- Build 606: both buttons name their scope; they sit under a filtered view -->
-          <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate rotations — every nurse, every upcoming shift';})">↺ Recalculate rotations — every nurse, every upcoming shift</button>
+          <!-- Build 607 (Tomas): the whole-sheet duplicate sweep is hidden — every source of duplicate rows is closed, and the grid's ⚠2 badge
+               catches and removes the rare cross-device one per cell. dedupAssignments stays in code (console: safeAsync(dedupAssignments)).
+          <button class="btn btn-ghost btn-sm" id="dedupBtn" onclick="safeAsync(dedupAssignments)">🧹 Remove duplicate shifts — whole schedule</button> -->
+          <button class="btn btn-ghost btn-sm" id="recalcAllBtn" onclick="this.disabled=true;this.textContent='Recalculating…';recalculateAllRotations().finally(()=>{this.disabled=false;this.textContent='↺ Recalculate rotations — every nurse, every upcoming shift';})">↺ Recalculate rotations — every nurse, every upcoming shift</button>
         </div>
       </div>
     </div>
@@ -2274,7 +2276,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-16-606'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-16-608'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5237,21 +5239,26 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     unitMeta[unit] = {
       wingNames: new Set(sameWing.map(s => s.BreakNurseName)),
       cover: coverRow ? coverRow.BreakNurseName : null,
-      anySameWing: sameWing.length > 0
+      anySameWing: sameWing.length > 0,
+      window: (removedUnitsWithBookings.find(g => g.unit === unit) || {})._window || null // Build 608: a kept unit, slots outside her new hours
     };
   });
+  // Build 608: Keep is meaningless for a run outside the nurse's new hours — those runs behave as noKeep
+  const noKeepFor = i => !!noKeep || !!(unitMeta[runUnit(runs[i])] || {}).window;
 
   // state[i]: 'keep' | 'cancel' | targetBNName
   const state = runs.map(() => 'keep');
   // Build 485 (Tomas): on Remove from this shift there is no one to Keep for — default each run
   // to Transfer when exactly one BN can take it, else Cancel; the Keep options are hidden.
-  if(noKeep){ try { const e0 = recomputeRunEligibility(baseCtx, runs, activeBNs, runs.map(() => CHOICE_CANCEL)); runs.forEach((_, i) => { state[i] = (e0[i] && e0[i].length === 1) ? e0[i][0] : 'cancel'; }); } catch(e){ runs.forEach((_, i) => { state[i] = 'cancel'; }); } }
   const engineAssignments = () => state.map(a =>
     a === 'keep' ? CHOICE_KEEP : a === 'cancel' ? CHOICE_CANCEL : a);
   const allowedFor = (eligByRun, i) => {
     const meta = unitMeta[runUnit(runs[i])] || { wingNames: new Set() };
     return (eligByRun[i] || []).filter(n => meta.wingNames.has(n));
   };
+  // Build 608: per run, and judged on the SAME wing-filtered list the dropdown shows (485 counted the unfiltered
+  // engine list, so a second same-shift BN on the other wing turned the default into Cancel)
+  if(runs.some((_, i) => noKeepFor(i))){ try { const e0 = recomputeRunEligibility(baseCtx, runs, activeBNs, runs.map((_, i) => noKeepFor(i) ? CHOICE_CANCEL : CHOICE_KEEP)); runs.forEach((_, i) => { if(noKeepFor(i)){ const al = allowedFor(e0, i); state[i] = al.length === 1 ? al[0] : 'cancel'; } }); } catch(e){ runs.forEach((_, i) => { if(noKeepFor(i)) state[i] = 'cancel'; }); } }
 
   return new Promise(resolve => {
     const existing = document.getElementById('bookingDecisionsModal');
@@ -5280,7 +5287,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
           ).join('')
         : `<option value="" disabled>No eligible Break Nurse for this run</option>`;
       return `
-        ${noKeep ? '' : `<option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>`}
+        ${noKeepFor(i) ? '' : `<option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>`}
         <option value="cancel"${state[i]==='cancel' ? ' selected' : ''}>Cancel booking${n!==1?'s':''}</option>
         ${transferOptions}`;
     };
@@ -5301,12 +5308,13 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
             <div class="_bdNote" data-noteidx="${i}" style="display:none;font-size:.72rem;color:#b45309;margin-top:4px"></div>
           </div>`).join('');
       const nRuns = runIdxs.length;
+      const winNote = meta.window ? `<span style="color:#b45309;font-size:.78rem">· outside ${firstName(outgoingBN)}'s hours (${fmt12(meta.window.start)}–${fmt12(meta.window.end)})</span>` : ''; // Build 608
       return `
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap">
-            <div style="font-weight:700;font-size:.95rem">${unit} — ${nRuns} break run${nRuns!==1?'s':''} ${headerNote}</div>
+            <div style="font-weight:700;font-size:.95rem">${unit} — ${nRuns} break run${nRuns!==1?'s':''} ${meta.window ? winNote : headerNote}</div>
             <div style="display:flex;gap:4px">
-              ${noKeep ? '' : `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>`}
+              ${(noKeep || meta.window) ? '' : `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>`}
               <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="cancel" style="font-size:.72rem;padding:3px 8px">All Cancel</button>
               ${meta.cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="transfer:${meta.cover}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(meta.cover)}</button>` : ''}
             </div>
@@ -5323,7 +5331,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:22px;max-width:480px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">Bookings on removed units</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${(() => { const w = removedUnitsWithBookings.some(g => g._window), u = removedUnitsWithBookings.some(g => !g._window); return w && u ? 'Bookings on removed units and outside the new hours' : w ? `Bookings outside ${firstName(outgoingBN)}'s new hours` : 'Bookings on removed units'; })()}</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}. Each row is one break run — it moves whole.</div>
         <div style="overflow-y:auto;flex:1;margin-bottom:14px">${html}</div>
         <div style="display:flex;flex-direction:column;gap:8px">
@@ -5358,7 +5366,8 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
       runs.forEach((r, i) => {
         const a = state[i];
         if(a !== 'keep' && a !== 'cancel' && !allowedFor(elig, i).includes(a)){
-          setRowAction(i, 'keep', `↺ set to Keep — ${firstName(a)} isn't available for this run anymore`);
+          const fb = noKeepFor(i) ? 'cancel' : 'keep'; // Build 608
+          setRowAction(i, fb, `↺ set to ${fb === 'keep' ? 'Keep' : 'Cancel'} — ${firstName(a)} isn't available for this run anymore`);
           reverted = true;
         }
       });
@@ -5398,7 +5407,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
         idxs.forEach(i => {
           const elig = recomputeRunEligibility(baseCtx, runs, activeBNs, engineAssignments());
           if(allowedFor(elig, i).includes(target)) setRowAction(i, target);
-          else setRowAction(i, 'keep', `↺ set to Keep — ${firstName(target)} isn't available for this run`);
+          else { const fb = noKeepFor(i) ? 'cancel' : 'keep'; setRowAction(i, fb, `↺ set to ${fb === 'keep' ? 'Keep' : 'Cancel'} — ${firstName(target)} isn't available for this run`); } // Build 608
         });
         reconcile();
       });
@@ -13330,6 +13339,19 @@ async function saveAssign(){
           && !units.includes(b.Unit) && !removedUnits.includes(b.Unit) && _slotIsAhead(dt, b.SlotTime, shift)); // 558
         if(pinned.length){ staffBookings = shiftBookings; const byU = {}; pinned.forEach(b => { (byU[b.Unit] ||= []).push(b); });
           Object.entries(byU).forEach(([unit, bookings]) => removedUnitsWithBookings.push({ unit, bookings, _pinned: true })); } }
+      // Build 608 (Tomas, "leaving at 3"): claims in her stream OUTSIDE a new partial window — units she keeps, slots
+      // she won't be there for — join the same dialog as removed-unit claims. The window test is constrainedRotation's
+      // (start ≤ slot < start + hours). Keep is not offered for these: she is gone at that hour.
+      if(_pStart && _pHours > 0){
+        const _wS = sortKey(_pStart, shift), _wE = _wS + Math.round(_pHours * 60);
+        const _inWin = hhmm => { const k = sortKey(normSlot(hhmm), shift); return k >= _wS && k < _wE; };
+        const _already = new Set(); removedUnitsWithBookings.forEach(g => (g.bookings || []).forEach(b => _already.add(String(b.Id))));
+        const _uSet = new Set(units);
+        const outside = shiftBookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && !_already.has(String(b.Id))
+          && bnOwns(b, _uSet, nurse) && _slotIsAhead(dt, b.SlotTime, shift) && !_inWin(b.SlotTime));
+        if(outside.length){ staffBookings = shiftBookings; const byU = {}; outside.forEach(b => { (byU[b.Unit] ||= []).push(b); });
+          Object.entries(byU).forEach(([unit, bookings]) => removedUnitsWithBookings.push({ unit, bookings, _window: { start: _pStart, end: addMinHHMM(_pStart, Math.round(_pHours * 60)) } })); }
+      }
 
       if(removedUnitsWithBookings.length){
         const result = await promptBookingDecisions({
