@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-617'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-618'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14944,6 +14944,13 @@ function showBusy(msg){
       <div id="busyMsg" style="font-size:.95rem;font-weight:500;color:var(--text)"></div>
     </div>`;
     document.body.appendChild(el);
+    // Build 618 (Tomas, the 6A close: a refresh during "Re-dealing 60 of 60 shifts…" left the horizon un-dealt): while
+    // this overlay is up, a reload or tab close asks first. The browser words the prompt itself; registered once, here,
+    // with the overlay. A read-only busy ("Checking…") gets the same question — rare, and only if someone reloads then.
+    window.addEventListener('beforeunload', e => {
+      const b = document.getElementById('busyOverlay');
+      if(b && b.style.display !== 'none'){ e.preventDefault(); e.returnValue = ''; }
+    });
     // Inject keyframes once
     if(!document.getElementById('busyKeyframes')){
       const style = document.createElement('style');
