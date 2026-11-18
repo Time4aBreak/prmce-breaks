@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-621'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-622'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3835,11 +3835,18 @@ async function _3CTick(){
   // syncedLS/state write bumps it, so an unchanged counter means the whole
   // watched set is provably fresh and the beat costs bytes. Wake-kicker
   // semantics preserved: unchanged-while-asleep correctly skips. FAIL-OPEN.
-  let _tkRevNow = null;
+  let _tkRevNow = null, _schedMoved622 = true;
   try {
     const _r = await fetchRevision(); // Build 614: shared probe
     _tkRevNow = (_r && _r.BNState) ? String(_r.BNState) : null;
-    if(_tkRevNow && _tickLastRev && _tkRevNow === _tickLastRev) return;
+    // Build 622 (perf check on 621: one single read left in an idle window): the Sign Up "3C manually assigned" read at
+    // the end of this tick sat behind the BNState gate — the wrong counter (an assignment bumps BNSchedule; BNState moves
+    // with every rotation, start or config write), so it re-read the shift's schedule on every BNState move. It now
+    // rides REV_BNSchedule on its own baseline, seeded by the slot loads (they derive the flag from their own read).
+    const _schedRevNow = (_r && _r.BNSchedule) ? String(_r.BNSchedule) : null;
+    _schedMoved622 = !_schedRevNow || _schedRevNow !== _tick3CSchedRev; // fail-open, as the gates around it
+    if(_schedRevNow) _tick3CSchedRev = _schedRevNow;
+    if(_tkRevNow && _tickLastRev && _tkRevNow === _tickLastRev){ if(_schedMoved622) await _tick3CSignupFlag(); return; }
   } catch(e){ /* fail-open */ }
   if(_tkRevNow) _tickLastRev = _tkRevNow;
   // Pull latest 3C state + app version from BNState before reading. Without
@@ -3955,29 +3962,30 @@ async function _3CTick(){
   // Manual Assign chips until the user re-touched date/shift/dropdown.
   if(typeof updateAdminUnitGrid === 'function') updateAdminUnitGrid();
 
-  // Staff-side: also refresh the "3C manually assigned" flag so the 3C button
-  // appears/disappears on Sign Up when admin makes an assignment from another
-  // device without the staff needing to re-tap a unit.
-  // Only runs when Sign Up tab is visible.
+  // Staff-side: the "3C manually assigned" flag — Build 622: only when the schedule moved (see the gate above)
+  if(_schedMoved622) await _tick3CSignupFlag();
+}
+// Staff-side: refresh the "3C manually assigned" flag so the 3C button appears/disappears on Sign Up when admin makes
+// an assignment from another device without the staff needing to re-tap a unit. Only runs when Sign Up tab is visible.
+async function _tick3CSignupFlag(){
   const signupVisible = document.getElementById('tab-staff') && document.getElementById('tab-staff').classList.contains('active');
-  if(signupVisible && S.shift){
-    try {
-      const dt = staffShiftDate(S.shift);
-      const scheds = await spGet(LISTS.schedule,
-        `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
-      // Gated by is3COpen — when 3C is closed globally, no schedule listing
-      // counts as "manually assigned" coverage. Closed status wins.
-      const newFlag = is3COpen(dt, S.shift) && scheds.some(s => {
-        if(s.Status === 'inactive') return false;
-        try { const u = JSON.parse(s.Units||'[]'); return u.includes('3C') || u.includes('C_PAIR'); }
-        catch { return false; }
-      });
-      if(newFlag !== _3CManuallyAssigned){
-        _3CManuallyAssigned = newFlag;
-        buildStaffUnitGrid();
-      }
-    } catch(e){ /* silent */ }
-  }
+  if(!(signupVisible && S.shift) || S.shift === 'Other') return;
+  try {
+    const dt = staffShiftDate(S.shift);
+    const scheds = await spGet(LISTS.schedule,
+      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${S.shift}'`);
+    // Gated by is3COpen — when 3C is closed globally, no schedule listing
+    // counts as "manually assigned" coverage. Closed status wins.
+    const newFlag = is3COpen(dt, S.shift) && scheds.some(s => {
+      if(s.Status === 'inactive') return false;
+      try { const u = JSON.parse(s.Units||'[]'); return u.includes('3C') || u.includes('C_PAIR'); }
+      catch { return false; }
+    });
+    if(newFlag !== _3CManuallyAssigned){
+      _3CManuallyAssigned = newFlag;
+      buildStaffUnitGrid();
+    }
+  } catch(e){ /* silent */ }
 }
 
 async function recompute3CAffectedRotations(){
@@ -8605,7 +8613,7 @@ async function _loadSlotsCore(silent=false){
       viewDate: dt // Build 347: the loader's date local is dt — 346 referenced a name that didn't exist (dateStr), crashing the render
     };
     // Build 614: this load's baseline for the tick's gate (see _revP614 above)
-    _revP614.then(r => { if(_ep317 !== _slotLoadEpoch || !r) return; if(r.BNBookings || r.BNSchedule) _slotsLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; if(r.BNState) _slotsLastStateRev = String(r.BNState); }).catch(() => {});
+    _revP614.then(r => { if(_ep317 !== _slotLoadEpoch || !r) return; if(r.BNBookings || r.BNSchedule) _slotsLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; if(r.BNState) _slotsLastStateRev = String(r.BNState); if(r.BNSchedule) _tick3CSchedRev = String(r.BNSchedule); }).catch(() => {}); // 622: the flag was derived from this load's read
 
     // Start silent background refresh timer
     clearInterval(S.refreshTmr);
@@ -9852,7 +9860,7 @@ async function loadOtherSlots(silent=false){
 
     renderOtherSlotsFromCache();
     // Build 620: this load's baseline for the tick's gate (614's pattern — see _revP620 above)
-    _revP620.then(r => { if(_ep317 !== _slotLoadEpoch || !r) return; if(r.BNBookings || r.BNSchedule) _slotsLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; if(r.BNState) _slotsLastStateRev = String(r.BNState); }).catch(() => {});
+    _revP620.then(r => { if(_ep317 !== _slotLoadEpoch || !r) return; if(r.BNBookings || r.BNSchedule) _slotsLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; if(r.BNState) _slotsLastStateRev = String(r.BNState); if(r.BNSchedule) _tick3CSchedRev = String(r.BNSchedule); }).catch(() => {});
 
     // Rider O1 (Build 290): start the same silent-refresh timer the standard
     // path starts at its success tail. Placement mirrored exactly — the empty
@@ -17297,6 +17305,7 @@ let _prodLogLastRev = null;
 // Build 274: the same gate for the app's three remaining pollers.
 let _slotsLastStateRev = null; // Build 614
 let _slotsLastRev = null, _covLastRev = null, _tickLastRev = null;
+let _tick3CSchedRev = null; // Build 622: the Sign Up 3C-flag read's own baseline (REV_BNSchedule)
 let _prodLogPollTmr = null;
 let _prodLogLastFingerprint = null;
 let _prodLogLastSlot = null;          // last slot the prod log rendered for; drives a seamless clock-only re-render at slot boundaries
