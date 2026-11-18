@@ -2296,7 +2296,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-18-626'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-18-627'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21706,14 +21706,21 @@ function wgShiftWeek(n){ if(!_wgWeek) return; wgSetWeek(_wgAddDays(_wgWeek, 7 * 
 // to what's on the schedule (drops the draft, re-prefills from the archive); on an
 // unsaved week it clears the grid as before.
 function _wgWeekIsSaved(){ return Object.keys(_wgBase).length > 0; } // Build 488: the sheet decides, not the archive
-function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes and show the week as it is on the sheet
+async function wgClearWeek(){ // Build 501: one behaviour — drop the unsaved changes and show the week as it is on the sheet
   if(_wgBaseState !== 'ok'){ wgSetWeek(_wgWeek); return; }
   const n = Object.keys(_wgEdits).length; if(!n) return;
   if(!confirm(`Discard ${n} unsaved change${n === 1 ? '' : 's'} and show this week as it is on the schedule?`)) return;
   _wgEdits = {}; _wgSaveDraft();
+  // Build 627 (Tomas, 2:40 AM: "no progress or tap guard after Discard unsaved"): the drafts vanish NOW from the last
+  // good read (592's quiet re-read used to leave them on screen until the sheet answered, with every cell tappable),
+  // and the overlay holds the grid until that re-read lands.
+  try { _wgMerge(); wgRender(); } catch(e){}
+  showBusy('Showing the week as saved…');
+  try {
   // Build 571: a Review batch built from the discarded taps goes with them — a stale batch could re-save what was just dropped
   try { if((_currentImportEntries || []).length && _currentImportEntries.every(e => e && e._source === 'grid')){ _currentImportEntries.length = 0; Object.keys(importUnitSel).forEach(k => delete importUnitSel[k]); const _ir = document.getElementById('importResults'); if(_ir) _ir.style.display = 'none'; window._wgDeleteIds = []; window._wgDeleteRows = []; } } catch(e){}
-  wgSetWeek(_wgWeek); // re-reads the sheet
+  await wgSetWeek(_wgWeek); // re-reads the sheet
+  } finally { hideBusy(); }
 }
 // ── Build 553 (Tomas, option A): the ⚖ badge, on the grid. The retired list's rule (397 badge · 400 a 3C+4C pair is ONE
 // dealt slot · 404 only before the shift's slots open to staff · 430 a capped shift with a BN holding two High units),
