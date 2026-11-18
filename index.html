@@ -1843,6 +1843,30 @@ async function applyCoverageLimitsToUpcoming(){
       await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
         ids: encodeURIComponent(JSON.stringify(_gone.slice(ci, ci + _CHUNK))) }), 60000, 'clearing the old rows');
     }
+    // Build 624 (the cascade timer, Nov 18 12:13 AM): the sweep replaced the rows and retired the rotations but never
+    // moved the BNs' break rows to the new units — the one re-deal path Build 605 did not reach. One bookings read over
+    // the horizon, the records in chunks of 50 (623's batched follow); a failure here is non-fatal (the next rotation
+    // rebuild follows them) and is named in the toast.
+    let _followed624 = 0, _followFail624 = '';
+    try {
+      showBusy('Applying — moving break rows to the new units…');
+      const _bk624 = await _tmo(spGet(LISTS.bookings, `SlotDate ge '${t}'`), 60000, 'reading the break rows');
+      const _byKey624 = {};
+      _bk624.forEach(b => { if(!isBNBreak(b)) return; const k = `${b.NurseName}|${String(b.SlotDate || '').slice(0, 10)}|${b.ShiftType}`; (_byKey624[k] = _byKey624[k] || []).push(b); });
+      const _recs624 = [];
+      for(const c of _creates){
+        let units = []; try { units = JSON.parse(c.Units || '[]'); } catch(e){}
+        const flt = filterClosedUnits(expandCPair(units, c.ShiftDate, c.ShiftType), c.ShiftDate, c.ShiftType);
+        if(!flt.length) continue;
+        const dateSeed = c.ShiftDate.split('-').reduce((a, b) => a + parseInt(b), 0) + c.BreakNurseName.charCodeAt(0);
+        _recs624.push(..._followBreakRecords(c.BreakNurseName, c.ShiftDate, c.ShiftType, flt, _byKey624[`${c.BreakNurseName}|${c.ShiftDate}|${c.ShiftType}`] || [], dateSeed));
+      }
+      if(_recs624.length){
+        showBusy(`Applying — moving ${_recs624.length} break row${_recs624.length === 1 ? '' : 's'} to the new units…`);
+        await _tmo(spBatchUpsert(LISTS.bookings, _recs624), 120000, 'moving the break rows');
+        _followed624 = _recs624.length;
+      }
+    } catch(e){ _followFail624 = (e && e.message) || String(e); console.warn('[re-deal] break-row follow failed (non-fatal):', _followFail624); }
     showBusy('Applying — retiring stale rotations…');
     try {
       // Build 497: setMany takes an ARRAY of {key, value}. Since Build 329 this passed an object map, so
@@ -1867,7 +1891,7 @@ async function applyCoverageLimitsToUpcoming(){
     } catch(e){ console.warn('[re-deal] wing-history flush failed:', e && e.message); }
     clearCoverageCountsCache(); // the sweep's writes make any cache stale
     hideBusy();
-    toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}`);
+    toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}${_followed624 ? ` · ${_followed624} break row${_followed624 === 1 ? '' : 's'} moved to the new units` : ''}${_followFail624 ? ` · break rows not moved (${_followFail624}) — ↺ Recalculate rotations will` : ''}`); // Build 624
     loadAssignments();
     try { if(_wgWeek){ _lastSchedRev = null; wgSetWeek(_wgWeek); } } catch(e){} // Build 584: the grid re-reads so the ⚖ badges reflect the new deal
   } catch(e){
@@ -2272,7 +2296,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-623'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-18-624'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
