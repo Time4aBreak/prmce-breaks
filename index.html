@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-622'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-623'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7143,18 +7143,28 @@ async function _dropBreaksOutsideWindow(name, date, shift, startTime, hours, boo
   if(out.length) await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(out.map(b => b.Id))) });
   return out;
 }
-async function _followBreakRows(bnName, date, shift, units, breaks, dateSeed){
-  if(!units || !units.length) return 0;
+// Build 623 (cascade timer, Nov 17 11:38 PM: a 6A reopen spent 565 s and counting in 185 sequential `patch` requests —
+// this function, one request per break row, called for every row of a 60-shift re-deal): the writes are ONE batchUpsert
+// (50 rows a request) instead of one patch each. A horizon-wide caller passes `collect` and flushes everything in a single
+// request alongside its schedule write; a single-shift caller gets the same batch from here.
+function _followBreakRecords(bnName, date, shift, units, breaks, dateSeed){
+  if(!units || !units.length) return [];
   const off = (breaks || []).filter(b => isBNBreak(b) && !units.includes(b.Unit) && _slotIsAhead(date, b.SlotTime, shift));
-  if(!off.length) return 0;
+  if(!off.length) return [];
   const fill = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
-  let n = 0;
-  for(const b of off){
+  return off.map(b => {
     const slot = normSlot(b.SlotTime), unit = fill[slot] || units[0];
-    try { await spPatch(LISTS.bookings, b.Id, { Unit: unit, Title: `BN-${bnName}-${unit}-${date}-${slot}` }); b.Unit = unit; n++; }
-    catch(e){ console.warn('[followBreakRows] patch failed (non-fatal):', bnName, date, shift, slot, e && e.message); }
-  }
-  return n;
+    b.Unit = unit; // callers that read the row again this pass see the new unit
+    return { matchFields: { Id: b.Id }, data: { Unit: unit, Title: `BN-${bnName}-${unit}-${date}-${slot}` } };
+  });
+}
+async function _followBreakRows(bnName, date, shift, units, breaks, dateSeed, collect = null){
+  const recs = _followBreakRecords(bnName, date, shift, units, breaks, dateSeed);
+  if(!recs.length) return 0;
+  if(collect){ collect.push(...recs); return recs.length; } // the caller flushes
+  try { await spBatchUpsert(LISTS.bookings, recs); }
+  catch(e){ console.warn('[followBreakRows] batch failed (non-fatal):', bnName, date, shift, e && e.message); return 0; }
+  return recs.length;
 }
 
 async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null){
@@ -10927,6 +10937,7 @@ async function bulkSaveUnitsAndRotations(updates){
   // Build batch payloads
   const scheduleRecords = []; // for spBatchUpsert
   const rotationEntries = []; // for syncedLS.setMany
+  const _followRecsBS = [];   // Build 623: break rows following the re-dealt units — one batchUpsert, not a patch each
   let failed = 0;
 
   for(const u of updates){
@@ -10989,7 +11000,7 @@ async function bulkSaveUnitsAndRotations(updates){
       localStorage.setItem(rotKey, JSON.stringify(normalized));
       rotationEntries.push({ key: rotKey, value: normalized });
       // Build 605: the BN's break rows follow the re-dealt unit set (rows already in hand from the range fetch)
-      try { await _followBreakRows(u.bn, u.date, u.shift, filteredUnits, bnBreakBookings, dateSeed); }
+      try { await _followBreakRows(u.bn, u.date, u.shift, filteredUnits, bnBreakBookings, dateSeed, _followRecsBS); } // Build 623: collected, flushed below in one request
       catch(e){ console.warn('[bulkSaveUnitsAndRotations] followBreakRows failed (non-fatal):', u.bn, u.date, u.shift, e && e.message); }
     } catch(err){
       console.warn('[bulkSaveUnitsAndRotations] failed for', u.bn, u.date, u.shift, ':', err.message);
@@ -11004,6 +11015,9 @@ async function bulkSaveUnitsAndRotations(updates){
       : Promise.resolve(),
     rotationEntries.length
       ? syncedLS.setMany(rotationEntries).catch(err => { console.warn('rotation batch failed:', err.message); })
+      : Promise.resolve(),
+    _followRecsBS.length // Build 623
+      ? spBatchUpsert(LISTS.bookings, _followRecsBS).catch(err => { console.warn('break-row follow batch failed:', err.message); })
       : Promise.resolve()
   ]);
 
@@ -14198,6 +14212,7 @@ async function recalculateAllRotations(opts = {}){
   let _pinsByKey = {};
   const _breaksByKey = {}; // Build 605: the BNs' own break rows, by name|date|shift — same fetch
   let followed = 0;
+  const _followRecsRA = []; // Build 623
   try {
     const _dates = active.map(s => (s.ShiftDate || '').slice(0,10)).sort();
     if(_dates.length){
@@ -14220,7 +14235,7 @@ async function recalculateAllRotations(opts = {}){
       const dateSeed = s.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + s.BreakNurseName.charCodeAt(0);
       // Build 605: break rows follow the unit set (main rows only — a supplemental row's units are not the BN's own)
       if(String(s.IsSupplemental) !== '1'){
-        try { followed += await _followBreakRows(s.BreakNurseName, String(s.ShiftDate).slice(0,10), s.ShiftType, units, _breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || [], dateSeed); }
+        try { followed += await _followBreakRows(s.BreakNurseName, String(s.ShiftDate).slice(0,10), s.ShiftType, units, _breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || [], dateSeed, _followRecsRA); } // Build 623: collected
         catch(e){ console.warn('[recalcAll] followBreakRows failed (non-fatal):', e && e.message); }
       }
       // Use existing BN default breaks if available
@@ -14281,6 +14296,11 @@ async function recalculateAllRotations(opts = {}){
     }
   }
 
+  // Build 623: the followed break rows go in one request (50 a chunk), before the rotations
+  if(_followRecsRA.length){
+    try { await spBatchUpsert(LISTS.bookings, _followRecsRA); }
+    catch(e){ console.warn('[recalcAll] break-row follow batch failed:', e && e.message); followed = 0; }
+  }
   // Single batch call to save all rotations to BNState in one round trip.
   // syncedLS.setMany surfaces its own error toast on failure.
   if(rotationEntries.length){
