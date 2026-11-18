@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-618'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-619'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6685,6 +6685,21 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     console.warn('[applyTrace] EXIT no-units —', name, date, shift, '· preloaded:', !!(preloads && preloads.scheds));
     return;
   }
+  // Build 619: the row's window, looked up ONCE here (the future branch's seed rotation reused to fetch it itself). The
+  // template is seeded inside the window only — a 20:30–04:00 partial never gets the 04:15 / 06:15 rows. The preload
+  // filter now names the date and shift too: a range preload (Save All) could hand the first row of that name instead.
+  let _winRow619 = {};
+  try {
+    const _pre = (preloads && preloads.scheds) ? preloads.scheds.filter(r => r.BreakNurseName === name && String(r.ShiftDate || '').slice(0, 10) === date && r.ShiftType === shift) : null;
+    const _rs619 = (_pre && _pre.length) ? _pre
+      : await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`);
+    _winRow619 = _rs619.find(r => String(r.IsSupplemental) !== '1' && (r.Status || '') !== 'inactive') || {};
+  } catch(e){ /* no window known — seed the whole template, as before */ }
+  if(_winRow619.StartTime && Number(_winRow619.Hours) > 0){
+    const _all = (defaultSlots || []).length;
+    defaultSlots = (defaultSlots || []).filter(t => _inWindow(t, shift, _winRow619.StartTime, _winRow619.Hours));
+    if(defaultSlots.length !== _all) console.info('[applyTrace] 619 window filter —', name, date, shift, `· ${_all} → ${defaultSlots.length} slots inside ${_winRow619.StartTime} ${_winRow619.Hours}h`);
+  }
 
   // Has the sign-up window already opened for this shift's date?
   // For today's shift: check current time. For future dates: window hasn't opened yet.
@@ -6761,15 +6776,9 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     // Build 244 (closes 226's documented residual): the SEED rotation goes
     // through the constraint-aware deal — window from the row, pins from
     // this BN's live staff bookings. saveRotation below still guards past.
-    let _seedRow = {}, _seedPins = [];
+    let _seedRow = _winRow619, _seedPins = []; // Build 619: the row was looked up once at the top (258/267's lookup lived here)
     try {
-      // Build 258: both seeds derivable from preloads (name filter = the
-      // exact server query; CreatedBy filter = the exact pins query).
-      const _rsPre = (preloads && preloads.scheds) ? preloads.scheds.filter(r => r.BreakNurseName === name) : null;
-      const _rs = (_rsPre && _rsPre.length)
-        ? _rsPre
-        : await spGet(LISTS.schedule, `ShiftDate ge '${date}' and ShiftDate le '${date}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(name)}'`); // Build 267: filtered-empty preload → fetch
-      _seedRow = _rs.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
+      // Build 258: the pins seed is derivable from preloads (CreatedBy filter = the exact pins query).
       _seedPins = (preloads && preloads.bookings)
         ? preloads.bookings.filter(b => b.CreatedBy === name)
         : await spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
@@ -7114,6 +7123,25 @@ async function warmRotationCache(bnName, date, shift){
 // 4C/3A and 7N after moves to 6N/7N and 9N/9S). Staff blocking is by name + time, so nothing broke, but the stored
 // unit must read true: every rotation rebuild re-points the BN's FUTURE break rows that sit outside the unit set onto
 // the fill rotation (applyDefaultToShift's picker). Past rows stay as written. No reads added; writes only on drift.
+// Build 619 (Tomas: "the BN break rows can reflect the same unavailable outside"): a BN's own break rows live INSIDE her
+// window. Outside = still ahead in time and not within [start, start + hours) — constrainedRotation's test, the one the
+// 608/616/617 claim checks use. Past rows are history and stay. Every door that narrows a window drops them (Edit card,
+// grid Save All, My Shift's declared start), and the template never seeds them (applyDefaultToShift).
+function _inWindow(hhmm, shift, startTime, hours){
+  const st = String(startTime || '').replace(/\D/g, '').padStart(4, '0'), h = Number(hours || 0);
+  if(!/^\d{4}$/.test(st) || !(h > 0) || h >= 12) return true; // no window = a full shift
+  const wS = sortKey(st, shift), k = sortKey(normSlot(hhmm), shift);
+  return k >= wS && k < wS + Math.round(h * 60);
+}
+function _breaksOutsideWindow(name, date, shift, startTime, hours, bookings){
+  return (bookings || []).filter(b => isBNBreak(b) && b.NurseName === name && String(b.SlotDate).slice(0, 10) === date && b.ShiftType === shift
+    && String(b.IsCancelled) !== '1' && _slotIsAhead(date, b.SlotTime, shift) && !_inWindow(b.SlotTime, shift, startTime, hours));
+}
+async function _dropBreaksOutsideWindow(name, date, shift, startTime, hours, bookings){
+  const out = _breaksOutsideWindow(name, date, shift, startTime, hours, bookings);
+  if(out.length) await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(out.map(b => b.Id))) });
+  return out;
+}
 async function _followBreakRows(bnName, date, shift, units, breaks, dateSeed){
   if(!units || !units.length) return 0;
   const off = (breaks || []).filter(b => isBNBreak(b) && !units.includes(b.Unit) && _slotIsAhead(date, b.SlotTime, shift));
@@ -11489,9 +11517,9 @@ async function onBNStartTimeChange(){
     const _before = (_bk || []).filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && bnOwns(b, _uSet, BNS.name)
       && _slotIsAhead(_dt, b.SlotTime, _sh) && sortKey(normSlot(b.SlotTime), _sh) < _sK);
     hideBusy();
+    const _winRow = _mine.find(r => r.StartTime && Number(r.Hours) > 0 && Number(r.Hours) < 12);
+    const _end = _winRow ? addMinHHMM(String(_winRow.StartTime).padStart(4, '0'), Math.round(Number(_winRow.Hours) * 60)) : (_sh === 'Day' ? '2030' : '0830');
     if(_before.length){
-      const _winRow = _mine.find(r => r.StartTime && Number(r.Hours) > 0 && Number(r.Hours) < 12);
-      const _end = _winRow ? addMinHHMM(String(_winRow.StartTime).padStart(4, '0'), Math.round(Number(_winRow.Hours) * 60)) : (_sh === 'Day' ? '2030' : '0830');
       const _byU = {}; _before.forEach(b => { (_byU[b.Unit] ||= []).push(b); });
       const _dec = await promptBookingDecisions({ removedUnitsWithBookings: Object.entries(_byU).map(([unit, bookings]) => ({ unit, bookings, _window: { start: val, end: _end } })),
         outgoingBN: BNS.name, date: _dt, shift: _sh, allScheds: _scheds, allBookings: _bk });
@@ -11511,6 +11539,13 @@ async function onBNStartTimeChange(){
         loadBNConfirm().then(() => requestAnimationFrame(() => window.scrollTo({ top: _sy1, behavior: 'instant' }))); return;
       }
     }
+    // Build 619: her own break rows before the new start go too (ahead only; a taken break stays as history). The window
+    // is start → the scheduled partial's end, else the shift end — the same one the dialog's note shows.
+    try {
+      const _hrs619 = (sortKey(_end, _sh) - _sK) / 60;
+      const _gone619 = _hrs619 > 0 ? await _dropBreaksOutsideWindow(BNS.name, _dt, _sh, val, _hrs619, _bk) : [];
+      if(_gone619.length) _tail617 += ` · ${_gone619.length} break${_gone619.length === 1 ? '' : 's'} before ${fmt12(val)} removed`;
+    } catch(e){ console.warn('[start time] 619 drop failed (non-fatal):', e && e.message); }
   }
   // Full-screen busy overlay blocks all taps (dropdown, +Log, everything)
   // until the BNState write commits — same pattern as the rest of the app.
@@ -13464,6 +13499,7 @@ async function saveAssign(){
     // bookings branch) — honestly uncovered for NEW sign-ups. Rotation
     // writes batched per target; saveRotation's past-preservation applies.
     let _finalWarn = ''; // Build 374: warnings fold into the FINAL toast (single-element toast, last write wins — Build 304's race)
+    let _dropped619 = 0; // Build 619: her break rows outside the new window, removed
     if(transfers.length){
       const _byTarget = {};
       transfers.forEach(t => { if(t.targetBN) (_byTarget[t.targetBN] ||= []).push(t); });
@@ -13563,9 +13599,18 @@ async function saveAssign(){
       const _xfer = {};
       transfers.forEach(t => { if(t.targetBN) _xfer[String(t.booking.Id)] = t.targetBN; });
       const _postScheds = allScheds.filter(r => !_delIds.has(String(r.Id))).concat(_createdRow ? [_createdRow] : []);
-      const _postBookings = shiftBookings
+      let _postBookings = shiftBookings
         .filter(b => !_cxIds.has(String(b.Id)))
         .map(b => _xfer[String(b.Id)] ? Object.assign({}, b, { CreatedBy: _xfer[String(b.Id)], CoveredBy: _xfer[String(b.Id)] }) : b);
+      // Build 619: her own break rows outside the new window go the way the claims did (ahead only; past = history).
+      // Done BEFORE the template step so applyDefaultToShift's "existing" list is the truth — if nothing is left inside,
+      // the template seeds fresh rows inside the window.
+      if(_pStart && _pHours > 0){
+        try {
+          const _gone619 = await _dropBreaksOutsideWindow(nurse, dt, shift, _pStart, _pHours, _postBookings);
+          if(_gone619.length){ const _ids = new Set(_gone619.map(b => String(b.Id))); _postBookings = _postBookings.filter(b => !_ids.has(String(b.Id))); _dropped619 = _gone619.length; }
+        } catch(e){ console.warn('[saveAssign] 619 drop failed (non-fatal):', e && e.message); }
+      }
       if(bnDef && bnDef.length > 0){
         await applyDefaultToShift(nurse, dt, shift, bnDef, false, null, { scheds: _postScheds, bookings: _postBookings });
       }
@@ -13614,7 +13659,7 @@ async function saveAssign(){
     hideBusy();
     // Build 374: single final toast — warnings outrank celebration; no clobber.
     if(_finalWarn) toast(_finalWarn, true);
-    else toast(existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`);
+    else toast((existing.length > 0 ? `Coverage updated for ${firstName(nurse)}!` : `Coverage saved for ${firstName(nurse)}!`) + (_dropped619 ? ` · ${_dropped619} break${_dropped619 === 1 ? '' : 's'} outside the new hours removed` : ''));
     _pulseAssignKey = { name: nurse, date: dt, shift, until: Date.now() + 30000 }; // Build 240: pulse the saved card
     loadAssignments((await _tailScheds) || undefined); // Build 252: prefetched during the tail
     notifyProdLogChanged(nurse);
@@ -16087,11 +16132,12 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   // there. One bookings read, only when a window changed; a failed read skips too — never write a window over claims
   // that could not be seen. The cell stays an unsaved draft (its window differs from the sheet's).
   const _winSkips = [];
+  let _wbk619 = null; const _winOk = []; // Build 619: the window entries that DO get written, and the bookings read they were judged on
   { const _wIx = indices.filter(i => entriesToProcess[i]._windowChanged && entriesToProcess[i].startTime && Number(entriesToProcess[i].hours) > 0);
     if(_wIx.length){
       const _wd = _wIx.map(i => entriesToProcess[i].date).sort();
       let _wbk = null;
-      try { _wbk = await spGet(LISTS.bookings, `SlotDate ge '${_wd[0]}' and SlotDate le '${_wd[_wd.length - 1]}T23'`); }
+      try { _wbk = await spGet(LISTS.bookings, `SlotDate ge '${_wd[0]}' and SlotDate le '${_wd[_wd.length - 1]}T23'`); _wbk619 = _wbk; }
       catch(e){ console.warn('[Save All] window-claims read failed:', e && e.message); }
       const _dl = d => { const x = new Date(d + 'T12:00:00'); return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][x.getDay()]} ${x.getMonth() + 1}/${x.getDate()}`; };
       for(const i of _wIx){
@@ -16102,6 +16148,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
         const outside = _wbk ? _wbk.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1'
           && String(b.SlotDate).slice(0, 10) === e.date && b.ShiftType === e.shift && bnOwns(b, uSet, e.name)
           && _slotIsAhead(e.date, b.SlotTime, e.shift) && (k => k < wS || k >= wE)(sortKey(normSlot(b.SlotTime), e.shift))) : null;
+        if(outside !== null && !outside.length) _winOk.push(i); // Build 619
         if(outside === null || outside.length){
           const ri = indices.indexOf(i); if(ri >= 0){ indices.splice(ri, 1); records.splice(ri, 1); } // parallel arrays, pushed together above
           _winSkips.push(outside === null
@@ -16204,6 +16251,13 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
   try {
     setPhase(`Saving ${records.length} assignments in one batch...`, `Saving ${records.length}...`);
     await spBatchUpsert(LISTS.schedule, records);
+    // Build 619: a kept-units / new-hours entry that was just written — her own break rows outside the new window go too
+    // (ahead only). Before the bookings prefetch below, so the template step sees the truth.
+    for(const i of _winOk){
+      const e = entriesToProcess[i];
+      try { const gone = await _dropBreaksOutsideWindow(e.name, e.date, e.shift, e.startTime, e.hours, _wbk619 || []); if(gone.length) console.info('[Save All] 619 —', e.name, e.date, e.shift, `· ${gone.length} break row(s) outside the new hours removed`); }
+      catch(err){ console.warn('[Save All] 619 drop failed (non-fatal):', e.name, e.date, e.shift, err && err.message); }
+    }
     // Build 484: rows the grid no longer has (cleared / moved) go with the same save
     try { const del = (window._wgDeleteIds || []).slice(); if(del.length && entriesToProcess.every(e => e._source === 'grid')){ setPhase(`Removing ${del.length} shift${del.length === 1 ? '' : 's'} no longer on the grid...`, 'Removing...'); await gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(del)) }); await _forgetShifts((window._wgDeleteRows || []).filter(r => del.includes(r.Id))); } window._wgDeleteIds = []; window._wgDeleteRows = []; } catch(e){ console.warn('stale-row delete failed (non-fatal):', e && e.message); }
 
