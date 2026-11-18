@@ -2296,7 +2296,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-18-625'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-18-626'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -16711,6 +16711,26 @@ async function saveImportRow(i){
       );
       if(!proceed) return;
     }
+    // Build 626 (Tomas, 2:27 AM: "I tapped the save inside the card but it didn't actually save"): this button wrote
+    // units only — a partial card became a full shift, and the grid kept its dashed draft because the sheet did not
+    // match it. It now writes the window like Save All does, and keeps Save All's two rules: a kept-units / new-hours
+    // card with staff claims outside the window is refused (616 — the Edit card decides), and the nurse's own break
+    // rows outside the new window go (619).
+    const _h626 = Number(entry.hours || 0), _part626 = !!(entry.startTime && _h626 > 0 && _h626 < 12);
+    const _st626 = _part626 ? String(entry.startTime).replace(/[:.]/g, '').padStart(4, '0') : '';
+    let _bk626 = null;
+    if(_part626){
+      try { _bk626 = await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23'`); } catch(e){}
+      if(!_bk626){ toast(`Couldn't read the shift's claims — ${firstName(name)} not saved; try again`, true); return; }
+      const wS = sortKey(_st626, shift), wE = wS + Math.round(_h626 * 60), uSet = new Set(units);
+      const outside = _bk626.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && String(b.SlotDate).slice(0, 10) === date && b.ShiftType === shift
+        && bnOwns(b, uSet, name) && _slotIsAhead(date, b.SlotTime, shift) && (k => k < wS || k >= wE)(sortKey(normSlot(b.SlotTime), shift)));
+      if(outside.length){
+        const _dl = (() => { const x = new Date(date + 'T12:00:00'); return `${['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][x.getDay()]} ${x.getMonth() + 1}/${x.getDate()}`; })();
+        toast(`Not saved — ${firstName(name)} ${_dl} ${shift} — ${outside.length} claim${outside.length === 1 ? '' : 's'} outside ${fmt12(_st626)}–${fmt12(addMinHHMM(_st626, Math.round(_h626 * 60)))} · change ${firstName(name)}'s hours from the Edit card to cancel or transfer them`, true);
+        return;
+      }
+    }
     // Build 507 (Tomas): the per-card save had no progress or tap guard (494 covered Save All only). The
     // overlay covers the read, the write and the default warm-up; the rotation recalc stays fire-and-forget as
     // before (it is keyed by nurse/date/shift, so nothing tapped meanwhile can corrupt it). One finally brings it down.
@@ -16724,7 +16744,8 @@ async function saveImportRow(i){
     if (isUpdate) {
       await spPatch(LISTS.schedule, existing[0].Id, {
         Units: JSON.stringify(units),
-        Title: `${name}-${date}-${shift}`
+        Title: `${name}-${date}-${shift}`,
+        StartTime: _st626, Hours: _part626 ? String(_h626) : '' // Build 626: the window rides the save (a full card clears it, as Save All does)
       });
       for (let j = 1; j < existing.length; j++) {
         await spDel(LISTS.schedule, existing[j].Id);
@@ -16737,11 +16758,14 @@ async function saveImportRow(i){
         BreakNurseName: name,
         ShiftDate: date,
         ShiftType: shift,
-        Units: JSON.stringify(units)
+        Units: JSON.stringify(units),
+        StartTime: _st626, Hours: _part626 ? String(_h626) : '' // Build 626
       });
       const splitNote = wings.length > 1 ? ` (split: ${wings.join(' & ')} Wing)` : '';
       toast(`✓ ${firstName(name)} saved for ${shift} on ${date}${splitNote}`);
     }
+    // Build 626: her own break rows outside the new window go before the template step (619)
+    if(_part626 && _bk626){ try { await _dropBreaksOutsideWindow(name, date, shift, _st626, _h626, _bk626); } catch(e){ console.warn('[saveImportRow] 619 drop failed (non-fatal):', e && e.message); } }
     // Immediately regenerate rotation — apply default breaks if BN has them set
     // Warm BN default from BNState before using it
     await warmDefaultTemplate(name, shift);
