@@ -2296,7 +2296,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-18-624'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-18-625'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3855,6 +3855,25 @@ async function _3CTick(){
   // fires an immediate pass on return, so nobody waits a full interval
   // after waking the phone.
   if(document.hidden) return;
+  // Build 625 (Tomas, option C — bed suite-3cflip Z1): a SCHEDULED 3C transition writes nothing, so since 274 the flip
+  // detection below the BNState gate never ran for it; and when an unrelated write finally opened the gate, every
+  // device recomputed the whole horizon (the 319-request flip of Nov 18 12:30 AM × the fleet). The flip is now noticed
+  // HERE, from the local schedule, every tick — and it repaints only: toggle, unit grid, slot list, assignments, the
+  // BN log. The fleet-wide rotation rewrite is retired: admin changes (now or scheduled) re-deal the future through
+  // commitUnitChange, which also recomputes the in-progress shift; a BN running through a scheduled boundary keeps a
+  // 3C-shaped gap until her shift is touched. That is the accepted cost.
+  try {
+    const _nowStatus625 = effective3CStatusAt(new Date());
+    if(_3CTickLastStatus === null){ _3CTickLastStatus = _nowStatus625; }
+    else if(_nowStatus625 !== _3CTickLastStatus){
+      _3CTickLastStatus = _nowStatus625;
+      show3CDefaultToggle();
+      if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
+      if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
+      if(typeof loadAssignments === 'function') loadAssignments();
+      if(typeof notifyProdLog3CFlipped === 'function') notifyProdLog3CFlipped();
+    }
+  } catch(e){ /* a repaint must never stop the beat */ }
   // Build 274: REV_BNState gate in front of the batched refreshMany — every
   // syncedLS/state write bumps it, so an unchanged counter means the whole
   // watched set is provably fresh and the beat costs bytes. Wake-kicker
@@ -3960,23 +3979,9 @@ async function _3CTick(){
       if(needsCompaction) await set3CSchedule(current);
     }
   } catch{}
-  const nowStatus = effective3CStatusAt(new Date());
-  const statusFlipped = _3CTickLastStatus !== null && nowStatus !== _3CTickLastStatus;
-  if(_3CTickLastStatus === null){
-    _3CTickLastStatus = nowStatus;
-  } else if(statusFlipped){
-    _3CTickLastStatus = nowStatus;
-    show3CDefaultToggle();
-    if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
-    if(typeof loadSlots === 'function' && document.getElementById('slotsList')) loadSlots().catch(()=>{});
-    if(typeof loadAssignments === 'function') loadAssignments();
-    if(typeof notifyProdLog3CFlipped === 'function') notifyProdLog3CFlipped();
-    // Recompute rotations for BNs with 3C in their units — so 3C slots appear
-    // or disappear from rotation automatically at boundary crossings.
-    recompute3CAffectedRotations().catch(()=>{});
-  } else {
-    show3CDefaultToggle();
-  }
+  // Build 625: the flip itself is noticed above the gate now (local schedule, every tick); a refreshed 3C schedule or
+  // default from another device (the batched refresh above) is reflected by the toggle here.
+  show3CDefaultToggle();
 
   // Build 126 (2026-05-26): Refresh the Manual Assign card's unit grid
   // styling too. _3CTick already refreshed unitStatuses/unitSchedules
@@ -4012,12 +4017,17 @@ async function _tick3CSignupFlag(){
   } catch(e){ /* silent */ }
 }
 
-async function recompute3CAffectedRotations(){
+// Build 625: `onlyThroughMs` — recompute only shifts whose nominal start is at or before that moment (the in-progress /
+// straddling ones); every later shift is re-dealt whole by commitUnitChange's redealFutureShifts, so touching it here
+// was double work (the 6A reopen: 38 requests; the 3C flip: 319).
+const _shiftStartedBy = (s, ms) => ms == null || (+slotDateTime(String(s.ShiftDate).slice(0, 10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType) <= ms);
+async function recompute3CAffectedRotations(onlyThroughMs = null){
   try {
     const t = activeShiftFloor();
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     const active = scheds.filter(s => {
       if(s.Status === 'inactive') return false;
+      if(!_shiftStartedBy(s, onlyThroughMs)) return false; // Build 625
       let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
       return units.includes('3C') || units.includes('C_PAIR');
     });
@@ -4101,8 +4111,8 @@ async function recomputeBNWithPastPreserved(bnName, date, shift){
 // This function is idempotent — calling it twice in a row with the same
 // unit produces the same final rotations. Safe to retry.
 
-async function recomputeUnitAffectedRotations(unit){
-  return recomputeUnitsAffectedRotations([unit]);
+async function recomputeUnitAffectedRotations(unit, onlyThroughMs = null){
+  return recomputeUnitsAffectedRotations([unit], onlyThroughMs);
 }
 
 // Batch recompute for multiple unit status changes applied together
@@ -4124,7 +4134,7 @@ async function recomputeUnitAffectedRotations(unit){
 // will display the unit-less rows with the new "all units closed" state
 // once chunk 4 wires the visual handling.
 
-async function recomputeUnitsAffectedRotations(units){
+async function recomputeUnitsAffectedRotations(units, onlyThroughMs = null){
   if(!units || !units.length) return;
   const affected = new Map(); // key = "name|date|shift" → {name, date, shift}
 
@@ -4133,6 +4143,7 @@ async function recomputeUnitsAffectedRotations(units){
     const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     for(const s of scheds){
       if(s.Status === 'inactive') continue;
+      if(!_shiftStartedBy(s, onlyThroughMs)) continue; // Build 625
       let schedUnits = []; try { schedUnits = JSON.parse(s.Units||'[]'); } catch{}
       // A schedule covers a changed unit if it lists that unit directly,
       // OR if the changed unit is 3C/4C and the schedule lists C_PAIR
@@ -4202,9 +4213,9 @@ async function _writeUnitDefault(unit, status){
   if(unit === '3C') return set3CDefault(status);
   return setUnitStatus(unit, status);
 }
-async function _recomputeAffectedFor(unit){
-  if(unit === '3C') return recompute3CAffectedRotations();
-  return recomputeUnitAffectedRotations(unit);
+async function _recomputeAffectedFor(unit, onlyThroughMs = null){
+  if(unit === '3C') return recompute3CAffectedRotations(onlyThroughMs);
+  return recomputeUnitAffectedRotations(unit, onlyThroughMs);
 }
 function _peekNextScheduledForUnit(unit, fromDate){
   if(unit === '3C') return nextScheduled3CChange(fromDate);
@@ -4794,7 +4805,7 @@ async function commitUnitChange(){
       // chunk-5 bug fix now correctly catches C_PAIR for 4C as well).
       // Both internally use recomputeBNWithPastPreserved so mid-shift
       // opens add slots to future rotation only, preserving past history.
-      _recomputeAffectedFor(unit).catch(()=>{});
+      _recomputeAffectedFor(unit, pending.effectiveAt.getTime()).catch(()=>{}); // Build 625: the in-progress shift only — the future is re-dealt below
 
       // Build 107 (2026-05-25): revert any substitutions that were applied
       // when this unit was previously closed. Walks the substitution log
@@ -5542,7 +5553,7 @@ async function decorateUnitGridCoverage(){
     const key = `${dt}|${shift}`;
     let covered = (_covPillMemo.key === key && Date.now() - _covPillMemo.at < 5000) ? _covPillMemo.set : null;
     if(!covered){
-      const sch = await spGet(LISTS.schedule, `ShiftDate ge '${dt}'`);
+      const sch = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23'`); // Build 625: one day, not the whole horizon (the filter below only ever kept that day)
       covered = new Set();
       sch.filter(r => (r.ShiftDate||'').slice(0,10) === dt && r.ShiftType === shift && r.Status !== 'inactive')
          .forEach(r => { STAFF_UNITS.forEach(u => { if(!covered.has(u) && unitCoveredBy(r, u, dt, shift)) covered.add(u); }); });
