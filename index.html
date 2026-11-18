@@ -2272,7 +2272,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-17-620'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-17-621'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3857,8 +3857,20 @@ async function _3CTick(){
     _changedKeys = await syncedLS.refreshMany([
       'unit3CDefault', 'unit3CSchedule', 'unitStatuses', 'unitSchedules', 'appVersion',
       'bnImportedNames',
+      'rampConfig', 'coverageConfig', 'acuityConfig', // Build 621: the 321/325 minute heartbeat's keys ride this gated beat
       _bn ? `bnDefault_${_bn}_Day` : '', _bn ? `bnDefault_${_bn}_Noc` : ''
     ]);
+  } catch{}
+  // Build 621 (perf check on 620: an idle Sign Up still made 6 single reads in 31 s — the Build 321/325 minute
+  // heartbeat, five ungated BNState reads per phone per minute, half the idle cost 614 had removed): its repaints
+  // live here now, behind the REV_BNState gate, firing only when the key actually changed.
+  try {
+    if(_changedKeys.some(k => k === 'rampConfig' || k === 'coverageConfig' || k === 'acuityConfig')) refreshRampCardIfChanged();
+    if(_changedKeys.includes('unitStatuses') || _changedKeys.includes('unitSchedules')){
+      refreshStaffUnitGridIfChanged();
+      const g = document.getElementById('unitStatusGrid');
+      if(g && g.offsetParent) refreshUnitStatusGrid();
+    }
   } catch{}
   // Build 215: targeted re-renders on cross-device deltas — same pattern as
   // the 3C flip handling below: repaint only what changed, never mid-edit.
@@ -5760,28 +5772,9 @@ function init(){
   // Build 321: limits propagate to OPEN screens — the configs ride the
   // Build-217 refresh (direct BNState read, write-lock aware) once a
   // minute. Without this, an open phone keeps its first-load limits.
-  setInterval(() => {
-    Promise.all([
-      syncedLS.refresh('rampConfig'),
-      syncedLS.refresh('coverageConfig'),
-      syncedLS.refresh('acuityConfig') // Build 430
-    ]).then(() => refreshRampCardIfChanged()).catch(()=>{});
-    // Build 325: unit statuses join the heartbeat, and the grid repaints
-    // when the open-set changed.
-    Promise.all([
-      syncedLS.refresh('unitStatuses'),
-      syncedLS.refresh('unitSchedules')
-    ]).then(() => {
-      refreshStaffUnitGridIfChanged();
-      // Build 341: the admin Unit Status grid joins the heartbeat —
-      // visible-only; taps there act immediately (no drafts), so a plain
-      // idempotent repaint is safe. (The BN Prod Log needed nothing: its
-      // 5s poll already fingerprints her schedule row, rotation, start,
-      // and status keys — Build 273 got there first.)
-      const g = document.getElementById('unitStatusGrid');
-      if(g && g.offsetParent) refreshUnitStatusGrid();
-    }).catch(()=>{});
-  }, 60000);
+  // Build 621: the minute heartbeat (321/325/341/430 — five single BNState reads per phone per minute, not revision-
+  // gated) is retired; its keys and repaints ride _3CTick's gated refreshMany (15 s, REV_BNState) — faster propagation,
+  // zero reads while nothing changed.
 
   // Show simulation banner if in sim mode
   showSimBanner();
