@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-19-628'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-19-629'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11522,6 +11522,11 @@ async function autoDeclareScheduledStart(){
     // guard in onBNStartTimeChange needs it even (especially) when a
     // declaration already exists.
     window._bnSchedStart = '';
+    // Build 629 (Tomas, Nov 19 4:19 AM: "a spinner every few seconds"): a shift that has ENDED has nothing to declare.
+    // restoreBNStartTimeUI evicts an expired bnStart_ key on every load; declaring it again here and reloading the log
+    // evicted it again — a loop of one BNState write + two reads per cycle for as long as a past partial was on screen
+    // (bed: 304 cycles in 6 s). Same boundary the poller stops on.
+    if(typeof shiftIsOver === 'function' && shiftIsOver(dt, BNS.shift)) return;
     const rows = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${BNS.shift}'`);
     const mine = rows.find(r => r.BreakNurseName === BNS.name && r.Status !== 'inactive' && String(r.IsSupplemental) !== '1');
     if(!mine) return;
