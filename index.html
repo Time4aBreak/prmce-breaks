@@ -2289,7 +2289,7 @@ const S = {
 
 // ── Set to true to use local simulation instead ────────
 const SIM_MODE = false;
-const DEV_MODE = true; // Auto-unlock portal as admin — set false for production
+const DEV_MODE = false; // Build 630 (launch-gate E4, pulled forward for tablets/security review): the portal asks for its password. true = auto-unlock as admin while developing.
 // ─────────────────────────────────────────────────────
 
 // ── App version ───────────────────────────────────────
@@ -2298,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-19-629'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-19-630'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2740,6 +2740,12 @@ async function _spPatchReal(list, id, data){
 
 function esc(s){ return (s||'').replace(/'/g,"''"); }
 function escHTML(s){ return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// Build 630: a value inside a '…' JS string literal inside a double-quoted HTML attribute (onclick="fn('…')").
+// JS-escape first (backslash, quote, newline), then HTML-escape the result; the HTML parser decodes the attribute
+// before JS parses it, so the function receives the original text. esc() is the OData escaper (doubles quotes) and
+// escHTML() leaves ' alone — both were used in onclicks, and a name with an apostrophe (O'Brien) broke the button,
+// while a crafted name typed into Sign Up could leave the literal altogether.
+function escJS(s){ return escHTML(String(s == null ? '' : s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\r?\n/g, '\\n')); }
 
 // ── BNState helpers — cross-device persistent storage ──
 // Falls back to localStorage in SIM_MODE automatically via spGet/spPost/spPatch
@@ -8620,7 +8626,7 @@ async function _loadSlotsCore(silent=false){
         } else if(isPickerOpen){
           actionHtml = `<div style="display:flex;gap:4px;flex-wrap:wrap">
             <button class="btn btn-danger btn-sm" onclick="pickCancel('${booking.Id}','${slot}')">Cancel</button>
-            <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${booking.NurseName}')">Transfer</button>
+            <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${escJS(booking.NurseName)}')">Transfer</button>
             <button class="btn btn-ghost btn-sm" onclick="pickKeep('${slot}')">Keep</button>
           </div>`;
         } else {
@@ -9077,7 +9083,7 @@ function _renderSingleSlotRow(slot){
       // Picker open — show three inline buttons
       actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
         <button class="btn btn-danger btn-sm" onclick="pickCancel('${booking.Id}','${slot}')">Cancel</button>
-        <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${booking.NurseName}')">Transfer</button>
+        <button class="btn btn-primary btn-sm" onclick="pickTransfer('${booking.Id}','${slot}','${escJS(booking.NurseName)}')">Transfer</button>
         <button class="btn btn-ghost btn-sm" onclick="pickKeep('${slot}')">Keep</button>
       </div>`;
     } else {
@@ -9992,7 +9998,7 @@ function renderOtherSlotsFromCache(){
           } else if(isPickerOpen){
             actionCell = `<div style="display:flex;gap:4px;flex-wrap:wrap">
               <button class="btn btn-danger btn-sm" onclick="pickCancel('${myBookingId}','${time}')">Cancel</button>
-              <button class="btn btn-primary btn-sm" onclick="pickTransfer('${myBookingId}','${time}','${escHTML(curName)}')">Transfer</button>
+              <button class="btn btn-primary btn-sm" onclick="pickTransfer('${myBookingId}','${time}','${escJS(curName)}')">Transfer</button>
               <button class="btn btn-ghost btn-sm" onclick="pickKeep('${time}')">Keep</button>
             </div>`;
           } else {
@@ -14102,8 +14108,8 @@ async function _loadAssignmentsCore(preloadedScheds){
                      delete-all-and-consolidate would fold the supp into a plain row,
                      destroying CoveredFrom and blinding Mark Available's take-back and
                      213's strip-on-close. Supp lifecycle belongs to the coverage verbs. -->
-                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${s.BreakNurseName}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
-                ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${s.BreakNurseName}')">✅ Mark Available</button>` : ''}
+                ${!isInactive && String(s.IsSupplemental) !== '1' && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--red)" onclick="this.disabled=true;this.textContent='Processing…';markBNUnavailable(${s.Id},'${escJS(s.BreakNurseName)}','${s.ShiftDate.slice(0,10)}','${s.ShiftType}')">🏠 Unavailable</button>` : ''}
+                ${isInactive && s.ShiftDate.slice(0,10) >= shiftDate(s.ShiftType) && !shiftIsOver(s.ShiftDate, s.ShiftType) ? `<button class="btn btn-ghost btn-sm" style="color:var(--teal-dk)" onclick="this.disabled=true;this.textContent='Processing…';markBNAvailable(${s.Id},'${escJS(s.BreakNurseName)}')">✅ Mark Available</button>` : ''}
                 <!-- Remove button retired from row UI 2026-05-22 (build 83). Permanent BN removal
                      now lives in the Break Nurses roster card (BN quit / fired scenario). Row-level
                      Unavailable handles the "out for this shift" case with reversible semantics. -->
@@ -15334,7 +15340,7 @@ function _buildImportRowsHTML(batch){
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
             onclick="clearImportSel(${i})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
-            onclick="rerunSuggest(${i},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>
+            onclick="rerunSuggest(${i},'${escJS(e.name)}','${e.date}','${e.shift}')">↺ Re-suggest</button>
         </div>
       </div>
       <div id="unitgrid-${i}" style="margin-bottom:10px">
@@ -16684,7 +16690,7 @@ async function _rerunSuggestCore(i, name, date, shift){
           <button style="background:none;border:none;color:var(--muted);font-size:.7rem;cursor:pointer;margin-left:6px" 
             onclick="clearImportSel(${idx})">Clear</button>
           <button style="background:none;border:none;color:var(--teal);font-size:.7rem;cursor:pointer;margin-left:4px"
-            onclick="rerunSuggest(${idx},'${e.name}','${e.date}','${e.shift}')">↺ Re-suggest</button>`;
+            onclick="rerunSuggest(${idx},'${escJS(e.name)}','${e.date}','${e.shift}')">↺ Re-suggest</button>`;
       }
     }
   });
@@ -19134,7 +19140,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
                   <span style="font-size:.78rem;color:var(--teal-dk);font-weight:600;white-space:nowrap">→ Transfer to</span>
                   <input id="xferName_${b.Id}" type="text" placeholder="Vocera Name" value="${escHTML(_typed)}" autocomplete="off" oninput="onLogTransferInput(${b.Id}, this)" onkeydown="if(event.key==='Enter'){ event.preventDefault(); stageLogTransfer(${b.Id},'${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}'); }" style="flex:1 1 140px;min-width:120px;padding:6px 8px;font-size:.85rem;border:1px solid var(--border);border-radius:6px">
                 </div>`;
-              actionHtml = `<button class="btn btn-primary btn-sm" onclick="stageLogTransfer(${b.Id},'${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')">✓ Queue</button>
+              actionHtml = `<button class="btn btn-primary btn-sm" onclick="stageLogTransfer(${b.Id},'${escJS(b.NurseName)}','${b.SlotTime}','${b.Unit}')">✓ Queue</button>
                 <button class="btn btn-ghost btn-sm" onclick="openLogTransfer(${b.Id})" style="color:var(--muted)">✕</button>`;
             } else {
             const takenCls   = stagedAction === 'confirmed' ? 'btn-success' : 'btn-ghost';
@@ -19150,9 +19156,9 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             // Build 442 (Tomas, Sep 11 live): a break can't be confirmed before it has
             // happened — Taken / Not Taken stay inert until the slot's time arrives.
             const _notYet = !isPast; const _gate = _notYet ? ' disabled title="' + fmt12(slot) + " hasn't happened yet\"" : '';
-            actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px${_notYet ? ';opacity:.45' : ''}"${_gate}>✓ Taken</button>
-              <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}${_notYet ? ';opacity:.45' : ''}"${_gate}>✗ Not Taken</button>
-              <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${esc(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>
+            actionHtml = `<button class="btn ${takenCls} btn-sm" onclick="stageBreakAction(${b.Id},'confirmed','${escJS(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px${_notYet ? ';opacity:.45' : ''}"${_gate}>✓ Taken</button>
+              <button class="btn ${notTakenCls} btn-sm" onclick="stageBreakAction(${b.Id},'not_taken','${escJS(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="margin-right:4px;${notTakenStyle}${_notYet ? ';opacity:.45' : ''}"${_gate}>✗ Not Taken</button>
+              <button class="btn ${cancelCls} btn-sm" onclick="stageBreakAction(${b.Id},'cancelled','${escJS(b.NurseName)}','${b.SlotTime}','${b.Unit}')" style="${cancelStyle}">✕ Cancel</button>
               <button class="btn btn-ghost btn-sm" style="color:var(--muted)" onclick="openLogTransfer(${b.Id})" title="A different staff nurse takes this break">→ Transfer</button>`
               + (_notYet ? `<button class="btn btn-ghost btn-sm" style="margin-left:4px" onclick="handOffClaim(${b.Id})" title="Another break nurse gives this break">→ Hand off</button>` : ''); // Build 486 · Build 591 adds → Transfer
             }
