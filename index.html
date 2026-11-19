@@ -500,6 +500,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             </select>
             <button class="btn btn-ghost btn-sm" onclick="clearBNStartTime()" style="font-size:.75rem">Clear start time</button><!-- Build 535 (Tomas) -->
           </div>
+          <!-- Build 628 (Tomas, option B): one half of a straddling partial says where the other half is -->
+          <div id="bnHalfNote" style="display:none;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:10px;padding:8px 12px;border:1px dashed var(--border);border-radius:10px;font-size:.85rem;color:var(--muted)"></div>
 
           <div id="bnConfirmList"></div>
           <!-- Productivity Log submit bar — matches Breaker's Breaks pattern, sits at
@@ -2296,7 +2298,7 @@ const DEV_MODE = true; // Auto-unlock portal as admin — set false for producti
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-18-627'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-19-628'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -11504,7 +11506,7 @@ function populateBNStartTimeSlots(){
   // from a scheduled partial's clock time) — render it, honoring the
   // Build-191 promise that the saved start always appears.
   const offGrid = (saved && !slots.includes(saved))
-    ? `<option value="${saved}" selected>${fmt12(saved)} (scheduled)</option>` : '';
+    ? `<option value="${saved}" selected>${fmt12(saved)} (scheduled${_bnSplitPartner ? ' · ' + BNS.shift + ' half' : ''})</option>` : ''; // Build 628: a half says so
   el.innerHTML = '<option value="">— full shift —</option>' + offGrid +
     slots.map(s => `<option value="${s}"${s===saved?' selected':''}>${fmt12(s)}</option>`).join('');
 }
@@ -15263,6 +15265,9 @@ function _buildImportRowsHTML(batch){
   _impKeptShown = false;
   const keptN = batch.filter((e, i) => e && !e.isDiscarded && _impEntryUnchanged(e, i)).length;
   const keptLine = keptN ? `<div id="importKeptLine" style="display:flex;align-items:center;gap:8px;padding:8px 12px;margin-bottom:8px;border:1px dashed var(--border);border-radius:10px;font-size:.82rem;color:var(--muted)"><span>${keptN} saved shift${keptN === 1 ? '' : 's'} unchanged — not written by Save All</span><button type="button" class="btn btn-ghost btn-sm" style="margin-left:auto;font-size:.75rem" onclick="toggleImportKept()">show</button></div>` : '';
+  // Build 628 (Tomas, 2:27 AM): with ONE card the card's own ✓ Save and SAVE ALL did the same thing to the same row —
+  // two buttons, one meaning. The card's Save shows only when there are several cards to choose between.
+  const _single628 = batch.filter((x, j) => x && !x.isDiscarded && !x._splitTail && !_impEntryUnchanged(x, j)).length === 1; // kept-unchanged cards are folded away (571) and don't count
   return keptLine + batch.map((e, i) => {
     if(e.isDiscarded) return ''; // skip — user dismissed
     const _kept = _impEntryUnchanged(e, i); // Build 571: folded away unless the reviewer opens them
@@ -15295,7 +15300,7 @@ function _buildImportRowsHTML(batch){
     const actionRow = isFlaggedUnresolved
       ? `<button class="btn btn-success btn-sm" onclick="suggestFlaggedRow(${i})">✓ Confirm shift</button>
          <button class="btn btn-ghost btn-sm" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>`
-      : `<button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>
+      : `${_single628 ? '' : `<button class="btn btn-success btn-sm" id="savebtn-${i}" onclick="const _b=this;_b.disabled=true;_b.textContent='Saving…';Promise.resolve(saveImportRow(${i})).finally(()=>{_b.disabled=false;_b.textContent='✓ Save'})">✓ Save</button>`}
          <span id="saved-${i}" style="display:none;margin-left:8px;font-size:.8rem;color:var(--green);font-weight:600">Saved ✓</span>
          <button class="btn btn-ghost btn-sm" id="editbtn-${i}" style="display:none;margin-left:8px" onclick="editSavedRow(${i})">✏️ Edit</button>
          <button class="btn btn-ghost btn-sm" id="discardbtn-${i}" style="margin-left:8px" onclick="discardFlaggedRow(${i})">✕ Discard</button>`;
@@ -18590,6 +18595,44 @@ function _renderBNConfirm(){
   }
 }
 
+// Build 628 (Tomas, option B — Lindsay's 2:30–11:00, Nov 18): a window that crosses 8:30 is two rows (449), and the log
+// shows one shift at a time, so each half lived under its own pill with nothing saying the other existed. The partner
+// is the nurse's other partial row whose span is contiguous with this one — before it ("continues from") or after it
+// ("continues into") — measured on the calendar: a Noc row's post-midnight start sits on the day after its ShiftDate.
+let _bnSplitPartner = null;
+function _bnFindSplitPartner(rows, dt, shift){
+  try {
+    const act = (rows || []).filter(r => r.Status !== 'inactive' && String(r.IsSupplemental) !== '1' && r.StartTime && Number(r.Hours) > 0 && Number(r.Hours) < 12);
+    const me = act.find(r => String(r.ShiftDate || '').slice(0, 10) === dt && r.ShiftType === shift); if(!me) return null;
+    const dayIdx = d => Math.round((new Date(d + 'T12:00:00') - new Date(dt + 'T12:00:00')) / 86400000);
+    const span = r => { const st = String(r.StartTime).replace(/\D/g, '').padStart(4, '0'); const m = parseInt(st.slice(0, 2), 10) * 60 + parseInt(st.slice(2), 10);
+      const cal = (r.ShiftType === 'Noc' && m < 720) ? 1 : 0; const a = (dayIdx(String(r.ShiftDate).slice(0, 10)) + cal) * 1440 + m; const mins = Math.round(Number(r.Hours) * 60);
+      return { a, b: a + mins, st, end: addMinHHMM(st, mins) }; };
+    const mine = span(me);
+    for(const r of act){
+      if(r === me || (String(r.ShiftDate || '').slice(0, 10) === dt && r.ShiftType === shift)) continue;
+      const o = span(r);
+      if(o.b === mine.a) return { dir: 'from', shift: r.ShiftType, date: String(r.ShiftDate).slice(0, 10), start: o.st, end: o.end };
+      if(o.a === mine.b) return { dir: 'into', shift: r.ShiftType, date: String(r.ShiftDate).slice(0, 10), start: o.st, end: o.end };
+    }
+  } catch(e){}
+  return null;
+}
+function _bnPaintHalfNote(){
+  const hn = document.getElementById('bnHalfNote'); if(!hn) return;
+  const p = _bnSplitPartner;
+  if(!p){ hn.style.display = 'none'; hn.innerHTML = ''; return; }
+  hn.innerHTML = `<span>↔ This shift ${p.dir === 'from' ? 'continues from' : 'continues into'} the <b>${p.shift} half</b> · ${fmt12(p.start)}–${fmt12(p.end)}</span>` +
+    `<button class="btn btn-ghost btn-sm" style="font-size:.75rem" onclick="_bnViewHalf('${p.shift}','${p.date}')">View</button>`;
+  hn.style.display = 'flex';
+}
+function _bnViewHalf(shift, date){ // one tap: the other half's pill and date, then the navigation door
+  const dp = document.getElementById('bnDate'); if(dp) dp.value = date;
+  BNS.date = date;
+  if(BNS.shift !== shift){ BNS.shift = shift; _prodLogResetShiftState(); }
+  renderBNShiftPill();
+  loadBNConfirm(true);
+}
 async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is navigation intent, not a reload side effect
   const wrap = document.getElementById('bnConfirmWrap');
   const list = document.getElementById('bnConfirmList');
@@ -18627,7 +18670,9 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
     })(dt);
     const maxDt = shift === 'Noc' ? nextDt : dt;
 
-    const schedFilter = `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}' and BreakNurseName eq '${esc(BNS.name)}'`;
+    // Build 628: the nurse's rows a day either side as well — one request, a row or two more — so a straddling partial's
+    // other half can be found (449 stores the window as two rows). `scheds` below keeps its meaning: this date + shift.
+    const schedFilter = `ShiftDate ge '${_wgAddDays(dt, -1)}' and ShiftDate le '${_wgAddDays(dt, 1)}T23' and BreakNurseName eq '${esc(BNS.name)}'`;
     // Note: no ShiftType filter on bookings — we need both shifts for overlap attribution.
     const bookFilter = `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`;
     const notifyKey = `slotNotify_${dt}_${shift}`;
@@ -18646,7 +18691,9 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
         {sheet:LISTS.state, filter:notifyFilter}
       ]);
     }
-    const scheds = results[0];
+    const schedsAll = results[0] || [];
+    const scheds = schedsAll.filter(r => String(r.ShiftDate || '').slice(0, 10) === dt && r.ShiftType === shift);
+    _bnSplitPartner = _bnFindSplitPartner(schedsAll, dt, shift); // Build 628
     const allBookings = reconcileBookings(results[1]);
     const notifyState = results[2];
 
@@ -18705,6 +18752,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
   // paint belongs to a screen that no longer exists — discard it. Mirrors
   // Sign Up's _loadSlotsGen lesson.
   if(dt !== (BNS.date || today()) || shift !== BNS.shift) return;
+  try { _bnPaintHalfNote(); } catch(e){} // Build 628
   try {    // Sync Mark unavailable button state with current schedule. If any
     // schedule entry for this BN/date/shift has Status='inactive' and no
     // active entries exist, BN is currently marked unavailable.
