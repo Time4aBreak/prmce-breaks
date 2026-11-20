@@ -1836,9 +1836,11 @@ async function applyCoverageLimitsToUpcoming(){
     _at = 'applying';
     const _CHUNK = 50;
     showBusy(`Applying — writing ${_creates.length} new assignments…`);
+    _busyChunks(Math.ceil(_creates.length / _CHUNK)); // Build 633
     for(let ci = 0; ci < _creates.length; ci += _CHUNK){
       await _tmo(gasCallPost({ action: 'batchInsert', sheet: LISTS.schedule,
         rows: encodeURIComponent(JSON.stringify(_creates.slice(ci, ci + _CHUNK))) }), 60000, 'writing the new rows');
+      _busyChunkDone();
     }
     showBusy('Applying — clearing the old rows…');
     // Build 556: re-read and remove EVERY other row on the dealt shifts (the ids read at the start are a subset) —
@@ -1846,9 +1848,11 @@ async function applyCoverageLimitsToUpcoming(){
     let _gone = _delIds;
     try { const _now = await _tmo(spGet(LISTS.schedule, `ShiftDate ge '${t}'`), 60000, 're-reading the schedule'); _gone = _redealStaleIds(_now, _dealtKeys, _creates.map(c => c.Id)); }
     catch(e){ console.warn('[re-deal] re-read failed, clearing the rows read at the start:', e && e.message); }
+    _busyChunks(Math.ceil(_gone.length / _CHUNK)); // Build 633
     for(let ci = 0; ci < _gone.length; ci += _CHUNK){
       await _tmo(gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule,
         ids: encodeURIComponent(JSON.stringify(_gone.slice(ci, ci + _CHUNK))) }), 60000, 'clearing the old rows');
+      _busyChunkDone();
     }
     // Build 624 (the cascade timer, Nov 18 12:13 AM): the sweep replaced the rows and retired the rotations but never
     // moved the BNs' break rows to the new units — the one re-deal path Build 605 did not reach. One bookings read over
@@ -2303,7 +2307,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-20-632'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-20-633'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2659,6 +2663,7 @@ async function spBatchUpsert(list, records){
   // Sequential chunks (when there are multiple) to avoid pushing Apps Script
   // past its 30-concurrent-execution limit.
   const CHUNK_SIZE = 50;
+  _busyChunks(Math.ceil(records.length / CHUNK_SIZE)); // Build 633: the overlay's estimate counts these
   for(let i = 0; i < records.length; i += CHUNK_SIZE){
     const chunk = records.slice(i, i + CHUNK_SIZE);
     await gasCallPost({
@@ -2666,6 +2671,7 @@ async function spBatchUpsert(list, records){
       sheet: list,
       records: encodeURIComponent(JSON.stringify(chunk))
     });
+    _busyChunkDone();
   }
 }
 
@@ -2699,11 +2705,12 @@ async function spBatchSetState(entries){
   for(let i = 0; i < entries.length; i += CHUNK_SIZE){
     chunks.push(entries.slice(i, i + CHUNK_SIZE));
   }
+  _busyChunks(chunks.length); // Build 633
   await Promise.all(chunks.map(chunk =>
     gasCallPost({
       action: 'batchSetState',
       entries: encodeURIComponent(JSON.stringify(chunk))
-    })
+    }).then(r => { _busyChunkDone(); return r; })
   ));
 }
 
@@ -14245,7 +14252,7 @@ async function recalculateAllRotations(opts = {}){
   // This runs ~40s for a full sheet; without the overlay, taps during
   // the loop could navigate or trigger other state changes. The overlay
   // also makes the long wait obvious to the user (vs. silent grinding).
-  showBusy('Recalculating all rotations… (~40s)');
+  showBusy('Recalculating rotations…'); // Build 633: the overlay times the write chunks itself (was a hard-coded "~40s")
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
 
@@ -15051,6 +15058,68 @@ function safeAsync(fn, ...args){
 
 // Global busy overlay — shown during multi-step async operations so the user
 // knows the app is working and not frozen.
+// Build 633 (Tomas, Nov 20: "a countdown to completion type timer"): the overlay keeps time. After 5 s it shows the
+// elapsed clock; when the work has countable steps it also shows an ESTIMATE of what is left, measured from this run's
+// own pace — never a countdown to zero. Steps come from two places, no caller changes needed for the first:
+//   • the phase message itself ("Re-dealing 12 of 60 shifts…", "Recalculating rotations… 7/21") — a new message with
+//     the digits stripped is a new phase; each time the first number grows, one step has finished;
+//   • the batch helpers (spBatchUpsert, spBatchSetState, the sweep's chunk loops) report their chunks through
+//     _busyChunks / _busyChunkDone — the write phases of every cascade, where most of the seconds go.
+// Rounding is coarse on purpose ("about 1 min", "about 30 s", "a few seconds"); the pace of Apps Script varies and a
+// precise number would be a lie. At 30 s a line asks not to reload (618's prompt catches the ones who do anyway).
+const _busy = { t0: 0, timer: null, phaseKey: '', phaseT0: 0, lastDone: -1, steps: 0, total: 0, chunkDone: 0, chunkTotal: 0, chunkT0: 0 };
+function _busyUpNow(){ const b = document.getElementById('busyOverlay'); return !!(b && b.style.display !== 'none'); }
+function _busyParseCounts(msg){ const m = String(msg || '').match(/(\d+)\s*(?:of|\/)\s*(\d+)/); return m ? { done: +m[1], total: +m[2] } : null; }
+function _busyNotePhase(msg){
+  const now = Date.now();
+  const key = String(msg || '').replace(/\d+/g, '#');
+  const c = _busyParseCounts(msg);
+  if(key !== _busy.phaseKey){
+    _busy.phaseKey = key; _busy.phaseT0 = now; _busy.steps = 0;
+    _busy.lastDone = c ? c.done : -1; _busy.total = c ? c.total : 0;
+    _busy.chunkDone = 0; _busy.chunkTotal = 0; _busy.chunkT0 = now;
+    return;
+  }
+  if(c){
+    if(c.done > _busy.lastDone && _busy.lastDone >= 0) _busy.steps += c.done - _busy.lastDone;
+    _busy.lastDone = c.done; _busy.total = c.total;
+  }
+}
+// The batch helpers: n more chunks are coming in this phase / one chunk just finished. No-ops while the overlay is down.
+function _busyChunks(n){ if(!_busyUpNow() || !(n > 0)) return; if(!_busy.chunkTotal) _busy.chunkT0 = Date.now(); _busy.chunkTotal += n; }
+function _busyChunkDone(){ if(!_busyUpNow() || !_busy.chunkTotal) return; _busy.chunkDone = Math.min(_busy.chunkTotal, _busy.chunkDone + 1); _busyPaint(); }
+function _busyFmtLeft(sec){
+  if(sec >= 90) return `about ${Math.max(2, Math.round(sec / 60))} min left`;
+  if(sec >= 12) return `about ${Math.max(10, Math.round(sec / 10) * 10)} s left`;
+  return 'a few seconds left';
+}
+function _busyEstimate(now){
+  // chunk progress first (the write phases), else the phase's own step count; both need at least one finished step
+  if(_busy.chunkTotal > 1 && _busy.chunkDone >= 1){
+    if(_busy.chunkDone >= _busy.chunkTotal) return 'finishing up';
+    const rate = (now - _busy.chunkT0) / _busy.chunkDone;
+    return _busyFmtLeft(((_busy.chunkTotal - _busy.chunkDone) * rate) / 1000);
+  }
+  if(_busy.total > 1 && _busy.steps >= 1){
+    const left = _busy.total - _busy.steps;
+    if(left <= 0) return 'finishing up';
+    const rate = (now - _busy.phaseT0) / _busy.steps;
+    return _busyFmtLeft((left * rate) / 1000);
+  }
+  return '';
+}
+function _busyPaint(){
+  const meta = document.getElementById('busyMeta'), hold = document.getElementById('busyHold');
+  if(!meta || !_busy.t0) return;
+  const now = Date.now(), el = now - _busy.t0;
+  if(el < 5000){ meta.style.display = 'none'; hold.style.display = 'none'; return; }
+  const sec = Math.floor(el / 1000), mm = Math.floor(sec / 60), ss = String(sec % 60).padStart(2, '0');
+  const est = _busyEstimate(now);
+  const chunkTxt = (_busy.chunkTotal > 1) ? ` · step ${Math.min(_busy.chunkDone + 1, _busy.chunkTotal)} of ${_busy.chunkTotal}` : '';
+  meta.textContent = `${mm}:${ss} elapsed${est ? ' · ' + est : ''}${chunkTxt}`;
+  meta.style.display = 'block';
+  hold.style.display = el >= 30000 ? 'block' : 'none';
+}
 function showBusy(msg){
   let el = document.getElementById('busyOverlay');
   if(!el){
@@ -15063,9 +15132,13 @@ function showBusy(msg){
     // deadlocking saveAssign ("stuck on Checking assignment"). Invariant:
     // interactive surfaces stack above the passive mutex. One layer down.
     el.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.35);z-index:9998;display:flex;align-items:center;justify-content:center;backdrop-filter:blur(2px)';
-    el.innerHTML = `<div style="background:var(--card);border-radius:14px;padding:22px 28px;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;align-items:center;gap:14px;max-width:320px">
-      <div style="width:22px;height:22px;border:3px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite"></div>
-      <div id="busyMsg" style="font-size:.95rem;font-weight:500;color:var(--text)"></div>
+    el.innerHTML = `<div style="background:var(--card);border-radius:14px;padding:22px 28px;box-shadow:0 8px 32px rgba(0,0,0,.25);display:flex;align-items:center;gap:14px;max-width:340px">
+      <div style="width:22px;height:22px;flex:0 0 22px;border:3px solid var(--border);border-top-color:var(--teal);border-radius:50%;animation:spin .8s linear infinite"></div>
+      <div style="min-width:0">
+        <div id="busyMsg" style="font-size:.95rem;font-weight:500;color:var(--text)"></div>
+        <div id="busyMeta" style="display:none;margin-top:4px;font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums"></div>
+        <div id="busyHold" style="display:none;margin-top:4px;font-size:.78rem;color:var(--muted)">Still working — please don't reload.</div>
+      </div>
     </div>`;
     document.body.appendChild(el);
     // Build 618 (Tomas, the 6A close: a refresh during "Re-dealing 60 of 60 shifts…" left the horizon un-dealt): while
@@ -15083,12 +15156,23 @@ function showBusy(msg){
       document.head.appendChild(style);
     }
   }
+  if(el.style.display === 'none' || !_busy.t0){ // a fresh wait: the clock starts now
+    _busy.t0 = Date.now(); _busy.phaseKey = ''; _busy.chunkTotal = 0; _busy.chunkDone = 0;
+    if(_busy.timer) clearInterval(_busy.timer);
+    _busy.timer = setInterval(_busyPaint, 1000);
+    const meta = document.getElementById('busyMeta'), hold = document.getElementById('busyHold');
+    if(meta) meta.style.display = 'none'; if(hold) hold.style.display = 'none';
+  }
+  _busyNotePhase(msg);
   document.getElementById('busyMsg').textContent = msg || 'Working…';
   el.style.display = 'flex';
+  _busyPaint();
 }
 function hideBusy(){
   const el = document.getElementById('busyOverlay');
   if(el) el.style.display = 'none';
+  if(_busy.timer){ clearInterval(_busy.timer); _busy.timer = null; }
+  _busy.t0 = 0; _busy.phaseKey = ''; _busy.chunkTotal = 0; _busy.chunkDone = 0;
 }
 
 // Inline progress bar helpers. Render into a container with renderProgress,
@@ -15630,6 +15714,7 @@ async function renderImportRows(entries, forceReplace = false){
     }
     _progressDone++;
     if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
+    if(_busyUpNow() && _totalDateShifts > 1) showBusy(`Dealing ${Math.min(_progressDone + 1, _totalDateShifts)} of ${_totalDateShifts} shifts…`); // Build 633
     await new Promise(r => requestAnimationFrame(r));
   }
 
@@ -15883,6 +15968,7 @@ async function _resuggestAllCore(){
     }
     _progressDone++;
     if(_importWrap) updateProgressBar(_importWrap, _progressDone, _totalDateShifts);
+    if(_busyUpNow() && _totalDateShifts > 1) showBusy(`Dealing ${Math.min(_progressDone + 1, _totalDateShifts)} of ${_totalDateShifts} shifts…`); // Build 633
     await new Promise(r => requestAnimationFrame(r));
   }
 
@@ -17876,7 +17962,9 @@ async function submitStagedActions(){
   const errors = [];
   // Iterate a snapshot so concurrent taps don't mutate underfoot
   const entries = [..._prodLogStaged.entries()];
+  let _k633 = 0;
   for(const [id, info] of entries){
+    if(entries.length > 3) showBusy(`Submitting ${++_k633} of ${total} actions…`); // Build 633: one request per action, so count them
     try {
       if(info.action === 'confirmed'){
         await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 }));
