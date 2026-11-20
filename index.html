@@ -2289,7 +2289,7 @@ const S = {
 
 // ── Set to true to use local simulation instead ────────
 const SIM_MODE = false;
-const DEV_MODE = false; // Build 630 (launch-gate E4, pulled forward for tablets/security review): the portal asks for its password. true = auto-unlock as admin while developing.
+const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing — the gate asked on every reload (nothing is remembered per device). Set false before the first unit tablet goes out (launch-gate E4); the planned fix is a "Remember this device" box on the gate so phones ask once and shared tablets keep asking.
 // ─────────────────────────────────────────────────────
 
 // ── App version ───────────────────────────────────────
@@ -2298,7 +2298,7 @@ const DEV_MODE = false; // Build 630 (launch-gate E4, pulled forward for tablets
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-19-630'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-20-631'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
