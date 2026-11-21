@@ -2307,7 +2307,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-21-635'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-21-636'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20389,15 +20389,24 @@ function _rptTallyTable(T, shift){
   weeks.forEach((w, wi) => {
     const open = _rptTallyOpen[shift].has(w.key);
     const weekTotals = {}; let weekSum = 0; const hcs = {}; let covered = 0;
+    // Build 636 (Tomas, Nov 21 5:38 AM): a unit that HAD a break nurse and took no breaks shows a red 0; a unit with no
+    // break nurse that shift shows "–"; both only once the shift has ended (a shift still ahead or under way stays
+    // blank — nobody has missed anything yet). The week row says the same over its ended days: red 0 when the unit was
+    // covered on at least one of them and took nothing all week, "–" when none covered it. `T.covered` is 465's set
+    // (main + absorbed units, open units only) — the one the xlsx export already prints as 0 vs n/a.
+    const weekCov = new Set(); let weekEnded = false;
     const dayRows = w.days.map(ds => {
       const dow = new Date(ds + 'T12:00:00').getDay();
       const row = T.counts[ds + '|' + shift] || {};
       const rowTotal = T.units.reduce((a, u) => a + (row[u] || 0), 0);
       const hc = T.heads[ds + '|' + shift] || 0; if(hc){ hcs[hc] = (hcs[hc] || 0) + 1; covered++; }
+      const covSet = (T.covered || {})[ds + '|' + shift]; const ended = shiftIsOver(ds, shift); if(ended) weekEnded = true;
       weekSum += rowTotal;
       return `<tr data-tw="${shift}|${w.key}" title="${hc} BN${hc === 1 ? '' : 's'} scheduled" style="display:${open ? '' : 'none'}${hc ? '' : ';color:var(--muted)'}">`
         + `<td style="padding:2px 5px 2px 18px;white-space:nowrap;border-left:3px solid ${edge(hc)}">${DOW[dow]} ${Number(ds.slice(5, 7))}/${Number(ds.slice(8, 10))}</td>`
-        + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; return `<td style="text-align:center;padding:2px 4px">${v || ''}</td>`; }).join('')
+        + T.units.map(u => { const v = row[u] || 0; if(v) weekTotals[u] = (weekTotals[u] || 0) + v; const cov = !!(covSet && covSet.has(u)); if(cov && ended) weekCov.add(u);
+            const mark = v || !ended ? '' : cov ? ';color:var(--red);font-weight:600' : ';color:var(--muted)';
+            return `<td style="text-align:center;padding:2px 4px${mark}">${v || (!ended ? '' : cov ? '0' : '–')}</td>`; }).join('')
         + `<td style="text-align:center;padding:2px 5px;font-weight:600">${rowTotal || ''}</td></tr>`;
     }).join('');
     // the week's usual headcount: the most common non-zero count over its covered days (ties → the larger)
@@ -20405,7 +20414,8 @@ function _rptTallyTable(T, shift){
     const ttl = covered ? `${usual} BN${usual === 1 ? '' : 's'} on ${hcs[usual]} of ${covered} covered day${covered === 1 ? '' : 's'} · tap for the days` : 'no break nurse this week · tap for the days';
     html += `<tr onclick="_rptTallyToggleWeek('${shift}','${w.key}')" title="${ttl}" style="font-weight:700;cursor:pointer;background:${tint(usual)};border-top:1.5px solid var(--border)">`
       + `<td style="padding:4px 5px;white-space:nowrap;border-left:3px solid ${edge(usual)}"><span data-twchev="${shift}|${w.key}" style="display:inline-block;width:10px;color:var(--muted)">${open ? '▾' : '▸'}</span>${span(w)}${w.days.length < 7 ? `<span style="font-weight:400;color:var(--muted)"> · ${w.days.length}d</span>` : ''}</td>`
-      + T.units.map(u => `<td style="text-align:center;padding:4px 4px">${weekTotals[u] || ''}</td>`).join('')
+      + T.units.map(u => { const v = weekTotals[u] || 0; const mark = v || !weekEnded ? '' : weekCov.has(u) ? ';color:var(--red)' : ';color:var(--muted);font-weight:400';
+          return `<td style="text-align:center;padding:4px 4px${mark}">${v || (!weekEnded ? '' : weekCov.has(u) ? '0' : '–')}</td>`; }).join('')
       + `<td style="text-align:center;padding:4px 5px">${weekSum || ''}</td></tr>` + dayRows;
     T.units.forEach(u => rangeTotals[u] = (rangeTotals[u] || 0) + (weekTotals[u] || 0));
     rangeSum += weekSum; weekCount++;
