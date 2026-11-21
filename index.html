@@ -2307,7 +2307,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-21-636'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-21-637'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -20373,7 +20373,10 @@ function _rptTallyToggleAll(shift, keys){
 function _rptTallyTable(T, shift){
   const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
   const MON = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-  const tint = n => n >= 4 ? '#f7e4f2' : n === 3 ? '#eaf6ea' : n === 2 ? '#e8f0fb' : n === 1 ? '#fdecec' : 'transparent';
+  // Build 637 (Tomas, Nov 21 5:55 AM): the week rows wear the SHIFT's colour — Sign Up's lit-unit fill (amber Day /
+  // blue Noc, 377/579) — instead of the headcount tint (1 red · 2 blue · 3 green · 4+ magenta, the workbook's key).
+  // The headcount still shows on the 3-px left edge and the row's hover text, and the xlsx rows keep the key.
+  const shiftFill = shift === 'Noc' ? '#eaf0fb' : '#fef3e2';
   const edge = n => n >= 4 ? '#c2189b' : n === 3 ? 'var(--green)' : n === 2 ? '#1f6fd6' : n === 1 ? 'var(--red)' : 'var(--border)';
   // the weeks of the range (Sun → Sat; the first and last may be partial)
   const weeks = []; let cur = null;
@@ -20412,7 +20415,7 @@ function _rptTallyTable(T, shift){
     // the week's usual headcount: the most common non-zero count over its covered days (ties → the larger)
     const usual = Object.keys(hcs).map(Number).sort((a, b) => hcs[b] - hcs[a] || b - a)[0] || 0;
     const ttl = covered ? `${usual} BN${usual === 1 ? '' : 's'} on ${hcs[usual]} of ${covered} covered day${covered === 1 ? '' : 's'} · tap for the days` : 'no break nurse this week · tap for the days';
-    html += `<tr onclick="_rptTallyToggleWeek('${shift}','${w.key}')" title="${ttl}" style="font-weight:700;cursor:pointer;background:${tint(usual)};border-top:1.5px solid var(--border)">`
+    html += `<tr onclick="_rptTallyToggleWeek('${shift}','${w.key}')" title="${ttl}" style="font-weight:700;cursor:pointer;background:${shiftFill};border-top:1.5px solid var(--border)">`
       + `<td style="padding:4px 5px;white-space:nowrap;border-left:3px solid ${edge(usual)}"><span data-twchev="${shift}|${w.key}" style="display:inline-block;width:10px;color:var(--muted)">${open ? '▾' : '▸'}</span>${span(w)}${w.days.length < 7 ? `<span style="font-weight:400;color:var(--muted)"> · ${w.days.length}d</span>` : ''}</td>`
       + T.units.map(u => { const v = weekTotals[u] || 0; const mark = v || !weekEnded ? '' : weekCov.has(u) ? ';color:var(--red)' : ';color:var(--muted);font-weight:400';
           return `<td style="text-align:center;padding:4px 4px${mark}">${v || (!weekEnded ? '' : weekCov.has(u) ? '0' : '–')}</td>`; }).join('')
