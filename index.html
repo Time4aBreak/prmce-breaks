@@ -2307,7 +2307,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-20-633'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-21-634'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -9391,15 +9391,24 @@ async function submitClaims(){
     if(S.unit) S.refreshTmr = setInterval(silentRefreshSlots, 10000 + Math.floor(Math.random() * 3000)); // Build 215: jitter
   };
 
-  // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) ──
-  let allBookingsToday;
+  // ── ONE pre-fetch: all bookings (covers float, race, max, BN break checks) + the claims' schedule rows (634) ──
+  let allBookingsToday, _scheds634 = null, _schedDts634 = [];
   try {
     if(SIM_MODE){
       allBookingsToday = [];
       for(const d of _fetchDts) allBookingsToday.push(...await spGet(LISTS.bookings, `SlotDate ge '${d}' and SlotDate le '${d}T23'`));
     } else {
-      const r = await spBatchGet(_fetchDts.map(d => ({ sheet: LISTS.bookings, filter: `SlotDate ge '${d}' and SlotDate le '${d}T23'` })));
-      allBookingsToday = r.flat();
+      // Build 634: the schedule rows claimSlot's BN-uniqueness check reads PER SLOT ride in this same request — one
+      // query per date the staged claims will ask about (the date derived exactly as claimSlot derives it), so a run
+      // of N costs no N schedule reads (live Nov 21: a three-slot run took 20 s; bed: 9 round trips → 6). A date not covered
+      // here (an overlap slot owned by the other shift) still reads live inside claimSlot.
+      _schedDts634 = [...new Set([...S.pendingClaims].map(c => { const k = _parseClaimKey(c); return k.dt || (k.shift === 'Noc' ? staffShiftDate('Noc') : k.shift === 'Day' ? today() : staffShiftDate(S.shift)); }))];
+      const r = await spBatchGet([
+        ..._fetchDts.map(d => ({ sheet: LISTS.bookings, filter: `SlotDate ge '${d}' and SlotDate le '${d}T23'` })),
+        ..._schedDts634.map(d => ({ sheet: LISTS.schedule, filter: `ShiftDate ge '${d}' and ShiftDate le '${d}T23'` }))
+      ]);
+      allBookingsToday = r.slice(0, _fetchDts.length).flat();
+      _scheds634 = { dates: new Set(_schedDts634), rows: r.slice(_fetchDts.length).flat() };
     }
   } catch(e){
     toast('Network error fetching current bookings. Please try again.', true);
@@ -9552,7 +9561,7 @@ async function submitClaims(){
   for(const run of _runs){
     if(run.length === 1){
       const _k = run[0];
-      const result = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt);
+      const result = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt, null, _scheds634);
       if(result === 'ok'){ results.claimed.push(_k.time); _cacheClaim(_k); }
       else results.failed.push({ label: fmt12(_k.time), reason: result });
       continue;
@@ -9560,7 +9569,7 @@ async function submitClaims(){
     const runLabel = `${fmt12(run[0].time)}–${fmt12(run[run.length - 1].time)}`;
     const rows = []; let refused = null;
     for(const _k of run){
-      const r = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt, rows);
+      const r = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt, rows, _scheds634);
       if(r !== 'prepared'){ refused = `${fmt12(_k.time)}: ${r}`; break; }
     }
     if(refused){ results.failed.push({ label: runLabel, reason: `${refused} — the run wasn't saved` }); continue; }
@@ -10081,7 +10090,7 @@ function renderOtherSlotsFromCache(){
 // legitimate distinct claims.
 const _claimsInFlight = new Set();
 
-async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy='', srcDt='', runRows=null){ // Build 560: runRows = prepare only — every check runs, the row is pushed, submitClaims posts the run as one request // Build 284: coveredBy = the BN whose row was tapped (streams ruling) · Build 290: srcDt = source-shift date threaded from the composed Other row
+async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetchedBookings=null, unitOverride=null, coveredBy='', srcDt='', runRows=null, prefetchedScheds=null){ // Build 634: prefetchedScheds = {dates:Set, rows} from submitClaims' batch — the per-slot schedule read is skipped for a date it covers // Build 560: runRows = prepare only — every check runs, the row is pushed, submitClaims posts the run as one request // Build 284: coveredBy = the BN whose row was tapped (streams ruling) · Build 290: srcDt = source-shift date threaded from the composed Other row
   // Build 138 (2026-05-27): Capture unit at function entry. Without this,
   // submitClaims's batch loop reads S.unit fresh on each iteration — if
   // the user navigates to another unit mid-submit (via pickUnit), later
@@ -10209,8 +10218,11 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     // BN-level uniqueness: a BN can only cover one break at a time.
     // If the BN covering this slot for _unit is already booked on another unit
     // at this slot time, block the claim.
-    const _claimScheds = await spGet(LISTS.schedule,
-      `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${slotShift}'`);
+    // Build 634: served from submitClaims' pre-fetch when it covers this date (the same rows the read below returns,
+    // filtered the way the filter would); a date it didn't cover, or a solo claim, still reads live.
+    const _claimScheds = (prefetchedScheds && prefetchedScheds.dates && prefetchedScheds.dates.has(dt))
+      ? prefetchedScheds.rows.filter(x => String(x.ShiftDate || '').slice(0, 10) === dt && x.ShiftType === slotShift)
+      : await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${slotShift}'`);
     const _claimSched = _claimScheds.find(s => s.Status !== 'inactive' && unitCoveredBy(s, _unit, dt, slotShift));
     const _bnConflict = findBNConflict(_claimSched, slotTime, _unit, _poolDt, dt, slotShift); // Build 590: this date's rows
     if(_bnConflict){
