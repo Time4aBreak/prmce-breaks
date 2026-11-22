@@ -486,6 +486,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
             <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
+            <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Checking…';bnUnitSwap().finally(()=>{_b.disabled=false;_b.textContent='⇄ Unit Swap'})">⇄ Unit Swap</button><!-- Build 638 (Tomas): a unit declines coverage mid-shift -->
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
             <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.7rem" onclick="showDebugDiag()">🔍 Debug</button>
           </div>
@@ -519,6 +520,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Clearing…';clearBNBreaks().finally(()=>{this.disabled=false;this.textContent='Clear All My Breaks'})">Clear All My Breaks</button>
             <button class="btn btn-ghost btn-sm" onclick="this.disabled=true;this.textContent='Setting…';resetShiftToDefault().finally(()=>{this.disabled=false;this.textContent='Set to My Normal Breaks'})">Set to My Normal Breaks</button>
             <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
+            <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Checking…';bnUnitSwap().finally(()=>{_b.disabled=false;_b.textContent='⇄ Unit Swap'})">⇄ Unit Swap</button><!-- Build 638 (Tomas): a unit declines coverage mid-shift -->
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
           </div>
           <!-- Manual break entry now lives inline in the Productivity Log
@@ -2307,7 +2309,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-21-637'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-21-638'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5232,7 +5234,7 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
 // the findSubstituteUnit auto-pick badged "suggested", plus "No substitute".
 // Mirrors reopenCoveragePicker. Returns { unit: <string> } for a pick or
 // { unit: null } for "no substitute". No backdrop dismiss — must be answered.
-function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, suggested){
+function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, suggested, opts = {}){ // Build 638: opts {title, question, hint, cancel} for the BN's own Unit Swap
   return new Promise(resolve => {
     const existing = document.getElementById('substitutePickerModal');
     if(existing) existing.remove();
@@ -5251,16 +5253,17 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
         }).join('')
       : `<div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">No open Wing-${wing} units are free for a substitute.</div>`;
 
-    const wingHint = `<div style="font-size:.78rem;color:var(--muted);margin:2px 0 12px;line-height:1.4">Only open Wing-${wing} units are shown. To assign a different unit, choose "No substitute" and add it from ${firstName(bnName)}'s Edit.</div>`;
+    const wingHint = `<div style="font-size:.78rem;color:var(--muted);margin:2px 0 12px;line-height:1.4">${opts.hint || `Only open Wing-${wing} units are shown. To assign a different unit, choose "No substitute" and add it from ${firstName(bnName)}'s Edit.`}</div>`;
 
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${closingUnit} is pausing</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${opts.title || `${closingUnit} is pausing`}</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
-        <div style="font-size:.85rem;margin-bottom:10px">What should <strong>${firstName(bnName)}</strong> cover instead of <strong>${closingUnit}</strong>?</div>
+        <div style="font-size:.85rem;margin-bottom:10px">${opts.question || `What should <strong>${firstName(bnName)}</strong> cover instead of <strong>${closingUnit}</strong>?`}</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${unitButtons}</div>
         ${wingHint}
         <button type="button" class="btn btn-ghost" id="_spNone">No substitute — just drop ${closingUnit}</button>
+        ${opts.cancel ? '<button type="button" class="btn btn-ghost" id="_spCancel" style="margin-top:8px;color:var(--muted)">Cancel — keep things as they are</button>' : ''}
       </div>`;
     document.body.appendChild(modal);
 
@@ -5269,6 +5272,7 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
       btn.onclick = () => cleanup({ unit: btn.getAttribute('data-unit') });
     });
     document.getElementById('_spNone').onclick = () => cleanup({ unit: null });
+    const _spCancel = document.getElementById('_spCancel'); if(_spCancel) _spCancel.onclick = () => cleanup(null); // 638
   });
 }
 
@@ -19481,6 +19485,123 @@ async function toggleGapsGiven(firstId){
 // A future claim on this BN's log goes to a same-wing BN who has that slot free (the
 // coverage dialog's own test, T+1 buffer included). Stamps move; a rotation pin puts the
 // slot/unit in her rotation; any pin here clears. The staff nurse's break doesn't change.
+// ── ⇄ Unit Swap (Build 638, Tomas Nov 21–22: "there's times when a unit will decline coverage for the remainder of a
+// current shift… the BN needs a way to switch coverage to a different unit, choosing from suggested and other same wing
+// units. The BN's other assigned units for that shift should remain unchanged. This should be possible in My Shift") ──
+// The BN's own door to the surgical swap a pause performs for an in-progress shift (commitUnitChange ~4646): one row's
+// Units patched, her rotation rebuilt around the elapsed slots, her break rows following (605), nothing else touched —
+// no re-deal, no other nurse, not tomorrow. Three taps: which unit → (only if she has staff breaks already claimed on it
+// still ahead) did the unit decline ALL remaining coverage — Yes cancels them in one batchDelete, No keeps them with her
+// as rotation pins → which unit instead (the pause picker: ★ suggested, the other open same-wing units nobody holds,
+// "just drop", or Cancel). Not written to the unit sub log: that ledger belongs to pause/reopen, whose reopen would
+// otherwise offer to "switch back" a swap the unit itself asked for.
+function _swapModal(html){
+  return new Promise(resolve => {
+    const m = document.createElement('div'); m.id = 'bnSwapModal';
+    m.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:9999;display:flex;align-items:center;justify-content:center;padding:16px';
+    m.innerHTML = `<div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">${html}</div>`;
+    document.body.appendChild(m);
+    m.querySelectorAll('[data-pick]').forEach(b => { b.onclick = () => { m.remove(); resolve(b.getAttribute('data-pick')); }; });
+  });
+}
+async function bnUnitSwap(){
+  const dt = BNS.date || today(), shift = BNS.shift;
+  if(!BNS.name){ toast('Select your name first', true); return; }
+  if(!shift){ toast('No shift selected', true); return; }
+  if(shiftIsOver(dt, shift)){ toast('That shift is over — nothing to swap', true); return; }
+  showBusy('Checking your assignment…');
+  let allScheds, bookings;
+  try {
+    [allScheds, bookings] = await spBatchGet([
+      { sheet: LISTS.schedule, filter: `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23' and ShiftType eq '${shift}'` },
+      { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23' and ShiftType eq '${shift}'` }
+    ]);
+  } catch(e){ hideBusy(); toast('Couldn\'t read the shift — try again', true); return; }
+  hideBusy();
+  const mine = allScheds.find(s => s.BreakNurseName === BNS.name && s.Status !== 'inactive' && String(s.IsSupplemental) !== '1');
+  if(!mine){ toast(`${firstName(BNS.name)} has no active assignment on this ${shift} shift`, true); return; }
+  let units = []; try { units = JSON.parse(mine.Units || '[]'); } catch(e){}
+  if(units.includes('C_PAIR')){ units = units.filter(u => u !== 'C_PAIR'); if(!units.includes('3C')) units.push('3C'); if(!units.includes('4C')) units.push('4C'); } // legacy token → stored units
+  if(!units.length){ toast('No units on this shift to swap', true); return; }
+  const unitSet = new Set(units);
+
+  // 1 — which unit
+  const pick = await _swapModal(`
+    <div style="font-weight:700;font-size:1rem;margin-bottom:4px">⇄ Unit Swap</div>
+    <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${dt} · ${escHTML(firstName(BNS.name))}</div>
+    <div style="font-size:.85rem;margin-bottom:10px">Which unit can't take coverage for the rest of this shift?</div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">${units.map(u => `<button type="button" class="btn btn-pick" data-pick="${u}" style="width:100%">${u}</button>`).join('')}</div>
+    <button type="button" class="btn btn-ghost" data-pick="" style="color:var(--muted)">Cancel</button>`);
+  if(!pick) return;
+  const unit = pick;
+
+  // 2 — her staff breaks already claimed on that unit and still ahead
+  const claims = bookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1' && b.Unit === unit && bnOwns(b, unitSet, BNS.name) && _slotIsAhead((b.SlotDate || '').slice(0, 10), b.SlotTime, shift))
+    .sort((a, b) => sortKey(normSlot(a.SlotTime), shift) - sortKey(normSlot(b.SlotTime), shift));
+  let cancelClaims = false;
+  if(claims.length){
+    const ans = await _swapModal(`
+      <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${unit} — breaks already signed up</div>
+      <div style="font-size:.85rem;margin-bottom:10px">${claims.length} nurse${claims.length !== 1 ? 's have' : ' has'} signed up on ${unit} after now:</div>
+      <div style="background:var(--bg);border-radius:8px;padding:10px 12px;margin-bottom:12px;font-size:.85rem;line-height:1.6">${claims.map(b => `• ${escHTML(bareName(b.NurseName))} — ${fmt12(b.SlotTime)}`).join('<br>')}</div>
+      <div style="font-size:.85rem;margin-bottom:10px">Did ${unit} decline <strong>all</strong> remaining coverage?</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:12px">
+        <button type="button" class="btn btn-pick" data-pick="yes" style="width:100%;text-align:left">Yes — cancel ${claims.length === 1 ? 'this break' : `these ${claims.length} breaks`} (tell the nurses)</button>
+        <button type="button" class="btn btn-pick" data-pick="no" style="width:100%;text-align:left">No — I'll still give ${claims.length === 1 ? 'it' : 'them'}; only the open slots move</button>
+      </div>
+      <button type="button" class="btn btn-ghost" data-pick="" style="color:var(--muted)">Cancel</button>`);
+    if(!ans) return;
+    cancelClaims = ans === 'yes';
+  }
+
+  // 3 — which unit instead (the pause picker's rules: same wing, open now, not hers, not held by another BN this shift)
+  showBusy('Finding open units…');
+  let counts = {}; try { counts = await getUnitCoverageCounts(shift); } catch(e){}
+  hideBusy();
+  const suggested = findSubstituteUnit(BNS.name, unit, dt, shift, allScheds, new Date(), counts);
+  const wing = getUnitWing(unit);
+  const heldByOthers = new Set();
+  allScheds.forEach(r => { if(r.BreakNurseName === BNS.name || r.Status === 'inactive' || String(r.IsSupplemental) === '1') return;
+    try { JSON.parse(r.Units || '[]').forEach(u => { if(u === 'C_PAIR'){ heldByOthers.add('3C'); heldByOthers.add('4C'); } else heldByOthers.add(u); }); } catch(e){} });
+  let cands = ['3A','4A','5A','6A','7A','3C','4C','6N','7N','8N','8S','9N','9S','10N','10S']
+    .filter(u => u !== unit && getUnitWing(u) === wing && !unitSet.has(u) && !heldByOthers.has(u) && isUnitOpenForShiftEffective(u, dt, shift));
+  if(suggested && suggested !== unit && !unitSet.has(suggested) && !cands.includes(suggested)) cands.push(suggested);
+  cands.sort((a, b) => ((counts[a] || 0) - (counts[b] || 0)));
+  const choice = await promptSubstitutePicker(unit, BNS.name, dt, shift, cands, suggested, {
+    title: `${unit} can't take coverage`,
+    question: `What will you cover instead of <strong>${unit}</strong> for the rest of this shift? Your other unit${units.length > 2 ? 's stay' : ' stays'} as ${units.length > 2 ? 'they are' : 'it is'}.`,
+    hint: `Open Wing-${wing} units nobody else holds this shift. "Just drop" leaves you with ${units.filter(u => u !== unit).join(', ') || 'no units'}.`,
+    cancel: true
+  });
+  if(!choice) return;
+  const substitute = choice.unit;
+  const newUnits = units.filter(u => u !== unit); if(substitute) newUnits.push(substitute);
+
+  // commit — the same writes a pause makes for an in-progress shift, for this one row
+  showBusy(substitute ? `Swapping ${unit} for ${substitute}…` : `Dropping ${unit}…`);
+  let cancelled = 0, kept = 0;
+  try {
+    if(cancelClaims && claims.length){
+      await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(claims.map(b => b.Id))) });
+      cancelled = claims.length;
+    }
+    if(!cancelClaims && claims.length){
+      // Kept breaks stay hers on the dropped unit — the Edit card's Keep (143/479): both stamps say so, and that stamp is
+      // what makes a foreign-unit slot a legitimate pin for bulkSave's rotation rebuild (its pins are keyed by CreatedBy)
+      // and for the Prod Log's staleness validator (226), which would otherwise recompute the pin away.
+      const toStamp = claims.filter(b => b.CreatedBy !== BNS.name || b.CoveredBy !== BNS.name);
+      if(toStamp.length) await spBatchUpsert(LISTS.bookings, toStamp.map(b => ({ matchFields: { Id: b.Id }, data: { CreatedBy: BNS.name, CoveredBy: BNS.name } })));
+      kept = claims.length;
+    }
+    await bulkSaveUnitsAndRotations([{ schedId: mine.Id, bn: BNS.name, date: dt, shift, oldUnits: units, newUnits, substitute }]);
+    try { clearCoverageCountsCache(); } catch(e){}
+  } catch(e){
+    hideBusy(); console.warn('[bnUnitSwap]', e); toast(`Swap failed — ${e.message || 'try again'}`, true); return;
+  } finally { hideBusy(); }
+  toast(`${unit} → ${substitute || 'dropped'} for the rest of this shift` + (cancelled ? ` · ${cancelled} break${cancelled !== 1 ? 's' : ''} cancelled` : '') + (kept ? ` · ${kept} break${kept !== 1 ? 's' : ''} kept on ${unit}` : ''));
+  try { await loadBNConfirm(true); } catch(e){}
+}
+
 async function handOffClaim(id){
   try {
     const cache = _bnConfirmCache; if(!cache){ toast('Reload the log first', true); return; }
