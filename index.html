@@ -2309,7 +2309,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-641'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-642'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7670,6 +7670,15 @@ function _setUnitButtonsLocked(on){
   if(on) _unitLockT = setTimeout(() => _setUnitButtonsLocked(false), 5000);
 }
 
+const _fetchedUnderRev642 = {}; // Build 642: BNState key → the BNState revision this device last fetched it under (per page life)
+function _markFetched642(keys, rev){
+  const _now = Date.now();
+  keys.forEach(k => {
+    if(!k) return;
+    if(rev) _fetchedUnderRev642[k] = String(rev);
+    if(localStorage.getItem(k) == null) syncedLS._absent[k] = _now; // a refresh leaves no absence memo (431) — stamp it, or the next warm re-asks for the same missing keys
+  });
+}
 let _slotsReadMemo = null;  // Build 641: the standard path's last server read {key, allSchedsRaw, oppBookingsRaw, at}
 let _slotsPaint641 = null;  // Build 641: set by submitClaims for ONE paint — {dt, bookings} = its pre-fetch pool + what it wrote
 async function loadSlots(silent=false, opts={}){
@@ -8155,11 +8164,21 @@ async function _loadSlotsCore(silent=false, opts={}){
     // warms inflating each other to 4-5s). warmMany parallels small N and
     // bulk-fetches past 5 in ONE trip (the Build-111 machinery, unchanged).
     // Build 614: the rotation keys and the 3C keys (warm3CStatus) warm in ONE request
-    await syncedLS.warmMany([
-      ...covering.map(sched => rotationKey(sched.BreakNurseName, dt, shift)),
-      ...oppCovering.map(sched => rotationKey(sched.BreakNurseName, oppSchedDt, oppShift)),
-      `unit3C_${dt}_${shift}`, 'unit3CDefault', 'unit3CSchedule'
-    ]).catch(()=>{});
+    // Build 642 (Tomas, Nov 21 8:44 PM: his phone sold 12:35 and 12:55 on 10N from a rotation the 5:43 PM reopen had
+    // already moved to 9N): a warm fetches only what this device LACKS, so a rotation it saw earlier in the day stayed
+    // as it was. The poller catches changes made after a load, not before it. Now: when BNState has moved since this
+    // device last looked — or the page is fresh — the keys are REFRESHED (the same single batched read the cold warm
+    // makes); unchanged → warm, as before, zero requests. _revP614 was probed before the batch and has landed by now.
+    { const _keys642 = [
+        ...covering.map(sched => rotationKey(sched.BreakNurseName, dt, shift)),
+        ...oppCovering.map(sched => rotationKey(sched.BreakNurseName, oppSchedDt, oppShift)),
+        `unit3C_${dt}_${shift}`, 'unit3CDefault', 'unit3CSchedule'
+      ];
+      const _rv642 = _paint641 ? null : await _revP614.catch(() => null);
+      const _stNow642 = _rv642 && _rv642.BNState ? String(_rv642.BNState) : null;
+      const _stale642 = !_paint641 && (!_stNow642 || _keys642.some(k => _fetchedUnderRev642[k] !== _stNow642)); // a key this device has not fetched under the current BNState revision
+      await (_stale642 ? syncedLS.refreshMany(_keys642) : syncedLS.warmMany(_keys642)).catch(()=>{});
+      _markFetched642(_keys642, _stNow642); }
 
     // Load block rotation for each BN covering this unit. Uses
     // loadRotationWithFallback so staff Sign Up filtering still works when
@@ -8782,11 +8801,40 @@ async function silentRefreshSlots(){
     _slRevNow = (_r && (_r.BNBookings || _r.BNSchedule)) ? `${_r.BNBookings || ''}|${_r.BNSchedule || ''}` : null;
     _stRevNow = (_r && _r.BNState) ? String(_r.BNState) : null;
     // Build 614: unit statuses (325) only when BNState moved — or when the probe could not say (fail-open, as before)
+    let _stateMoved642 = false;
     if(!_stRevNow || _stRevNow !== _slotsLastStateRev){
       if(_stRevNow) _slotsLastStateRev = _stRevNow;
-      try { const _t325 = document.querySelector('.tab.active'); if(_t325 && _t325.textContent.includes('Sign Up')){ syncedLS.refreshMany(['unitStatuses', 'unitSchedules']).then(() => refreshStaffUnitGridIfChanged()).catch(()=>{}); } } catch(e){}
+      _stateMoved642 = true;
     }
-    if(_slRevNow && _slotsLastRev && _slRevNow === _slotsLastRev) return;
+    const _schedSame642 = !!(_slRevNow && _slotsLastRev && _slRevNow === _slotsLastRev);
+    if(_stateMoved642){
+      // Build 642: bookings/schedule unchanged but BNState moved — a rotation or declared start may have been rewritten
+      // (a recompute, a swap, a re-deal's rotation batch). The old gate returned without looking. The keys this list
+      // depends on (the last render's covering BNs) ride the SAME batched read as the unit statuses (325/614): one probe
+      // + one batch per state move, as before. A reload only if one of the watched keys changed. (When the slot tables
+      // moved too, the full re-read below refreshes the watched set itself — only the statuses go here.)
+      let _onSignUp = false; try { const _t325 = document.querySelector('.tab.active'); _onSignUp = !!(_t325 && _t325.textContent.includes('Sign Up')); } catch(e){}
+      let _watch642 = [];
+      if(_schedSame642 && S.shift !== 'Other' && _slotRenderCache && _slotRenderCache.covering && _slotRenderCache.covering.length){
+        // the same set the load fetches (so a reload after this warms): covering BNs' rotation + declared start, the overlap BNs' rotation, the 3C keys
+        const _dt642 = staffShiftDate(S.shift), _sh642 = S.shift, _names642 = [...new Set(_slotRenderCache.covering.map(c => c.BreakNurseName))];
+        _watch642 = [...new Set([
+          ..._names642.map(n => rotationKey(n, _dt642, _sh642)), ..._names642.map(n => `bnStart_${n}_${_dt642}_${_sh642}`),
+          ...(_slotRenderCache.oppCovering || []).map(c => rotationKey(c.BreakNurseName, String(c.ShiftDate || '').slice(0, 10), c.ShiftType)),
+          `unit3C_${_dt642}_${_sh642}`, 'unit3CDefault', 'unit3CSchedule'
+        ])];
+      }
+      const _keys642 = [...(_onSignUp ? ['unitStatuses', 'unitSchedules'] : []), ..._watch642];
+      if(_keys642.length){
+        const _p642 = syncedLS.refreshMany(_keys642).then(_ch => {
+          if(_onSignUp) refreshStaffUnitGridIfChanged();
+          _markFetched642(_keys642, _stRevNow);
+          if(_watch642.length && (_ch || []).some(k => _watch642.includes(k))) loadSlots(true);
+        }).catch(()=>{});
+        if(_watch642.length) await _p642;
+      }
+    }
+    if(_schedSame642) return;
   } catch(e){ /* fail-open */ }
   if(_slRevNow) _slotsLastRev = _slRevNow;
 
@@ -8824,6 +8872,7 @@ async function silentRefreshSlots(){
       'unitSchedules'
     ];
     await syncedLS.refreshMany(watchedKeys);
+    _markFetched642(watchedKeys, _stRevNow); // Build 642: fetched under the revision this tick probed
 
     // Build a lightweight state fingerprint from current bookings
     const bMap = {};
@@ -9749,14 +9798,20 @@ async function loadOtherSlots(silent=false){
     // Warm BEFORE the gate walks read (the old fork fire-and-forgot and the
     // first render could miss rotations; standard awaits its warms too).
     // Build 620: rotations and declared starts warm in ONE request (two sequential warms before)
-    await syncedLS.warmMany([
-      ...dayCovering.map(s => rotationKey(s.BreakNurseName, dt, 'Day')),
-      ...nocCovering.map(s => rotationKey(s.BreakNurseName, nocDt, 'Noc')),
-      ...tmrCovering.map(s => rotationKey(s.BreakNurseName, tmrDt, 'Day')),
-      ...dayCovering.map(s => `bnStart_${s.BreakNurseName}_${dt}_Day`),
-      ...nocCovering.map(s => `bnStart_${s.BreakNurseName}_${nocDt}_Noc`),
-      ...tmrCovering.map(s => `bnStart_${s.BreakNurseName}_${tmrDt}_Day`)
-    ].filter(k => k && !/_undefined_|_null_/.test(k))).catch(()=>{});
+    // Build 642: refreshed, not warmed, when BNState moved since this device last looked (see _loadSlotsCore)
+    { const _keys642 = [
+        ...dayCovering.map(s => rotationKey(s.BreakNurseName, dt, 'Day')),
+        ...nocCovering.map(s => rotationKey(s.BreakNurseName, nocDt, 'Noc')),
+        ...tmrCovering.map(s => rotationKey(s.BreakNurseName, tmrDt, 'Day')),
+        ...dayCovering.map(s => `bnStart_${s.BreakNurseName}_${dt}_Day`),
+        ...nocCovering.map(s => `bnStart_${s.BreakNurseName}_${nocDt}_Noc`),
+        ...tmrCovering.map(s => `bnStart_${s.BreakNurseName}_${tmrDt}_Day`)
+      ].filter(k => k && !/_undefined_|_null_/.test(k));
+      const _rv642 = await _revP620.catch(() => null);
+      const _stNow642 = _rv642 && _rv642.BNState ? String(_rv642.BNState) : null;
+      const _stale642 = !_stNow642 || _keys642.some(k => _fetchedUnderRev642[k] !== _stNow642);
+      await (_stale642 ? syncedLS.refreshMany(_keys642) : syncedLS.warmMany(_keys642)).catch(()=>{});
+      _markFetched642(_keys642, _stNow642); }
     if(_ep317 !== _slotLoadEpoch) return; // Build 317: stale — discard before any render
     warm3CStatus(dt, 'Day').catch(()=>{});
     warm3CStatus(nocDt, 'Noc').catch(()=>{});
