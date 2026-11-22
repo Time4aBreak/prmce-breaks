@@ -2309,7 +2309,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-21-638'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-640'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4034,7 +4034,14 @@ async function _tick3CSignupFlag(){
     });
     if(newFlag !== _3CManuallyAssigned){
       _3CManuallyAssigned = newFlag;
-      buildStaffUnitGrid();
+      buildStaffUnitGrid(); // rebuild → decorate (377) — the pills repaint from a fresh read
+    } else {
+      // Build 639: the schedule moved (a swap, an edit, a pause's row changes) and the grid stands — repaint the coverage
+      // pills from THIS read, so a phone idle on the grid with no unit selected shows the new set within a tick.
+      const covered = _covSetFrom(scheds, dt, S.shift);
+      _covPillMemo = { key: `${dt}|${S.shift}`, at: Date.now(), set: covered };
+      const previewing = typeof CAL_TAP_PREVIEW !== 'undefined' && CAL_TAP_PREVIEW && _calSelectedDate && _calSelectedDate !== dt;
+      if(!previewing) _paintCovPills(covered);
     }
   } catch(e){ /* silent */ }
 }
@@ -5565,6 +5572,19 @@ let _3CManuallyAssigned = false;
 // rebuilds, not on pure clock ticks.
 let _covPillMemo = { key: null, at: 0, set: null };
 let _covDecorSeq = 0; // Build 457
+// Build 639 (Tomas, Nov 21 5:39 PM: "10N didn't light up on Sign Up" after his Unit Swap — a tap repainted it): the lit
+// set is derived here from the schedule rows, and painted here, so the tick (which re-reads the same rows whenever
+// REV_BNSchedule moves while Sign Up is visible) and the tab entry can repaint without a second read.
+function _covSetFrom(sch, dt, shift){
+  const covered = new Set();
+  sch.filter(r => (r.ShiftDate||'').slice(0,10) === dt && r.ShiftType === shift && r.Status !== 'inactive')
+     .forEach(r => { STAFF_UNITS.forEach(u => { if(!covered.has(u) && unitCoveredBy(r, u, dt, shift)) covered.add(u); }); });
+  return covered;
+}
+function _paintCovPills(covered){
+  const ug = document.getElementById('unitGrid'); if(!ug) return;
+  ug.querySelectorAll('.unit-btn').forEach(b => b.classList.toggle('cov', covered.has(b.textContent.trim())));
+}
 async function decorateUnitGridCoverage(){
   try {
     const ug = document.getElementById('unitGrid');
@@ -5586,13 +5606,11 @@ async function decorateUnitGridCoverage(){
     let covered = (_covPillMemo.key === key && Date.now() - _covPillMemo.at < 5000) ? _covPillMemo.set : null;
     if(!covered){
       const sch = await spGet(LISTS.schedule, `ShiftDate ge '${dt}' and ShiftDate le '${dt}T23'`); // Build 625: one day, not the whole horizon (the filter below only ever kept that day)
-      covered = new Set();
-      sch.filter(r => (r.ShiftDate||'').slice(0,10) === dt && r.ShiftType === shift && r.Status !== 'inactive')
-         .forEach(r => { STAFF_UNITS.forEach(u => { if(!covered.has(u) && unitCoveredBy(r, u, dt, shift)) covered.add(u); }); });
+      covered = _covSetFrom(sch, dt, shift);
       _covPillMemo = { key, at: Date.now(), set: covered };
     }
     if(_mySeq !== _covDecorSeq) return; // Build 457: superseded while fetching
-    ug.querySelectorAll('.unit-btn').forEach(b => b.classList.toggle('cov', covered.has(b.textContent.trim())));
+    _paintCovPills(covered);
   } catch(e){ /* decoration is a courtesy; never break the grid */ }
 }
 
@@ -6151,6 +6169,9 @@ function showTab(name, btn){
     _slotLoadEpoch++;
     _setUnitButtonsLocked(true);
     loadSlots();
+  } else if(name === 'staff'){
+    _covPillMemo = { key: null, at: 0, set: null }; // Build 639: arriving on the grid repaints the coverage pills from a fresh read
+    if(typeof decorateUnitGridCoverage === 'function') decorateUnitGridCoverage();
   }
 
   // If portal already unlocked this session, skip gate
@@ -11035,17 +11056,16 @@ async function bulkSaveUnitsAndRotations(updates){
       const filteredUnits = filterClosedUnits(expanded, u.date, u.shift);
       if(!filteredUnits.length) continue;
 
-      // Use actual booking break slots if any exist (preserves mid-shift
-      // adjustments); fall back to default template otherwise.
+      // The BN's own break slots = her break ROWS, and only those. Build 640 (Tomas, Nov 21 5:51 PM: after a Unit Swap,
+      // Sign Up said "coverage for 9S is complete" while her log showed 9S free at 5:55 and 6:15): Build 113 fell back
+      // to her default TEMPLATE when she had no rows, which carved her template times out of the rotation without any
+      // break existing — Sign Up (which reads the rotation) had nothing to offer there, the log (which paints a fallback
+      // where the rotation is blank) offered "+ My Break". Every other rebuild (`recalculateRotation`, the Edit card,
+      // Recalculate all) uses rows only, or applies the template by WRITING the rows (`applyDefaultToShift`). A BN with
+      // no break rows has no planned breaks: every slot is coverable until she adds one (which recomputes).
       const key = `${u.bn}|${u.date}|${u.shift}`;
       const bnBreakBookings = bookingsByKey[key] || [];
-      let bnBreakSet;
-      if(bnBreakBookings.length){
-        bnBreakSet = new Set(bnBreakBookings.map(b => b.SlotTime));
-      } else {
-        const bnDef = getDefaultTemplate(u.bn, u.shift);
-        bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
-      }
+      const bnBreakSet = new Set(bnBreakBookings.map(b => String(b.SlotTime).padStart(4, '0')));
 
       const dateSeed = u.date.split('-').reduce((a,b) => a + parseInt(b), 0) + u.bn.charCodeAt(0);
       const _rowBS = _schedByIdBS[String(u.schedId)] || {};
