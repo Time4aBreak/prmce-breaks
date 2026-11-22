@@ -2309,7 +2309,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-640'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-641'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7670,7 +7670,9 @@ function _setUnitButtonsLocked(on){
   if(on) _unitLockT = setTimeout(() => _setUnitButtonsLocked(false), 5000);
 }
 
-async function loadSlots(silent=false){
+let _slotsReadMemo = null;  // Build 641: the standard path's last server read {key, allSchedsRaw, oppBookingsRaw, at}
+let _slotsPaint641 = null;  // Build 641: set by submitClaims for ONE paint — {dt, bookings} = its pre-fetch pool + what it wrote
+async function loadSlots(silent=false, opts={}){
   if(!S.unit) return;
   const key = S.shift === 'Other'
     ? `${S.unit}|Other`
@@ -7684,7 +7686,7 @@ async function loadSlots(silent=false){
     return _lsInFlight;
   }
   const _ep = _slotLoadEpoch; // Build 317
-  const p = _loadSlotsCore(silent);
+  const p = _loadSlotsCore(silent, opts);
   _lsInFlight = p; _lsInFlightKey = key; _lsInFlightSilent = !!silent;
   p.finally(() => {
     if(_lsInFlight === p){ _lsInFlight = null; _lsInFlightKey = null; }
@@ -7692,7 +7694,7 @@ async function loadSlots(silent=false){
   }).catch(() => {});
   return p;
 }
-async function _loadSlotsCore(silent=false){
+async function _loadSlotsCore(silent=false, opts={}){
   const _ep317 = _slotLoadEpoch; // Build 317: this load's world
   // Build 286: NO entry reset. 285's reset-per-pass fought the Build-274
   // revision gates: quiet polls enter, reset, and early-return before the
@@ -7767,10 +7769,25 @@ async function _loadSlotsCore(silent=false){
     // every phone's first tick used to re-read the shift and then fully reload (the fingerprint baseline was unset).
     // Probed before the read: a write landing in between makes the stored revision older than the data — one extra
     // re-read at the first tick, never a missed change.
-    const _revP614 = fetchRevision().catch(() => null);
-    const _q614 = [{ sheet: LISTS.schedule, filter: `ShiftDate ge '${schedFloor}'` }, { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23'` }];
-    if(oppDt !== dt) _q614.push({ sheet: LISTS.bookings, filter: `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'` });
-    const _r614 = await spBatchGet(_q614);
+    // Build 641 (Tomas: "paint"): after a Submit the list is painted from what this phone already knows — the schedule and
+    // opposite-date rows of its last server read, plus the submit's own pre-fetch pool with the rows it just wrote
+    // (real rows, with Ids, so Manage works at once) — instead of waiting ~5 s on a four-query reload that is always a
+    // cache miss right after the write. The revision baseline is deliberately NOT advanced, so the next silent tick sees
+    // the submit's own bump, re-reads from the server and reconciles anything another phone did meanwhile.
+    const _memoKey641 = `${dt}|${shift}`;
+    const _paint641 = !!(opts && opts.paint && _slotsPaint641 && _slotsPaint641.dt === dt && _slotsReadMemo && _slotsReadMemo.key === _memoKey641 && Date.now() - _slotsReadMemo.at < 15 * 60 * 1000);
+    let _revP614, _r614;
+    if(_paint641){
+      _revP614 = Promise.resolve(null);
+      _r614 = [_slotsReadMemo.allSchedsRaw, _slotsPaint641.bookings.filter(b => (b.SlotDate || '').slice(0, 10) === dt), _slotsReadMemo.oppBookingsRaw];
+      _slotsPaint641 = null; // one paint
+    } else {
+      _revP614 = fetchRevision().catch(() => null);
+      const _q614 = [{ sheet: LISTS.schedule, filter: `ShiftDate ge '${schedFloor}'` }, { sheet: LISTS.bookings, filter: `SlotDate ge '${dt}' and SlotDate le '${dt}T23'` }];
+      if(oppDt !== dt) _q614.push({ sheet: LISTS.bookings, filter: `SlotDate ge '${oppDt}' and SlotDate le '${oppDt}T23'` });
+      _r614 = await spBatchGet(_q614);
+      _slotsReadMemo = { key: _memoKey641, allSchedsRaw: _r614[0], oppBookingsRaw: oppDt !== dt ? _r614[2] : [], at: Date.now() };
+    }
     const allSchedsRaw = _r614[0], allBookingsRaw = reconcileBookings(_r614[1]), oppBookingsRaw = oppDt !== dt ? reconcileBookings(_r614[2]) : [];
     _coverageScheds = allSchedsRaw;        // build 208: feed the coverage calendar (no extra fetch)
     if(_ep317 !== _slotLoadEpoch) return; // Build 317: a newer world took over mid-fetch — discard
@@ -9591,11 +9608,12 @@ async function submitClaims(){
     else _runs.push([_k]);
   }
   const _cacheClaim = (k) => allBookingsToday.push({NurseName:name, Unit:submitUnit, SlotTime:k.time, SlotDate:(k.dt || dt), ShiftType:k.shift, IsBNBreak:false, CoveredBy: k.bn || ''}); // Build 138/290: the cache mirrors what was written, on submitUnit
+  const _inPool641 = (k) => allBookingsToday.some(b => b.Id != null && b.NurseName === name && b.Unit === submitUnit && normSlot(b.SlotTime) === normSlot(k.time) && (b.SlotDate || '').slice(0, 10) === (k.dt || dt)); // Build 641
   for(const run of _runs){
     if(run.length === 1){
       const _k = run[0];
       const result = await claimSlot(_k.time, true, _k.shift, allBookingsToday, submitUnit, _k.bn, _k.dt, null, _scheds634);
-      if(result === 'ok'){ results.claimed.push(_k.time); _cacheClaim(_k); }
+      if(result === 'ok'){ results.claimed.push(_k.time); if(!_inPool641(_k)) _cacheClaim(_k); } // Build 641: claimSlot pushed the real row; the synthetic one only when it couldn't
       else results.failed.push({ label: fmt12(_k.time), reason: result });
       continue;
     }
@@ -9607,8 +9625,9 @@ async function submitClaims(){
     }
     if(refused){ results.failed.push({ label: runLabel, reason: `${refused} — the run wasn't saved` }); continue; }
     try {
-      await spPostRun(LISTS.bookings, rows);
-      run.forEach(_k => { results.claimed.push(_k.time); _cacheClaim(_k); });
+      const _items641 = await spPostRun(LISTS.bookings, rows);
+      (_items641 || []).forEach(it => { if(it && it.Id != null && !allBookingsToday.some(b => String(b.Id) === String(it.Id))) allBookingsToday.push(it); }); // Build 641: the real rows, with Ids
+      run.forEach(_k => { results.claimed.push(_k.time); if(!_inPool641(_k)) _cacheClaim(_k); });
     } catch(e){
       const msg = (e && e.message) || '';
       const who = msg.startsWith('SLOT_TAKEN:') ? bareName(msg.slice('SLOT_TAKEN:'.length) || 'another nurse') : null;
@@ -9642,8 +9661,19 @@ async function submitClaims(){
   // the overlay was gone but the claimed slots hadn't repainted with their
   // green banner + manage UI yet. Awaiting loadSlots keeps the overlay up
   // until the new state is on screen, so the transition is seamless.
-  await loadSlots();
-  if(document.getElementById('summList')) loadSummary();
+  // Build 641: the repaint comes from this submit's own pool (server truth at submit time + the rows it wrote, with
+  // their Ids) and the last read's schedule — no reload while the overlay is up; the next silent tick (≤13 s) sees
+  // this submit's revision bump and reconciles with the server. The Other path keeps its reload.
+  // Any failure means another phone wrote in between (a SLOT_TAKEN, a vanished row) — the pool is known-stale, so the
+  // list reloads from the server as before; the paint is for the clean case, which is nearly every submit.
+  if(results.failed.length === 0) _slotsPaint641 = { dt, bookings: allBookingsToday };
+  await loadSlots(false, { paint: results.failed.length === 0 });
+  _slotsPaint641 = null;
+  // Build 641: the Coverage board refresh fired from EVERY staff phone's submit (`#summList` is always in the DOM) — a
+  // probe + two batches per claim for a board nobody on that phone was looking at. Only when it is on screen; its own
+  // poller catches up on entry otherwise.
+  { const _tp = document.getElementById('tab-portal'), _sp = document.getElementById('subtab-summary');
+    if(_tp && _tp.classList.contains('active') && _sp && _sp.style.display !== 'none' && document.getElementById('summList')) loadSummary(); }
   _resetSubmitState();
 }
 
@@ -10245,7 +10275,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       (!coveredBy || !b.CoveredBy || b.CoveredBy === coveredBy));
     if(taken){
       if(!silent){ toast(`${fmt12(slotTime)} was just claimed by ${bareName(taken.NurseName)}. Please choose another slot.`, true); loadSlots(); }
-      return `${fmt12(slotTime)} already taken`;
+      return `${fmt12(slotTime)} just claimed by ${bareName(taken.NurseName)}`; // Build 641: the same sentence the server guard gives — the pool knows who
     }
 
     // BN-level uniqueness: a BN can only cover one break at a time.
@@ -10319,7 +10349,9 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
     if(runRows){ runRows.push(_row); return 'prepared'; } // Build 560: the run is written by submitClaims in one request
     _claimsInFlight.add(_inFlightKey);
     try {
-      await spPost(LISTS.bookings, _row);
+      const _created641 = await spPost(LISTS.bookings, _row);
+      // Build 641: the real row (with its Id) joins submitClaims' pool, so the post-submit paint can offer Manage on it
+      if(prefetchedBookings && _created641 && _created641.Id != null && !prefetchedBookings.some(b => String(b.Id) === String(_created641.Id))) prefetchedBookings.push(_created641);
     } finally {
       // Clear the guard ~3 seconds after the POST completes — long enough
       // to cover the eventual-consistency window where the next GET might
