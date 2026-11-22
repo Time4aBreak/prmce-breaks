@@ -1084,9 +1084,9 @@ function set3CSchedule(entries){
       lastStatus = e.status;
     }
   }
-  // syncedLS.set updates LS immediately, mirrors to BNState, throws on
-  // network failure with its own user-visible toast.
-  return syncedLS.set('unit3CSchedule', compacted);
+  // syncedLS.setMany updates LS immediately, mirrors to BNState in one batchSetState (Build 644, same as setUnitSchedule),
+  // throws on network failure with its own user-visible toast.
+  return syncedLS.setMany([{ key: 'unit3CSchedule', value: compacted }]);
 }
 async function add3CScheduleEntry(effectiveAt, status){
   // Compaction (drop consecutive same-status entries) happens inside
@@ -1292,7 +1292,7 @@ async function appendUnitSubLog(entries){
   await syncedLS.refresh('unitSubLog');
   const existing = getUnitSubLog();
   const merged = [...existing, ...entries];
-  await syncedLS.set('unitSubLog', merged);
+  await syncedLS.setMany([{ key: 'unitSubLog', value: merged }]); // Build 644: one batchSetState, not get+patch
 }
 
 async function removeUnitSubLogEntries(filterFn){
@@ -1301,7 +1301,7 @@ async function removeUnitSubLogEntries(filterFn){
   const existing = getUnitSubLog();
   const remaining = existing.filter(e => !filterFn(e));
   if(remaining.length !== existing.length){
-    await syncedLS.set('unitSubLog', remaining);
+    await syncedLS.setMany([{ key: 'unitSubLog', value: remaining }]); // Build 644
   }
 }
 
@@ -1337,7 +1337,9 @@ function setUnitSchedule(unit, entries){
   }
   const all = getUnitSchedules();
   all[unit] = compacted;
-  return syncedLS.set('unitSchedules', all);
+  // Build 644: ONE batchSetState (the backend upserts by key) instead of syncedLS.set's read-then-patch — the pause/reopen's
+  // "Applying change" phase was three sequential calls on live (refresh, get, patch ≈ 5 s); now two.
+  return syncedLS.setMany([{ key: 'unitSchedules', value: all }]);
 }
 
 async function addUnitScheduleEntry(unit, effectiveAt, status){
@@ -2320,7 +2322,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-643'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-644'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4671,7 +4673,13 @@ async function commitUnitChange(){
         // would re-query for every BN; pre-fetching is cheaper and keeps the
         // "available units" view consistent across the batch.
         const _scheFloor = activeShiftFloor();
-        const _allSchedsForSub = await spGet(LISTS.schedule, `ShiftDate ge '${_scheFloor}'`);
+        // Build 644: ONE read of the 90-day window serves the substitute lookup (rows from the active floor forward) AND
+        // primes the coverage counts for both shifts — this phase made two sequential reads of the same sheet on live
+        // (the floor read, then getUnitCoverageCounts' 90-day read ≈ 5 s together).
+        const _cut644 = coverageCountsCutoff();
+        const _rows644 = await spGet(LISTS.schedule, `ShiftDate ge '${_cut644 < _scheFloor ? _cut644 : _scheFloor}'`);
+        clearCoverageCountsCache(); primeCoverageCounts(_rows644);
+        const _allSchedsForSub = _rows644.filter(s => String(s.ShiftDate || '').slice(0, 10) >= _scheFloor);
         // Track substitutes picked in this batch so two BNs on the same shift
         // don't both grab the same available unit. Key by date|shift.
         const _picksThisBatch = {};
@@ -7441,8 +7449,14 @@ async function redealFutureShifts(fromTime, opts = {}){
 
   // One read: schedule rows from a day before the cutoff date forward (the
   // precise per-shift start filter below excludes anything not actually future).
+  // Build 644: the read starts at the coverage-counts cutoff (90 days back) and primes BOTH shifts' counts — the deal loop
+  // used to read the same window again, once per shift type, inside "Re-dealing k of N" (~5 s on live). Same payload the
+  // counts read already fetched; one execution instead of three.
   const floorDate = new Date(fromTime - 86400000).toISOString().slice(0, 10);
-  const allScheds = await spGet(LISTS.schedule, `ShiftDate ge '${floorDate}'`);
+  const _cut644 = coverageCountsCutoff();
+  const _rows644 = await spGet(LISTS.schedule, `ShiftDate ge '${_cut644 < floorDate ? _cut644 : floorDate}'`);
+  primeCoverageCounts(_rows644);
+  const allScheds = _rows644.filter(s => String(s.ShiftDate || '').slice(0, 10) >= floorDate);
 
   // Group active core BNs by future shift. Exclude inactive + supplemental —
   // suggestAssignments deals the core team; supplementals are additive and not
@@ -21242,24 +21256,22 @@ function unitsPerNurse(shift, nurseCount){
 
 // ── All-time coverage counts ──────────────────────────
 let _coverageCountsCache = {};
-async function getUnitCoverageCounts(shift){
-  if(_coverageCountsCache[shift]) return _coverageCountsCache[shift];
+let _coverageCountsInflight = null; // Build 644: concurrent first callers share one read
+function coverageCountsCutoff(){ const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90); return cutoff.toISOString().slice(0,10); }
+// Build 644: counts for ONE shift from schedule rows already in hand (the 90-day window, any shift type — filtered here).
+function _coverageCountsFrom(scheds, shift){
   const counts = {};
   ALL_COVERAGE_SLOTS.forEach(s => counts[s] = 0);
-  try {
-    const cutoff = new Date(); cutoff.setDate(cutoff.getDate() - 90);
-    const cutStr = cutoff.toISOString().slice(0,10);
-    const scheds = await spGet(LISTS.schedule, `ShiftType eq '${shift}' and ShiftDate ge '${cutStr}'`);
-    scheds.forEach(s => {
-      let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
-      const hasC = units.includes('3C') || units.includes('4C');
-      if(hasC) counts['C_PAIR'] = (counts['C_PAIR']||0) + 1;
-      units.forEach(u => {
-        if(u !== '3C' && u !== '4C' && counts[u] !== undefined)
-          counts[u] = (counts[u]||0) + 1;
-      });
+  scheds.forEach(s => {
+    if(s.ShiftType !== shift) return;
+    let units = []; try { units = JSON.parse(s.Units||'[]'); } catch{}
+    const hasC = units.includes('3C') || units.includes('4C');
+    if(hasC) counts['C_PAIR'] = (counts['C_PAIR']||0) + 1;
+    units.forEach(u => {
+      if(u !== '3C' && u !== '4C' && counts[u] !== undefined)
+        counts[u] = (counts[u]||0) + 1;
     });
-  } catch(e) { /* return zeros on error */ }
+  });
   // Build 328: rates over open days — a closed unit's zero-count period is
   // an ARTIFACT, not a debt. Raw totals made every reopening a flood (7N,
   // closed 12 days, re-entered as the "most starved" unit and got dealt
@@ -21285,8 +21297,28 @@ async function getUnitCoverageCounts(shift){
       }
     });
   } catch(e){ /* raw totals on any error */ }
-  _coverageCountsCache[shift] = counts;
   return counts;
+}
+// Build 644: fill BOTH shifts' caches from one set of rows (must cover the 90-day window). The close path and the re-deal
+// already read the schedule — they hand the rows over instead of letting the dealer read the same window again per shift.
+function primeCoverageCounts(scheds){
+  _coverageCountsCache['Day'] = _coverageCountsFrom(scheds, 'Day');
+  _coverageCountsCache['Noc'] = _coverageCountsFrom(scheds, 'Noc');
+}
+async function getUnitCoverageCounts(shift){
+  if(_coverageCountsCache[shift]) return _coverageCountsCache[shift];
+  // Build 644: one 90-day read, no ShiftType filter, fills Day AND Noc — the deal loop asked once per shift type (two
+  // scans of the same window, ~2.5 s each on live); concurrent first callers (the grid's Promise.allSettled) share it.
+  if(!_coverageCountsInflight){
+    _coverageCountsInflight = (async () => {
+      try {
+        const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${coverageCountsCutoff()}'`);
+        primeCoverageCounts(scheds);
+      } catch(e) { primeCoverageCounts([]); /* zeros on error, as before */ }
+    })().finally(() => { _coverageCountsInflight = null; });
+  }
+  await _coverageCountsInflight;
+  return _coverageCountsCache[shift] || _coverageCountsFrom([], shift);
 }
 function clearCoverageCountsCache(){ _coverageCountsCache = {}; }
 
