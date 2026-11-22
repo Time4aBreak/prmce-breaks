@@ -2208,6 +2208,17 @@ function bnOwns(b, responsibleUnits, bnName){
   if(b.CreatedBy) return b.CreatedBy === bnName;
   return responsibleUnits && responsibleUnits.has(b.Unit);
 }
+// Build 643 (Tomas, Nov 22: "a few times the Prod Log didn't match the Sign Up"; the Nov 12 sim finding #2): ONE pin rule.
+// A live staff booking pins its slot to its unit in the rotation of the BN who OWNS it by stamp — CoveredBy first (Sign
+// Up's attribution, 284), else CreatedBy (+Log / Keep / Transfer) — the same precedence as bnOwns, minus the unit-membership
+// fallback (an unstamped legacy row sits on her own unit already). Before 643 every writer (recalculateRotation, the Save
+// All / Recalculate-all / bulkSave batches, applyDefaultToShift's seed) and the Prod Log's staleness validator (226) pinned
+// on CreatedBy ONLY, so a Sign Up claim (CoveredBy only) never pinned: any rebuild — "+ My Break" re-phasing her blocks, a
+// pause's in-progress re-deal, a Recalculate — could move the slot's unit while the claim stayed, and the log then labelled
+// the slot with a unit Sign Up did not show. The validator and the writers MUST share this rule: a pin the validator does
+// not recognise is "stale" to it, and it wipes and recomputes on every log render.
+function pinOwner(b){ return b ? (b.CoveredBy || b.CreatedBy || '') : ''; }
+function pinsFor(b, bnName){ return !!bnName && !!b && isStaffBooking(b) && String(b.IsCancelled) !== '1' && pinOwner(b) === bnName; }
 // Legacy alias retained for any caller still using the older name.
 // Returns true when the booking is a cross-unit attributed entry for
 // this BN. New code should call bnOwns directly.
@@ -2309,7 +2320,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-642'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-643'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6867,10 +6878,10 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     // this BN's live staff bookings. saveRotation below still guards past.
     let _seedRow = _winRow619, _seedPins = []; // Build 619: the row was looked up once at the top (258/267's lookup lived here)
     try {
-      // Build 258: the pins seed is derivable from preloads (CreatedBy filter = the exact pins query).
-      _seedPins = (preloads && preloads.bookings)
-        ? preloads.bookings.filter(b => b.CreatedBy === name)
-        : await spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+      // Build 258: the pins seed is derivable from preloads. Build 643: owned by stamp (CoveredBy, else CreatedBy), one rule.
+      _seedPins = ((preloads && preloads.bookings)
+        ? preloads.bookings
+        : await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`)).filter(b => pinsFor(b, name));
     } catch(e){ /* degrade to unconstrained (pre-244) */ }
     const rotation = constrainedRotation(expandedUnits, bnBreakSet, shift, dateSeed,
       { startTime: _seedRow.StartTime, hours: _seedRow.Hours, bookings: _seedPins });
@@ -7316,12 +7327,11 @@ async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null
   // seed-branch writes its own rotation and stays exposed — reachable only
   // if a pin-holder applies a ⭐ template mid-shift.
   try {
-    const pinned = (preloads && preloads.bookings)
-      ? preloads.bookings.filter(b => b.CreatedBy === bnName)
-      : await spGet(LISTS.bookings,
-          `CreatedBy eq '${esc(bnName)}' and SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`);
+    // Build 643: pins = the bookings this BN owns by stamp (pinsFor), not CreatedBy alone.
+    const pinned = ((preloads && preloads.bookings)
+      ? preloads.bookings
+      : await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`)).filter(b => pinsFor(b, bnName));
     pinned.forEach(b => {
-      if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
       rotation[String(b.SlotTime).padStart(4,'0')] = b.Unit;
     });
   } catch(e){ console.warn('pin overlay failed (non-fatal):', e.message); }
@@ -11108,7 +11118,7 @@ async function bulkSaveUnitsAndRotations(updates){
   const _pinsByKeyBS = {};
   allBookings.forEach(b => {
     if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
-    const k = `${b.CreatedBy}|${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`;
+    const k = `${pinOwner(b)}|${(b.SlotDate||'').slice(0,10)}|${b.ShiftType}`; // Build 643: keyed by the stamp owner
     (_pinsByKeyBS[k] = _pinsByKeyBS[k] || []).push(b);
   });
 
@@ -14411,7 +14421,7 @@ async function recalculateAllRotations(opts = {}){
       _bk.forEach(b => {
         if(isBNBreak(b)){ const kb = `${b.NurseName}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`; (_breaksByKey[kb] = _breaksByKey[kb] || []).push(b); return; }
         if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return;
-        const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
+        const k = `${pinOwner(b)}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`; // Build 643
         (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
       });
     }
@@ -16593,7 +16603,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
       if(_impDates.length){
         const _bk = await spGet(LISTS.bookings, `SlotDate ge '${_impDates[0]}' and SlotDate le '${_impDates[_impDates.length - 1]}T23'`);
         _bk.filter(isStaffBooking).forEach(b => {
-          const k = `${b.CreatedBy}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`;
+          const k = `${pinOwner(b)}|${String(b.SlotDate).slice(0,10)}|${b.ShiftType}`; // Build 643
           (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
         });
         // Build 258: raw bookings grouped by date|shift for the apply preloads.
@@ -19157,9 +19167,8 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // My Shift opened. A future foreign-unit entry is valid iff a live
       // staff booking at (slot, unit) is pinned to this BN. SlotDate === dt
       // is ghost-safe: Noc post-midnight bookings carry the shift-START date.
-      const _pinBacked = new Set(
-        allBookings.filter(b => isStaffBooking(b) && String(b.IsCancelled) !== '1'
-          && b.CreatedBy === BNS.name && (b.SlotDate || '').slice(0,10) === dt)
+      const _pinBacked = new Set( // Build 643: owned by stamp (pinsFor) — the same rule the writers pin by
+        allBookings.filter(b => pinsFor(b, BNS.name) && (b.SlotDate || '').slice(0,10) === dt)
           .map(b => `${normSlot(b.SlotTime)}|${b.Unit}`)
       );
       const _hasStaleUnit = Object.entries(rotation).some(([slot, unit]) => {
