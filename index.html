@@ -1811,14 +1811,16 @@ async function applyCoverageLimitsToUpcoming(){
     let done = 0, skipped = 0;
     const _delIds = [], _creates = [], _rotKeys = [];
     const _dealtKeys = new Set(), _stamp = Date.now(); // Build 556: our rows carry our own ids, so the cleanup can tell them apart
+    const _handShaped = rows => rows.some(r => String(r.IsSupplemental) === '1' || r.Status === 'inactive' || (r.StartTime && Number(r.Hours) > 0));
+    // Build 645: every group this sweep will re-deal leaves the baseline before the first deal (not group by group — deal 1
+    // must not see group 5's old rows either). Hand-shaped groups keep their rows and stay counted.
+    overlayMinusRows(_ov, _keys.filter(k => !_handShaped(groups[k]) && groups[k].some(r => r.BreakNurseName)).flatMap(k => groups[k]));
     for(const key of _keys){
       const rows = groups[key];
       const [d, sh] = key.split('|');
       _at = `${_fmtDayShort(d)} ${sh}`;
       showBusy(`Computing ${done + skipped + 1}/${_total} — ${_at}…`);
-      const handShaped = rows.some(r => String(r.IsSupplemental) === '1'
-        || r.Status === 'inactive'
-        || (r.StartTime && Number(r.Hours) > 0));
+      const handShaped = _handShaped(rows);
       if(handShaped){ skipped++; continue; }
       const nurses = [...new Set(rows.map(r => r.BreakNurseName).filter(Boolean))];
       if(!nurses.length){ skipped++; continue; }
@@ -2322,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-644'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-22-645'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -7380,7 +7382,7 @@ async function recalcFairnessForShift(date, shift, options={}){
   // The date-keyed dedup inside _savePartialWingHistory ensures any prior
   // entries for these BNs on this date get overwritten with the new fair
   // distribution, which is the correct behavior post-recalc.
-  const suggestions = await suggestAssignments(nurseNames, shift, date);
+  const suggestions = await suggestAssignments(nurseNames, shift, date, overlayMinusRows({}, active)); // Build 645: the rows being re-dealt leave the baseline
 
   // Patch each BN's Units and refresh their rotation. Done sequentially to
   // avoid hammering Sheets and to keep error attribution clean — if one
@@ -7479,6 +7481,7 @@ async function redealFutureShifts(fromTime, opts = {}){
 
   // Deal each future shift in chronological order, threading the overlay.
   const batchCountOverlay = {};
+  overlayMinusRows(batchCountOverlay, Object.values(schedByKey).flat()); // Build 645: the rows this re-deal replaces leave the baseline
   const wingHistoryBatch = {};
   const updates = [];
   const summary = [];
@@ -13431,14 +13434,14 @@ async function suggestUnitsForManualAssign(btn){
       const covMax = Math.max(..._covCfg()[shift === 'Day' ? 'Day' : 'Noc'].byTeam);
       const nUnits = Math.min(Math.max(1, Math.ceil(hrs / pc.perHours) * pc.units), Math.max(1, covMax));
       const lockedU = [...new Set(Object.values(locked).flat())];
-      const slots = await _pickPartialSlots(shift, dt, nUnits, {}, lockedU, document.getElementById('aPartStart').value.replace(':', ''));
+      const slots = await _pickPartialSlots(shift, dt, nUnits, overlayMinusRows({}, existing.filter(s => s.BreakNurseName === nurse)), lockedU, document.getElementById('aPartStart').value.replace(':', '')); // Build 645: her own saved row leaves the baseline
       S.aUnits = slots.slice();
       document.querySelectorAll('.uc').forEach(cb => { const u = cb.id.replace('au-',''); cb.classList.toggle('on', S.aUnits.includes(u)); });
       toast(`Suggested ${slots.length} unit${slots.length !== 1 ? 's' : ''} for the ${hrs}h partial`);
       return;
     }
     const _expN394 = parseInt((document.getElementById('aExpectedBNs') || {}).value, 10) || null;
-    const result = await suggestAssignments(nurses, shift, dt, {}, null, locked, true, _expN394);
+    const result = await suggestAssignments(nurses, shift, dt, overlayMinusRows({}, existing.filter(s => s.BreakNurseName === nurse)), null, locked, true, _expN394); // Build 645: her own saved row leaves the baseline (the teammates' stay — they are locked)
     const slots = result[nurse] || [];
     if(!slots.length){
       toast('Suggester returned no units for this BN', true);
@@ -14110,7 +14113,7 @@ async function repriceShift(date, shift, btn){
   showBusy(`⚖ Rebalancing ${mains.length} ${shift} assignment${mains.length === 1 ? '' : 's'} on ${date}…`);
   try {
     const names = mains.map(r => r.BreakNurseName);
-    const sugg = await suggestAssignments(names, shift, date, {}, null, null, true, rows.length);
+    const sugg = await suggestAssignments(names, shift, date, overlayMinusRows({}, mains), null, null, true, rows.length); // Build 645: the rows being re-dealt leave the baseline
     let done = 0;
     for(const r of mains){
       // Build 401: expand the C_PAIR slot token before the Units write — the
@@ -15833,6 +15836,7 @@ async function renderImportRows(entries, forceReplace = false){
   // In-memory overlay counts to track what's been suggested within this batch
   // Prevents same units being suggested every day when global counts all start at 0
   const batchCountOverlay = {}; // slot -> extra count from batch suggestions so far
+  _overlayMinusBatchRows645(batchCountOverlay, entriesToProcess, e => !e._keep); // Build 645: the saved rows the changed cards replace, and the queued removals, leave the baseline (kept cards stay — they are locked and already counted)
   let _progressDone = 0;
   for(const key of sortedKeys){
     const nurses = byDateShift[key] || [];
@@ -16095,6 +16099,7 @@ async function _resuggestAllCore(){
   }
   const allSuggestions = {};
   const batchCountOverlay = {};
+  _overlayMinusBatchRows645(batchCountOverlay, batch, () => true); // Build 645: every card is re-dealt (519's flags are stripped) — all their saved rows leave the baseline
   const sortedKeys = [...new Set([...Object.keys(byDateShift), ...Object.keys(partialsByDateShift)])].sort();
   let _progressDone = 0;
   for(const key of sortedKeys){
@@ -16901,6 +16906,7 @@ async function _rerunSuggestCore(i, name, date, shift){
   // Build overlay from other dates already suggested in this batch
   // so re-suggest benefits from what was already allocated to other dates
   const batchOverlay = {};
+  _overlayMinusBatchRows645(batchOverlay, entriesToProcess, () => true); // Build 645: the batch replaces every saved row behind it; the other dates come back below as their current chips
   entriesToProcess.forEach((e, idx) => {
     if(e.date !== date && importUnitSel[idx]){
       importUnitSel[idx].forEach(slot => {
@@ -21427,12 +21433,15 @@ function _dealDisjoint(sets, count){
   rec(0, [], new Set());
   return out;
 }
-function _dealSite({ names, pool, quota, shift, seed }){
+function _dealSite({ names, pool, quota, shift, seed, date }){
   const n = names.length;
   const capOn = _acuityCapOn(shift);
   const aPool = pool.filter(e => e.wing === 'A'), dPool = pool.filter(e => e.wing === 'D');
   // Who is owed a D shift: 60-day history, D minus A, most owed first; seeded hash breaks ties.
-  const owed = nm => { const h = getNurseWingHistory(nm, shift); return h.filter(e => e.wing === 'D').length - h.filter(e => e.wing === 'A').length; };
+  // Build 645: history is what happened BEFORE this shift — entries dated on or after the shift being dealt are a previous
+  // deal's output for shifts this pass has not reached yet (a re-deal rewrites them date by date), and counting them made
+  // the second deal of an unchanged horizon split the wings differently from the first (bed D1: 57 of 82 rows flipped).
+  const owed = nm => { const h = getNurseWingHistory(nm, shift).filter(e => !date || e.date < date); return h.filter(e => e.wing === 'D').length - h.filter(e => e.wing === 'A').length; };
   const order = [...names].sort((x, y) => owed(x) - owed(y) || (_dealHash(x, seed) % 1000) - (_dealHash(y, seed) % 1000));
   const darkness = arr => arr.reduce((acc, e) => acc + (e.globalCount || 0), 0);
   const capOk = st => !capOn || st.filter(e => e.tier === 'High').length <= 1;
@@ -21587,6 +21596,38 @@ function _clearWingHistoryForDate(name, shift, date){
 // _dealWingTemplates, _claimWingTemplateSets — Builds 388/393/394/395)
 // are RETIRED. Their shapes survive as the contiguity rule inside
 // _dealSets; the calendar no longer chooses which sets are dealt.
+// Build 645 (Tomas, Nov 22 4:07 PM: "Why are these the same?" — 9N and 10N lit every day on the Sign Up calendar). A deal
+// that REPLACES rows must not count those rows in its baseline. The 90-day coverage counts include every row on the sheet,
+// future ones too, so a re-deal was steering by its own previous output: a unit flooded by deal k looked bright to deal k+1
+// and was starved, a unit starved by k looked dark to k+1 and was flooded — four re-deals in six minutes that morning left
+// 9N dealt 15/15 days at the HIGHEST count and 6A 0/15 at the LOWEST (`deal_check.js`). The overlay the dealer already
+// consumes carries per-unit deltas keyed `slot|shift`; every caller that replaces rows seeds it with −1 per unit of each
+// row it is about to replace (3C/4C/C_PAIR → one C_PAIR, as the counts tally them), then its loop adds the new deals as
+// before. The dealer then sees: the past 90 days + the future it is NOT touching + this deal so far — the premise it was
+// written for. Accepts raw sheet rows ({Units JSON, ShiftType}) and the grid's base rows ({units[], shift}).
+// Build 645, the grid's review batches: the saved row behind each entry the batch will replace (looked up on the week the
+// grid holds; a new cell has none) plus the rows queued for removal.
+function _overlayMinusBatchRows645(overlay, entries, pick){
+  try {
+    const rows = [];
+    (entries || []).forEach(e => { if(!e || !pick(e)) return; const r = (typeof _wgSavedRowFor === 'function') ? _wgSavedRowFor(e.name, e.date, e.shift) : null; if(r) rows.push(r); });
+    (window._wgDeleteRows || []).forEach(r => { if(r) rows.push(r); });
+    overlayMinusRows(overlay, rows);
+  } catch(e){ /* fail-open: the old baseline */ }
+  return overlay;
+}
+function overlayMinusRows(overlay, rows){
+  (rows || []).forEach(r => {
+    if(!r || (r.Status || '') === 'inactive' || String(r.IsSupplemental) === '1') return;
+    const sh = r.ShiftType || r.shift; if(sh !== 'Day' && sh !== 'Noc') return;
+    let units = Array.isArray(r.units) ? r.units : null;
+    if(!units){ try { units = JSON.parse(r.Units || '[]'); } catch(e){ units = []; } }
+    if(!Array.isArray(units)) return;
+    if(units.includes('3C') || units.includes('4C') || units.includes('C_PAIR')) overlay[`C_PAIR|${sh}`] = (overlay[`C_PAIR|${sh}`] || 0) - 1;
+    units.forEach(u => { if(u !== '3C' && u !== '4C' && u !== 'C_PAIR' && ALL_COVERAGE_SLOTS.includes(u)) overlay[`${u}|${sh}`] = (overlay[`${u}|${sh}`] || 0) - 1; });
+  });
+  return overlay;
+}
 async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, wingHistoryBatch=null, lockedAssignments=null, suppressHistory=false, expectedTotal=null){
   if(!nurses.length) return {};
   // Build 300 (bug #6): locked-assignments overlay. When teammates already
@@ -21656,7 +21697,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
   // declared headcount already sized the quota (394). The 394/395 wing-
   // forcing rules are gone with the cycles: a nurse dealt alone now takes
   // the darkest set available around her teammates (see the file header).
-  const _dealt = _dealSite({ names: dealNurses, pool: poolAvail, quota: uPerNurse, shift, seed: dateSeed });
+  const _dealt = _dealSite({ names: dealNurses, pool: poolAvail, quota: uPerNurse, shift, seed: dateSeed, date }); // Build 645: date, so owed-D counts history before this shift only
   if(_dealt.forcedCap) console.warn(`[suggestAssignments] ${date} ${shift}: no cap-honoring arrangement existed — a set holds two High units`);
   if(_dealt.relaxed) console.warn(`[suggestAssignments] ${date} ${shift}: walk budget relaxed by ${_dealt.relaxed} floor(s) to fit the open pool`);
   const rows = dealNurses.map(bn => ({
