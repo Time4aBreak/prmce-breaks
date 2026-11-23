@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-648'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-649'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2675,8 +2675,10 @@ async function _spDelReal(list, id){
 // serialises writes, a phase costs ~2 s × the number of mutating calls whatever they carry — five queued 50-entry
 // setState chunks were 10 s, thirteen mutating calls made the re-deal 22–26 s. The May chunk size of 50 guarded a
 // 30-concurrent-execution limit that the lock has made moot (parallel chunks only queue). POST bodies have 50 MB of
-// headroom; one call per write kind is the lever. Upsert stays at 50 — the backend writes an upsert cell by cell, and a
-// 250-row upsert would hold the lock ~5 s against a claim (option 2, not built).
+// headroom; one call per write kind is the lever. Build 649 (the 2026-11-23b backend writes an upsert's rows in spans,
+// one setValues per span instead of one per field): upsert joins the constant — a cascade's 188-row upsert is one request.
+// With the 11-23 backend still deployed, a 250-row upsert holds the lock a few seconds longer (per-field writes); the
+// chunk size is safe either way, only the gain depends on the backend.
 const BATCH_CHUNK = 250;
 async function spBatchUpsert(list, records){
   if(!records.length) return;
@@ -2687,7 +2689,7 @@ async function spBatchUpsert(list, records){
   // CHUNK_SIZE=50 — typically one round trip for our largest workloads.
   // Sequential chunks (when there are multiple) to avoid pushing Apps Script
   // past its 30-concurrent-execution limit.
-  const CHUNK_SIZE = 50;
+  const CHUNK_SIZE = BATCH_CHUNK; // Build 649: was 50 — see the note above
   _busyChunks(Math.ceil(records.length / CHUNK_SIZE)); // Build 633: the overlay's estimate counts these
   for(let i = 0; i < records.length; i += CHUNK_SIZE){
     const chunk = records.slice(i, i + CHUNK_SIZE);
