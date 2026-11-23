@@ -1840,7 +1840,7 @@ async function applyCoverageLimitsToUpcoming(){
     }
     // ── Phase 2: apply ────────────────────────────────────────────────
     _at = 'applying';
-    const _CHUNK = 50;
+    const _CHUNK = BATCH_CHUNK; // Build 648: was 50 — one insert and one delete for a 188-row sweep (the delete's tab rewrite happens once, not four times)
     showBusy(`Applying — writing ${_creates.length} new assignments…`);
     _busyChunks(Math.ceil(_creates.length / _CHUNK)); // Build 633
     for(let ci = 0; ci < _creates.length; ci += _CHUNK){
@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-647'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-648'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2670,6 +2670,14 @@ async function _spDelReal(list, id){
 
 // Batch upsert: send all records in one round trip
 // records: [{matchFields:{...}, data:{...}}] — matchFields used to find existing, data to write
+// Build 648 (Nov 23, state_size.js + the cascade timer): every backend request costs ~1.6 s before any work (a one-key
+// read served from the server CACHE took 1.64 s; the whole 294-row BNState tab 1.58 s), and since the Nov 20 script lock
+// serialises writes, a phase costs ~2 s × the number of mutating calls whatever they carry — five queued 50-entry
+// setState chunks were 10 s, thirteen mutating calls made the re-deal 22–26 s. The May chunk size of 50 guarded a
+// 30-concurrent-execution limit that the lock has made moot (parallel chunks only queue). POST bodies have 50 MB of
+// headroom; one call per write kind is the lever. Upsert stays at 50 — the backend writes an upsert cell by cell, and a
+// 250-row upsert would hold the lock ~5 s against a claim (option 2, not built).
+const BATCH_CHUNK = 250;
 async function spBatchUpsert(list, records){
   if(!records.length) return;
   // Build 113b (2026-05-25): switched gasCall (GET) → gasCallPost (POST).
@@ -2717,7 +2725,8 @@ async function spBatchSetState(entries){
   // triggering CORS errors on background calls. 50 is a defensive middle —
   // few enough chunks to be fast (5 chunks for 256 entries), small enough
   // per-chunk to finish quickly and free up an execution slot.
-  const CHUNK_SIZE = 50;
+  // Build 648: 50 → BATCH_CHUNK (250) — one call for a cascade's rotations; see the note above spBatchUpsert.
+  const CHUNK_SIZE = BATCH_CHUNK;
   const chunks = [];
   for(let i = 0; i < entries.length; i += CHUNK_SIZE){
     chunks.push(entries.slice(i, i + CHUNK_SIZE));
@@ -4633,9 +4642,9 @@ async function commitUnitChange(){
         // each: five cancels = 16 s on live, Nov 21; the 5.2 review's "N parallel deletes" finding). The same rows go;
         // one revision bump per chunk instead of one per row; the overlay counts the chunks (633).
         const _ids635 = pending.affectedBookings.map(b => b.Id);
-        _busyChunks(Math.ceil(_ids635.length / 50));
-        for(let ci = 0; ci < _ids635.length; ci += 50){
-          await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_ids635.slice(ci, ci + 50))) });
+        _busyChunks(Math.ceil(_ids635.length / BATCH_CHUNK)); // Build 648: chunk 50 → BATCH_CHUNK
+        for(let ci = 0; ci < _ids635.length; ci += BATCH_CHUNK){
+          await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_ids635.slice(ci, ci + BATCH_CHUNK))) });
           _busyChunkDone();
         }
       }
@@ -6775,7 +6784,7 @@ async function applyDefaultToAll(){
 
     // ── batchInsert in chunks of 50 rows to stay within URL limits ──
     if(allRows.length){
-      const CHUNK = 50;
+      const CHUNK = BATCH_CHUNK; // Build 648: was 50 (POST has no URL limit)
       for(let ci = 0; ci < allRows.length; ci += CHUNK){
         const chunk = allRows.slice(ci, ci + CHUNK);
         await gasCallPost({
