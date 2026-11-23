@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-651'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-652'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6743,17 +6743,10 @@ async function applyDefaultToAll(){
       return;
     }
 
-    // ── ONE batchDelete: remove all old BN breaks for upcoming shifts ──
+    // ── the old BN breaks for upcoming shifts: their ids now, the delete AFTER the insert (Build 652) ──
     const upcomingKeys = new Set(upcoming.map(s => `${s.ShiftDate}|${s.ShiftType}`));
     const toDelete = existingBreaks.filter(b => upcomingKeys.has(`${b.SlotDate}|${b.ShiftType}`));
-    if(toDelete.length){
-      if(applyBtn) applyBtn.textContent = '⏳ Applying…';
-      await gasCallPost({
-        action: 'batchDelete',
-        sheet: LISTS.bookings,
-        ids: encodeURIComponent(JSON.stringify(toDelete.map(b => b.Id)))
-      });
-    }
+    if(applyBtn) applyBtn.textContent = '⏳ Applying…';
 
     // ── Build all new break rows across all shifts ──
     if(applyBtn) applyBtn.textContent = '⏳ Saving breaks…';
@@ -6821,6 +6814,18 @@ async function applyDefaultToAll(){
         });
       }
     }
+    // Build 652 (the 5.2 review's ordering finding): the old breaks go AFTER the new ones are in — by the ids read at
+    // the top, so the delete cannot touch a new row. A failure between the two now leaves both sets for a moment (the
+    // next Apply or shift rebuild clears it), never a nurse with no breaks on every upcoming shift (delete-first did).
+    let _delWarn652 = '';
+    if(toDelete.length){
+      try {
+        await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(toDelete.map(b => b.Id))) });
+      } catch(e){
+        _delWarn652 = ` — the previous breaks may not have been removed (${(e && e.message) || e}); run Apply again`;
+        console.warn('[applyDefaultToAll] insert landed, delete failed:', e && e.message);
+      }
+    }
 
     // ── Mirror rotations to BNState in one round trip — LS already updated
     // synchronously inside syncedLS.setMany. Fire-and-forget: if it fails,
@@ -6828,7 +6833,7 @@ async function applyDefaultToAll(){
     if(rotationEntries.length) syncedLS.setMany(rotationEntries).catch(()=>{});
 
     const applied = upcoming.filter(s => (s.ShiftType==='Day'?dayDef:nocDef).length > 0).length;
-    toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}`);
+    toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}${_delWarn652}`, !!_delWarn652); // Build 652: a failed cleanup is named
     hideBusy();
     if(applyBtn){
       applyBtn.disabled = false;
@@ -13774,20 +13779,38 @@ async function saveAssign(){
     }
 
     showBusy(existing.length > 0 ? `Updating ${firstName(nurse)}'s assignment…` : `Saving assignment for ${firstName(nurse)}…`);
+    let _finalWarn652 = ''; // Build 652: set when the post landed but the old rows' delete failed
 
     // Build 249a: the sequential per-row delete loops (N+M ~2s round trips)
     // become ONE batchDelete per sheet, fired in parallel — different sheets,
-    // no ordering between them. The ordering that MUST hold is deletes-
-    // before-post (the D1/D2 duplicate-row lesson): the Promise.all below
-    // completes both before the consolidated post fires.
-    await Promise.all([
-      existing.length
-        ? gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(existing.map(r => r.Id))) })
-        : Promise.resolve(),
-      bookingsToCancel.length
-        ? gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(bookingsToCancel.map(b => b.Id))) })
-        : Promise.resolve()
-    ]);
+    // no ordering between them.
+    // Build 652 (the 5.2 review's ordering finding): the NEW row is posted FIRST, then the old rows go — by the ids read
+    // before the post, so the delete cannot touch the new row. A failure between the two now leaves a duplicate the
+    // grid flags and the sweep removes, never a nurse with no assignment (249a's delete-first left exactly that when the
+    // post failed). 249a's "deletes-before-post" guarded against a delete-by-query catching the new row; these deletes
+    // are by id. The re-deal has inserted first since 333 for the same reason.
+    if(_srcOldRotKey){ try { await syncedLS.delete(_srcOldRotKey); } catch(e){} } // Build 295: retire the moved-away identity's dealt rotation — it would silently resurrect if that (name, date, shift) is ever re-created
+    const _createdRow = await spPost(LISTS.schedule,{
+      Title:`${nurse}-${dt}-${shift}`,
+      BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
+      Units:JSON.stringify(units),
+      StartTime: _pStart, Hours: _pStart ? String(_pHours) : ''
+    });
+    try {
+      await Promise.all([
+        existing.length
+          ? gasCallPost({ action: 'batchDelete', sheet: LISTS.schedule, ids: encodeURIComponent(JSON.stringify(existing.map(r => r.Id))) })
+          : Promise.resolve(),
+        bookingsToCancel.length
+          ? gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(bookingsToCancel.map(b => b.Id))) })
+          : Promise.resolve()
+      ]);
+    } catch(e){
+      // Build 652: the new row is saved; what may remain is the old one (a duplicate on the grid) or claims that should
+      // have been cancelled — name it instead of failing a save that landed.
+      _finalWarn652 = `Saved, but the previous row or its claims may not have been removed (${(e && e.message) || e}) — check the grid (duplicates are flagged)`;
+      console.warn('[saveAssign] post landed, delete failed:', e && e.message);
+    }
 
     // Build 224 (D8, Tomas 2026-07-07): BOOKINGS-ONLY transfer — the exact
     // mirror of Keep, pointed at the target. Per booking: CreatedBy → target
@@ -13798,7 +13821,7 @@ async function saveAssign(){
     // unit reads limited-coverage on Sign Up afterward (loadSlots' pinned-
     // bookings branch) — honestly uncovered for NEW sign-ups. Rotation
     // writes batched per target; saveRotation's past-preservation applies.
-    let _finalWarn = ''; // Build 374: warnings fold into the FINAL toast (single-element toast, last write wins — Build 304's race)
+    let _finalWarn = _finalWarn652 || ''; // Build 374: warnings fold into the FINAL toast (single-element toast, last write wins — Build 304's race); Build 652 seeds it
     let _dropped619 = 0; // Build 619: her break rows outside the new window, removed
     if(transfers.length){
       const _byTarget = {};
@@ -13833,13 +13856,7 @@ async function saveAssign(){
       }
     }
 
-    if(_srcOldRotKey){ try { await syncedLS.delete(_srcOldRotKey); } catch(e){} } // Build 295: retire the moved-away identity's dealt rotation — it would silently resurrect if that (name, date, shift) is ever re-created
-    const _createdRow = await spPost(LISTS.schedule,{
-      Title:`${nurse}-${dt}-${shift}`,
-      BreakNurseName:nurse, ShiftDate:dt, ShiftType:shift,
-      Units:JSON.stringify(units),
-      StartTime: _pStart, Hours: _pStart ? String(_pHours) : ''
-    });
+    // Build 652: the consolidated post moved above the deletes (see there).
     // Update wing history so the fairness algorithm sees this manual
     // assignment alongside suggester-generated ones. Without this, the
     // suggester would happily re-pick these same units for this BN later
