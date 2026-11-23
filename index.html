@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-653'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-654'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5077,7 +5077,14 @@ async function commitUnitChange(){
     if(typeof buildStaffUnitGrid === 'function') buildStaffUnitGrid();
   } catch(e){
     hideBusy();
-    toast(`Couldn't save the change — ${(e && e.message) || e || 'unknown error'}`, true);
+    console.error('commitUnitChange failed:', e);
+    // Build 654 (the 5.2 review: "any failure reports Couldn't save although the pause is saved and partly applied"): name
+    // the phase. Past the first phases the status write has landed and the rest re-applies from Settings → Re-deal upcoming.
+    const _ph654 = (typeof _busy !== 'undefined' && _busy.msg) || '';
+    const _early654 = !_ph654 || /^Applying .* change/.test(_ph654) || /^Checking affected/.test(_ph654);
+    toast(_early654
+      ? `Couldn't save the change — ${(e && e.message) || e || 'unknown error'}`
+      : `${unit}'s change is saved, but it stopped at "${_ph654.replace(/…$/, '')}" — ${(e && e.message) || e || 'unknown error'}. Settings → ↻ Re-deal upcoming applies the rest.`, true);
   } finally {
     // Safety net: guarantee the busy overlay dismisses even if the success
     // path didn't reach an inline hideBusy. Calling hideBusy a second time
@@ -7583,7 +7590,10 @@ async function redealFutureShifts(fromTime, opts = {}){
   // Preview by default — inspect the plan before persisting (observe-before-commit).
   let save = null;
   if(opts.commit){
-    save = await bulkSaveUnitsAndRotations(updates);
+    save = await bulkSaveUnitsAndRotations(updates); // Build 654: throws when the unit changes did not land; `errors` carries the rest
+    if(save && save.errors && save.errors.length){
+      try { toast(`Units re-dealt, but not everything saved — ${save.errors.join('; ')}. ↺ Recalculate rotations (grid footer) rebuilds the rotations and moves the break rows.`, true); } catch(e){}
+    }
     // Flush wing history in ONE batched round trip (vs one syncedLS.set per
     // BN per shift). Commit-gated: a preview makes zero backend writes and
     // keeps wing history consistent with the units write.
@@ -11294,22 +11304,30 @@ async function bulkSaveUnitsAndRotations(updates){
   }
 
   // Send batched writes in parallel. Each helper internally chunks safely.
+  // Build 654 (the 5.2 review: "swallows all three batch failures and still returns success counts; pause, re-deal and
+  // revert then toast success"): the three writes report. A failed SCHEDULE batch THROWS — the units did not land and
+  // every caller already catches and names that ("Couldn't save the change…", "Future-shift re-deal failed…"). A failed
+  // rotation or break-row batch is recoverable by a rebuild, so it comes back in `errors` for the caller's toast.
+  const _errs654 = [];
   await Promise.all([
     scheduleRecords.length
-      ? spBatchUpsert(LISTS.schedule, scheduleRecords).catch(err => { console.warn('schedule batch failed:', err.message); })
+      ? spBatchUpsert(LISTS.schedule, scheduleRecords).catch(err => { console.warn('schedule batch failed:', err.message); _errs654.push({ what: 'schedule rows', message: (err && err.message) || String(err) }); })
       : Promise.resolve(),
     rotationEntries.length
-      ? syncedLS.setMany(rotationEntries).catch(err => { console.warn('rotation batch failed:', err.message); })
+      ? syncedLS.setMany(rotationEntries).catch(err => { console.warn('rotation batch failed:', err.message); _errs654.push({ what: 'rotations', message: (err && err.message) || String(err) }); })
       : Promise.resolve(),
     _followRecsBS.length // Build 623
-      ? spBatchUpsert(LISTS.bookings, _followRecsBS).catch(err => { console.warn('break-row follow batch failed:', err.message); })
+      ? spBatchUpsert(LISTS.bookings, _followRecsBS).catch(err => { console.warn('break-row follow batch failed:', err.message); _errs654.push({ what: 'break rows', message: (err && err.message) || String(err) }); })
       : Promise.resolve()
   ]);
+  const _schedErr = _errs654.find(e => e.what === 'schedule rows');
+  if(_schedErr) throw new Error(`the unit changes were not saved (${_schedErr.message})`);
 
   return {
     schedulesUpdated: scheduleRecords.length,
-    rotationsUpdated: rotationEntries.length,
-    failed
+    rotationsUpdated: _errs654.some(e => e.what === 'rotations') ? 0 : rotationEntries.length,
+    failed,
+    errors: _errs654.map(e => `${e.what}: ${e.message}`) // Build 654: non-fatal batch failures, for the caller's toast
   };
 }
 
@@ -14609,10 +14627,11 @@ async function recalculateAllRotations(opts = {}){
     try {
       await syncedLS.setMany(rotationEntries);
     } catch(e) {
-      // Error already toasted by syncedLS.setMany. Local cache is consistent
-      // (we wrote LS in the loop above), so the device will function — but
-      // other devices may not see the update until the next batch retry.
+      // Local cache is consistent (we wrote LS in the loop above), so this device will function — but the sheet and the
+      // other devices keep the old rotations until the retry queue drains. Build 654: say so (setMany only toasts after
+      // several failed attempts, so this return was silent — the 5.2 review).
       hideBusy();
+      toast(`Rotations rebuilt on this device but NOT saved to the sheet — ${(e && e.message) || e || 'unknown error'}. They will retry in the background; other phones see the old rotations until then.`, true);
       return;
     }
   }
@@ -15313,6 +15332,7 @@ const _busy = { t0: 0, timer: null, phaseKey: '', phaseT0: 0, lastDone: -1, step
 function _busyUpNow(){ const b = document.getElementById('busyOverlay'); return !!(b && b.style.display !== 'none'); }
 function _busyParseCounts(msg){ const m = String(msg || '').match(/(\d+)\s*(?:of|\/)\s*(\d+)/); return m ? { done: +m[1], total: +m[2] } : null; }
 function _busyNotePhase(msg){
+  _busy.msg = String(msg || ''); // Build 654: the phase a failure toast can name
   const now = Date.now();
   const key = String(msg || '').replace(/\d+/g, '#');
   const c = _busyParseCounts(msg);
