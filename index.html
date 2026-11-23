@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-652'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-653'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2705,8 +2705,11 @@ async function appendSlotNotices(items){
   });
   syncedLS.setMany(entries).catch(() => {});
 }
-async function spBatchUpsert(list, records){
-  if(!records.length) return;
+async function spBatchUpsert(list, records, opts){
+  if(!records.length) return [];
+  // Build 653: `opts.onlyExisting` (the 2026-11-23d backend) — an unmatched record is NOT inserted, it answers
+  // {ok:false, error:'Not found'}; the per-record results come back, in order, for callers that need them.
+  const _only653 = !!(opts && opts.onlyExisting), _results653 = [];
   // Build 113b (2026-05-25): switched gasCall (GET) → gasCallPost (POST).
   // GET's URL length limit forced CHUNK_SIZE=5; that became the new
   // bottleneck after the close-path bulk refactor (50 records × ~2s per
@@ -2718,13 +2721,15 @@ async function spBatchUpsert(list, records){
   _busyChunks(Math.ceil(records.length / CHUNK_SIZE)); // Build 633: the overlay's estimate counts these
   for(let i = 0; i < records.length; i += CHUNK_SIZE){
     const chunk = records.slice(i, i + CHUNK_SIZE);
-    await gasCallPost({
+    const _r653 = await gasCallPost(Object.assign({
       action: 'batchUpsert',
       sheet: list,
       records: encodeURIComponent(JSON.stringify(chunk))
-    });
+    }, _only653 ? { onlyExisting: 1 } : {}));
+    (_r653 && Array.isArray(_r653.results) ? _r653.results : chunk.map(() => ({ ok: true }))).forEach(x => _results653.push(x));
     _busyChunkDone();
   }
+  return _results653;
 }
 
 // Batch set state: write multiple BNState entries in one round trip.
@@ -18202,41 +18207,64 @@ async function submitStagedActions(){
   const errors = [];
   // Iterate a snapshot so concurrent taps don't mutate underfoot
   const entries = [..._prodLogStaged.entries()];
-  let _k633 = 0;
-  for(const [id, info] of entries){
-    if(entries.length > 3) showBusy(`Submitting ${++_k633} of ${total} actions…`); // Build 633: one request per action, so count them
+  // Build 653 (the 5.2 review: "one awaited request per action — a 30-break shift is 30 round trips"): three groups.
+  // The removals (✕ Cancel, a removed BN break) go in ONE batchDelete; the status and transfer patches in ONE batchUpsert
+  // (`onlyExisting` — a break another device removed since staging fails on its own, no ghost row); the creates (+ Log
+  // claims, added BN breaks) stay one post each — they are few, and the claim's post carries the backend's slot guard.
+  // Removals go first so a claim on a slot whose old row is being cancelled finds it free. A failed group leaves its
+  // actions staged and named; the other groups still land. 633's per-action counter is now per group.
+  const _fail653 = (info, e) => { failCount++; errors.push(`${formatNurse(info.nurseName)} ${fmt12(info.slotTime)}: ${(e && e.message) || e || 'unknown error'}`); };
+  const _done653 = id => { _prodLogStaged.delete(id); okCount++; };
+  const _dels653 = entries.filter(([, i]) => i.action === 'cancelled' || i.action === 'remove_break');
+  const _pats653 = entries.filter(([, i]) => i.action === 'confirmed' || i.action === 'not_taken' || i.action === 'transfer');
+  const _creates653 = entries.filter(([, i]) => i.action === 'claim' || i.action === 'add_break');
+  if(_dels653.length){
+    showBusy(`Removing ${_dels653.length} of ${total} actions…`);
+    const _ids = _dels653.map(([id, info]) => info.action === 'cancelled' ? id : info.bookingId);
     try {
+      await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_ids)) }); // already-gone rows are simply not counted — the desired end state either way
+      _dels653.forEach(([id, info]) => { trackDelete(info.action === 'cancelled' ? id : info.bookingId); _done653(id); });
+    } catch(e){ _dels653.forEach(([, info]) => _fail653(info, e)); }
+  }
+  if(_pats653.length){
+    showBusy(`Saving ${_pats653.length} of ${total} actions…`);
+    const _records = [], _after = [], _notices = [];
+    _pats653.forEach(([id, info]) => {
       if(info.action === 'confirmed'){
-        await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 }));
+        const f = _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 });
+        _records.push({ matchFields: { Id: id }, data: f }); _after.push(() => trackPatch(id, f));
       } else if(info.action === 'not_taken'){
-        await spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'not_taken', IsCompleted: 0 }));
-      } else if(info.action === 'cancelled'){
-        try {
-          await spDel(LISTS.bookings, id);
-        } catch(e){
-          // Already gone is the desired end state — don't surface as failure
-          if(!/not found|404/i.test(e.message || '')) throw e;
-        }
-        trackDelete(id);
-      } else if(info.action === 'transfer'){
+        const f = _statusPatch(id, { BreakStatus: 'not_taken', IsCompleted: 0 });
+        _records.push({ matchFields: { Id: id }, data: f }); _after.push(() => trackPatch(id, f));
+      } else {
         // Build 591: the Sign Up transfer's write, from the log. NurseName only — the stream stamps, the flag and the
         // slot stay; the receiver is keyless and manages the break through this BN (563). The staff side hears about
         // it through the same slotNotify entry Sign Up writes, keyed by the BOOKING's own date and shift (an overlap
-        // claim on this log can be stored under the other shift).
+        // claim on this log can be stored under the other shift). Build 653: the notices ride appendSlotNotices (650).
         const toName = toTitleCase(info.toName);
         const _bk = ((_bnConfirmCache && _bnConfirmCache.allBookings) || []).find(x => String(x.Id) === String(id)) || {};
         const _nDt = String(_bk.SlotDate || _bnDate).slice(0,10), _nSh = _bk.ShiftType || _bnShift;
-        try {
-          const nk = `slotNotify_${_nDt}_${_nSh}`;
-          let notes = []; try { notes = JSON.parse(localStorage.getItem(nk) || '[]'); } catch(e){}
-          notes.push({ type: 'transfer', unit: info.unit, slotTime: info.slotTime, fromNurse: info.nurseName, toNurse: toName, ts: Date.now() });
-          localStorage.setItem(nk, JSON.stringify(notes));
-          setState(nk, notes).catch(()=>{});
-        } catch(e){}
-        await spPatch(LISTS.bookings, id, { NurseName: toName });
-        trackPatch(id, { NurseName: toName });
-        if(_bk && _bk.Id) _bk.NurseName = toName;
-      } else if(info.action === 'claim'){
+        _notices.push({ date: _nDt, shift: _nSh, notice: { type: 'transfer', unit: info.unit, slotTime: info.slotTime, fromNurse: info.nurseName, toNurse: toName, ts: Date.now() } });
+        _records.push({ matchFields: { Id: id }, data: { NurseName: toName } }); _after.push(() => { trackPatch(id, { NurseName: toName }); if(_bk && _bk.Id) _bk.NurseName = toName; });
+      }
+    });
+    try {
+      const _res = await spBatchUpsert(LISTS.bookings, _records, { onlyExisting: true });
+      const _okNotices = [];
+      _pats653.forEach(([id, info], i) => {
+        const r = _res[i];
+        if(r && r.ok === false){ _fail653(info, new Error(/not found/i.test(r.error || '') ? 'already changed by someone else' : (r.error || 'not saved'))); return; }
+        _after[i](); _done653(id);
+        if(info.action === 'transfer'){ const n = _notices.find(x => x.notice.slotTime === info.slotTime && x.notice.toNurse === toTitleCase(info.toName)); if(n) _okNotices.push(n); }
+      });
+      if(_okNotices.length) appendSlotNotices(_okNotices).catch(() => {});
+    } catch(e){ _pats653.forEach(([, info]) => _fail653(info, e)); }
+  }
+  let _k633 = 0;
+  for(const [id, info] of _creates653){
+    if(_creates653.length > 1) showBusy(`Logging ${++_k633} of ${_creates653.length}…`);
+    try {
+      if(info.action === 'claim'){
         // Walk-up claim: create a new booking record, already confirmed.
         // Build 139: use captured _bnDate/_bnShift/_bnName instead of live
         // BNS.* so a mid-loop BN/shift switch can't corrupt attribution.
@@ -18334,21 +18362,10 @@ async function submitStagedActions(){
           CreatedBy: _bnName
         });
         trackCreate(created);
-      } else if(info.action === 'remove_break'){
-        // Mid-shift BN-break removal. Just delete the booking by Id.
-        try {
-          await spDel(LISTS.bookings, info.bookingId);
-        } catch(e){
-          // Already gone is the desired end state — don't surface as failure
-          if(!/not found|404/i.test(e.message || '')) throw e;
-        }
-        trackDelete(info.bookingId);
-      }
-      _prodLogStaged.delete(id);
-      okCount++;
+      } // Build 653: remove_break joined the batchDelete group above
+      _done653(id);
     } catch(e){
-      failCount++;
-      errors.push(`${formatNurse(info.nurseName)} ${fmt12(info.slotTime)}: ${(e && e.message) || e || 'unknown error'}`);
+      _fail653(info, e);
     }
   }
   _prodLogUpdateHeader();
@@ -20056,27 +20073,22 @@ async function confirmAllBreaks(){
 
   // Re-render once from cache — all rows flip instantly
   if(!_renderBNConfirm()) loadBNConfirm();
-  toast(`✓ ${pending.length} break${pending.length!==1?'s':''} confirmed`);
+  toast(`Saving ${pending.length} confirmation${pending.length!==1?'s':''}…`);
 
-  // Fire all writes in PARALLEL in the background. Track per-row outcomes
-  // for rollback. No await — the function returns immediately after the
-  // optimistic render.
-  Promise.allSettled(
-    originals.map(({ id }) => spPatch(LISTS.bookings, id, _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 })))
-  ).then(results => {
-    const failed = results
-      .map((r, i) => r.status === 'rejected' ? originals[i] : null)
-      .filter(Boolean);
-    if(failed.length){
-      // Roll back failed rows only
-      failed.forEach(({ ref, id, prev }) => {
-        ref.BreakStatus = prev.BreakStatus;
-        ref.IsCompleted = prev.IsCompleted;
-        trackPatch(id, prev);
-      });
-      toast(`${failed.length} of ${originals.length} confirmations failed — please retry`, true);
-      if(!_renderBNConfirm()) loadBNConfirm();
-    }
+  // Build 653 (the 5.2 review: N parallel patches, serialised by the lock, after a success toast): ONE batchUpsert
+  // (`onlyExisting` — a row another device removed fails on its own), the ✓ toast when it has landed; a row that did
+  // not land rolls back on its own. No await — the rows have already flipped.
+  const _recs = originals.map(({ id }) => ({ matchFields: { Id: id }, data: _statusPatch(id, { BreakStatus: 'confirmed', IsCompleted: 1 }) }));
+  spBatchUpsert(LISTS.bookings, _recs, { onlyExisting: true }).then(results => {
+    const failed = originals.filter((o, i) => !(results[i] && results[i].ok !== false));
+    if(!failed.length){ toast(`✓ ${pending.length} break${pending.length!==1?'s':''} confirmed`); return; }
+    failed.forEach(({ ref, id, prev }) => { ref.BreakStatus = prev.BreakStatus; ref.IsCompleted = prev.IsCompleted; trackPatch(id, prev); });
+    toast(`${failed.length} of ${originals.length} confirmations failed — please retry`, true);
+    if(!_renderBNConfirm()) loadBNConfirm();
+  }).catch(e => {
+    originals.forEach(({ ref, id, prev }) => { ref.BreakStatus = prev.BreakStatus; ref.IsCompleted = prev.IsCompleted; trackPatch(id, prev); });
+    toast(`Confirmations not saved (${(e && e.message) || e}) — please retry`, true);
+    if(!_renderBNConfirm()) loadBNConfirm();
   });
 }
 
