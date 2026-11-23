@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-654'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-655'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2692,6 +2692,13 @@ const BATCH_CHUNK = 250;
 // Build 650: the Sign Up cancel path's notices — ONE write per date|shift, the key refreshed from the server first (231's
 // refresh-before-merge: two phones cancelling on one shift used to overwrite each other's entries — the 5.2 review).
 // `items` = [{date, shift, notice}]; LS is updated inside setMany, the sheet write is one batchSetState, fire-and-forget as before.
+// Build 655: one batchDelete that REPORTS instead of a loop of swallowed spDels — the Mark Unavailable path told the
+// coordinator breaks "have been cancelled" whatever happened to the deletes (the 5.2 review).
+async function batchDeleteRows(list, ids){
+  if(!ids || !ids.length) return { ok: true, n: 0 };
+  try { const r = await gasCallPost({ action: 'batchDelete', sheet: list, ids: encodeURIComponent(JSON.stringify(ids)) }); return { ok: true, n: Number(r && r.deleted) || ids.length }; }
+  catch(e){ return { ok: false, n: 0, error: (e && e.message) || String(e) }; }
+}
 async function appendSlotNotices(items){
   if(!items || !items.length) return;
   const byKey = {};
@@ -4929,7 +4936,7 @@ async function commitUnitChange(){
       // chunk-5 bug fix now correctly catches C_PAIR for 4C as well).
       // Both internally use recomputeBNWithPastPreserved so mid-shift
       // opens add slots to future rotation only, preserving past history.
-      _recomputeAffectedFor(unit, pending.effectiveAt.getTime()).catch(()=>{}); // Build 625: the in-progress shift only — the future is re-dealt below
+      _recomputeAffectedFor(unit, pending.effectiveAt.getTime()).catch(e => { console.warn('[commitUnitChange] live-shift rotation rebuild failed:', e && e.message); try { toast(`${unit} is open, but the live shift's rotations were not rebuilt (${(e && e.message) || e}) — ↺ Recalculate rotations (grid footer)`, true); } catch(_){} }); // Build 625: the in-progress shift only — the future is re-dealt below; Build 655: a failure is named
 
       // Build 107 (2026-05-25): revert any substitutions that were applied
       // when this unit was previously closed. Walks the substitution log
@@ -11675,29 +11682,23 @@ async function markBNAvailable(schedId, bnName){
       }
     }
 
+    // Build 655 (the 5.2 review: "reactivating a nurse ignores every rebuild error, then says the nurse is back on"): the
+    // reactivation itself (the row's Status) is awaited and throws into the catch as before; the rotation rebuilds were
+    // swallowed — they are collected and named in the toast, with the repair.
+    const _rb655 = [];
+    const _rebuild655 = async (nm) => { try { const d = getDefaultTemplate(nm, ShiftType); if(d && d.length > 0) await applyDefaultToShift(nm, dStr, ShiftType, d); else await recalculateRotation(nm, dStr, ShiftType); } catch(e){ _rb655.push(firstName(nm)); console.warn('[markBNAvailable] rotation rebuild failed for', nm, e && e.message); } };
+    const _rbNote655 = () => _rb655.length ? ` Rotation not rebuilt for ${_rb655.join(', ')} — ↺ Recalculate rotations (grid footer).` : '';
     if(!letKeep){
       // Take back path: delete supplementals so absorbers drop out of
       // rotation, then recompute their rotations, then reactivate BN.
       const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
       await restampStreamsOnTakeBack(suppls, dStr, ShiftType, cutoverMs, bnName); // Build 473/474
       for(const s of suppls) await spDel(LISTS.schedule, s.Id);
-      for(const otherBN of affectedBNs){
-        const bnDef = getDefaultTemplate(otherBN, ShiftType);
-        if(bnDef && bnDef.length > 0){
-          await applyDefaultToShift(otherBN, dStr, ShiftType, bnDef).catch(()=>{});
-        } else {
-          await recalculateRotation(otherBN, dStr, ShiftType).catch(()=>{});
-        }
-      }
+      for(const otherBN of affectedBNs) await _rebuild655(otherBN);
       await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
-      const bnDef = getDefaultTemplate(bnName, ShiftType);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
-      } else {
-        await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
-      }
+      await _rebuild655(bnName);
       hideBusy();
-      toast(`${firstName(bnName)} is back on — assignment reactivated.`);
+      toast(`${firstName(bnName)} is back on — assignment reactivated.${_rbNote655()}`, _rb655.length > 0);
     } else {
       // Let keep path (Build 100 — Option 1, "frozen supp"):
       // - Supplementals STAY (Michelle continues showing as supplemental).
@@ -11709,15 +11710,10 @@ async function markBNAvailable(schedId, bnName){
       // frozen supp's slots don't get hidden on the unit they're on.
       await spPatch(LISTS.schedule, schedId, { Status: 'active', EndedAt: '' });
       // Recompute the returning BN's rotation now that main is active again.
-      const bnDef = getDefaultTemplate(bnName, ShiftType);
-      if(bnDef && bnDef.length > 0){
-        await applyDefaultToShift(bnName, dStr, ShiftType, bnDef).catch(()=>{});
-      } else {
-        await recalculateRotation(bnName, dStr, ShiftType).catch(()=>{});
-      }
+      await _rebuild655(bnName);
       hideBusy();
       const absorberLabel = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
-      toast(`${firstName(bnName)} is back on — ${absorberLabel} keeping absorbed slots.`);
+      toast(`${firstName(bnName)} is back on — ${absorberLabel} keeping absorbed slots.${_rbNote655()}`, _rb655.length > 0);
     }
 
     await new Promise(r => setTimeout(r, 100));
@@ -12028,29 +12024,21 @@ async function toggleSelfAvailability(){
           }
         }
 
+        // Build 655: the rotation rebuilds report (the admin path's _rebuild655, this copy's own)
+        const _rbSelf655 = [];
+        const _rebuildSelf655 = async (nm) => { try { const d = getDefaultTemplate(nm, shift); if(d && d.length > 0) await applyDefaultToShift(nm, dt, shift, d); else await recalculateRotation(nm, dt, shift); } catch(e){ _rbSelf655.push(firstName(nm)); console.warn('[toggleSelfAvailability] rotation rebuild failed for', nm, e && e.message); } };
+        const _rbNoteSelf655 = () => _rbSelf655.length ? ` Rotation not rebuilt for ${_rbSelf655.join(', ')} — ↺ Recalculate rotations (grid footer).` : '';
         if(!letKeep){
           // Take back path: delete supplementals, recompute rotations,
           // reactivate BN.
           const affectedBNs = [...new Set(suppls.map(s => s.BreakNurseName))];
           await restampStreamsOnTakeBack(suppls, dt, shift, cutoverMs, BNS.name); // Build 474: the self path's own restore copy
           for(const s of suppls) await spDel(LISTS.schedule, s.Id);
-          for(const otherBN of affectedBNs){
-            const bnDef = getDefaultTemplate(otherBN, shift);
-            if(bnDef && bnDef.length > 0){
-              await applyDefaultToShift(otherBN, dt, shift, bnDef).catch(()=>{});
-            } else {
-              await recalculateRotation(otherBN, dt, shift).catch(()=>{});
-            }
-          }
+          for(const otherBN of affectedBNs) await _rebuildSelf655(otherBN);
           await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-          const bnDef = getDefaultTemplate(BNS.name, shift);
-          if(bnDef && bnDef.length > 0){
-            await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
-          } else {
-            await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
-          }
+          await _rebuildSelf655(BNS.name);
           hideBusy();
-          toast(`${firstName(BNS.name)} is back on — assignment reactivated.`);
+          toast(`${firstName(BNS.name)} is back on — assignment reactivated.${_rbNoteSelf655()}`, _rbSelf655.length > 0); // Build 655
           loadBNConfirm();
           finalInactive = false; // flipped to active
         } else {
@@ -12059,15 +12047,10 @@ async function toggleSelfAvailability(){
           // - BN reactivated, main row restored
           // - All absorbed bookings already stamped CreatedBy=absorber above
           await spPatch(LISTS.schedule, inactive.Id, { Status: 'active', EndedAt: '' });
-          const bnDef = getDefaultTemplate(BNS.name, shift);
-          if(bnDef && bnDef.length > 0){
-            await applyDefaultToShift(BNS.name, dt, shift, bnDef).catch(()=>{});
-          } else {
-            await recalculateRotation(BNS.name, dt, shift).catch(()=>{});
-          }
+          await _rebuildSelf655(BNS.name);
           hideBusy();
           const absorberLabel = [...new Set(suppls.map(s => firstName(s.BreakNurseName)))].join(', ');
-          toast(`${firstName(BNS.name)} is back on — ${absorberLabel} keeping absorbed slots.`);
+          toast(`${firstName(BNS.name)} is back on — ${absorberLabel} keeping absorbed slots.${_rbNoteSelf655()}`, _rbSelf655.length > 0); // Build 655
           loadBNConfirm();
           finalInactive = false; // flipped to active (Build 100: was true in old dont_take_back path; let_keep now reactivates BN)
         }
@@ -12710,9 +12693,8 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       b.SlotDate >= shiftDate(shift) &&
       sortKey(b.SlotTime, shift) > nowKey(shift)
     );
-    for(const b of bnAOwnBreaks){
-      await spDel(LISTS.bookings, b.Id).catch(()=>{});
-    }
+    const _ownDel655 = await batchDeleteRows(LISTS.bookings, bnAOwnBreaks.map(b => b.Id)); // Build 655: one request, and it reports
+    if(!_ownDel655.ok) toast(`${firstName(bnName)}'s own break rows could not be removed (${_ownDel655.error}) — they will show until a reload or ↺ Recalculate rotations`, true);
 
     // Branch on staff arrival. Pre-staff-arrival (future shift) → just
     // mark inactive; no recalc, no booking absorption. Per Tomas's
@@ -12782,10 +12764,10 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
         const flagList = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
         // Actually delete the staff bookings — previously they were flagged only,
         // which left orphaned records that reappeared if BN was reactivated.
-        for(const b of uncovered){
-          await spDel(LISTS.bookings, b.Id).catch(()=>{});
-        }
-        await showAlert(`${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`);
+        const _d655 = await batchDeleteRows(LISTS.bookings, uncovered.map(b => b.Id)); // Build 655
+        await showAlert(_d655.ok
+          ? `${firstName(bnName)} marked unavailable.\n\nThe following breaks have been cancelled — Please notify!\n\n${flagList}`
+          : `${firstName(bnName)} marked unavailable.\n\n⚠️ The following breaks could NOT be cancelled (${_d655.error}) — they are still on the sheet. Cancel them from the log, then notify!\n\n${flagList}`);
         loadAssignments();
         notifyProdLogChanged(bnName);
         return;
@@ -12795,10 +12777,10 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
         hideBusy();
         // No other BNs available — delete all uncovered staff bookings and flag
         const flagged = uncovered.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
-        for(const b of uncovered){
-          await spDel(LISTS.bookings, b.Id).catch(()=>{});
-        }
-        await showAlert(`${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`);
+        const _d655b = await batchDeleteRows(LISTS.bookings, uncovered.map(b => b.Id)); // Build 655
+        await showAlert(_d655b.ok
+          ? `${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\nPlease notify!`
+          : `${firstName(bnName)} marked unavailable.\n\nNo other break nurses available on the same wing to cover:\n\n${flagged}\n\n⚠️ These breaks could NOT be removed from the sheet (${_d655b.error}) — cancel them from the log, then notify!`);
         loadAssignments();
         notifyProdLogChanged(bnName);
         return;
@@ -12817,10 +12799,10 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // earlier, which deletes uncovered bookings outright. Cleanup BEFORE
     // the alert so the BNBookings sheet is consistent when the user
     // proceeds. Failures are non-fatal (alert still shows the list).
+    let _cleanupErr655 = '';
     if(flaggedNurses.length){
-      for(const b of flaggedNurses){
-        await spDel(LISTS.bookings, b.Id).catch(e => console.warn(`Booking ${b.Id} cleanup failed:`, e.message));
-      }
+      const _d = await batchDeleteRows(LISTS.bookings, flaggedNurses.map(b => b.Id)); // Build 655: one request, reported below
+      if(!_d.ok){ _cleanupErr655 = _d.error; console.warn('[processBNUnavailability] flagged cleanup failed:', _d.error); }
     }
 
     // Apply absorbed assignments — create supplemental schedule records and update bookings
@@ -12834,7 +12816,15 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
     // inactive BN ("BN unavailable") while the unit had gone to the absorber. Console fixtures
     // carry no stamp, which is why Section D never saw it. The absorbed bookings now follow
     // their absorber's stream; CreatedBy (report attribution) is still stamped on restore.
-    await Promise.allSettled(absorbed.map(({booking, bnName: assignedBN}) => spPatch(LISTS.bookings, booking.Id, { CoveredBy: assignedBN })));
+    // Build 655: ONE batchUpsert (onlyExisting) instead of N parallel patches whose outcomes were never read; a booking that
+    // did not take its new stream is counted and named below.
+    let _restampFail655 = 0;
+    if(absorbed.length){
+      try {
+        const _res = await spBatchUpsert(LISTS.bookings, absorbed.map(({booking, bnName: assignedBN}) => ({ matchFields: { Id: booking.Id }, data: { CoveredBy: assignedBN } })), { onlyExisting: true });
+        _restampFail655 = _res.filter(r => !r || r.ok === false).length;
+      } catch(e){ _restampFail655 = absorbed.length; console.warn('[processBNUnavailability] re-stamp batch failed:', e && e.message); }
+    }
 
     for(const [assignedBN, unitSet] of Object.entries(supplementalMap)){
       const suppUnits = [...unitSet];
@@ -12885,6 +12875,8 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       if(nAbs) msg += `\n\n✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`;
       const flagList = flaggedNurses.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
       msg += `\n\n⚠️ The following breaks could not be covered — Please notify!\n\n${flagList}`;
+      if(_cleanupErr655) msg += `\n\n⚠️ They could NOT be removed from the sheet (${_cleanupErr655}) — cancel them from the log.`;
+      if(_restampFail655) msg += `\n\n⚠️ ${_restampFail655} redistributed break${_restampFail655 !== 1 ? 's' : ''} did not move to the absorber's stream — check the log.`;
       await showAlert(msg);
     } else if(nFlag){
       // Choice-modal path with cancels: the user explicitly chose to leave these
@@ -12895,10 +12887,13 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       const parts = [];
       if(nAbs) parts.push(`${nAbs} redistributed`);
       parts.push(`${nFlag} left uncovered — notify affected staff`);
+      if(_cleanupErr655) parts.push(`the uncovered breaks are STILL on the sheet (${_cleanupErr655}) — cancel them from the log`);
+      if(_restampFail655) parts.push(`${_restampFail655} did not move to the absorber's stream — check the log`);
       toast(`${firstName(bnName)} marked unavailable. ${parts.join(', ')}.`, true);
     } else {
-      // All runs absorbed — plain success toast.
-      toast(`${firstName(bnName)} marked unavailable. ✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`);
+      // All runs absorbed — plain success toast (Build 655: unless the re-stamp batch did not land).
+      if(_restampFail655) toast(`${firstName(bnName)} marked unavailable. ${nAbs - _restampFail655} of ${nAbs} redistributed — ${_restampFail655} did not move to the absorber's stream; check the log.`, true);
+      else toast(`${firstName(bnName)} marked unavailable. ✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`);
     }
 
     // Update assignment display immediately, background refresh for full state
@@ -14893,7 +14888,7 @@ async function setShiftDefault(fullName, shift){
   const saved = { ...BN_SHIFT_DEFAULTS };
   localStorage.setItem('bnShiftDefaults', JSON.stringify(saved));
   renderImportedNamesList();
-  try { await setState('bnShiftDefaults', saved); } catch(e){ toast('Default shift didn\'t sync — it will retry on the next change', true); }
+  try { await setState('bnShiftDefaults', saved); } catch(e){ toast('Default shift saved on this device but didn\'t sync — change it again to retry', true); } // Build 655: setState has no retry queue; the old text promised one
 }
 async function warmPreferredNames(){
   // Build 158 (2026-05-30): cross-device propagation fix. Previously this used
