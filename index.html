@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-22-645'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-646'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2789,6 +2789,18 @@ async function getState(key){
 
 // Per-key write lock — prevents concurrent setState calls from creating duplicate rows
 const _stateWriteLock = {};
+// Build 646 (the 6A resume, Nov 23 12:51 AM): Build 217/231's fence skips a pull for a key while a SINGLE-key write is in
+// flight. Two gaps: 644 moved the unit-schedule and sub-log writes to syncedLS.setMany (batchSetState), which never took
+// the lock; and a pull that STARTED before a write and landed after it applied its stale answer even though the write had
+// finished (the config poll's batchGet, in flight 7.9 s across the resume's write, put the pre-resume `unitSchedules`
+// back in localStorage; the re-deal 5 s later read "6A closed" for every future shift and dealt it nowhere). Every
+// syncedLS write now stamps the key when the server has acknowledged it, batch writes hold the lock too, and a pull
+// applies a server value only if the pull began AFTER that stamp — a pull that began earlier cannot know about the
+// write, so its answer is left unapplied; the next cycle, which begins after the stamp, reconciles.
+// Stamps and pull starts use performance.now(): monotonic, immune to a device clock change, and not frozen by a pinned
+// Date (the bed pins Date; with Date.now every stamp would equal every pull start and nothing would ever apply).
+const _localWriteDone = {};
+function _pullMayApply(key, pullStartedAt){ return !_stateWriteLock[key] && !((_localWriteDone[key] || 0) >= pullStartedAt); }
 
 async function setState(key, value){
   // Wait for any in-flight write on this key to finish before starting a new one
@@ -2815,6 +2827,7 @@ async function setState(key, value){
     localStorage.setItem(key, val);
     if(remoteErr) throw remoteErr;
   } finally {
+    _localWriteDone[key] = performance.now(); // Build 646: pulls that began before this moment may not overwrite the key
     _resolve();
     delete _stateWriteLock[key];
   }
@@ -2977,13 +2990,15 @@ const syncedLS = {
     // catch up after the write lands.
     if(_stateWriteLock[key]) return false;
     try {
+      const _pull646 = performance.now();
       const items = await spGet(LISTS.state, `Key eq '${esc(key)}'`);
       // Build 231 (Finding 3, E1 2026-07-11): the 217 fence above is intake-only.
       // A write that STARTED while this pull was in flight would be clobbered by
       // applying the (now-stale) result — LS reverts for a cycle and any memory
       // copies reassigned off the change report go stale until reload (the A6
       // roster ghost). Re-check at apply time; the in-flight write wins.
-      if(_stateWriteLock[key]) return false;
+      // Build 646: and a write that FINISHED after this pull began wins too.
+      if(!_pullMayApply(key, _pull646)) return false;
       const remote = items.length ? JSON.parse(items[0].Value || 'null') : null;
       const before = localStorage.getItem(key);
       if(remote == null){
@@ -3015,13 +3030,15 @@ const syncedLS = {
     // never delete). Falls back to the old parallel-singles path if the
     // batch call itself fails.
     try {
+      const _pull646 = performance.now();
       const resultSets = await spBatchGet(valid.map(k => ({ sheet: LISTS.state, filter: `Key eq '${esc(k)}'` })));
       const changed = [];
       valid.forEach((k, i) => {
         // Build 231 (Finding 3): apply-time re-check — a setState that began
         // while the batch was in flight must win; skip applying stale results
         // for its key (mirrors the single-key refresh() guard).
-        if(_stateWriteLock[k]) return;
+        // Build 646: a write that finished after this pull began wins too (the 6A resume).
+        if(!_pullMayApply(k, _pull646)) return;
         const items = resultSets[i] || [];
         let remote = null, parsed = false;
         try { remote = items.length ? JSON.parse(items[0].Value || 'null') : null; parsed = true; } catch{}
@@ -3082,13 +3099,21 @@ const syncedLS = {
     for(const {key, value} of entries){
       localStorage.setItem(key, JSON.stringify(value));
     }
+    // Build 646: the same fence a single-key write holds (217/231) — a pull skips these keys while the batch is in flight
+    // (a key another write already holds keeps that lock; it is still stamped here when this batch lands)
+    const _keys646 = [...new Set(entries.map(e => e.key).filter(Boolean))];
+    let _release646; const _p646 = new Promise(r => _release646 = r);
+    _keys646.forEach(k => { if(!_stateWriteLock[k]) _stateWriteLock[k] = _p646; });
+    const _done646 = () => { const now = performance.now(); _keys646.forEach(k => { _localWriteDone[k] = now; if(_stateWriteLock[k] === _p646) delete _stateWriteLock[k]; }); _release646(); };
     try {
       await spBatchSetState(entries);
+      _done646();
       // Clear all these keys from retry queue; drain any other pending items.
       entries.forEach(({key}) => _syncedDequeueRetry(key));
       syncedLS._drainRetryQueue().catch(()=>{});
       return true;
     } catch(e){
+      _done646();
       console.warn(`[syncedLS.setMany] ${entries.length} entries failed: ${(e && e.message) || e || 'unknown error'}`);
       // Enqueue each key individually; drain handles them one by one.
       let maxAttempts = 0;
