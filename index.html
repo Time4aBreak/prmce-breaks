@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-650'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-651'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2586,7 +2586,15 @@ async function fetchWithTimeout(url, ms, opts={}){
 }
 
 // gasCallLong removed — superseded by gasCallPost (POST avoids GET URL length limits)
+// Build 651 (the 5.2 review's "GET retries duplicate writes"; the 2026-11-23c backend): every mutating request carries a
+// request id, minted ONCE per logical call — gasCall's retries re-send the same one — and the backend answers a rid it has
+// already served from its cache instead of writing again. A post that landed but answered after the 30-s timeout used to
+// be written twice on the retry (the grid's duplicate badge). An older backend ignores the parameter.
+const RID_ACTIONS = { post: 1, postRun: 1, patch: 1, 'delete': 1, batchUpsert: 1, batchInsert: 1, batchDelete: 1, batchSetState: 1, clearSheet: 1 };
+function _newRid(){ return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10) + Math.random().toString(36).slice(2, 6); }
+function _withRid(params){ return (params && RID_ACTIONS[params.action] && !params.rid) ? Object.assign({ rid: _newRid() }, params) : params; }
 async function gasCallPost(params){
+  params = _withRid(params); // Build 651
   // POST variant for large payloads that exceed GET URL length limits
   const body = new URLSearchParams({...params, token: REQUEST_TOKEN});
   const r = await fetchWithTimeout(GAS_URL, 90000, {
@@ -2603,6 +2611,7 @@ async function gasCallPost(params){
 
 async function gasCall(params, retries=API_MAX_RETRIES){
   if(SIM_MODE) throw new Error('gasCall called in SIM_MODE');
+  params = _withRid(params); // Build 651: one id for every attempt of this call
   const url = GAS_URL + '?' + new URLSearchParams({...params, token: REQUEST_TOKEN}).toString();
   let lastErr;
   for(let attempt = 0; attempt <= retries; attempt++){
