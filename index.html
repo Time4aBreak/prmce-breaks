@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-646'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-647'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21320,15 +21320,34 @@ function _coverageCountsFrom(scheds, shift){
       }
       return open;
     };
+    // Build 647: the raw tally and each unit's rate factor ride along (non-enumerable — every consumer that enumerates or
+    // looks up `counts[u]` sees exactly what it saw before); the dealer applies the factor itself, see coverageRate.
+    const _raw = Object.assign({}, counts), _factor = {};
     Object.keys(counts).forEach(u => {
       const probeUnit = u === 'C_PAIR' ? '4C' : u;
       const open = _openDaysOf(probeUnit);
       if(open > 0 && open < _totalDays){
-        counts[u] = Math.round(counts[u] * _totalDays / open);
+        _factor[u] = _totalDays / open;
+        counts[u] = Math.round(counts[u] * _factor[u]);
       }
     });
+    Object.defineProperty(counts, '_raw', { value: _raw, enumerable: false });
+    Object.defineProperty(counts, '_factor', { value: _factor, enumerable: false });
   } catch(e){ /* raw totals on any error */ }
   return counts;
+}
+// Build 647 (Nov 23 8:26 AM witness: after a pause + resume of 5A the Day horizon came back row-identical, Noc re-folded
+// from 11/26 — 6A/7A → 5A/7A on a near-tie, darkest-first re-folded the rest). The dealer's view of a slot is now
+// (raw rows − the rows this deal replaces + the rows it has dealt so far) × the 328 rate factor, rounded ONCE here.
+// Rounding the base first and adding the 645 overlay after left a scaled unit's count depending on how many of its rows
+// happened to be in the base — the previous deal's output again, by ±1 — so a sweep (base: 6A nowhere) and the resume
+// (base: the pause's 6A-heavy rows) disagreed by one on 6A. Units with no closed days in the window are unaffected
+// (factor 1), which is why Day held and the all-open 645 bed never saw it. Counts without the raw tally (the error
+// fallback) behave as before.
+function coverageRate(counts, slot, delta){
+  const raw = counts && counts._raw, f = counts && counts._factor;
+  if(!raw) return ((counts && counts[slot]) || 0) + (delta || 0);
+  return Math.round(((raw[slot] || 0) + (delta || 0)) * ((f && f[slot]) || 1));
 }
 // Build 644: fill BOTH shifts' caches from one set of rows (must cover the 90-day window). The close path and the re-deal
 // already read the schedule — they hand the rows over instead of letting the dealer read the same window again per shift.
@@ -21557,7 +21576,7 @@ async function _pickPartialSlots(shift, date, n, batchCountOverlay={}, excludeUn
     .filter(s => s !== 'C_PAIR' && (_openAt ? isUnitOpenAt(s, _openAt) : isUnitOpenForShift(s, date, shift)) && !excludeUnits.includes(s))
     .map(s => ({
       slot: s,
-      total: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0)
+      total: coverageRate(counts, s, batchCountOverlay[`${s}|${shift}`] || 0) // Build 647: scaled once, after the overlay
     }))
     .sort((a, b) => a.total - b.total); // ascending: most under-covered first
   return pool.slice(0, n).map(p => p.slot);
@@ -21701,7 +21720,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
     .map(s => ({
       slot: s,
       units: s === 'C_PAIR' ? ['3C','4C'] : [s],
-      globalCount: (counts[s] || 0) + (batchCountOverlay[`${s}|${shift}`] || 0),
+      globalCount: coverageRate(counts, s, batchCountOverlay[`${s}|${shift}`] || 0), // Build 647: scaled once, after the overlay
       wing: getWing(s),
       tier: isHighUnit(s) ? 'High' : (UNIT_TIER[s] || 'Standard'), // Build 430: the map is a setting
       floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
