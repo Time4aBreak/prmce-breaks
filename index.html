@@ -2324,7 +2324,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-649'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-650'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -2680,6 +2680,22 @@ async function _spDelReal(list, id){
 // With the 11-23 backend still deployed, a 250-row upsert holds the lock a few seconds longer (per-field writes); the
 // chunk size is safe either way, only the gain depends on the backend.
 const BATCH_CHUNK = 250;
+// Build 650: the Sign Up cancel path's notices — ONE write per date|shift, the key refreshed from the server first (231's
+// refresh-before-merge: two phones cancelling on one shift used to overwrite each other's entries — the 5.2 review).
+// `items` = [{date, shift, notice}]; LS is updated inside setMany, the sheet write is one batchSetState, fire-and-forget as before.
+async function appendSlotNotices(items){
+  if(!items || !items.length) return;
+  const byKey = {};
+  items.forEach(it => { const k = `slotNotify_${it.date}_${it.shift}`; (byKey[k] = byKey[k] || []).push(it.notice); });
+  const keys = Object.keys(byKey);
+  try { await syncedLS.refreshMany(keys); } catch(e){}
+  const entries = keys.map(key => {
+    let list = []; try { list = JSON.parse(localStorage.getItem(key) || '[]'); } catch(e){}
+    if(!Array.isArray(list)) list = [];
+    return { key, value: list.concat(byKey[key]) };
+  });
+  syncedLS.setMany(entries).catch(() => {});
+}
 async function spBatchUpsert(list, records){
   if(!records.length) return;
   // Build 113b (2026-05-25): switched gasCall (GET) → gasCallPost (POST).
@@ -9603,8 +9619,9 @@ async function submitClaims(){
       // can run frozen-supp cleanup at the end. The float cancel may have
       // deleted the last booking a frozen supp was holding.
       const _floatCancelledDateShifts = new Set();
+      // Build 650: ONE batchDelete for the other units' breaks (was one awaited spDel each, ~2 s apiece under the lock)
+      await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(otherUnitNotStaged.map(b => b.Id))) });
       for(const b of otherUnitNotStaged){
-        await spDel(LISTS.bookings, b.Id);
         const bDate = b.SlotDate || dt;
         const bShift = b.ShiftType || S.shift;
         _floatCancelledDateShifts.add(`${bDate}|${bShift}`);
@@ -9635,34 +9652,34 @@ async function submitClaims(){
   // calls when multiple cancels target the same shift.
   const _cancelledDateShifts = new Set();
 
+  // Build 650: validate every staged cancel against the fresh read, then ONE batchDelete for all of them and ONE notice
+  // write per date|shift (appendSlotNotices). Before: per cancel, a fire-and-forget setState (a get + a patch) and an
+  // awaited spDel — three requests each, serialised by the backend lock at ~2 s; three cancels ≈ 15 s. The delete now
+  // goes first and the notices follow it (a notice for a cancel that failed used to stay behind).
+  const _cx650 = [];
   for(const bookingId of S.pendingCancels){
     const fresh = bookingsById[bookingId];
     if(!fresh){
       results.failed.push({ label: 'cancel', reason: 'Slot was already changed by someone else' });
       continue;
     }
+    _cx650.push({ id: bookingId, fresh, date: fresh.SlotDate || dt, shift: fresh.ShiftType || S.shift });
+  }
+  if(_cx650.length){
     try {
-      // Notification first (for BN view), then delete
-      const slotShift = fresh.ShiftType || S.shift;
-      const slotDate  = fresh.SlotDate || dt;
-      const key = `slotNotify_${slotDate}_${slotShift}`;
-      let notifications = [];
-      try { notifications = JSON.parse(localStorage.getItem(key) || '[]'); } catch{}
-      notifications.push({
-        type: 'cancel', unit: fresh.Unit, slotTime: fresh.SlotTime,
-        fromNurse: fresh.NurseName, ts: Date.now()
+      await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_cx650.map(c => c.id))) });
+      const _ts650 = Date.now();
+      appendSlotNotices(_cx650.map(c => ({ date: c.date, shift: c.shift, notice: { type: 'cancel', unit: c.fresh.Unit, slotTime: c.fresh.SlotTime, fromNurse: c.fresh.NurseName, ts: _ts650 } }))).catch(() => {});
+      _cx650.forEach(c => {
+        _cancelledDateShifts.add(`${c.date}|${c.shift}`);
+        results.cancelled.push(c.fresh.SlotTime);
+        // Remove from cached data so any pending claim on the same slot can succeed
+        delete bookingsById[c.id];
+        const idx = allBookingsToday.findIndex(b => b.Id === c.id);
+        if(idx >= 0) allBookingsToday.splice(idx, 1);
       });
-      localStorage.setItem(key, JSON.stringify(notifications));
-      setState(key, notifications).catch(()=>{});
-      await spDel(LISTS.bookings, bookingId);
-      _cancelledDateShifts.add(`${slotDate}|${slotShift}`);
-      results.cancelled.push(fresh.SlotTime);
-      // Remove from cached data so any pending claim on the same slot can succeed
-      delete bookingsById[bookingId];
-      const idx = allBookingsToday.findIndex(b => b.Id === bookingId);
-      if(idx >= 0) allBookingsToday.splice(idx, 1);
     } catch(e){
-      results.failed.push({ label: `cancel ${fmt12(fresh.SlotTime)}`, reason: e.message || 'Network error' });
+      _cx650.forEach(c => results.failed.push({ label: `cancel ${fmt12(c.fresh.SlotTime)}`, reason: e.message || 'Network error' }));
     }
   }
 
