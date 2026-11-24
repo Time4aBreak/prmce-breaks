@@ -360,11 +360,15 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <div class="pw-gate">
       <div style="font-size:2rem;margin-bottom:10px">🔐</div>
       <h2>Breakers Portal</h2>
+      <!-- Build 659: while a remembered device's one-read check runs, the fields hide and this line shows (the fields flashed for ~1.6 s before) -->
+      <div id="portalGateChecking" style="display:none;color:var(--muted);font-size:.9rem;margin-top:6px">Opening on this remembered device…</div>
+      <div id="portalGateFields">
       <input type="password" id="portalPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockPortal()"/>
       <!-- Build 657: phones only — a device marked "shared tablet" in Settings never shows this box -->
       <label id="portalRememberRow" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:.85rem;color:var(--muted);margin-top:10px;cursor:pointer"><input type="checkbox" id="portalRemember" style="width:auto;margin:0"/> Remember this device for 30 days</label>
       <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockPortal()">Unlock</button>
+      </div>
       <div id="portalPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
     </div>
   </div>
@@ -2331,7 +2335,7 @@ const DEV_MODE = false; // Build 658 (launch-gate E4, Tomas Nov 23): the gate is
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-658'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-24-659'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6080,6 +6084,9 @@ function setDeviceShared(on){
   toast(on ? 'This device is now a shared tablet — the portal will lock after 10 idle minutes' : 'This device is no longer marked shared');
 }
 function _paintDeviceCard(){ const b = document.getElementById('deviceSharedBox'); if(b) b.checked = isSharedDevice(); const n = document.getElementById('deviceSharedNote'); if(n) n.textContent = isSharedDevice() ? 'Shared tablet: no Remember box, idle lock on, staff name clears after Submit.' : (_remembered() ? `Your phone: remembered until ${new Date(_remembered().until).toLocaleDateString()} — 🔒 Lock forgets it.` : 'Your own phone: tick "Remember this device" at the gate to skip the password for 30 days.'); }
+// Build 659: the gate's two faces — the fields, or "Opening on this remembered device…" while _rememberedUnlock runs.
+function _gateChecking(on){ const f = document.getElementById('portalGateFields'), c = document.getElementById('portalGateChecking'); if(f) f.style.display = on ? 'none' : ''; if(c) c.style.display = on ? 'block' : 'none'; }
+let _remCheckInflight = false;
 function _paintRememberRow(){ const r = document.getElementById('portalRememberRow'); if(r) r.style.display = isSharedDevice() ? 'none' : 'flex'; const c = document.getElementById('portalRemember'); if(c && isSharedDevice()) c.checked = false; }
 function _remembered(){ try { const r = JSON.parse(localStorage.getItem('portalRemember') || 'null'); return (r && r.until > Date.now() && !isSharedDevice()) ? r : null; } catch(e){ return null; } }
 function rememberDevice(){ if(isSharedDevice()) return; try { localStorage.setItem('portalRemember', JSON.stringify({ until: Date.now() + REMEMBER_DAYS * 86400000, since: Date.now() })); } catch(e){} }
@@ -6111,6 +6118,7 @@ function _openPortal(){
 }
 function lockPortal(opts){
   const idle = !!(opts && opts.idle);
+  _gateChecking(false); // Build 659
   forgetDevice();
   PORTAL.unlocked = false; PORTAL.level = null;
   try { S.adminOk = false; } catch(e){}
@@ -6338,9 +6346,16 @@ function showTab(name, btn){
 
   // Build 657: a remembered phone (box ticked at the gate, ≤ 30 days, no password change since) opens without the
   // gate. The check reads one BNState key; while it runs the gate shows a moment, then the portal.
-  if(name==='portal' && !PORTAL.unlocked && !DEV_MODE && _remembered()){
-    _paintRememberRow();
-    _rememberedUnlock().then(okRem => { if(okRem){ _openPortal(); _afterPortalOpen657(); } }).catch(() => {});
+  if(name==='portal' && !PORTAL.unlocked && !DEV_MODE && _remembered() && !_remCheckInflight){
+    _paintRememberRow(); _gateChecking(true); _remCheckInflight = true; // Build 659: no fields while the check runs
+    const _errEl = document.getElementById('portalPwErr'); if(_errEl) _errEl.style.display = 'none';
+    _rememberedUnlock().then(okRem => {
+      _remCheckInflight = false; _gateChecking(false);
+      if(okRem){ _openPortal(); _afterPortalOpen657(); }
+    }).catch(() => {
+      _remCheckInflight = false; _gateChecking(false);
+      if(_errEl){ _errEl.style.display = 'block'; _errEl.textContent = 'Connection error — try again.'; } // 659: say why the gate stayed
+    });
   }
   // If portal already unlocked this session, skip gate
   if(name==='portal' && (PORTAL.unlocked || DEV_MODE)){
