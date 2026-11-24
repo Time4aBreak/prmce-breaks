@@ -870,24 +870,18 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
     <!-- Change passwords — collapsible -->
     <div class="card">
       <div style="display:flex;align-items:center;justify-content:space-between;cursor:pointer" onclick="togglePwCard()">
-        <div style="display:flex;align-items:center;gap:8px"><div class="card-label" style="margin:0">🔑 Change Passwords</div><span id="pwDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
+        <div style="display:flex;align-items:center;gap:8px"><div class="card-label" style="margin:0">🔑 Change Password</div><span id="pwDirtyDot" style="display:none;font-size:.72rem;color:#a06a00;background:#fff8eb;border:1px solid #f3d68a;border-radius:99px;padding:2px 8px">● Unsaved changes</span></div>
         <span id="pwCardChevron" style="font-size:.85rem;color:var(--muted)">▼</span>
       </div>
       <div id="pwCardBody" style="display:none;margin-top:14px">
-        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Schedule (Admin) Password</div>
+        <!-- Build 656: one portal password for break nurses and admins alike -->
+        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Portal Password <span style="font-weight:400;color:var(--muted)">— one password for everyone who opens the Breakers Portal; tell the team when it changes</span></div>
         <div class="row" style="margin-bottom:12px">
-          <input type="password" id="pw1" placeholder="New password" style="flex:1"/>
+          <input type="password" id="pw1" placeholder="New password (6+ characters)" style="flex:1"/>
           <input type="password" id="pw2" placeholder="Confirm" style="flex:1"/>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="changePw();setTimeout(_pwDirtyCheck, 600)">Update</button>
+          <button type="button" class="btn btn-ghost btn-sm" id="pwUpdateBtn" onclick="changePw();setTimeout(_pwDirtyCheck, 600)">Update</button>
         </div>
-        <div id="pwMsg" style="font-size:.8rem;margin-bottom:14px;display:none"></div>
-        <div style="font-size:.82rem;font-weight:600;margin-bottom:6px">Break Nurse Password</div>
-        <div class="row">
-          <input type="password" id="bnpw1" placeholder="New password" style="flex:1"/>
-          <input type="password" id="bnpw2" placeholder="Confirm" style="flex:1"/>
-          <button type="button" class="btn btn-ghost btn-sm" onclick="changeBNPw();setTimeout(_pwDirtyCheck, 600)">Update</button>
-        </div>
-        <div id="bnpwMsg" style="font-size:.8rem;margin-top:8px;display:none"></div>
+        <div id="pwMsg" style="font-size:.8rem;margin-bottom:4px;display:none"></div>
       </div>
     </div>
 
@@ -2324,7 +2318,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-655'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-656'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -5940,7 +5934,7 @@ function init(){
   // look identical to a saved one. Delegated: one listener serves every
   // wired card.
   window._pwDirtyCheck = () => {
-    const dirty = ['pw1','pw2','bnpw1','bnpw2'].some(id => (document.getElementById(id)?.value || '') !== '');
+    const dirty = ['pw1','pw2'].some(id => (document.getElementById(id)?.value || '') !== ''); // Build 656: one password
     const el = document.getElementById('pwDirtyDot');
     if(el) el.style.display = dirty ? '' : 'none';
   };
@@ -5959,7 +5953,7 @@ function init(){
       }
       return;
     }
-    if(['pw1','pw2','bnpw1','bnpw2'].includes(t.id)) window._pwDirtyCheck();
+    if(['pw1','pw2'].includes(t.id)) window._pwDirtyCheck();
   });
   setInterval(updateClock, 10000);
 
@@ -6063,30 +6057,19 @@ function unlockPortal(){
   });
 }
 
+// Build 656 (Tomas, Nov 23 3:58 PM: "we just need 1 password for break nurses and admin. The BNs will end up doing most
+// of the management of this app"): ONE portal password — the key `portalPw_admin` (what Settings → Change Password
+// writes; default `breaker` until set) — and every login is 'admin': all tabs, no inner Schedule gate, Reports open.
+// `portalPw_bn` is no longer read (its BNState row can stay). The plaintext localStorage fallback (`bnAdminPw` /
+// `bnBnPw`, never written by any build) is gone — with the API down the gate says "Connection error" instead of
+// accepting the default password (the 5.2 review).
 async function validatePortalPassword(pw){
-  try {
-    const states = SIM_MODE
-      ? await spGet(LISTS.state, `(Key eq 'portalPw_admin' or Key eq 'portalPw_bn')`)
-      : (await spBatchGet([{sheet:LISTS.state, filter:`(Key eq 'portalPw_admin' or Key eq 'portalPw_bn')`}]))[0];
-    let adminPw = 'breaker', bnPw = 'breaknurse'; // defaults if not yet set in BNState
-    states.forEach(s => {
-      try {
-        const val = JSON.parse(s.Value);
-        if(s.Key === 'portalPw_admin') adminPw = val;
-        if(s.Key === 'portalPw_bn') bnPw = val;
-      } catch{}
-    });
-    if(pw === adminPw) return 'admin';
-    if(pw === bnPw) return 'bn';
-    return null;
-  } catch {
-    // Fallback to localStorage if API unavailable
-    const adminPw = localStorage.getItem('bnAdminPw') || 'breaker';
-    const bnPw    = localStorage.getItem('bnBnPw')    || 'breaknurse';
-    if(pw === adminPw) return 'admin';
-    if(pw === bnPw) return 'bn';
-    return null;
-  }
+  const states = SIM_MODE
+    ? await spGet(LISTS.state, `Key eq 'portalPw_admin'`)
+    : (await spBatchGet([{sheet:LISTS.state, filter:`Key eq 'portalPw_admin'`}]))[0];
+  let portalPw = 'breaker'; // the default until one is set in Settings
+  (states || []).forEach(s => { try { if(s.Key === 'portalPw_admin') portalPw = JSON.parse(s.Value); } catch{} });
+  return pw === String(portalPw) ? 'admin' : null;
 }
 
 function showSubTab(name, btn){
@@ -14790,17 +14773,25 @@ async function clearSimData(){
   setTimeout(() => location.reload(), 700);
 }
 
-function changePw(){
+// Build 656: the one portal password. Honest (the 5.2 review: the save's error was discarded and "Password updated ✓"
+// always showed): the write is awaited, a failure is shown and the fields keep their text, and a minimum length applies.
+async function changePw(){
   const p1=document.getElementById('pw1').value;
   const p2=document.getElementById('pw2').value;
   const msg=document.getElementById('pwMsg');
-  if(!p1||p1!==p2){
-    msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
-  }
-  setState('portalPw_admin', p1).catch(()=>{});
-  document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
-  msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Password updated ✓';
-  setTimeout(()=>msg.style.display='none',3000);
+  const btn=document.getElementById('pwUpdateBtn');
+  const show=(text, bad)=>{ msg.style.display='block'; msg.style.color=bad ? 'var(--red)' : 'var(--green)'; msg.textContent=text; };
+  if(!p1||p1!==p2){ show('Passwords do not match.', true); return; }
+  if(p1.length < 6){ show('Use at least 6 characters.', true); return; }
+  if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
+  try {
+    await setState('portalPw_admin', p1);
+    document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
+    show('Password updated ✓ — everyone signs in with the new one from now on', false);
+    setTimeout(()=>msg.style.display='none',5000);
+  } catch(e){
+    show(`Password NOT updated — ${(e && e.message) || e || 'connection error'}. The old one still works; try again.`, true);
+  } finally { if(btn){ btn.disabled = false; btn.textContent = 'Update'; } }
 }
 
 function togglePwCard(){
@@ -14812,18 +14803,7 @@ function togglePwCard(){
   if(chev) chev.textContent = open ? '▼' : '▲';
 }
 
-function changeBNPw(){
-  const p1=document.getElementById('bnpw1').value;
-  const p2=document.getElementById('bnpw2').value;
-  const msg=document.getElementById('bnpwMsg');
-  if(!p1||p1!==p2){
-    msg.style.display='block';msg.style.color='var(--red)';msg.textContent='Passwords do not match.';return;
-  }
-  setState('portalPw_bn', p1).catch(()=>{});
-  document.getElementById('bnpw1').value=''; document.getElementById('bnpw2').value='';
-  msg.style.display='block';msg.style.color='var(--green)';msg.textContent='Break nurse password updated ✓';
-  setTimeout(()=>msg.style.display='none',3000);
-}
+// Build 656: changeBNPw is gone — one password (see validatePortalPassword).
 
 // ═══════════════════════════════════════════════════════
 // TOAST
