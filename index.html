@@ -362,6 +362,8 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <h2>Breakers Portal</h2>
       <input type="password" id="portalPwInput" placeholder="Password"
         onkeydown="if(event.key==='Enter')unlockPortal()"/>
+      <!-- Build 657: phones only — a device marked "shared tablet" in Settings never shows this box -->
+      <label id="portalRememberRow" style="display:flex;align-items:center;gap:8px;justify-content:center;font-size:.85rem;color:var(--muted);margin-top:10px;cursor:pointer"><input type="checkbox" id="portalRemember" style="width:auto;margin:0"/> Remember this device for 30 days</label>
       <button type="button" class="btn btn-primary" style="width:100%;margin-top:8px" onclick="unlockPortal()">Unlock</button>
       <div id="portalPwErr" style="color:var(--red);font-size:.8rem;margin-top:8px;display:none">Incorrect password.</div>
     </div>
@@ -378,6 +380,7 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
       <button class="sub-tab" id="st-admin" onclick="showSubTab('admin',this)" style="display:none">🕐 Schedule</button>
       <button class="sub-tab" id="st-settings" onclick="showSubTab('settings',this)" style="display:none">🛠️ Settings</button>
       <button class="sub-tab" id="st-reports" onclick="showSubTab('reports',this)">📊 Reports</button>
+      <button class="sub-tab" id="st-lock" onclick="lockPortal()" title="Lock the portal — the next person enters the password" style="margin-left:auto">🔒 Lock</button><!-- Build 657 -->
     </div>
 
     <!-- Sub-tab content -->
@@ -865,6 +868,16 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
         </div>
         <button type="button" class="btn btn-ghost btn-sm" id="pushUpdateBtn" onclick="safeAsync(pushAppUpdate)">Push update</button>
       </div>
+    </div>
+
+    <!-- Build 657: this device — shared tablet or not (stored on the device, never synced) -->
+    <div class="card">
+      <div class="card-label">📱 This Device</div>
+      <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;font-size:.9rem">
+        <input type="checkbox" id="deviceSharedBox" style="width:auto;margin-top:3px" onchange="setDeviceShared(this.checked)"/>
+        <span><strong>This device is a shared tablet</strong><br><span style="font-size:.8rem;color:var(--muted)">Set once on each unit's tablet. The portal gate never offers "Remember this device", the portal locks itself after 10 idle minutes, and the staff name clears after every Submit. Leave it off on your own phone.</span></span>
+      </label>
+      <div id="deviceSharedNote" style="font-size:.8rem;color:var(--muted);margin-top:8px"></div>
     </div>
 
     <!-- Change passwords — collapsible -->
@@ -2318,7 +2331,7 @@ const DEV_MODE = true; // Build 631 (Tomas, Nov 20): back ON while developing �
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-23-656'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-23-657'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -6020,36 +6033,11 @@ function unlockPortal(){
     if(!level){
       err.style.display = 'block'; err.textContent = 'Incorrect password.'; return;
     }
-    PORTAL.unlocked = true; PORTAL.level = level;
-    document.getElementById('portalGate').style.display  = 'none';
-    document.getElementById('portalPanel').style.display = 'block';
-
-    // Schedule tab always visible after portal unlock — inner adminGate handles
-    // admin password validation for BN-level logins (Option C gate).
-    const adminBtn = document.getElementById('st-admin');
-    if(adminBtn) adminBtn.style.display = 'inline-flex';
-    const settingsBtn = document.getElementById('st-settings');
-    if(settingsBtn) settingsBtn.style.display = 'inline-flex';
-
-    showSubTab('bn', document.getElementById('st-bn')); // Build 554 (Tomas): the portal opens on My Shift
-    // Auto-detect Day/Noc for coverage tab (its own entry re-detects; this seeds the state)
-    const _autoSumShift = detectShift();
-    S.summShift = _autoSumShift;
-    hiShift('sDay','sNoc', _autoSumShift);
-    const _summDp = document.getElementById('summDate');
-    if(_summDp) _summDp.value = shiftDate(_autoSumShift);
-    // Build 483 (Tomas): a tap on the tab is a fresh look — spinner and locked controls, not the
-    // old list sitting there while the fetch runs (443's keep-in-place is for the background poll).
-    ['summList','summList2'].forEach(id => { const el = document.getElementById(id); if(el) el.dataset.ctx = ''; });
-    loadSummary();
-    populateBNDropdown();
-    if(PORTAL.level === 'admin'){
-      loadAdminData();
-      renderImportedNamesList();
-      show3CDefaultToggle();
-      showAppVersionLine();
-      update3CToggle();
-    }
+    // Build 657: the box remembers this device (phones only); the portal opens through the one shared path
+    const rb = document.getElementById('portalRemember');
+    if(rb && rb.checked && !isSharedDevice()) rememberDevice(); else forgetDevice();
+    document.getElementById('portalPwInput').value = '';
+    _openPortal();
   }).catch(e => {
     if(btn){ btn.disabled = false; btn.textContent = 'Unlock'; }
     err.style.display = 'block';
@@ -6071,6 +6059,96 @@ async function validatePortalPassword(pw){
   (states || []).forEach(s => { try { if(s.Key === 'portalPw_admin') portalPw = JSON.parse(s.Value); } catch{} });
   return pw === String(portalPw) ? 'admin' : null;
 }
+
+// ── Build 657: the portal session on this device — Remember / Lock / idle lock / shared tablet ─────────────────────
+// (Tomas, Nov 23 4:42–4:48 PM: nothing was remembered, nothing could relock, and a tick on a shared tablet would have
+// survived a refresh.) Per-device facts live in plain localStorage — they are truths about THIS device, never synced.
+//   deviceShared   '1' on a unit's shared tablet (Settings → This Device). Hides the Remember box, idle lock always on,
+//                  the staff name clears after every Sign Up Submit.
+//   portalRemember {until, since} — set by the gate's box; honoured by _rememberedUnlock() until `until`, and only if
+//                  the password has not changed since `since` (changePw writes BNState `portalPwChangedAt`; a change on
+//                  any device therefore forgets every remembered phone). Lock forgets it. Never on a shared device.
+// The idle lock: IDLE_LOCK_MIN minutes without a tap/key in the portal → lockPortal({idle:true}); off while a remembered
+// phone is unlocked; waits while a busy overlay is up or Productivity Log actions are staged (they would be lost).
+const IDLE_LOCK_MIN = 10;
+const REMEMBER_DAYS = 30;
+function isSharedDevice(){ try { return localStorage.getItem('deviceShared') === '1'; } catch(e){ return false; } }
+function setDeviceShared(on){
+  try { if(on) localStorage.setItem('deviceShared', '1'); else localStorage.removeItem('deviceShared'); } catch(e){}
+  if(on) forgetDevice();
+  _paintDeviceCard(); _paintRememberRow(); _idleLockArm();
+  toast(on ? 'This device is now a shared tablet — the portal will lock after 10 idle minutes' : 'This device is no longer marked shared');
+}
+function _paintDeviceCard(){ const b = document.getElementById('deviceSharedBox'); if(b) b.checked = isSharedDevice(); const n = document.getElementById('deviceSharedNote'); if(n) n.textContent = isSharedDevice() ? 'Shared tablet: no Remember box, idle lock on, staff name clears after Submit.' : (_remembered() ? `Your phone: remembered until ${new Date(_remembered().until).toLocaleDateString()} — 🔒 Lock forgets it.` : 'Your own phone: tick "Remember this device" at the gate to skip the password for 30 days.'); }
+function _paintRememberRow(){ const r = document.getElementById('portalRememberRow'); if(r) r.style.display = isSharedDevice() ? 'none' : 'flex'; const c = document.getElementById('portalRemember'); if(c && isSharedDevice()) c.checked = false; }
+function _remembered(){ try { const r = JSON.parse(localStorage.getItem('portalRemember') || 'null'); return (r && r.until > Date.now() && !isSharedDevice()) ? r : null; } catch(e){ return null; } }
+function rememberDevice(){ if(isSharedDevice()) return; try { localStorage.setItem('portalRemember', JSON.stringify({ until: Date.now() + REMEMBER_DAYS * 86400000, since: Date.now() })); } catch(e){} }
+function forgetDevice(){ try { localStorage.removeItem('portalRemember'); } catch(e){} }
+// Boot / tab entry: is this device remembered, and is the memory still good (no password change since)? Fail closed:
+// with the API down the gate shows, as it does for a typed password (656).
+async function _rememberedUnlock(){
+  const r = _remembered(); if(!r) return false;
+  const rows = SIM_MODE ? await spGet(LISTS.state, `Key eq 'portalPwChangedAt'`) : (await spBatchGet([{ sheet: LISTS.state, filter: `Key eq 'portalPwChangedAt'` }]))[0];
+  let changedAt = 0; (rows || []).forEach(x => { try { changedAt = Number(JSON.parse(x.Value)) || 0; } catch(e){} });
+  if(changedAt > r.since){ forgetDevice(); return false; }
+  return true;
+}
+// One place that opens the portal UI after a successful unlock (typed, remembered, or DEV_MODE).
+function _openPortal(){
+  PORTAL.unlocked = true; PORTAL.level = 'admin';
+  const gate = document.getElementById('portalGate'), panel = document.getElementById('portalPanel');
+  if(gate) gate.style.display = 'none'; if(panel) panel.style.display = 'block';
+  const adminBtn = document.getElementById('st-admin'); if(adminBtn) adminBtn.style.display = 'inline-flex';
+  const settingsBtn = document.getElementById('st-settings'); if(settingsBtn) settingsBtn.style.display = 'inline-flex';
+  showSubTab('bn', document.getElementById('st-bn')); // Build 554 (Tomas): the portal opens on My Shift
+  const _sh = detectShift(); S.summShift = _sh; hiShift('sDay','sNoc', _sh);
+  const _dp = document.getElementById('summDate'); if(_dp) _dp.value = shiftDate(_sh);
+  ['summList','summList2'].forEach(id => { const el = document.getElementById(id); if(el) el.dataset.ctx = ''; });
+  loadSummary(); populateBNDropdown();
+  loadAdminData(); renderImportedNamesList(); show3CDefaultToggle(); showAppVersionLine(); update3CToggle();
+  const _lk = document.getElementById('st-lock'); if(_lk) _lk.style.display = DEV_MODE ? 'none' : ''; // no gate to lock behind while DEV_MODE bypasses it
+  _paintDeviceCard(); _idleLockArm();
+}
+function lockPortal(opts){
+  const idle = !!(opts && opts.idle);
+  forgetDevice();
+  PORTAL.unlocked = false; PORTAL.level = null;
+  try { S.adminOk = false; } catch(e){}
+  try { if(typeof RPT !== 'undefined') RPT.unlocked = false; } catch(e){}
+  try { stopProdLogPolling(); stopCoveragePolling(); stopSchedulePolling(); } catch(e){}
+  const gate = document.getElementById('portalGate'), panel = document.getElementById('portalPanel');
+  if(panel) panel.style.display = 'none'; if(gate) gate.style.display = 'block';
+  const pw = document.getElementById('portalPwInput'); if(pw) pw.value = '';
+  const rb = document.getElementById('portalRemember'); if(rb) rb.checked = false;
+  const err = document.getElementById('portalPwErr'); if(err) err.style.display = 'none';
+  ['st-admin', 'st-settings'].forEach(id => { const b = document.getElementById(id); if(b) b.style.display = 'none'; });
+  const ag = document.getElementById('adminGate'), ap = document.getElementById('adminPanel'); if(ag) ag.style.display = 'block'; if(ap) ap.style.display = 'none';
+  const rg = document.getElementById('rptGate'), rp = document.getElementById('rptPanel'); if(rg) rg.style.display = 'block'; if(rp) rp.style.display = 'none';
+  _idleLockDisarm();
+  try { showTab('staff', document.getElementById('nt-staff')); } catch(e){}
+  _paintRememberRow();
+  toast(idle ? `Portal locked after ${IDLE_LOCK_MIN} idle minutes` : 'Portal locked');
+}
+let _idleTimer = null, _idleLast = 0;
+function _idleLockWanted(){ return PORTAL.unlocked && !DEV_MODE && (isSharedDevice() || !_remembered()); }
+function _idleTouch(){ _idleLast = Date.now(); }
+function _idleLockArm(){
+  _idleLockDisarm();
+  if(!_idleLockWanted()) return;
+  _idleLast = Date.now();
+  _idleTimer = setInterval(() => {
+    if(!_idleLockWanted()){ _idleLockDisarm(); return; }
+    if(Date.now() - _idleLast < IDLE_LOCK_MIN * 60000) return;
+    const busy = document.getElementById('busyOverlay'); if(busy && busy.style.display !== 'none' && busy.offsetParent !== null) return; // a cascade is running
+    if(typeof _prodLogStaged !== 'undefined' && _prodLogStaged.size > 0) return; // staged log actions would be lost
+    lockPortal({ idle: true });
+  }, 15000);
+}
+function _idleLockDisarm(){ if(_idleTimer){ clearInterval(_idleTimer); _idleTimer = null; } }
+document.addEventListener('DOMContentLoaded', () => {
+  ['pointerdown', 'keydown', 'touchstart'].forEach(ev => document.addEventListener(ev, _idleTouch, { passive: true }));
+  _paintRememberRow();
+});
 
 function showSubTab(name, btn){
   // Warn if leaving a sub-tab with staged Productivity Log changes.
@@ -6258,26 +6336,16 @@ function showTab(name, btn){
     if(typeof decorateUnitGridCoverage === 'function') decorateUnitGridCoverage();
   }
 
+  // Build 657: a remembered phone (box ticked at the gate, ≤ 30 days, no password change since) opens without the
+  // gate. The check reads one BNState key; while it runs the gate shows a moment, then the portal.
+  if(name==='portal' && !PORTAL.unlocked && !DEV_MODE && _remembered()){
+    _paintRememberRow();
+    _rememberedUnlock().then(okRem => { if(okRem){ _openPortal(); _afterPortalOpen657(); } }).catch(() => {});
+  }
   // If portal already unlocked this session, skip gate
   if(name==='portal' && (PORTAL.unlocked || DEV_MODE)){
     if(DEV_MODE && !PORTAL.unlocked){
-      PORTAL.unlocked = true; PORTAL.level = 'admin';
-      const adminBtn = document.getElementById('st-admin');
-      if(adminBtn) adminBtn.style.display = 'inline-flex';
-      const settingsBtn2 = document.getElementById('st-settings');
-      if(settingsBtn2) settingsBtn2.style.display = 'inline-flex';
-      // Auto-detect current shift for coverage tab
-      const _devShift = detectShift();
-      S.summShift = _devShift;
-      hiShift('sDay','sNoc', _devShift);
-      const _devDp = document.getElementById('summDate');
-      if(_devDp) _devDp.value = shiftDate(_devShift);
-      loadSummary();
-      populateBNDropdown();
-      loadAdminData();
-      renderImportedNamesList();
-      show3CDefaultToggle(); showAppVersionLine(); update3CToggle();
-      showSubTab('bn', document.getElementById('st-bn')); // Build 562 (Tomas): the DEV_MODE door skipped 554's opening tab — the button said My Shift, the panel showed Coverage
+      _openPortal(); // Build 657: the DEV_MODE door opens through the same path as a typed password (562's My Shift opening included)
     }
     document.getElementById('portalGate').style.display  = 'none';
     document.getElementById('portalPanel').style.display = 'block';
@@ -6297,7 +6365,15 @@ function showTab(name, btn){
     // actions and typed claim-form inputs survive via _prodLogStaged / _prodLogInputs). Before 568 this was a one-shot
     // loadBNConfirm() with no restart — the log then froze until a sub-tab tap or an app switch.
     restartActivePoller();
+    _idleLockArm(); // Build 657
   }
+  if(name==='portal' && !PORTAL.unlocked) _paintRememberRow(); // Build 657: the gate's box follows the device flag
+}
+// Build 657: what showTab does after the portal panel is up (the 3C/app-version refresh and the poller restart) — for the
+// remembered door, which opens asynchronously after showTab has returned.
+function _afterPortalOpen657(){
+  Promise.all([syncedLS.refresh('unit3CDefault'), syncedLS.refresh('unit3CSchedule'), syncedLS.refresh('unitStatuses'), syncedLS.refresh('unitSchedules'), syncedLS.refresh('appVersion')]).finally(() => { show3CDefaultToggle(); showAppVersionLine(); });
+  restartActivePoller();
 }
 
 // ═══════════════════════════════════════════════════════
@@ -9798,6 +9874,7 @@ async function submitClaims(){
   if(results.failed.length === 0){
     toast(`✓ ${successParts.join(', ')}!`);
     try { document.getElementById('nurseExt').value = ''; } catch(e){} // Build 564 (Tomas): the code is re-entered to manage — never left sitting in the field
+    if(isSharedDevice()){ try { document.getElementById('nurseName').value = ''; onNameInput(); } catch(e){} } // Build 657: a shared tablet forgets the name too
   } else {
     const ok = successParts.length ? `${successParts.join(', ')}. ` : '';
     const fail = results.failed.map(f => `${f.label}: ${f.reason}`).join(' | ');
@@ -14786,6 +14863,7 @@ async function changePw(){
   if(btn){ btn.disabled = true; btn.textContent = 'Saving…'; }
   try {
     await setState('portalPw_admin', p1);
+    setState('portalPwChangedAt', Date.now()).catch(() => {}); // Build 657: every remembered phone forgets on its next open
     document.getElementById('pw1').value=''; document.getElementById('pw2').value='';
     show('Password updated ✓ — everyone signs in with the new one from now on', false);
     setTimeout(()=>msg.style.display='none',5000);
