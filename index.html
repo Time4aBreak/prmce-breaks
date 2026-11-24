@@ -2326,7 +2326,7 @@ const S = {
 
 // ── Set to true to use local simulation instead ────────
 const SIM_MODE = false;
-const DEV_MODE = false; // Build 658 (launch-gate E4, Tomas Nov 23): the gate is REAL — one portal password (656), "Remember this device" on phones, the idle lock and 🔒 Lock on shared tablets (657). Was true from 631 (Nov 20) while developing; the DEV_MODE door in showTab stays in the code for the next dev stretch.
+const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the password gate for now") — back ON; 658 had it off (E4). The gate, Remember, 🔒 Lock and the idle lock (656–659) are all built and witnessed; flipping this to false brings them back.
 // ─────────────────────────────────────────────────────
 
 // ── App version ───────────────────────────────────────
@@ -2335,7 +2335,7 @@ const DEV_MODE = false; // Build 658 (launch-gate E4, Tomas Nov 23): the gate is
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-24-659'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-24-660'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3952,7 +3952,7 @@ async function cancelScheduledUnitChangeUI(unit, effectiveAt){
     await redealFutureShifts(parseLocalIso(effectiveAt), { commit: true });
   } catch(e){
     console.warn('[cancelScheduledUnitChangeUI] future re-deal failed:', e.message);
-    toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
+    toast(`Future-shift re-deal failed — ${(e && e.message) || 'network error'}. Use Re-deal upcoming in Settings.`, true); // Build 660: the reason rides along
   }
   hideBusy();
   refreshUnitStatusGrid();
@@ -4911,7 +4911,7 @@ async function commitUnitChange(){
         await redealFutureShifts(pending.effectiveAt, { commit: true });
       } catch(e){
         console.warn('[commitUnitChange] future re-deal failed:', e.message);
-        toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
+        toast(`Future-shift re-deal failed — ${(e && e.message) || 'network error'}. Use Re-deal upcoming in Settings.`, true); // Build 660: the reason rides along
       }
 
       hideBusy();
@@ -5061,7 +5061,7 @@ async function commitUnitChange(){
         await redealFutureShifts(pending.effectiveAt, { commit: true });
       } catch(e){
         console.warn('[commitUnitChange] reopen future re-deal failed:', e.message);
-        toast('Future-shift re-deal failed — use Re-deal upcoming in Settings.', true);
+        toast(`Future-shift re-deal failed — ${(e && e.message) || 'network error'}. Use Re-deal upcoming in Settings.`, true); // Build 660: the reason rides along
       }
       hideBusy();
 
@@ -9709,7 +9709,7 @@ async function submitClaims(){
     const otherUnitBookings = allBookingsToday.filter(b => {
       if(isBNBreak(b)) return false;
       if(b.Unit === S.unit) return false;
-      return sameBareName(b.NurseName, _nurseFirst); // Build 563
+      return sameNurse(b.NurseName, name); // Build 660: name AND code (563 matched the bare name — typing a colleague's name cancelled her breaks); keyless rows (made FOR a nurse) are the BN's to cancel
     });
     // Don't trigger float modal for the user's own owned slots that are staged
     // for cancel/transfer — those are intentional management actions.
@@ -10457,7 +10457,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
       const otherUnitBookings = allBookingsToday.filter(b => {
         if(isBNBreak(b)) return false;
         if(b.Unit === _unit) return false;
-        return sameBareName(b.NurseName, _nurseFirst); // Build 563
+        return sameNurse(b.NurseName, name); // Build 660: name AND code
       });
       const myOtherUnits = [...new Set(otherUnitBookings.map(b => b.Unit))];
       if(myOtherUnits.length){
@@ -10467,7 +10467,7 @@ async function claimSlot(slotTime, silent=false, slotShiftOverride=null, prefetc
           `Go back to ${myOtherUnits.join(', ')}`
         );
         if(!floated){ pickUnit(myOtherUnits[0]); return 'cancelled'; }
-        for(const b of otherUnitBookings) await spDel(LISTS.bookings, b.Id);
+        await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(otherUnitBookings.map(b => b.Id))) }); // Build 660: one call (the run site got this in 650)
         S.pendingClaims.clear(); updateSubmitBar();
         const extElF = document.getElementById('nurseExt');
         if(extElF) extElF.value = '';
@@ -11290,8 +11290,10 @@ async function bulkSaveUnitsAndRotations(updates){
   // Build 244 (F4/F9): fetch ALL bookings (breaks AND staff pins) plus the
   // schedule rows (window source) in the same parallel round trip.
   const [allBookings, allSchedRows] = await Promise.all([
-    spGet(LISTS.bookings, `SlotDate ge '${minDate}' and SlotDate le '${maxDate}T23'`).catch(() => []),
-    spGet(LISTS.schedule, `ShiftDate ge '${minDate}' and ShiftDate le '${maxDate}T23'`).catch(() => []),
+    // Build 660: a failed read used to become [] — rotations were then rebuilt with no pins and no breaks and SAVED.
+    // Now it throws before anything is written; the callers (654) name the phase.
+    spGet(LISTS.bookings, `SlotDate ge '${minDate}' and SlotDate le '${maxDate}T23'`).catch(e => { throw new Error(`the bookings read failed (${e.message || 'network error'}) — no rotation was rebuilt`); }),
+    spGet(LISTS.schedule, `ShiftDate ge '${minDate}' and ShiftDate le '${maxDate}T23'`).catch(e => { throw new Error(`the schedule read failed (${e.message || 'network error'}) — no rotation was rebuilt`); }),
     warmAllBNDefaults(pairs).catch(() => {})
   ]);
   const _schedByIdBS = {};
@@ -11557,7 +11559,7 @@ async function countOutageBookings(suppls, outageStartMs, dStr, shiftType){
   if(!suppls.length || !outageStartMs || isNaN(outageStartMs)) return 0;
   const all = await spGet(LISTS.bookings,
     `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`
-  ).catch(() => []);
+  ).catch(e => { throw new Error(`Couldn't read today's bookings (${e.message || 'network error'}) — nothing changed. Try again.`); }); // Build 660: was [] → "No absorbed breaks remain"
   const absorbedUnits = new Set();
   suppls.forEach(s => {
     try { JSON.parse(s.Units || '[]').forEach(u => absorbedUnits.add(u)); } catch{}
@@ -11630,7 +11632,7 @@ async function stampOutageAttribution(suppls, outageStartMs, cutoverMs, dStr, sh
   }
   const outageBookings = await spGet(LISTS.bookings,
     `SlotDate ge '${dStr}' and SlotDate le '${dStr}T23' and ShiftType eq '${shiftType}'`
-  ).catch(() => []);
+  ).catch(e => { throw new Error(`Couldn't read today's bookings (${e.message || 'network error'}) — nothing changed. Try again.`); }); // Build 660: was [] → attribution silently skipped
   const patches = [];
   for(const s of suppls){
     let absorbedUnits = [];
@@ -22852,8 +22854,10 @@ async function removeImportedName(name){
     const all = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
     upcoming = all.filter(s => s.BreakNurseName === name);
   } catch(e) {
-    console.warn('removeImportedName: could not check assignments:', e.message);
-    // Fall through — we'll just remove from roster without deletion
+    // Build 660 (the 5.2 review, "failed reads treated as empty"): before, this fell through to the "no upcoming
+    // assignments" branch and removed the name — the future BNSchedule rows were orphaned. Now nothing changes.
+    toast(`Couldn't check ${firstName(name)}'s upcoming assignments (${e.message || 'network error'}) — not removed. Try again.`, true);
+    return;
   }
 
   // No upcoming assignments → ask for a simple confirm, then remove.
