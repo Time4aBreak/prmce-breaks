@@ -1516,8 +1516,7 @@ function _covCfg(){
     };
   } catch(e){ return COV_DEFAULTS; }
 }
-// Build 430 (Tomas): the acuity map and the cap are SETTINGS. UNIT_TIER stays
-// only as the default map. cap.Day/cap.Noc = "no two High units in one set"
+// Build 430 (Tomas): the acuity map and the cap are SETTINGS; ACUITY_DEFAULTS is the default map. cap.Day/cap.Noc = "no two High units in one set"
 // on that shift (Tomas: Day on, Noc off by default).
 const ACUITY_DEFAULTS = { high: ['5A','7N','8N','10S'], cap: { Day: true, Noc: false } }; // Build 436: floor feedback — 6N out, 8N in
 function _acuityCfg(){
@@ -2335,7 +2334,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-24-660'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-24-661'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -21379,22 +21378,8 @@ async function loadReports(){
 // UNIT CONFIGURATION & FAIRNESS ALGORITHM
 // ═══════════════════════════════════════════════════════
 
-// ── Unit tiers (from 2026 PRMCE DOH staffing plan) ───
-// High:     max 1 per nurse assignment
-// Standard: no restriction beyond acuity rule
-// Low:      no restriction
-const UNIT_TIER = {
-  // High acuity
-  // Build 436: floor feedback (Tomas, Sep 10) — 6N is NOT High; 8N is.
-  '5A':'High', '6N':'Standard', '7N':'High',
-  // Standard
-  '8N':'High', '8S':'Standard', '9N':'Standard',
-  '9S':'Standard', '10N':'Standard', '10S':'High',
-  'C_PAIR':'Low',
-  // Low acuity
-  '3A':'Low', '4A':'Low', '6A':'Low', '7A':'Low',
-  '3C':'Low', '4C':'Low'
-};
+// ── Unit tiers: High/Standard is the Settings acuity map (`ACUITY_DEFAULTS` is the default; Build 661 removed the
+// hardcoded UNIT_TIER fallback the dealer still read). High: max 1 per set when the shift's cap is on.
 
 // ── Wing configuration ────────────────────────────────
 const WING_A      = ['3A','4A','5A','6A','7A'];
@@ -21586,8 +21571,7 @@ function nurseWingCount(nurseName, shift, wing){
 // at a time, and a last-resort greedy fill guarantees nobody gets zero
 // (the 395 lesson). Deterministic: counts, history, seed — no Math.random.
 //
-// Acuity tiers' ONLY remaining job is the Day cap. UNIT_TIER stays as the
-// cap's source (a Settings card can replace it later) and for display.
+// Acuity tiers' ONLY remaining job is the Day cap; the map is the Settings acuity config (430; 661 dropped the fallback).
 // Build 419 (Tomas): ONE ceiling for every set size, from Settings (default 4 =
 // the whole D corridor). Lab: ceiling 4 + nearness tie-break → unit spread 0 on
 // both roster shapes, walking BELOW the old 2-floor budget (0.92 vs 0.94), and
@@ -21878,7 +21862,7 @@ async function suggestAssignments(nurses, shift, date, batchCountOverlay={}, win
       units: s === 'C_PAIR' ? ['3C','4C'] : [s],
       globalCount: coverageRate(counts, s, batchCountOverlay[`${s}|${shift}`] || 0), // Build 647: scaled once, after the overlay
       wing: getWing(s),
-      tier: isHighUnit(s) ? 'High' : (UNIT_TIER[s] || 'Standard'), // Build 430: the map is a setting
+      tier: isHighUnit(s) ? 'High' : 'Standard', // Build 661: the setting alone (430 fell back to the hardcoded UNIT_TIER, so un-marking 5A/7N/8N/10S in Settings had no effect — the cap still counted them High)
       floor: WING_FLOOR[s === 'C_PAIR' ? '3C' : s] || 0
     }));
 
