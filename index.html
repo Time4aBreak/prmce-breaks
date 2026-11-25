@@ -2334,7 +2334,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-24-661'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-24-663'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3074,6 +3074,28 @@ const syncedLS = {
   // Batch-refresh many keys in parallel. Returns the array of keys that
   // changed. Used by polling to detect cross-device updates without spamming
   // round trips when nothing's changed.
+  // Build 663: the per-key apply of a pulled BNState row, one-sourced so a view can fetch a key in ITS OWN batchGet
+  // (the My Shift log fetches its rotation row with its bookings) and fold it into the mirror with the same guards.
+  // `items` = the rows the `Key eq` query returned; `pullStartedAt` = performance.now() before the request. True if changed.
+  applyPulled(k, items, pullStartedAt){
+    // Build 231 (Finding 3): apply-time re-check — a setState that began while the batch was in flight must win;
+    // skip applying stale results for its key (mirrors the single-key refresh() guard).
+    // Build 646: a write that finished after this pull began wins too (the 6A resume).
+    if(!_pullMayApply(k, pullStartedAt)) return false;
+    items = items || [];
+    let remote = null, parsed = false;
+    try { remote = items.length ? JSON.parse(items[0].Value || 'null') : null; parsed = true; } catch{}
+    if(!parsed) return false; // corrupt value — no change, matches refresh()'s error path
+    const before = localStorage.getItem(k);
+    if(remote == null){
+      // Missing in BNState (deleted on another device). Clear local too.
+      if(before != null){ localStorage.removeItem(k); return true; }
+      return false;
+    }
+    const next = JSON.stringify(remote);
+    if(before !== next){ localStorage.setItem(k, next); return true; }
+    return false;
+  },
   async refreshMany(keys){
     // Build 217: same in-flight-write skip as refresh() — the batched path
     // does its own compare/store, so it needs its own intake filter.
@@ -3091,25 +3113,7 @@ const syncedLS = {
       const _pull646 = performance.now();
       const resultSets = await spBatchGet(valid.map(k => ({ sheet: LISTS.state, filter: `Key eq '${esc(k)}'` })));
       const changed = [];
-      valid.forEach((k, i) => {
-        // Build 231 (Finding 3): apply-time re-check — a setState that began
-        // while the batch was in flight must win; skip applying stale results
-        // for its key (mirrors the single-key refresh() guard).
-        // Build 646: a write that finished after this pull began wins too (the 6A resume).
-        if(!_pullMayApply(k, _pull646)) return;
-        const items = resultSets[i] || [];
-        let remote = null, parsed = false;
-        try { remote = items.length ? JSON.parse(items[0].Value || 'null') : null; parsed = true; } catch{}
-        if(!parsed) return; // corrupt value — no change, matches refresh()'s error path
-        const before = localStorage.getItem(k);
-        if(remote == null){
-          // Missing in BNState (deleted on another device). Clear local too.
-          if(before != null){ localStorage.removeItem(k); changed.push(k); }
-          return;
-        }
-        const next = JSON.stringify(remote);
-        if(before !== next){ localStorage.setItem(k, next); changed.push(k); }
-      });
+      valid.forEach((k, i) => { if(syncedLS.applyPulled(k, resultSets[i], _pull646)) changed.push(k); });
       return changed;
     } catch(e){
       console.warn('[syncedLS.refreshMany] batch failed, falling back to singles:', e.message);
@@ -6715,9 +6719,12 @@ function saveDefaultTemplate(){
   if(!name){ toast('Select your name first', true); return; }
   const selected = [...document.querySelectorAll('.bn-default-slot.on')]
     .map(el => el.dataset.slot);
-  syncedLS.set(`bnDefault_${name}_${shift}`, selected).catch(()=>{});
+  // Build 662 (the 5.2 review: "Apply runs before the save is confirmed"): the write is returned, not fired — the one
+  // caller awaits it. On failure syncedLS.set keeps the value on this device and queues the retry; the caller says so.
+  const _p662 = syncedLS.set(`bnDefault_${name}_${shift}`, selected);
   BNS._defaultDirty = false; // Build 215
   updateApplyAllBtn();
+  return _p662;
 }
 
 async function saveAndApplyDefault(btn){
@@ -6729,8 +6736,16 @@ async function saveAndApplyDefault(btn){
   if(!selected.length){
     toast('Select at least one break slot first', true); return;
   }
-  // Save default first
-  saveDefaultTemplate();
+  // Save default first — and know it landed (Build 662). A default that only lives on this device would be applied to
+  // every upcoming shift now, while the next rebuild on another device (Mark Available, a cascade) used the old one.
+  try {
+    if(btn){ btn.disabled = true; btn.textContent = '⏳ Saving default…'; }
+    await saveDefaultTemplate();
+  } catch(e){
+    if(btn){ btn.disabled = false; btn.textContent = 'Apply to all shifts'; }
+    toast(`Default NOT saved to the sheet (${(e && e.message) || 'network error'}) — nothing applied. It is kept on this device and will retry; tap Apply again in a moment.`, true);
+    return;
+  }
   // Then apply to all upcoming shifts
   await applyDefaultToAll();
 }
@@ -6818,7 +6833,7 @@ async function applyDefaultToAll(){
       spGet(LISTS.schedule, `BreakNurseName eq '${esc(name)}'`),
       spGet(LISTS.bookings, `NurseName eq '${esc(name)}' and IsBNBreak eq 1`),
       // Build 244 (F4): this BN's staff bookings, for pinning the bulk seeds.
-      spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}'`).catch(() => [])
+      spGet(LISTS.bookings, `CreatedBy eq '${esc(name)}'`).catch(e => { throw new Error(`Couldn't read your claims (${(e && e.message) || 'network error'}) — nothing applied. Try again.`); }) // Build 662: was [] → seeds without pins
     ]);
     const _pinsADA = {};
     _pinsRawADA.forEach(b => {
@@ -6919,13 +6934,17 @@ async function applyDefaultToAll(){
       }
     }
 
-    // ── Mirror rotations to BNState in one round trip — LS already updated
-    // synchronously inside syncedLS.setMany. Fire-and-forget: if it fails,
-    // the toast inside syncedLS.setMany surfaces it; local data still works.
-    if(rotationEntries.length) syncedLS.setMany(rotationEntries).catch(()=>{});
+    // ── Mirror rotations to BNState in one round trip — LS already updated synchronously inside syncedLS.setMany.
+    // Build 662: awaited and named (was fire-and-forget: the breaks landed on the sheet, the rotations only on this
+    // device — every other device kept the old order until someone recalculated).
+    let _rotWarn662 = '';
+    if(rotationEntries.length){
+      try { await syncedLS.setMany(rotationEntries); }
+      catch(e){ _rotWarn662 = ` — but the rotations were NOT saved to the sheet (${(e && e.message) || e}): ↺ Recalculate rotations (grid footer)`; console.warn('[applyDefaultToAll] rotation mirror failed:', e && e.message); }
+    }
 
     const applied = upcoming.filter(s => (s.ShiftType==='Day'?dayDef:nocDef).length > 0).length;
-    toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}${_delWarn652}`, !!_delWarn652); // Build 652: a failed cleanup is named
+    toast(`✓ Default applied to ${applied} upcoming shift${applied!==1?'s':''}${_delWarn652}${_rotWarn662}`, !!(_delWarn652 || _rotWarn662)); // Build 652/662: a failed cleanup or rotation save is named
     hideBusy();
     if(applyBtn){
       applyBtn.disabled = false;
@@ -7034,7 +7053,14 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
       });
       console.info('[applyTrace] INSERTED (started-branch) —', name, date, shift, '· sent:', rows.length, '· server said:', JSON.stringify(_ir).slice(0, 200));
     }
-    // No rotation recalc — shift has started, unit assignments are locked
+    // No rotation recalc — shift has started, unit assignments are locked.
+    // Build 663: but the slots this reset FREED (old breaks not in the default) go back into the saved rotation — holes only.
+    const _newSet663 = new Set(defaultSlots.map(normSlot));
+    const _freed663 = existing.map(b => normSlot(b.SlotTime)).filter(t => !_newSet663.has(t));
+    if(_freed663.length){
+      const _res663 = await fillFreedRotationSlots(name, date, shift, _freed663, [{ Units: JSON.stringify(units) }]);
+      const _t663 = _fillFreedText663(_res663); if(_t663) toast(_t663.trim(), !!_res663.error);
+    }
   } else {
     // Future shift — recalculate rotation incorporating the new breaks
     const expandedUnits = filterClosedUnits(expandCPair(units, date, shift), date, shift);
@@ -7347,11 +7373,11 @@ function loadRotation(bnName, date, shift){
 // That's a workforce/patient-safety hole — staff could claim slots the BN
 // isn't scheduled to cover, and breaks would be missed.
 //
-// This helper attempts the saved rotation first; if missing, it computes
-// the same rotation the BN portal computes for its My Shift display
-// (`_fallbackRotation` around line 10779). Same algorithm, same inputs,
-// same output — fairness preserved. The schedule row's `Units` field is
-// authoritative.
+// This helper attempts the saved rotation first; if missing, it computes a
+// deterministic rotation from the row (same inputs → same output on every
+// device). Build 663 removed the log's per-slot gap-filler; this whole-row
+// fallback for a MISSING rotation is the one derivation left, and it is
+// identical everywhere. The schedule row's `Units` field is authoritative.
 //
 // `schedRow` is the BNSchedule row for this BN/date/shift (already in hand
 // at every call site). `bnBreakSet` defaults to empty Set since the staff
@@ -7380,6 +7406,52 @@ function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
 // Build 255: the rotation-key derivation, one-sourced for warmRotationCache
 // and the warm-cluster batching below.
 function rotationKey(bnName, date, shift){ return `bnRotation_${bnName}_${date}_${shift}`; }
+
+// Build 663 (Tomas, Nov 24: "everything needs to match everywhere — no stale copies, no device-derived paints"): when
+// own breaks are removed on the CURRENT shift, the freed future slots are WRITTEN into the saved rotation instead of
+// being painted by the log's local gap-filler (Build 243, now gone). Nothing else moves — the April 15 / Build 375
+// contract (no reshuffle mid-shift) stands; past slots are history (saveRotation preserves them). Rule, per freed slot
+// in time order: both neighbours the same unit → that unit; a block boundary → the unit with the fewest slots still
+// ahead (tie → the earlier neighbour, so the block continues); one neighbour → that one; no saved rotation → nothing.
+// Candidates are the row's units as of now (closed/paused excluded, C_PAIR expanded). Returns { filled, error }.
+async function fillFreedRotationSlots(bnName, dt, shift, freedSlots, schedRows){
+  const out = { filled: {}, error: null };
+  try {
+    if(!bnName || !dt || !shift || !freedSlots || !freedSlots.length) return out;
+    const key = rotationKey(bnName, dt, shift);
+    try { await syncedLS.refresh(key); } catch(e){} // the sheet's copy, not this device's
+    const rot = {}; Object.entries(loadRotation(bnName, dt, shift) || {}).forEach(([k, u]) => { rot[normSlot(k)] = u; });
+    if(!Object.keys(rot).length) return out;
+    const raw = []; (schedRows || []).forEach(r => { try { JSON.parse(r.Units || '[]').forEach(u => { if(!raw.includes(u)) raw.push(u); }); } catch(e){} });
+    const units = filterClosedUnits(expandCPair(raw, dt, shift), dt, shift);
+    if(!units.length) return out;
+    const sk = x => sortKey(x, shift);
+    const nk = (dt === shiftDate(shift)) ? nowKey(shift) : -Infinity;
+    const entries = () => Object.entries(rot).sort((a, b) => sk(a[0]) - sk(b[0]));
+    const remaining = () => { const c = {}; units.forEach(u => { c[u] = 0; }); entries().forEach(([t, u]) => { if(sk(t) > nk && c[u] !== undefined) c[u]++; }); return c; };
+    const targets = [...new Set(freedSlots.map(normSlot))].filter(x => sk(x) > nk && !rot[x]).sort((a, b) => sk(a) - sk(b));
+    for(const slot of targets){
+      let prev = null, next = null;
+      for(const [t, u] of entries()){ if(sk(t) < sk(slot)) prev = u; else if(sk(t) > sk(slot)){ next = u; break; } }
+      const okP = !!prev && units.includes(prev), okN = !!next && units.includes(next);
+      let pick = null;
+      if(okP && okN && prev === next) pick = prev;
+      else if(okP && okN){ const r = remaining(); pick = r[prev] <= r[next] ? prev : next; }
+      else if(okP) pick = prev;
+      else if(okN) pick = next;
+      else { const r = remaining(); pick = units.slice().sort((a, b) => r[a] - r[b])[0]; }
+      if(pick){ rot[slot] = pick; out.filled[slot] = pick; }
+    }
+    if(Object.keys(out.filled).length) await saveRotation(bnName, dt, shift, rot);
+  } catch(e){ out.error = (e && e.message) || String(e); }
+  return out;
+}
+function _fillFreedText663(res){
+  const ks = Object.keys(res.filled).sort();
+  if(!ks.length) return '';
+  const list = ks.map(k => `${fmt12(k)} → ${res.filled[k]}`).join(' · ');
+  return res.error ? ` Freed slots back in rotation on this device (${list}) — not yet on the sheet (${res.error}); it will retry.` : ` Freed slots back in rotation: ${list}.`;
+}
 async function warmRotationCache(bnName, date, shift){
   if(!bnName || !date || !shift) return;
   return syncedLS.warm(rotationKey(bnName, date, shift));
@@ -17600,8 +17672,18 @@ async function clearBNBreaks(){
       }
       _renderBNConfirm();
     }
-    // Note: no rotation recalc on mid-shift clear — unit assignments stay fixed
-    // so existing staff bookings keep their BN attribution.
+    // Build 663: the freed slots go back into the SAVED rotation (current shift: fill the holes, nothing else moves —
+    // the April 15 contract; a future shift: the full recompute, as submitStagedActions already does for a ✕ Remove).
+    // Before, nothing was written and the log painted the holes locally (Build 243) — Sign Up never saw them.
+    let _fillNote663 = '';
+    if(breaks.length){
+      if(dt === shiftDate(shift)){
+        const _schedRows663 = (_bnConfirmCache && _bnConfirmCache.scheds) || [];
+        _fillNote663 = _fillFreedText663(await fillFreedRotationSlots(BNS.name, dt, shift, breaks.map(b => b.SlotTime), _schedRows663));
+      } else {
+        try { await recalculateRotation(BNS.name, dt, shift); } catch(e){ _fillNote663 = ` Rotation not rebuilt for that day (${e.message || 'network error'}) — ↺ Recalculate rotations.`; }
+      }
+    }
 
     // Collect all stored cancelled bookings across all cleared slots.
     // Batch the BNState lookup into a single OR-query to avoid N round trips
@@ -17646,11 +17728,11 @@ async function clearBNBreaks(){
           CoveredBy: b.CoveredBy || '' // Build 282: restoration preserves attribution
         });
       }
-      toast(toRestore.length
+      toast((toRestore.length
         ? `All breaks cleared — ${toRestore.length} booking${toRestore.length!==1?'s':''} restored`
-        : 'All break slots cleared — slots are now open');
+        : 'All break slots cleared — slots are now open') + _fillNote663);
     } else {
-      toast('All break slots cleared');
+      toast('All break slots cleared' + _fillNote663);
     }
     const clearBtn = document.getElementById('clearAllBreaksBtn');
     if(clearBtn){ clearBtn.disabled=false; clearBtn.textContent='Clear All My Breaks'; }
@@ -18279,6 +18361,7 @@ async function submitStagedActions(){
   // Build 375: note break edits BEFORE the queue drains — feeds the
   // future-shift rotate-around recompute at the tail.
   const _hadBreakEdit = [..._prodLogStaged.values()].some(v => v.action === 'add_break' || v.action === 'remove_break');
+  const _removedSlots663 = []; // Build 663: the ✕ Removes whose delete lands — filled into the saved rotation on the current shift
   const submit = _prodLogSubmitBtn();
   if(submit){ submit.disabled = true; submit.textContent = 'Submitting…'; }
   // Build 139 (2026-05-27): Capture BN context at submit time + busy overlay.
@@ -18312,7 +18395,7 @@ async function submitStagedActions(){
     const _ids = _dels653.map(([id, info]) => info.action === 'cancelled' ? id : info.bookingId);
     try {
       await gasCallPost({ action: 'batchDelete', sheet: LISTS.bookings, ids: encodeURIComponent(JSON.stringify(_ids)) }); // already-gone rows are simply not counted — the desired end state either way
-      _dels653.forEach(([id, info]) => { trackDelete(info.action === 'cancelled' ? id : info.bookingId); _done653(id); });
+      _dels653.forEach(([id, info]) => { trackDelete(info.action === 'cancelled' ? id : info.bookingId); _done653(id); if(info.action === 'remove_break' && info.slotTime) _removedSlots663.push(info.slotTime); });
     } catch(e){ _dels653.forEach(([, info]) => _fail653(info, e)); }
   }
   if(_pats653.length){
@@ -18505,6 +18588,13 @@ async function submitStagedActions(){
     const _isActive = (typeof shiftDate === 'function') && shiftDate(BNS.shift) === _bDt
       && (typeof staffWindowOpen === 'function') && staffWindowOpen(BNS.shift);
     if(!_isActive) recalculateRotation(BNS.name, _bDt, BNS.shift).catch(() => {});
+    else if(_removedSlots663.length){
+      // Build 663: on the current shift the freed slots are written into the saved rotation (holes only — no reshuffle)
+      const _rows663 = (_bnConfirmCache && _bnConfirmCache.scheds) || [];
+      fillFreedRotationSlots(BNS.name, _bDt, BNS.shift, _removedSlots663, _rows663).then(res => {
+        const t = _fillFreedText663(res); if(t){ toast(t.trim(), !!res.error); loadBNConfirm(); if(S.unit) loadSlots(true); }
+      }).catch(() => {});
+    }
   }
 }
 
@@ -19127,20 +19217,27 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
     const bookFilter = `SlotDate ge '${dt}' and SlotDate le '${maxDt}T23'`;
     const notifyKey = `slotNotify_${dt}_${shift}`;
     const notifyFilter = `Key eq '${esc(notifyKey)}'`;
+    // Build 663: the rotation row rides the same request, so the FIRST paint is the sheet's rotation — not this
+    // device's copy corrected by the 5 s poller a beat later (Tomas: "no stale copies").
+    const _rotKey663 = rotationKey(BNS.name, dt, shift);
+    const _pull663 = performance.now();
     let results;
     if(SIM_MODE){
       results = await Promise.all([
         spGet(LISTS.schedule, schedFilter),
         spGet(LISTS.bookings, bookFilter),
-        spGet(LISTS.state, notifyFilter)
+        spGet(LISTS.state, notifyFilter),
+        spGet(LISTS.state, `Key eq '${esc(_rotKey663)}'`)
       ]);
     } else {
       results = await spBatchGet([
         {sheet:LISTS.schedule, filter:schedFilter},
         {sheet:LISTS.bookings, filter:bookFilter},
-        {sheet:LISTS.state, filter:notifyFilter}
+        {sheet:LISTS.state, filter:notifyFilter},
+        {sheet:LISTS.state, filter:`Key eq '${esc(_rotKey663)}'`}
       ]);
     }
+    try { syncedLS.applyPulled(_rotKey663, results[3], _pull663); } catch(e){}
     const schedsAll = results[0] || [];
     const scheds = schedsAll.filter(r => String(r.ShiftDate || '').slice(0, 10) === dt && r.ShiftType === shift);
     _bnSplitPartner = _bnFindSplitPartner(schedsAll, dt, shift); // Build 628
@@ -19348,7 +19445,8 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       // Validate cached rotation against current responsible units. If any
       // unit in the cache is no longer in the BN's schedule, the cache is
       // stale (e.g. units changed, BN re-assigned to different units, or a
-      // record was patched). Discard and let _fallbackRotation below
+      // record was patched). Discard (Build 663: the rows paint without a unit until the recalc below lands and the
+      // 5 s poller repaints — no local gap-filler any more) and
       // recompute from current scheds. Cache is keyed by (bnName, date,
       // shift) so it survives across renders, but unit changes don't
       // invalidate it on their own.
@@ -19412,6 +19510,14 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       const _winRow = scheds.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
       const _winHrs = Number(_winRow.Hours || 0);
       const _hasWindow = !!(_winRow.StartTime && _winHrs > 0 && _winHrs < 12);
+      // Build 663: NO saved rotation at all → the same whole-row fallback Sign Up uses (loadRotationWithFallback:
+      // deterministic, identical on every device), so the two screens agree. A SAVED rotation is never gap-filled; a
+      // rotation discarded as stale (above) paints no units until its recalc lands and the poller repaints.
+      if(!Object.keys(rotation).length && !_hasStaleUnit){
+        const _fbRow663 = _winRow.Units ? _winRow : (scheds[0] || null);
+        const _fb663 = loadRotationWithFallback(BNS.name, dt, shift, _fbRow663, new Set());
+        if(_fb663) rotation = _fb663;
+      }
       const _winStartK = _hasWindow ? sortKey(String(_winRow.StartTime).padStart(4, '0'), shift) : null;
       const _winEndK = _hasWindow ? _winStartK + Math.round(_winHrs * 60) : null;
 
@@ -19431,27 +19537,10 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         }
       } catch(e){}
 
-      // Display-only fallback rotation, computed without bnBreakSet
-      // exclusion. Mirrors Breaker's Breaks (line ~8506). When BN clears
-      // their own break mid-shift, the saved rotation still excludes that
-      // slot — so `rotation[slot]` is undefined and the row renders without
-      // a unit chip. The fallback fills in a sensible unit so the row shows
-      // "— Unclaimed · 8N —" instead of "— Unclaimed —".
-      let _fallbackRotation = null;
-      const _rawUnitsForFallback = [];
-      scheds.forEach(s => {
-        try { JSON.parse(s.Units||'[]').forEach(u => { if(!_rawUnitsForFallback.includes(u)) _rawUnitsForFallback.push(u); }); } catch{}
-      });
-      if(_rawUnitsForFallback.length){
-        const _expandedUnits = filterClosedUnits(expandCPair(_rawUnitsForFallback, dt, shift), dt, shift);
-        const _dateSeed = dt.split('-').reduce((a,b) => a + parseInt(b), 0) + BNS.name.charCodeAt(0);
-        // Build 243 (Finding 9, display arm): the gap-filler honors the row's
-        // window — this was the "entire day of 5A" caught live on the S1
-        // 4-hour fixture (2026-07-13). Off-window slots now render without a
-        // unit chip and take the window dim below.
-        _fallbackRotation = constrainedRotation(_expandedUnits, new Set(), shift, _dateSeed,
-          { startTime: _winRow.StartTime, hours: _winRow.Hours });
-      }
+      // Build 663: the log paints ONLY the saved rotation. The display-only gap-filler that lived here (April 24 /
+      // Build 243: a no-break rotation computed on this device for slots the saved one lacked) is gone — it painted a
+      // unit Sign Up never saw, with blocks aligned without breaks (the 7A·5A·7A alternation Tomas caught Nov 24).
+      // Freed slots are now WRITTEN into the saved rotation by fillFreedRotationSlots; a slot with no saved unit shows none.
 
       // Hard-blocked slots for this shift on this specific date.
       // For Noc, the 0755 slot is the NEXT morning after dt — that's why
@@ -19478,7 +19567,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
         const b = bookingBySlot[slot];
         const isOwnBreak = ownBreakSlots.has(slot);
         const isHardBlocked = hardBlockedSet.has(slot);
-        const rotationUnit = rotation[slot] || (_fallbackRotation ? _fallbackRotation[slot] : undefined);  // the unit where this BN was scheduled (or fallback for freed slots)
+        const rotationUnit = rotation[slot];  // Build 663: the saved rotation only (no local gap-filler)
         const isPast = !_slotIsAhead(dt, slot, shift); // Build 498: date-aware
         const staged = b ? _prodLogStaged.get(b.Id) : _prodLogStaged.get(`unclaimed:${slot}`);
 
