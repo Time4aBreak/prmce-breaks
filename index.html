@@ -495,7 +495,6 @@ html, body { overscroll-behavior-y: none; -webkit-text-size-adjust: 100%; }
             <button class="btn btn-ghost btn-sm self-avail-btn" style="color:var(--red)" onclick="const _b=this;_b.disabled=true;_b.textContent='Processing…';toggleSelfAvailability().finally(()=>{_b.disabled=false})">🏠 Mark unavailable</button>
             <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Checking…';bnUnitSwap().finally(()=>{_b.disabled=false;_b.textContent='⇄ Unit Swap'})">⇄ Unit Swap</button><!-- Build 638 (Tomas): a unit declines coverage mid-shift -->
             <button class="btn btn-success btn-sm" onclick="this.disabled=true;this.textContent='Saving…';confirmAllBreaks().finally(()=>{this.disabled=false;this.textContent='Submit all as Taken'})">Submit all as Taken</button>
-            <button class="btn btn-ghost btn-sm" style="color:var(--muted);font-size:.7rem" onclick="showDebugDiag()">🔍 Debug</button>
           </div>
 
           <!-- Start-time selector — for late-arrival BNs. Defaults to "full shift".
@@ -2334,7 +2333,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-24-663'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-24-665'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4619,12 +4618,12 @@ async function previewAndApplyUnitChange(unit, effectiveAt, targetStatus){
       +slotDateTime(i.date, i.shift === 'Day' ? '0800' : '2000', i.shift) <= effectiveAt.getTime());
     const _ipLines = _inProgImpacts.map(i =>
       i.hasOtherUnits
-        ? `• ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): ${unit} removed, still covers ${i.otherUnits.join(', ')}`
-        : `⚠️ ${firstName(i.bn)} (${i.shift} ${i.date.slice(5)}): <strong>only covers ${unit} — needs reassignment</strong>`);
+        ? `• ${escHTML(firstName(i.bn))} (${i.shift} ${i.date.slice(5)}): ${escHTML(unit)} removed, still covers ${escHTML(i.otherUnits.join(', '))}`
+        : `⚠️ ${escHTML(firstName(i.bn))} (${i.shift} ${i.date.slice(5)}): <strong>only covers ${escHTML(unit)} — needs reassignment</strong>`);
     // Build 213: absorbed-coverage strips are itemized with the in-progress
     // impacts — closing a supp-held unit must not silently edit the absorber.
     const _stripLines = suppStrips.map(st =>
-      `• ${firstName(st.absorber)} — absorbed coverage of ${unit} (for ${firstName(st.coveredFrom || '?')}) ends; breaks already covered stay credited to ${firstName(st.absorber)}`);
+      `• ${escHTML(firstName(st.absorber))} — absorbed coverage of ${unit} (for ${escHTML(firstName(st.coveredFrom || '?'))}) ends; breaks already covered stay credited to ${escHTML(firstName(st.absorber))}`);
     const _futureLine = hasFutureRedeal
       ? `<div style="margin-top:${(_ipLines.length || _stripLines.length) ? '8px' : '0'}"><strong>Future shifts:</strong> all shifts from ${effectiveLabel} will be re-dealt to rebalance coverage — break-nurse assignments may change, including on units other than ${unit}.</div>`
       : '';
@@ -5142,13 +5141,13 @@ async function promptReassignBN(impact){
 
     modal.innerHTML = `
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
-        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${firstName(impact.bn)} only covers ${closingUnit}</div>
+        <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${escHTML(firstName(impact.bn))} only covers ${escHTML(closingUnit)}</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${impact.shift} · ${impact.date}</div>
-        <div style="font-size:.85rem;margin-bottom:10px">Assign other units to ${firstName(impact.bn)}, or mark unavailable.</div>
+        <div style="font-size:.85rem;margin-bottom:10px">Assign other units to ${escHTML(firstName(impact.bn))}, or mark unavailable.</div>
         <div id="reassignUnits" style="background:var(--bg);border-radius:8px;padding:10px;margin-bottom:16px;display:grid;grid-template-columns:repeat(auto-fill,minmax(80px,1fr));gap:4px">${unitCheckboxes}</div>
         <div style="display:flex;flex-direction:column;gap:8px">
           <button type="button" class="btn btn-primary" id="_reassignSaveBtn">Save Assignment</button>
-          <button type="button" class="btn btn-ghost" id="_reassignUnavailBtn">Mark ${firstName(impact.bn)} unavailable</button>
+          <button type="button" class="btn btn-ghost" id="_reassignUnavailBtn">Mark ${escHTML(firstName(impact.bn))} unavailable</button>
         </div>
       </div>`;
     document.body.appendChild(modal);
@@ -5311,14 +5310,14 @@ function reopenCoveragePicker(unit, date, shift, candidates, subContext){
 
     const subLine = (subContext && subContext.length)
       ? `<div style="font-size:.82rem;color:var(--muted);margin-bottom:12px">${
-          subContext.map(e => `${firstName(e.bn)} is currently covering <strong>${e.substitute}</strong> in ${unit}'s place.`).join('<br>')
+          subContext.map(e => `${escHTML(firstName(e.bn))} is currently covering <strong>${escHTML(e.substitute)}</strong> in ${escHTML(unit)}'s place.`).join('<br>')
         }</div>`
       : '';
 
     const bnButtons = candidates.length
       ? candidates.map(c =>
-          `<button type="button" class="btn btn-pick _rcPick" data-bn="${c.bnName}" data-sched="${c.schedId}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%">
-             <span>${firstName(c.bnName)}</span>
+          `<button type="button" class="btn btn-pick _rcPick" data-bn="${escHTML(c.bnName)}" data-sched="${escHTML(String(c.schedId))}" style="display:flex;justify-content:space-between;align-items:center;gap:8px;width:100%">
+             <span>${escHTML(firstName(c.bnName))}</span>
              <span style="font-size:.78rem;opacity:.8;font-weight:400">${c.bnUnits.length} unit${c.bnUnits.length !== 1 ? 's' : ''}</span>
            </button>`).join('')
       : `<div style="font-size:.85rem;color:var(--muted);margin-bottom:12px">No same-wing break nurses on this shift to cover ${unit}.</div>`;
@@ -5381,7 +5380,7 @@ function promptSubstitutePicker(closingUnit, bnName, date, shift, candidates, su
       <div style="background:var(--card);border-radius:12px;padding:24px;max-width:420px;width:100%;box-shadow:0 8px 32px rgba(0,0,0,.2)">
         <div style="font-weight:700;font-size:1rem;margin-bottom:4px">${opts.title || `${closingUnit} is pausing`}</div>
         <div style="font-size:.82rem;color:var(--muted);margin-bottom:14px">${shift} · ${date}</div>
-        <div style="font-size:.85rem;margin-bottom:10px">${opts.question || `What should <strong>${firstName(bnName)}</strong> cover instead of <strong>${closingUnit}</strong>?`}</div>
+        <div style="font-size:.85rem;margin-bottom:10px">${opts.question || `What should <strong>${escHTML(firstName(bnName))}</strong> cover instead of <strong>${closingUnit}</strong>?`}</div>
         <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:8px">${unitButtons}</div>
         ${wingHint}
         <button type="button" class="btn btn-ghost" id="_spNone">No substitute — just drop ${closingUnit}</button>
@@ -5508,11 +5507,11 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
       const n = runs[i].length;
       const transferOptions = allowed.length
         ? allowed.map(nm =>
-            `<option value="transfer:${nm.replace(/"/g,'&quot;')}"${state[i] === nm ? ' selected' : ''}>Transfer to ${firstName(nm)}${nm === cover ? ' (already covers)' : ''}</option>`
+            `<option value="transfer:${escHTML(nm)}"${state[i] === nm ? ' selected' : ''}>Transfer to ${escHTML(firstName(nm))}${nm === cover ? ' (already covers)' : ''}</option>`
           ).join('')
         : `<option value="" disabled>No eligible Break Nurse for this run</option>`;
       return `
-        ${noKeepFor(i) ? '' : `<option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${firstName(outgoingBN)} will cover ${n===1?'this slot':'these slots'})</option>`}
+        ${noKeepFor(i) ? '' : `<option value="keep"${state[i]==='keep' ? ' selected' : ''}>Keep (${escHTML(firstName(outgoingBN))} will cover ${n===1?'this slot':'these slots'})</option>`}
         <option value="cancel"${state[i]==='cancel' ? ' selected' : ''}>Cancel booking${n!==1?'s':''}</option>
         ${transferOptions}`;
     };
@@ -5520,7 +5519,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
     const renderUnitSection = (unit, runIdxs) => {
       const meta = unitMeta[unit] || {};
       const headerNote = meta.cover
-        ? `<span style="color:var(--muted);font-size:.78rem">· ${firstName(meta.cover)} already covers</span>`
+        ? `<span style="color:var(--muted);font-size:.78rem">· ${escHTML(firstName(meta.cover))} already covers</span>`
         : (meta.anySameWing
             ? `<span style="color:var(--muted);font-size:.78rem">· no other BN covers</span>`
             : `<span style="color:var(--muted);font-size:.78rem">· no same-wing BN available</span>`);
@@ -5533,7 +5532,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
             <div class="_bdNote" data-noteidx="${i}" style="display:none;font-size:.72rem;color:#b45309;margin-top:4px"></div>
           </div>`).join('');
       const nRuns = runIdxs.length;
-      const winNote = meta.window ? `<span style="color:#b45309;font-size:.78rem">· outside ${firstName(outgoingBN)}'s hours (${fmt12(meta.window.start)}–${fmt12(meta.window.end)})</span>` : ''; // Build 608
+      const winNote = meta.window ? `<span style="color:#b45309;font-size:.78rem">· outside ${escHTML(firstName(outgoingBN))}'s hours (${fmt12(meta.window.start)}–${fmt12(meta.window.end)})</span>` : ''; // Build 608
       return `
         <div style="margin-bottom:14px">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;gap:6px;flex-wrap:wrap">
@@ -5541,7 +5540,7 @@ async function promptBookingDecisions({ removedUnitsWithBookings, outgoingBN, da
             <div style="display:flex;gap:4px">
               ${(noKeep || meta.window) ? '' : `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="keep" style="font-size:.72rem;padding:3px 8px">All Keep</button>`}
               <button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="cancel" style="font-size:.72rem;padding:3px 8px">All Cancel</button>
-              ${meta.cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${unit}" data-action="transfer:${meta.cover}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(meta.cover)}</button>` : ''}
+              ${meta.cover ? `<button type="button" class="btn btn-ghost btn-sm _bdBulk" data-unit="${escHTML(unit)}" data-action="transfer:${escHTML(meta.cover)}" style="font-size:.72rem;padding:3px 8px">All to ${firstName(meta.cover)}</button>` : ''}
             </div>
           </div>
           ${rowsHtml}
@@ -8875,7 +8874,7 @@ async function _loadSlotsCore(silent=false, opts={}){
         ? _slotBookingsArr.filter(b => isStaffBooking(b) && normSlot(String(b.SlotTime)) === slot && b.ShiftType === _slotShift)
         : null;
       _streamsAll.forEach((_st, _sIdx) => {
-      const _bnEsc = String(_st.raw).replace(/'/g, "\\'");
+      const _bnEsc = escJS(_st.raw); // Build 665: was a single-quote-only escape — a " in a name broke out of the attribute
       const booking = _streamsAll.length <= 1 ? booking0
         : (_slotBs.find(b => b.CoveredBy === _st.raw) || (_sIdx === 0 ? _slotBs.find(b => !b.CoveredBy) : null) || null);
       const isMine = booking && booking.NurseName===nurseName && nurseName;
@@ -8940,7 +8939,7 @@ async function _loadSlotsCore(silent=false, opts={}){
       if(isCancelStaged){
         nameCellHtml = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
       } else if(isTransferStaged){
-        const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
+        const newDisplay = escHTML(toTitleCase(transferData.newFirst)) /* 563: name only; 665: escaped */;
         nameCellHtml = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
       } else if(isMine){
         nameCellHtml = formatNurse(booking.NurseName);
@@ -8978,7 +8977,7 @@ async function _loadSlotsCore(silent=false, opts={}){
       } else if(canClaim){
         actionHtml = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}', null, '${_bnEsc}')">+ Select</button>`;
       }
-      html+=`<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${_st.raw}" style="${rowStyle}">
+      html+=`<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${escHTML(_st.raw)}" style="${rowStyle}">
         <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
         <div class="slot-name ${booking||isPending?'filled':''}">${nameCellHtml}</div>
         <div>${actionHtml}</div>
@@ -9027,7 +9026,7 @@ async function _loadSlotsCore(silent=false, opts={}){
       : isConn
         ? '📡 Could not reach the server — check your connection'
         : e.message;
-    list.innerHTML=`<div class="empty" style="color:var(--red)">${msg}<br><br>
+    list.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(msg)}<br><br>
       <button class="btn btn-ghost btn-sm" onclick="const _b=this;_b.disabled=true;_b.textContent='Loading…';Promise.resolve(loadSlots()).finally(()=>{_b.disabled=false;_b.textContent='↺ Try again'})">↺ Try again</button></div>`;
   }
   loader.style.display='none';
@@ -9385,7 +9384,7 @@ function _renderSingleSlotRow(slot){
     : null;
   let _out = '';
   _streamsAll.forEach((_st, _sIdx) => {
-  const _bnEsc = String(_st.raw).replace(/'/g, "\\'");
+  const _bnEsc = escJS(_st.raw); // Build 665
   const booking = _streamsAll.length <= 1 ? bMap[slot]
     : (_slotBs.find(b => b.CoveredBy === _st.raw) || (_sIdx === 0 ? _slotBs.find(b => !b.CoveredBy) : null) || null);
   const isMine  = booking && booking.NurseName === nurseName && nurseName;
@@ -9423,7 +9422,7 @@ function _renderSingleSlotRow(slot){
   if(isCancelStaged){
     nameCell = `<span style="color:var(--muted)">Will cancel · ${formatNurse(booking.NurseName)}</span>`;
   } else if(isTransferStaged){
-    const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
+    const newDisplay = escHTML(toTitleCase(transferData.newFirst)) /* 563: name only; 665: escaped */;
     nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
   } else if(isMine){
     nameCell = formatNurse(booking.NurseName);
@@ -9466,7 +9465,7 @@ function _renderSingleSlotRow(slot){
   } else if(canClaim){
     actionCell = `<button class="btn btn-primary btn-sm" onclick="togglePending('${slot}', null, '${_bnEsc}')">+ Select</button>`;
   }
-  _out += `<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${_st.raw}" style="${rowStyle}">
+  _out += `<div class="slot-row ${cls}" data-slot="${slot}" data-bn="${escHTML(_st.raw)}" style="${rowStyle}">
       <div class="slot-time" style="${timeStyle}">${fmt12(slot)}</div>
       <div class="slot-name ${booking||isPending?'filled':''}">${nameCell}</div>
       <div>${actionCell}</div>
@@ -10324,7 +10323,7 @@ async function loadOtherSlots(silent=false){
 
     loader.style.display = 'none';
   } catch(e){
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${escHTML(String((e && e.message) || e || 'unknown error'))}</div>`;
     loader.style.display = 'none';
   }
 }
@@ -10365,7 +10364,7 @@ function renderOtherSlotsFromCache(){
     // changed after the claim) still render as taken rows so no claim is
     // ever invisible (the bMap guarantee, stream-shaped).
     const _row = (st, booking) => {
-      const bnEsc = String(st.raw).replace(/'/g, "\\'");
+      const bnEsc = escJS(st.raw); // Build 665
       const isMine = booking && curName && booking.NurseName === curName;
       if(isMine){
         const myBookingId = booking.Id;
@@ -10383,7 +10382,7 @@ function renderOtherSlotsFromCache(){
         } else if(isTransferStaged){
           rowStyle += 'background:#fff8eb;border:1.5px solid #f3d68a';
           timeStyle = 'color:#a06a00;font-weight:700';
-          const newDisplay = toTitleCase(transferData.newFirst) /* 563: name only */;
+          const newDisplay = escHTML(toTitleCase(transferData.newFirst)) /* 563: name only; 665: escaped */;
           nameCell = `<span style="color:#a06a00">→ Transfer to ${newDisplay}</span>`;
         } else {
           rowStyle += 'border:2px solid var(--teal);background:var(--teal-lt)';
@@ -10406,7 +10405,7 @@ function renderOtherSlotsFromCache(){
             actionCell = `<button class="btn btn-danger btn-sm" onclick="openPicker('${myBookingId}','${time}')">✕ Manage</button>`;
           }
         }
-        return `<div class="slot-row mine" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="${rowStyle}">
+        return `<div class="slot-row mine" data-slot-key="${keyAttr}" data-bn="${escHTML(st.raw)}" style="${rowStyle}">
         <div class="slot-time" style="${timeStyle}">${fmt12(time)}</div>
         <div class="slot-name filled">${nameCell}</div>
         <div>${actionCell}</div>
@@ -10421,7 +10420,7 @@ function renderOtherSlotsFromCache(){
         const _kl = !LOCK_RE.test(parseNurse(booking.NurseName).key);
         const _klBN = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN) || 'your break nurse';
         const _nameCell = _kl ? `${formatNurse(booking.NurseName)} <span style="color:var(--muted);font-size:.78rem">· Call ${escHTML(_klBN)} to cancel or transfer</span>` : formatNurse(booking.NurseName);
-        return `<div class="slot-row taken" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
+        return `<div class="slot-row taken" data-slot-key="${keyAttr}" data-bn="${escHTML(st.raw)}" style="display:grid;grid-template-columns:90px 1fr;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:1px solid var(--border);margin-bottom:6px;background:var(--bg)">
         <div class="slot-time" style="color:var(--muted)">${fmt12(time)}</div>
         <div class="slot-name filled">${_nameCell}</div>
       </div>`;
@@ -10437,7 +10436,7 @@ function renderOtherSlotsFromCache(){
       </div>`;
       }
       const bnLabel = st.disp || (armShift === 'Day' ? activeDayBN : activeNocBN);
-      return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${keyAttr}" data-bn="${st.raw}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">
+      return `<div class="slot-row${isPending?' selected':''}" data-slot-key="${keyAttr}" data-bn="${escHTML(st.raw)}" style="display:grid;grid-template-columns:90px 1fr auto;gap:10px;align-items:center;padding:10px 14px;border-radius:10px;border:${isPending?'2px solid var(--teal)':'1px solid var(--border)'};margin-bottom:6px;background:${isPending?'var(--teal-lt)':'white'}" onclick="togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">
       <div class="slot-time" style="${isPending?'font-weight:700;color:var(--teal-dk)':''};">${fmt12(time)}</div>
       <div class="slot-name ${isPending?'filled':''}">${isPending?'✓ Selected':(bnLabel ? `Available · <span style="color:var(--muted)">covered by ${escHTML(bnLabel)}</span>` : 'Available')}</div>
       <button class="btn btn-sm${isPending?' btn-ghost':''}" style="${isPending?'':'background:var(--teal);color:white'}" onclick="event.stopPropagation();togglePending('${time}','${armShift}','${bnEsc}','${srcDt}')">${isPending?'↺ Undo':'+  Select'}</button>
@@ -12693,7 +12692,7 @@ function promptAbsorptionChoice(bnName, uncovered, otherBNs, ctx){
         sel.style.cssText = 'width:100%;padding:7px 8px;border:1px solid var(--border);border-radius:8px;'
           + 'font-size:.85rem;background:var(--card);color:var(--text)';
         const opts = [];
-        elig[i].forEach(bn => opts.push(`<option value="${bn.replace(/"/g,'&quot;')}"${bn===assignments[i]?' selected':''}>${firstName(bn)}</option>`));
+        elig[i].forEach(bn => opts.push(`<option value="${escHTML(bn)}"${bn===assignments[i]?' selected':''}>${escHTML(firstName(bn))}</option>`));
         // Cancel always available
         opts.push(`<option value="${CHOICE_CANCEL}"${isCancel?' selected':''}>Release — no one covers</option>`);
         sel.innerHTML = opts.join('');
@@ -13021,7 +13020,7 @@ async function processBNUnavailability(schedId, bnName, date, shift, redistribut
       // dormant-but-defensive for any future planner-on-started-shift use.
       let msg = `${firstName(bnName)} marked unavailable.`;
       if(nAbs) msg += `\n\n✓ ${nAbs} break${nAbs!==1?'s':''} redistributed.`;
-      const flagList = flaggedNurses.map(b => `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)}`).join('\n');
+      const flagList = flaggedNurses.map(b => `• ${bareName(b.NurseName)} on ${b.Unit} at ${fmt12(b.SlotTime)}`).join('\n'); // Build 665: bare — the modal escapes
       msg += `\n\n⚠️ The following breaks could not be covered — Please notify!\n\n${flagList}`;
       if(_cleanupErr655) msg += `\n\n⚠️ They could NOT be removed from the sheet (${_cleanupErr655}) — cancel them from the log.`;
       if(_restampFail655) msg += `\n\n⚠️ ${_restampFail655} redistributed break${_restampFail655 !== 1 ? 's' : ''} did not move to the absorber's stream — check the log.`;
@@ -13468,7 +13467,7 @@ async function _loadSummaryInner(mySeq, ctx){
       const bnNames = [...new Set([..._prev, ...[...scheds,...oppScheds].map(s => s.BreakNurseName).filter(Boolean)])].sort();
       const curVal = bnSel.value;
       bnSel.innerHTML = '<option value="All">All Break Nurses</option>' +
-        bnNames.map(n => `<option value="${n}"${n===curVal?' selected':''}>${firstName(n)}</option>`).join('');
+        bnNames.map(n => `<option value="${escHTML(n)}"${n===curVal?' selected':''}>${escHTML(firstName(n))}</option>`).join('');
     }
 
     // Filter by BN if selected
@@ -13528,7 +13527,7 @@ async function _loadSummaryInner(mySeq, ctx){
         const bnUnavailable = bn && inactiveBNs.has(bn) && !isPast(b.SlotTime, shift);
         html += `<div class="summ-row"${bnUnavailable?' style="background:#fff5f5;border-color:#ffcccc"':''}>
           <div class="summ-time"${bnUnavailable?' style="color:var(--red)"':''}>${fmt12(b.SlotTime)}</div>
-          <div class="summ-unit">${b.Unit}</div>
+          <div class="summ-unit">${escHTML(b.Unit)}</div>
           <div class="summ-nurse">${escHTML(bareName(b.NurseName))}</div>
           <div class="summ-bn">${bnUnavailable
             ? `<span style="color:var(--red);font-weight:600">⚠️ BN unavailable</span>`
@@ -13540,7 +13539,7 @@ async function _loadSummaryInner(mySeq, ctx){
     el.innerHTML = _heading + html; // Build 452
     _revP615.then(r => { if(mySeq !== _summaryRenderSeq || !r) return; if(r.BNBookings || r.BNSchedule) _covLastRev = `${r.BNBookings || ''}|${r.BNSchedule || ''}`; }).catch(() => {}); // Build 615
   }catch(e){
-    el.innerHTML=`<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
+    el.innerHTML=`<div class="empty" style="color:var(--red)">${escHTML(String((e && e.message) || e || 'unknown error'))}</div>`;
   } finally {
     try { _unlock(); } catch(_x){} // Build 468: every exit — render, error, or superseded early return
   }
@@ -14228,7 +14227,7 @@ function renderBNFilter(){
   [..._selectedBNs].forEach(n => { if(!valid.has(n)) _selectedBNs.delete(n); });
   const pills = sortedNames.map(name => {
     const active = _selectedBNs.has(name);
-    const esc = name.replace(/'/g, "\\'");
+    const esc = escJS(name); // Build 665
     return `<button class="bn-pill${active ? ' active' : ''}" onclick="toggleBNFilter('${esc}')">${escHTML(firstName(name))}</button>`;
   }).join('');
   const clearBtn = _selectedBNs.size > 0
@@ -15350,7 +15349,7 @@ function showRestoreModal(cancelled){
     list.innerHTML = groups.map(g => `
       <div style="padding:10px 0;border-bottom:1px solid var(--border)">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:7px">
-          <span style="font-weight:700;font-size:.9rem">${g.name}</span>
+          <span style="font-weight:700;font-size:.9rem">${escHTML(g.name)}</span>
           ${g.ext ? `<span style="font-family:'DM Mono',monospace;font-size:.78rem;color:var(--muted)">${g.ext}</span>` : ''}
           <span style="background:var(--teal-lt);color:var(--teal-dk);padding:1px 6px;border-radius:4px;font-family:'DM Mono',monospace;font-size:.7rem;font-weight:700">${g.unit === 'C_PAIR' ? '3C/4C' : g.unit}</span>
         </div>
@@ -15394,8 +15393,9 @@ function restoreModalConfirm(doRestore){
 
 // One-way alert using custom modal (no "This page says" header)
 function formatModalMsg(msg){
-  // Convert newlines and bullet points to clean HTML
-  const lines = msg.split('\n').filter(l => l.trim());
+  // Build 665: a modal message is TEXT. Every line is HTML-escaped here, once — no caller passes markup (grep-verified
+  // Nov 24), and the three that passed pre-escaped names (formatNurse / formatNurseUnit) now pass bare ones.
+  const lines = String(msg == null ? '' : msg).split('\n').filter(l => l.trim()).map(l => escHTML(l));
   const hasBullets = lines.some(l => l.trim().startsWith('•'));
   if(!hasBullets) return lines.map(l => `<p style="margin-bottom:6px">${l}</p>`).join('');
   let html = '';
@@ -17331,18 +17331,6 @@ async function saveImportRow(i){
 // ═══════════════════════════════════════════════════════
 const BNS = { shift: null, name: '', date: '' };
 
-// Build 103 (2026-05-25): in-memory ring buffer for [dateTrace] log lines so
-// the Debug button can surface them in the modal. Captures the last 30 entries
-// to keep memory bounded. Older entries shift out as new ones come in.
-const _dateTraceLog = [];
-function _logDateTrace(msg){
-  const ts = new Date();
-  const stamp = `${String(ts.getHours()).padStart(2,'0')}:${String(ts.getMinutes()).padStart(2,'0')}:${String(ts.getSeconds()).padStart(2,'0')}`;
-  const line = `[${stamp}] ${msg}`;
-  _dateTraceLog.push(line);
-  if(_dateTraceLog.length > 30) _dateTraceLog.shift();
-  console.log(`[dateTrace] ${msg}`);
-}
 
 function populateBNDropdown(){
   const sel = document.getElementById('bnNameSelect');
@@ -17352,7 +17340,7 @@ function populateBNDropdown(){
   // but a BN is still signed in via in-memory state.
   const prev = sel.value || (BNS && BNS.name) || '';
   sel.innerHTML = '<option value="">— Select your name —</option>' +
-    importedNames.map(n => `<option value="${n}"${n===prev?' selected':''}>${firstName(n)}</option>`).join('');
+    importedNames.map(n => `<option value="${escHTML(n)}"${n===prev?' selected':''}>${escHTML(firstName(n))}</option>`).join('');
 }
 
 let _bnViewGen = 0; // Build 280: generation counter — see guard notes inside loadBNView
@@ -17432,7 +17420,6 @@ async function _loadBNViewCore(){
   // Build 102 diagnostic: trace where BNS.date is set, to chase the
   // intermittent "date jumps to tomorrow" bug observed 2026-05-25.
   // Remove after the cause is identified.
-  _logDateTrace(`loadBNView set BNS.date=${BNS.date} shift=${BNS.shift} (resolvedFrom=${_resolvedFrom}) localToday=${today()}`);
   BNS.defaultShift = BNS.shift;
   // Clear Productivity Log state so stale expand/copy-last doesn't leak across BN/shift changes.
   _prodLogResetShiftState();
@@ -17513,7 +17500,6 @@ async function _loadBNViewCore(){
             const _prevDate = BNS.date;
             BNS.date  = future[0].ShiftDate.slice(0,10);
             BNS.shift = future[0].ShiftType;
-            _logDateTrace(`forward-scan jumped BNS.date from ${_prevDate} → ${BNS.date} (${BNS.shift}). Future records found: ${future.length}. localToday=${today()}`);
             const dp = document.getElementById('bnDate');
             if(dp) dp.value = BNS.date;
             renderBNShiftPill();
@@ -17564,7 +17550,6 @@ async function onBNDateChange(){
   const _prevDate = BNS.date;
   BNS.date = dp.value;
   // Build 102 diagnostic: catch manual date-picker changes vs programmatic
-  _logDateTrace(`onBNDateChange: BNS.date ${_prevDate} → ${BNS.date} (picker tapped or set programmatically). localToday=${today()}`);
   // Build 511: auto-detect the shift from the SHEET (archive retirement, reader 2 of 5 — the archive froze on
   // Sep 12, so this fell back to the default for every later date). The nurse's row on that date decides.
   const seq = ++_bnDateSeq;
@@ -17651,7 +17636,7 @@ async function clearBNBreaks(){
     if(actioned.length > 0){
       const actionLines = actioned.map(b => {
         const status = isConfirmed(b) ? 'confirmed' : 'not taken';
-        return `• ${formatNurseUnit(b.NurseName, b.Unit)} at ${fmt12(b.SlotTime)} — ${status}`;
+        return `• ${bareName(b.NurseName)} on ${b.Unit} at ${fmt12(b.SlotTime)} — ${status}`; // Build 665: bare — the modal escapes
       }).join('\n');
       if(!await customConfirm(actionLines,'Clear anyway','Cancel')) return;
     }
@@ -19279,7 +19264,7 @@ async function loadBNConfirm(_scrollToNow = false){ // Build 281: NOW-scroll is 
       } catch(e){}
     }, 150);
   } catch(e) {
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${escHTML(String((e && e.message) || e || 'unknown error'))}</div>`;
     wrap.style.display = 'block';
   }
   loader.style.display = 'none';
@@ -19548,7 +19533,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
       const hardBlocked = shift === 'Day' ? getDayHardBlocked(dt) : getNocHardBlocked(dt);
       const hardBlockedSet = new Set(hardBlocked);
 
-      const esc = (s) => String(s).replace(/'/g, "\\'");
+      const esc = (s) => escJS(s); // Build 665: unit, slot and row id inside onclick — JS-escaped then HTML-escaped
 
       // Precompute "compatible unclaimed slots" list for Apply-to-more chip picker.
       // A slot is compatible if: no booking exists, not own break, not hard-blocked,
@@ -19636,7 +19621,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
 
           if(bConfirmed){
             rowClass = 'confirmed';
-            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${escHTML(b.Unit)}</span></span>`;
             { const ri = _runInfo[String(b.Id)]; // Build 456: run line + gaps toggle on the run's first slot
               if(ri && ri.n >= 2 && ri.i === 0 && ri.allConf){
                 const credit = ri.gaps ? gapsGivenCredit(ri.n) : 0; const mins = _runMinutes(ri.n, ri.gaps);
@@ -19647,7 +19632,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             actionHtml = `<span style="font-size:.75rem;color:var(--green);font-weight:600;margin-right:6px">✓ Taken</span>
               <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
           } else if(bNotTaken){
-            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${escHTML(b.Unit)}</span></span>`;
             actionHtml = `<span style="font-size:.75rem;color:var(--muted);font-weight:600;background:var(--bg);border:1px solid var(--border);padding:2px 7px;border-radius:5px;margin-right:6px">✗ Not Taken</span>
               <button class="btn btn-ghost btn-sm" onclick="undoBreakStatus(${b.Id})">Undo</button>`;
           } else {
@@ -19679,7 +19664,7 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
             else if(stagedAction === 'not_taken') extraStyle = 'background:var(--bg);border:1.5px solid var(--muted)';
             else if(stagedAction === 'cancelled') extraStyle = 'background:var(--red-lt);border:1.5px solid var(--red);opacity:.7';
 
-            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${b.Unit}</span></span>`;
+            centerHtml = `<span class="filled">${formatNurse(b.NurseName)}<span style="color:var(--muted);font-size:.78rem"> · ${escHTML(b.Unit)}</span></span>`;
             // Build 442 (Tomas, Sep 11 live): a break can't be confirmed before it has
             // happened — Taken / Not Taken stay inert until the slot's time arrives.
             const _notYet = !isPast; const _gate = _notYet ? ' disabled title="' + fmt12(slot) + " hasn't happened yet\"" : '';
@@ -19827,14 +19812,14 @@ function _renderBNConfirmBody(wrap, list, scheds, allBookings, notifyState, dt, 
     wrap.style.display = 'block';
     _prodLogUpdateHeader();
   } catch(e) {
-    list.innerHTML = `<div class="empty" style="color:var(--red)">${(e && e.message) || e || 'unknown error'}</div>`;
+    list.innerHTML = `<div class="empty" style="color:var(--red)">${escHTML(String((e && e.message) || e || 'unknown error'))}</div>`;
     wrap.style.display = 'block';
   }
 }
 
 async function cancelStaffBooking(id, nurseName, slotTime){
   const confirmed = await customConfirm(
-    `Cancel ${formatNurse(nurseName)}'s break at ${fmt12(slotTime)}? The slot will reopen for others to claim.`,
+    `Cancel ${bareName(nurseName)}'s break at ${fmt12(slotTime)}? The slot will reopen for others to claim.`, // Build 665: bare — the modal escapes
     'Cancel their break',
     'Keep it'
   );
@@ -19853,7 +19838,7 @@ async function cancelStaffBooking(id, nurseName, slotTime){
   }
   trackDelete(id);
   _renderBNConfirm();
-  toast(`${formatNurse(nurseName)}'s ${fmt12(slotTime)} break cancelled — slot is now open`);
+  toast(`${bareName(nurseName)}'s ${fmt12(slotTime)} break cancelled — slot is now open`); // Build 665: a toast is text (& showed as &amp;)
   // Network in background; non-cache surfaces refresh after it lands
   spDel(LISTS.bookings, id)
     .then(() => {
@@ -20056,7 +20041,7 @@ async function handOffClaim(id){
     const target = await new Promise(resolve => {
       const modal = document.getElementById('customConfirmModal'), msgEl = document.getElementById('customConfirmMsg'), okBtn = document.getElementById('customConfirmOk'), cancelBtn = document.getElementById('customConfirmCancel');
       msgEl.innerHTML = `<div style="font-weight:700;margin-bottom:6px">Hand off ${formatNurse(b.NurseName)} · ${b.Unit} · ${run.map(x => fmt12(x.SlotTime)).join(' + ')}${run.length > 1 ? ` · ${run.length} slots` : ''}</div>${stays.length ? `<div style="font-size:.82rem;color:var(--muted);margin-bottom:6px">${stays.map(x => fmt12(x.SlotTime)).join(' + ')} already came around and stays with you.</div>` : ''}<div style="font-size:.85rem;color:var(--muted);margin-bottom:10px">Who gives this break instead of you?</div>`
-        + `<select id="handOffSel" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem">${elig.map(bn => `<option value="${bn}">${bnDisplayName(bn)}</option>`).join('')}</select>`;
+        + `<select id="handOffSel" style="width:100%;padding:10px;border:1px solid var(--border);border-radius:8px;font-size:.95rem">${elig.map(bn => `<option value="${escHTML(bn)}">${escHTML(bnDisplayName(bn))}</option>`).join('')}</select>`;
       okBtn.textContent = 'Hand off'; cancelBtn.textContent = 'Keep it';
       const done = v => { modal.style.display = 'none'; okBtn.onclick = null; cancelBtn.onclick = null; resolve(v); };
       okBtn.onclick = () => done(document.getElementById('handOffSel').value); cancelBtn.onclick = () => done(null);
@@ -20127,56 +20112,8 @@ function undoBreakStatus(id){
 // Surfaces BN identity, covered units, and the cached bookings (with
 // their CreatedBy attribution) in a screenshotable modal. The Copy
 // button puts the text on the clipboard for pasting into chat.
-function showDebugDiag(){
-  const cache = _bnConfirmCache;
-  const myUnits = [];
-  (cache?.scheds || []).forEach(s => {
-    try { JSON.parse(s.Units || '[]').forEach(u => { if(!myUnits.includes(u)) myUnits.push(u); }); } catch {}
-  });
-  const visible = (cache?.allBookings || [])
-    .filter(b => !isBNBreak(b))
-    .map(b => ({
-      nurse: b.NurseName,
-      unit: b.Unit,
-      slot: b.SlotTime,
-      createdBy: b.CreatedBy || '(empty)',
-      status: b.BreakStatus || '(pending)'
-    }));
-  const responsibleUnits = new Set(myUnits);
-  const visibleToMe = visible.filter(b => {
-    const fauxB = { Unit: b.unit, CreatedBy: b.createdBy === '(empty)' ? null : b.createdBy, IsBNBreak: 0 };
-    return bnOwns(fauxB, responsibleUnits, BNS.name);
-  });
-
-  const report = {
-    build: APP_VERSION,
-    BN: BNS.name || '(not set)',
-    date: BNS.date || '(not set)',
-    shift: BNS.shift || '(not set)',
-    units: myUnits,
-    cachedBookings: visible.length,
-    visibleToMe: visibleToMe.length,
-    // Build 103: include the dateTrace ring buffer so date-jump bugs can be
-    // captured without console access. Empty array if no traces have fired.
-    dateTrace: _dateTraceLog.slice(),
-    bookings: visible
-  };
-  const text = JSON.stringify(report, null, 2);
-
-  const wrap = document.createElement('div');
-  wrap.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px';
-  wrap.innerHTML = `
-    <div style="background:var(--card);border-radius:12px;padding:16px;max-width:600px;width:100%;max-height:90vh;display:flex;flex-direction:column;gap:10px">
-      <div style="font-size:.85rem;font-weight:600;color:var(--text)">Debug Snapshot</div>
-      <pre id="debugDiagText" style="background:var(--bg);padding:10px;border-radius:8px;font-size:.7rem;line-height:1.4;overflow:auto;flex:1;color:var(--text);white-space:pre-wrap;word-break:break-all">${escHTML(text)}</pre>
-      <div style="display:flex;gap:8px;justify-content:flex-end">
-        <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard?.writeText(document.getElementById('debugDiagText').textContent).then(()=>toast('Copied')).catch(()=>toast('Copy failed — screenshot instead',true))">Copy</button>
-        <button class="btn btn-primary btn-sm" onclick="this.closest('div[style*=fixed]').remove()">Close</button>
-      </div>
-    </div>`;
-  document.body.appendChild(wrap);
-}
-
+// Build 664: the 🔍 Debug button and its snapshot modal (Build 103) are gone — a development aid shipped to every break nurse
+// (the 5.2 review). Diagnostics run from the console (rotation_read.js and friends) on the laptop.
 function dismissNotifications(ids, dismissKey){
   const dismissed = new Set(JSON.parse(localStorage.getItem(dismissKey) || '[]'));
   ids.forEach(id => dismissed.add(id));
@@ -21458,7 +21395,7 @@ async function loadReports(){
 
   } catch(e){
     const isTimeout = /timeout/i.test(e.message || '');
-    status.innerHTML = `<div class="empty" style="color:var(--red)">${isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : e.message}<br><br>
+    status.innerHTML = `<div class="empty" style="color:var(--red)">${isTimeout ? '⏱ Request timed out — Google Sheets may be slow. Try again.' : escHTML(String(e.message))}<br><br>
       <button class="btn btn-ghost btn-sm" onclick="loadReports()">↺ Try again</button></div>`;
   }
 }
@@ -22111,7 +22048,7 @@ async function _populateNurseDropdownCore(){
   if (combined.length || others.length) {
     let html = '<option value="">— Select break nurse —</option>';
     if(combined.length){
-      html += combined.map(n => `<option value="${n}">${firstName(n)}</option>`).join('');
+      html += combined.map(n => `<option value="${escHTML(n)}">${escHTML(firstName(n))}</option>`).join('');
     }
     if(others.length){
       // Optgroup separates the two lists visually. Label varies based on
@@ -22119,7 +22056,7 @@ async function _populateNurseDropdownCore(){
       // ARE the full roster.
       const groupLabel = combined.length ? '— Other Break Nurses —' : '— All Break Nurses —';
       html += `<optgroup label="${groupLabel}">` +
-              others.map(n => `<option value="${n}">${firstName(n)}</option>`).join('') +
+              others.map(n => `<option value="${escHTML(n)}">${escHTML(firstName(n))}</option>`).join('') +
               `</optgroup>`;
     }
     sel.innerHTML = html;
@@ -22218,7 +22155,7 @@ function _wgRenderStack(){
     const _dev = _wgDevMapFor(data.rows || []); // Build 553
     const cell = (n, d) => { const c = data.cells[`${n}|${d}`]; const isNoc = c && c.shift === 'Noc'; const isPart = c && c.startTime && Number(c.hours) > 0 && Number(c.hours) < 12;
       const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1'; const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825'; const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-      return `<button type="button" onclick="wgGoWeek('${wk}','${n.replace(/'/g, "\\'")}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}${(c && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}${(c && data.dups && data.dups.has(`${n}|${d}`)) ? _wgDupBadge() : ''}</button>`; };
+      return `<button type="button" onclick="wgGoWeek('${wk}','${escJS(n)}','${d}')" title="Edit the week of ${Number(wk.slice(5, 7))}/${Number(wk.slice(8, 10))}" style="width:100%;min-height:46px;border:1.5px solid ${bd};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative;opacity:${c && c.inactive ? '.5' : '.9'}">${_wgCellHtml(c, d)}${(c && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}${(c && data.dups && data.dups.has(`${n}|${d}`)) ? _wgDupBadge() : ''}</button>`; };
     const formerNames = _wgFilter.size ? [] : [...new Set(Object.keys(data.former || {}).map(k => k.split('|')[0]))].sort((a, b) => bnDisplayName(a).localeCompare(bnDisplayName(b)));
     const fcell = (n, d) => { const c = (data.former || {})[`${n}|${d}`]; return c ? `<div style="min-height:46px;display:flex;align-items:center;justify-content:center;text-align:center;border:1.5px solid var(--border);border-radius:10px;background:var(--bg);color:var(--muted);font-size:.78rem;font-weight:600;padding:5px 4px;line-height:1.25;opacity:.8"><div>${_wgCellHtml(c, d)}</div></div>` : '<div></div>'; };
     return head + `<div style="overflow-x:auto"><div style="display:grid;grid-template-columns:minmax(88px,1.2fr) repeat(7,minmax(74px,1fr));gap:6px;align-items:center;min-width:640px">`
@@ -22234,7 +22171,7 @@ function wgClearFilter(){ _wgFilter.clear(); _wgSaveFilter(); wgRender(); _wgRen
 function _wgRenderFilter(names){
   const row = document.getElementById('wgFilter'); if(!row) return;
   const valid = new Set(names); [..._wgFilter].forEach(n => { if(!valid.has(n)) _wgFilter.delete(n); });
-  const pills = names.map(n => `<button type="button" class="bn-pill${_wgFilter.has(n) ? ' active' : ''}" onclick="wgToggleFilter('${n.replace(/'/g, "\\'")}')">${escHTML(bnDisplayName(n))}</button>`).join('');
+  const pills = names.map(n => `<button type="button" class="bn-pill${_wgFilter.has(n) ? ' active' : ''}" onclick="wgToggleFilter('${escJS(n)}')">${escHTML(bnDisplayName(n))}</button>`).join('');
   row.innerHTML = `<span style="font-size:.74rem;color:var(--muted);font-weight:600;letter-spacing:.04em;text-transform:uppercase;margin-right:2px">Filter:</span>${pills}${_wgFilter.size ? '<button type="button" class="bn-pill" onclick="wgClearFilter()" style="font-style:italic">Clear</button>' : ''}`;
 }
 let _wgBaseState = 'loading'; // 'loading' | 'ok' | 'failed'
@@ -22574,7 +22511,7 @@ function wgRender(){
     const bg = !c ? 'var(--bg)' : isPart ? '#fff3e0' : isNoc ? '#e8eaf6' : '#fff8e1';
     const bd = !c ? 'var(--border)' : isPart ? '#fb8c00' : isNoc ? '#5c6bc0' : '#f9a825';
     const fg = !c ? 'var(--muted)' : isPart ? '#bf360c' : isNoc ? '#283593' : '#8a5a00';
-    const esc = n.replace(/'/g, "\\'");
+    const esc = escJS(n); // Build 665
     return `<button type="button" onclick="wgTap('${esc}','${d}')" style="width:100%;min-height:46px;border:${ed ? `2px dashed ${c ? bd : '#e6a23c'}` : `1.5px solid ${bd}`};border-radius:10px;background:${bg};color:${fg};font-size:.78rem;font-weight:600;cursor:pointer;padding:5px 4px;line-height:1.25;position:relative${c && c.inactive ? ';opacity:.55' : ''}">${_wgCellHtml(c, d)}${(c && !ed && !c.orientation && !c.inactive && !isPart) ? _wgDevBadge(_dev[`${d}|${c.shift}`], n) : ''}${(c && _wgDups.has(`${n}|${d}`)) ? _wgDupBadge() : ''}</button>`; // 551: out cells dim; 553: ⚖; 556: ⚠2
   };
   // Build 490: saved shifts of nurses no longer on the roster — plain boxes, no handlers
@@ -22846,10 +22783,10 @@ function renderImportedNamesList(){
   }
   el.innerHTML = importedNames.map(n => {
     const pref = PREFERRED_NAMES[n] || '';
-    const esc = n.replace(/'/g,"\\'");
+    const esc = escJS(n); // Build 665
     return `<div class="roster-row" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-      <span style="font-weight:500;flex:1;min-width:140px">${n}</span>
-      <input type="text" value="${pref}" placeholder="Preferred name" autocomplete="off"
+      <span style="font-weight:500;flex:1;min-width:140px">${escHTML(n)}</span>
+      <input type="text" value="${escHTML(pref)}" placeholder="Preferred name" autocomplete="off"
         onblur="setPreferredName('${esc}', this.value); renderImportedNamesList();"
         style="padding:6px 8px;font-size:.85rem;width:130px"/>
       <span class="toggle" title="Default shift — what a tap on the Manual Schedule grid gives this nurse" style="font-size:.78rem">
