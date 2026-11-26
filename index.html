@@ -2333,7 +2333,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-24-665'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-25-667'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -4151,10 +4151,10 @@ async function _tick3CSignupFlag(){
 // straddling ones); every later shift is re-dealt whole by commitUnitChange's redealFutureShifts, so touching it here
 // was double work (the 6A reopen: 38 requests; the 3C flip: 319).
 const _shiftStartedBy = (s, ms) => ms == null || (+slotDateTime(String(s.ShiftDate).slice(0, 10), s.ShiftType === 'Day' ? '0800' : '2000', s.ShiftType) <= ms);
-async function recompute3CAffectedRotations(onlyThroughMs = null){
+async function recompute3CAffectedRotations(onlyThroughMs = null, schedRowsP = null){
   try {
     const t = activeShiftFloor();
-    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    const scheds = await (schedRowsP || spGet(LISTS.schedule, `ShiftDate ge '${t}'`)); // Build 666: shared read
     const active = scheds.filter(s => {
       if(s.Status === 'inactive') return false;
       if(!_shiftStartedBy(s, onlyThroughMs)) return false; // Build 625
@@ -4164,7 +4164,7 @@ async function recompute3CAffectedRotations(onlyThroughMs = null){
     await Promise.all(active.map(s =>
       recomputeBNWithPastPreserved(s.BreakNurseName, s.ShiftDate.slice(0,10), s.ShiftType)
     ));
-  } catch(e){ /* silent */ }
+  } catch(e){ throw e; } // Build 666: the caller names a failed read (was silent)
 }
 
 // ── Mid-shift-safe recompute wrapper ──────────────────────
@@ -4264,13 +4264,15 @@ async function recomputeUnitAffectedRotations(unit, onlyThroughMs = null){
 // will display the unit-less rows with the new "all units closed" state
 // once chunk 4 wires the visual handling.
 
-async function recomputeUnitsAffectedRotations(units, onlyThroughMs = null){
+async function recomputeUnitsAffectedRotations(units, onlyThroughMs = null, schedRowsP = null){
   if(!units || !units.length) return;
   const affected = new Map(); // key = "name|date|shift" → {name, date, shift}
 
-  try {
+  // Build 666: no silent catch — a failed schedule read now reaches the caller (commitUnitChange toasts "the live
+  // shift's rotations were not rebuilt"; before, the read failed quietly and the toast could never fire).
+  {
     const t = activeShiftFloor();
-    const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${t}'`);
+    const scheds = await (schedRowsP || spGet(LISTS.schedule, `ShiftDate ge '${t}'`)); // Build 666: shared read
     for(const s of scheds){
       if(s.Status === 'inactive') continue;
       if(!_shiftStartedBy(s, onlyThroughMs)) continue; // Build 625
@@ -4296,7 +4298,7 @@ async function recomputeUnitsAffectedRotations(units, onlyThroughMs = null){
     await Promise.all([...affected.values()].map(({ name, date, shift }) =>
       recomputeBNWithPastPreserved(name, date, shift)
     ));
-  } catch(e){ /* silent */ }
+  }
 }
 // Start ticking every 15 seconds so status transitions feel responsive
 if(typeof window !== 'undefined' && !window._3CTickStarted){
@@ -4343,9 +4345,12 @@ async function _writeUnitDefault(unit, status){
   if(unit === '3C') return set3CDefault(status);
   return setUnitStatus(unit, status);
 }
-async function _recomputeAffectedFor(unit, onlyThroughMs = null){
-  if(unit === '3C') return recompute3CAffectedRotations(onlyThroughMs);
-  return recomputeUnitAffectedRotations(unit, onlyThroughMs);
+// Build 666: `schedRowsP` — an optional promise of the open-ended schedule read (`ShiftDate ge activeShiftFloor()`), so a
+// caller that also needs those rows (commitUnitChange's reopen picker) reads once; the two consumers issued the same read
+// back to back on every live reopen (the cascade timer's two identical get:BNSchedule).
+async function _recomputeAffectedFor(unit, onlyThroughMs = null, schedRowsP = null){
+  if(unit === '3C') return recompute3CAffectedRotations(onlyThroughMs, schedRowsP);
+  return recomputeUnitsAffectedRotations([unit], onlyThroughMs, schedRowsP);
 }
 function _peekNextScheduledForUnit(unit, fromDate){
   if(unit === '3C') return nextScheduled3CChange(fromDate);
@@ -4949,7 +4954,10 @@ async function commitUnitChange(){
       // chunk-5 bug fix now correctly catches C_PAIR for 4C as well).
       // Both internally use recomputeBNWithPastPreserved so mid-shift
       // opens add slots to future rotation only, preserving past history.
-      _recomputeAffectedFor(unit, pending.effectiveAt.getTime()).catch(e => { console.warn('[commitUnitChange] live-shift rotation rebuild failed:', e && e.message); try { toast(`${unit} is open, but the live shift's rotations were not rebuilt (${(e && e.message) || e}) — ↺ Recalculate rotations (grid footer)`, true); } catch(_){} }); // Build 625: the in-progress shift only — the future is re-dealt below; Build 655: a failure is named
+      const _isNow666 = (pending.effectiveAt.getTime() - Date.now()) < 60*1000; // (isNow is declared further down)
+      const _schedRows666 = _isNow666 ? spGet(LISTS.schedule, `ShiftDate ge '${activeShiftFloor()}'`) : null; // Build 666: one read for the rebuild AND the reopen picker
+      if(_schedRows666) _schedRows666.catch(() => {}); // each consumer handles its own failure; no unhandled rejection
+      _recomputeAffectedFor(unit, pending.effectiveAt.getTime(), _schedRows666).catch(e => { console.warn('[commitUnitChange] live-shift rotation rebuild failed:', e && e.message); try { toast(`${unit} is open, but the live shift's rotations were not rebuilt (${(e && e.message) || e}) — ↺ Recalculate rotations (grid footer)`, true); } catch(_){} }); // Build 625: the in-progress shift only — the future is re-dealt below; Build 655: a failure is named
 
       // Build 107 (2026-05-25): revert any substitutions that were applied
       // when this unit was previously closed. Walks the substitution log
@@ -5049,7 +5057,7 @@ async function commitUnitChange(){
       // reopens and fills the case where the unit was closed before the shift
       // was dealt (nobody held it → no swap). Scheduled reopens skip this.
       if(isNow){
-        await promptReopenCoverage(unit, pending.effectiveAt, _reopenSubContext);
+        await promptReopenCoverage(unit, pending.effectiveAt, _reopenSubContext, _schedRows666);
       }
 
       // 2b: re-deal every fully-future shift so the reopened unit is folded
@@ -5195,7 +5203,7 @@ async function promptReassignBN(impact){
 // Switch-back/Keep modal (confirmSubstituteRevert) for live reopens and fills
 // the no-substitute case. Scheduled reopens are not routed here — their future
 // shifts are re-dealt by redealFutureShifts.
-async function promptReopenCoverage(unit, reopenAt, subContext){
+async function promptReopenCoverage(unit, reopenAt, subContext, schedRowsP = null){
   // Build 184: 3C/4C/C_PAIR are dealt as a pair by the engine and stored whole
   // in a nurse's Units, filtered to the open halves at render time. Reopening
   // either half never strands coverage — whoever holds the pair already carries
@@ -5212,7 +5220,12 @@ async function promptReopenCoverage(unit, reopenAt, subContext){
   if(unit === 'C_PAIR') return;
   const _pairOther = unit === '3C' ? '4C' : (unit === '4C' ? '3C' : null);
   const floor = activeShiftFloor();
-  const scheds = await spGet(LISTS.schedule, `ShiftDate ge '${floor}'`).catch(() => []);
+  let scheds;
+  try { scheds = await (schedRowsP || spGet(LISTS.schedule, `ShiftDate ge '${floor}'`)); } // Build 666: shared read
+  catch(e){ // Build 666: was [] → "nobody to offer" and the reopen went on uncovered, silently
+    toast(`Couldn't read the schedule (${(e && e.message) || 'network error'}) — no one was offered ${unit}. Assign it from the Schedule tab.`, true);
+    return;
+  }
   const core = scheds.filter(s =>
     s.Status !== 'inactive' && String(s.IsSupplemental) !== '1' &&
     (s.ShiftType === 'Day' || s.ShiftType === 'Noc'));
@@ -7271,17 +7284,34 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
     return [...units.slice(startIdx), ...units.slice(0, startIdx)];
   }
 
-  // Prime interleaves in 4-slot blocks; the edge tiers are each a single block.
-  // 2026-06-14 (Variant B): Late uses Prime's offset (1), NOT (2). That starts
-  // Late on the unit Prime OPENED with — always different from the unit Prime
-  // CLOSES on (a 6-block rotation over 2/3/4 units never opens and closes on the
-  // same unit). Prevents the Late block from chaining onto the final Prime block
-  // (the ~3h end-of-shift run that offset-2 produced on 2- and 4-unit shifts), and
-  // on 2-unit splits the two edge blocks across both units (one edge each).
+  // Prime interleaves in 4-slot blocks; Early is a single block.
+  // 2026-06-14 (Variant B) keyed Late to Prime's OPENER, reasoning that Prime is 24 slots = 6 blocks and a 6-block
+  // rotation never closes on its opener, so Late could never chain onto Prime's last block. That held only for the
+  // no-break pool: the BN's own breaks are removed from Prime first, and four :15 breaks make it 20 slots = 5 blocks,
+  // which DOES close on the opener — Late chained onto it (Ashley, Nov 24: 1635–1955 7A ×8) and the opener also took
+  // the odd block (5A 12 / 7A 16).
+  // Build 667 (Tomas, Nov 25 — "the Late fix"): Late goes to the LIGHTEST unit (fewest slots dealt so far), a tie going
+  // against the unit Prime closed on — so it never chains — and it is dealt in two pieces split at the shift-change
+  // gap (Day 1835/1855, Noc 0635/0655), the second piece to the lightest unit at that point, a tie going against the
+  // first piece's unit. Ashley becomes 13/15 with no run longer than a block; a three-unit day goes 12/10/11 where
+  // Variant B gave 12/13/8. Early and Prime are unchanged. Existing future rotations keep their layout until something
+  // recomputes them (Re-deal upcoming, ↺ Recalculate rotations, a unit change).
   assignPool(tierPools.earlyLow, poolOrder(0), tierPools.earlyLow.length || 1);
   assignPool(tierPools.prime,    poolOrder(1), PRIME_BLOCK);
-  assignPool(tierPools.lateLow,  poolOrder(1), tierPools.lateLow.length || 1);
-  assignPool(tierPools.thirdLow, poolOrder(3), tierPools.thirdLow.length || 1);
+  {
+    const late = tierPools.lateLow;
+    if(late.length){
+      const counts = () => { const c = {}; units.forEach(u => { c[u] = 0; }); Object.values(rotation).forEach(u => { if(c[u] !== undefined) c[u]++; }); return c; };
+      const lightest = (avoid) => { const c = counts(); return units.slice().sort((a, b) => c[a] - c[b] || (a === avoid) - (b === avoid) || units.indexOf(a) - units.indexOf(b))[0]; };
+      const primeCloser = tierPools.prime.length ? rotation[tierPools.prime[tierPools.prime.length - 1]] : null;
+      let cut = late.length;
+      for(let i = 1; i < late.length; i++){ if(sortKey(late[i], shift) - sortKey(late[i - 1], shift) > SLOT_IV){ cut = i; break; } }
+      const u1 = lightest(primeCloser);
+      late.slice(0, cut).forEach(s => { rotation[s] = u1; });
+      if(cut < late.length){ const u2 = lightest(u1); late.slice(cut).forEach(s => { rotation[s] = u2; }); }
+    }
+  }
+  assignPool(tierPools.thirdLow, poolOrder(3), tierPools.thirdLow.length || 1); // retired tier, always empty
 
   return rotation;
 }
