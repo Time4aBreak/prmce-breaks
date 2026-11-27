@@ -1603,19 +1603,26 @@ async function saveAcuityCfg(btn){
 // weekday rule that exists is the morning huddle, so it is ONE checkbox per shift ("Weekday 7:55 AM huddle"), shown when
 // 7:55 AM is in that shift's list; it writes `weekdayBlocked: ['0755']` or `[]`. The config shape, `_hardBlockedFor`, the
 // dealer and Sign Up are unchanged. The summary line is the cheap preview: tier sizes and how Prime divides into blocks.
-const _SLOT_GRID_FIRST = { Day: ['0615','0635','0655','0715','0735','0755','0815','0835','0855','0915','0935'], Noc: ['1815','1835','1855','1915','1935','1955','2015','2035','2055','2115','2135'] };
+// Build 671 (Tomas, Nov 27 1:09 AM): BNs start at 08:00 / 20:00, so the first slot is 08:15 / 20:15 or later; Early ends by
+// 09:35 / 21:35; Prime ends 16:55 / 04:55 or later; the huddle is Noc-only (07:55 on the chosen mornings).
+const _SLOT_GRID_FIRST = { Day: ['0815','0835','0855','0915','0935'], Noc: ['2015','2035','2055','2115','2135'] };
+const _SLOT_EARLY_MAX = { Day: '0935', Noc: '2135' }, _SLOT_PRIME_MIN = { Day: '1655', Noc: '0455' };
+const _DAY_ABBR = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'], _DAY_NAME = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+function _huddleDaysText(days){ const d = [...new Set(days)].sort(); return d.join() === '1,2,3,4,5' ? 'Mon–Fri' : d.join() === '0,1,2,3,4,5,6' ? 'every day' : d.map(n => _DAY_NAME[n]).join(', '); }
+function _slotHuddleDays(){ return [...document.querySelectorAll('#slotCfgBody .toggle-opt[data-hd].active')].map(el => Number(el.dataset.hd)).sort(); }
 function _slotsFrom(first){ const f = toMin(first); return Array.from({ length: NUM_SLOTS }, (_, i) => fromMin(f + i * SLOT_IV)); }
 function _slotCardDraft(sh){
   const body = document.getElementById('slotCfgBody'); if(!body) return null;
   const q = sel => body.querySelector(sel);
   const first = (q(`select[data-sh="${sh}"][data-k="first"]`) || {}).value, earlyEnd = (q(`select[data-sh="${sh}"][data-k="earlyEnd"]`) || {}).value, primeEnd = (q(`select[data-sh="${sh}"][data-k="primeEnd"]`) || {}).value;
   const chips = [...body.querySelectorAll(`.slotchip[data-sh="${sh}"]`)];
-  const huddle = q(`input[data-sh="${sh}"][data-k="huddle"]`); // Build 670: absent when 07:55 is not in this shift's list
-  return { first, earlyEnd, primeEnd, blocked: chips.filter(c => c.dataset.st === 'b').map(c => c.dataset.t), weekdayBlocked: huddle && huddle.checked ? ['0755'] : [] };
+  const huddleOn = sh === 'Noc' && _slotHuddleDays().length > 0; // Build 671: the day row is the control — a morning selected = the huddle rule on
+  return { first, earlyEnd, primeEnd, blocked: chips.filter(c => c.dataset.st === 'b').map(c => c.dataset.t), weekdayBlocked: huddleOn ? ['0755'] : [] };
 }
 function _slotCardDraftAll(){
   const pb = document.querySelector('#slotCfgBody .toggle-opt[data-pb].active');
-  return { Day: _slotCardDraft('Day'), Noc: _slotCardDraft('Noc'), primeBlock: pb && pb.dataset.pb === '6' ? 6 : 4 };
+  const hd = _slotHuddleDays();
+  return { Day: _slotCardDraft('Day'), Noc: _slotCardDraft('Noc'), primeBlock: pb && pb.dataset.pb === '6' ? 6 : 4, huddleDays: hd.length ? hd : _slotCfg().huddleDays.slice() };
 }
 function _slotCfgValidate(cfg){
   const errs = [], warns = [];
@@ -1637,7 +1644,7 @@ function _slotCfgValidate(cfg){
   });
   return { errs, warns };
 }
-function _slotCardSummary(sh, c, pb){
+function _slotCardSummary(sh, c, pb, days){
   const slots = _SLOT_HHMM.test(c.first || '') ? _slotsFrom(c.first) : [];
   if(!slots.includes(c.earlyEnd) || !slots.includes(c.primeEnd)) return '';
   const blockedAll = new Set([...c.blocked, ...c.weekdayBlocked]);
@@ -1645,32 +1652,34 @@ function _slotCardSummary(sh, c, pb){
   const nE = open.filter(t => sortKey(t, sh) <= sortKey(c.earlyEnd, sh)).length, nP = open.filter(t => sortKey(t, sh) > sortKey(c.earlyEnd, sh) && sortKey(t, sh) <= sortKey(c.primeEnd, sh)).length, nL = open.length - nE - nP;
   const stub = nP % pb;
   const wk = c.weekdayBlocked.filter(t => slots.includes(t)); // only slots that exist in this list
-  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wk.length ? ` · weekday huddle blocks ${wk.map(fmt12).join(', ')}` : ''}`;
+  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wk.length ? ` · huddle blocks ${wk.map(fmt12).join(', ')} ${_huddleDaysText(days || _slotCfg().huddleDays)}` : ''}`;
 }
 function initSlotCard(cfgIn){
   const body = document.getElementById('slotCfgBody'); if(!body) return;
   const cfg = cfgIn || _slotCfg();
   const sel = (sh, k, opts, val) => `<select data-sh="${sh}" data-k="${k}" onchange="_slotCardChanged('${sh}','${k}')" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">${opts.map(o => `<option value="${o}"${o === val ? ' selected' : ''}>${fmt12(o)}</option>`).join('')}</select>`;
+  // Build 671: the boundary selects are bounded (Early ends ≤ 09:35 / 21:35, Prime ends ≥ 16:55 / 04:55); a saved value outside stays listed so the card shows what is stored
+  const bounded = (sh, slots, pred, cur) => { const o = slots.filter(pred); if(slots.includes(cur) && !o.includes(cur)) o.push(cur); return o.sort((a, b) => sortKey(a, sh) - sortKey(b, sh)); };
   const shiftBlock = (sh) => {
     const c = cfg[sh], slots = _slotsFrom(c.first);
     const st = t => (c.blocked.includes(t) || (c.weekdayBlocked.includes(t) && t !== '0755')) ? 'b' : 'o'; // 670: a leftover weekday-only slot shows blocked — open it with a tap if that is what you meant
     const chip = t => { const x = st(t); return `<div class="slotchip${x === 'b' ? ' blk' : ''}" data-sh="${sh}" data-t="${t}" data-st="${x}" onclick="_slotChipTap(this)" title="${x === 'b' ? 'blocked — tap to open' : 'open — tap to block'}">${fmt12(t).replace(/ [AP]M$/, '')}</div>`; };
-    const huddle = slots.includes('0755') ? `<label style="display:flex;align-items:center;gap:6px;font-size:.82rem;margin-top:8px"><input type="checkbox" data-sh="${sh}" data-k="huddle"${c.weekdayBlocked.includes('0755') ? ' checked' : ''} onchange="_slotCardRefreshSummary()"> Weekday 7:55 AM huddle — 7:55 AM is blocked Mon–Fri${sh === 'Noc' ? ' (the morning after the shift starts)' : ''}</label>` : '';
+    const on = c.weekdayBlocked.includes('0755') ? cfg.huddleDays : []; // Build 671: the rule is on iff 07:55 is weekday-blocked; the row shows which mornings
+    const huddle = (sh === 'Noc' && slots.includes('0755')) ? `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;font-size:.82rem;margin-top:8px"><span>Huddle mornings — 7:55 AM is blocked on</span><span class="toggle" style="font-size:.78rem">${[0,1,2,3,4,5,6].map(n => `<span class="toggle-opt${on.includes(n) ? ' active' : ''}" data-hd="${n}" onclick="this.classList.toggle('active');_slotCardRefreshSummary()">${_DAY_ABBR[n]}</span>`).join('')}</span><span style="color:var(--muted)">(the morning after the shift starts; none selected = no huddle)</span></div>` : '';
     return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
       <div style="font-weight:700;margin-bottom:6px">${sh === 'Day' ? '☀️ Day' : '🌙 Noc'}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:.85rem">
         <label>First slot ${sel(sh, 'first', _SLOT_GRID_FIRST[sh], c.first)}</label>
-        <label>Early ends ${sel(sh, 'earlyEnd', slots, c.earlyEnd)}</label>
-        <label>Prime ends ${sel(sh, 'primeEnd', slots, c.primeEnd)}</label>
+        <label>Early ends ${sel(sh, 'earlyEnd', bounded(sh, slots, t => sortKey(t, sh) <= sortKey(_SLOT_EARLY_MAX[sh], sh), c.earlyEnd), c.earlyEnd)}</label>
+        <label>Prime ends ${sel(sh, 'primeEnd', bounded(sh, slots, t => sortKey(t, sh) >= sortKey(_SLOT_PRIME_MIN[sh], sh), c.primeEnd), c.primeEnd)}</label>
       </div>
       <div style="font-size:.78rem;color:var(--muted);margin:8px 0 4px">Blocked slots — tap to block or open</div>
       <div class="slotchips">${slots.map(chip).join('')}</div>${huddle}
-      <div class="slotsum" data-sh="${sh}" style="font-size:.78rem;color:var(--muted);margin-top:6px">${_slotCardSummary(sh, c, cfg.primeBlock)}</div>
+      <div class="slotsum" data-sh="${sh}" style="font-size:.78rem;color:var(--muted);margin-top:6px">${_slotCardSummary(sh, c, cfg.primeBlock, cfg.huddleDays)}</div>
     </div>`;
   };
   const pbTog = `<span class="toggle" style="font-size:.8rem"><span class="toggle-opt${cfg.primeBlock === 4 ? ' active' : ''}" data-pb="4" onclick="_slotSetPb(4)">4 slots (80 min)</span><span class="toggle-opt${cfg.primeBlock === 6 ? ' active' : ''}" data-pb="6" onclick="_slotSetPb(6)">6 slots (2 h)</span></span>`;
-  body.innerHTML = `<div style="font-size:.8rem;color:var(--muted);margin-bottom:8px">The slot list, the Early / Prime / Late windows the rotation is dealt around, and the slots staff never see. Changes apply to rotations dealt from now on — ↻ Re-deal upcoming applies them to the week.</div>
-    <div style="display:flex;align-items:center;gap:10px;font-size:.85rem"><strong>Prime blocks</strong> ${pbTog}</div>
+  body.innerHTML = `<div style="display:flex;align-items:center;gap:10px;font-size:.85rem"><strong>Prime blocks</strong> ${pbTog}</div>
     ${shiftBlock('Day')}${shiftBlock('Noc')}`;
   body.dataset.sig = JSON.stringify(cfg);
   const m = document.getElementById('slotCfgMsg'); if(m) m.style.display = 'none';
@@ -1680,13 +1689,13 @@ function _slotSetPb(n){ document.querySelectorAll('#slotCfgBody .toggle-opt[data
 function _slotCardChanged(sh, k){
   if(k === 'first'){ // the slot list moved: re-render that shift from the draft, keeping boundaries/blocks where they still exist
     const d = _slotCardDraftAll(); const c = d[sh]; const slots = _slotsFrom(c.first);
-    if(!slots.includes(c.earlyEnd)) c.earlyEnd = slots[Math.min(4, slots.length - 1)];
+    if(!slots.includes(c.earlyEnd)) c.earlyEnd = slots.filter(t => sortKey(t, sh) <= sortKey(_SLOT_EARLY_MAX[sh], sh)).pop() || slots[0]; // 671: the latest slot still inside Early's bound
     if(!slots.includes(c.primeEnd)) c.primeEnd = slots[Math.min(28, slots.length - 1)];
     initSlotCard(d); return;
   }
   _slotCardRefreshSummary();
 }
-function _slotCardRefreshSummary(){ const d = _slotCardDraftAll(); ['Day', 'Noc'].forEach(sh => { const el = document.querySelector(`#slotCfgBody .slotsum[data-sh="${sh}"]`); if(el && d[sh]) el.textContent = _slotCardSummary(sh, d[sh], d.primeBlock); }); }
+function _slotCardRefreshSummary(){ const d = _slotCardDraftAll(); ['Day', 'Noc'].forEach(sh => { const el = document.querySelector(`#slotCfgBody .slotsum[data-sh="${sh}"]`); if(el && d[sh]) el.textContent = _slotCardSummary(sh, d[sh], d.primeBlock, d.huddleDays); }); }
 function refreshSlotCardIfChanged(){
   const body = document.getElementById('slotCfgBody');
   if(!body || !body.offsetParent) return;
@@ -2413,7 +2422,8 @@ const NUM_SLOTS  = 36;
 const SLOT_DEFAULTS = Object.freeze({
   Day: { first: '0835', earlyEnd: '0935', primeEnd: '1735', blocked: ['0635', '0655', '1835', '1855', '2015'], weekdayBlocked: ['0755'] },
   Noc: { first: '2035', earlyEnd: '2135', primeEnd: '0535', blocked: ['0635', '0655', '1835', '1855', '0815'], weekdayBlocked: ['0755'] },
-  primeBlock: 4
+  primeBlock: 4,
+  huddleDays: [1, 2, 3, 4, 5] // Build 671: the mornings `weekdayBlocked` applies on (0 = Sun … 6 = Sat); was hardcoded Mon–Fri
 });
 const _SLOT_HHMM = /^([01]\d|2[0-3])[0-5]\d$/;
 let _slotCfgMemo = { raw: undefined, cfg: null }; // getSlotTier runs per slot per paint — parse the stored JSON once per change
@@ -2421,7 +2431,7 @@ function _slotCfg(){
   let rawStr = null; try { rawStr = localStorage.getItem('slotConfig'); } catch(e){}
   if(_slotCfgMemo.cfg && _slotCfgMemo.raw === rawStr) return _slotCfgMemo.cfg;
   const d = (sh) => ({ first: SLOT_DEFAULTS[sh].first, earlyEnd: SLOT_DEFAULTS[sh].earlyEnd, primeEnd: SLOT_DEFAULTS[sh].primeEnd, blocked: SLOT_DEFAULTS[sh].blocked.slice(), weekdayBlocked: SLOT_DEFAULTS[sh].weekdayBlocked.slice() });
-  const out = { Day: d('Day'), Noc: d('Noc'), primeBlock: SLOT_DEFAULTS.primeBlock };
+  const out = { Day: d('Day'), Noc: d('Noc'), primeBlock: SLOT_DEFAULTS.primeBlock, huddleDays: SLOT_DEFAULTS.huddleDays.slice() };
   _slotCfgMemo = { raw: rawStr, cfg: out };
   try {
     const c = rawStr ? JSON.parse(rawStr) : null;
@@ -2432,6 +2442,7 @@ function _slotCfg(){
       ['blocked', 'weekdayBlocked'].forEach(k => { if(Array.isArray(x[k])) out[sh][k] = x[k].map(String).filter(t => _SLOT_HHMM.test(t)); });
     });
     if(c.primeBlock === 6 || c.primeBlock === '6') out.primeBlock = 6;
+    if(Array.isArray(c.huddleDays)) out.huddleDays = [...new Set(c.huddleDays.map(Number).filter(n => Number.isInteger(n) && n >= 0 && n <= 6))].sort(); // Build 671 (an empty list = no huddle mornings)
   } catch(e){}
   return out;
 }
@@ -2511,7 +2522,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-26-670'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-27-671'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3806,10 +3817,10 @@ function _slotWeekday(shift, dateStr){
 // Build 668: blocked = the shift's always-blocked list, plus its weekday-only list on Mon–Fri (today's 07:55 huddle:
 // the break would end 08:10 with the BN late for the 08:00 huddle; for Noc the weekday is the NEXT morning's).
 function _hardBlockedFor(shift, dateStr){
-  const c = _slotCfg()[shift === 'Noc' ? 'Noc' : 'Day'];
+  const all = _slotCfg(), c = all[shift === 'Noc' ? 'Noc' : 'Day'];
   const dow = _slotWeekday(shift, dateStr);
-  const isWeekday = dow >= 1 && dow <= 5;
-  return isWeekday ? [...c.blocked, ...c.weekdayBlocked] : [...c.blocked];
+  const huddle = all.huddleDays.includes(dow); // Build 671: the huddle mornings are a setting (default Mon–Fri)
+  return huddle ? [...c.blocked, ...c.weekdayBlocked] : [...c.blocked];
 }
 function getDayHardBlocked(dateStr){ return _hardBlockedFor('Day', dateStr); }
 function getNocHardBlocked(dateStr){ return _hardBlockedFor('Noc', dateStr); }
