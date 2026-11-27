@@ -175,7 +175,6 @@ body{overflow-x:hidden} /* Build 537: nothing may widen the page past the screen
 .slotchips{display:grid;grid-template-columns:repeat(auto-fill,minmax(52px,1fr));gap:4px}
 .slotchip{padding:5px 2px;border-radius:6px;border:1.5px solid var(--border);background:var(--bg);text-align:center;font-family:'DM Mono',monospace;font-size:.72rem;cursor:pointer;user-select:none}
 .slotchip.blk{background:#e5e7eb;border-color:#9ca3af;color:#6b7280;text-decoration:line-through}
-.slotchip.wk{background:#fef3c7;border-color:#f59e0b;color:#92400e}
 
 /* ── States ── */
 .empty{text-align:center;padding:30px 20px;color:var(--muted);font-size:.875rem;line-height:1.6}
@@ -1599,8 +1598,11 @@ async function saveAcuityCfg(btn){
 
 // ── Slot Windows card (Build 668) ──────────────────────────────────────────────────────────────────────────────
 // Edits live in the DOM (data-* on the controls) until Save; `_slotCardDraft(sh)` reads them back. The chip row shows
-// the 36 slots that follow from the chosen first slot; a tap cycles open → blocked → weekdays-only → open. The summary
-// line is the cheap preview: tier sizes and how Prime divides into blocks (a stub is named).
+// the 36 slots that follow from the chosen first slot; a tap toggles open ↔ blocked. Build 670 (Tomas, Nov 26 11:55 PM,
+// after his unblock tap landed on the amber middle stop: "let's simplify"): the three-state chip is gone — the only
+// weekday rule that exists is the morning huddle, so it is ONE checkbox per shift ("Weekday 7:55 AM huddle"), shown when
+// 7:55 AM is in that shift's list; it writes `weekdayBlocked: ['0755']` or `[]`. The config shape, `_hardBlockedFor`, the
+// dealer and Sign Up are unchanged. The summary line is the cheap preview: tier sizes and how Prime divides into blocks.
 const _SLOT_GRID_FIRST = { Day: ['0615','0635','0655','0715','0735','0755','0815','0835','0855','0915','0935'], Noc: ['1815','1835','1855','1915','1935','1955','2015','2035','2055','2115','2135'] };
 function _slotsFrom(first){ const f = toMin(first); return Array.from({ length: NUM_SLOTS }, (_, i) => fromMin(f + i * SLOT_IV)); }
 function _slotCardDraft(sh){
@@ -1608,7 +1610,8 @@ function _slotCardDraft(sh){
   const q = sel => body.querySelector(sel);
   const first = (q(`select[data-sh="${sh}"][data-k="first"]`) || {}).value, earlyEnd = (q(`select[data-sh="${sh}"][data-k="earlyEnd"]`) || {}).value, primeEnd = (q(`select[data-sh="${sh}"][data-k="primeEnd"]`) || {}).value;
   const chips = [...body.querySelectorAll(`.slotchip[data-sh="${sh}"]`)];
-  return { first, earlyEnd, primeEnd, blocked: chips.filter(c => c.dataset.st === 'b').map(c => c.dataset.t), weekdayBlocked: chips.filter(c => c.dataset.st === 'w').map(c => c.dataset.t) };
+  const huddle = q(`input[data-sh="${sh}"][data-k="huddle"]`); // Build 670: absent when 07:55 is not in this shift's list
+  return { first, earlyEnd, primeEnd, blocked: chips.filter(c => c.dataset.st === 'b').map(c => c.dataset.t), weekdayBlocked: huddle && huddle.checked ? ['0755'] : [] };
 }
 function _slotCardDraftAll(){
   const pb = document.querySelector('#slotCfgBody .toggle-opt[data-pb].active');
@@ -1642,7 +1645,7 @@ function _slotCardSummary(sh, c, pb){
   const nE = open.filter(t => sortKey(t, sh) <= sortKey(c.earlyEnd, sh)).length, nP = open.filter(t => sortKey(t, sh) > sortKey(c.earlyEnd, sh) && sortKey(t, sh) <= sortKey(c.primeEnd, sh)).length, nL = open.length - nE - nP;
   const stub = nP % pb;
   const wk = c.weekdayBlocked.filter(t => slots.includes(t)); // only slots that exist in this list
-  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wk.length ? ` · weekdays also block ${wk.map(fmt12).join(', ')}` : ''}`;
+  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wk.length ? ` · weekday huddle blocks ${wk.map(fmt12).join(', ')}` : ''}`;
 }
 function initSlotCard(cfgIn){
   const body = document.getElementById('slotCfgBody'); if(!body) return;
@@ -1650,8 +1653,9 @@ function initSlotCard(cfgIn){
   const sel = (sh, k, opts, val) => `<select data-sh="${sh}" data-k="${k}" onchange="_slotCardChanged('${sh}','${k}')" style="padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:.85rem">${opts.map(o => `<option value="${o}"${o === val ? ' selected' : ''}>${fmt12(o)}</option>`).join('')}</select>`;
   const shiftBlock = (sh) => {
     const c = cfg[sh], slots = _slotsFrom(c.first);
-    const st = t => c.blocked.includes(t) ? 'b' : (c.weekdayBlocked.includes(t) ? 'w' : 'o');
-    const chip = t => { const x = st(t); return `<div class="slotchip${x === 'b' ? ' blk' : x === 'w' ? ' wk' : ''}" data-sh="${sh}" data-t="${t}" data-st="${x}" onclick="_slotChipTap(this)" title="${x === 'b' ? 'blocked — tap for weekdays only' : x === 'w' ? 'blocked on weekdays — tap to open' : 'open — tap to block'}">${fmt12(t).replace(/ [AP]M$/, '')}</div>`; };
+    const st = t => (c.blocked.includes(t) || (c.weekdayBlocked.includes(t) && t !== '0755')) ? 'b' : 'o'; // 670: a leftover weekday-only slot shows blocked — open it with a tap if that is what you meant
+    const chip = t => { const x = st(t); return `<div class="slotchip${x === 'b' ? ' blk' : ''}" data-sh="${sh}" data-t="${t}" data-st="${x}" onclick="_slotChipTap(this)" title="${x === 'b' ? 'blocked — tap to open' : 'open — tap to block'}">${fmt12(t).replace(/ [AP]M$/, '')}</div>`; };
+    const huddle = slots.includes('0755') ? `<label style="display:flex;align-items:center;gap:6px;font-size:.82rem;margin-top:8px"><input type="checkbox" data-sh="${sh}" data-k="huddle"${c.weekdayBlocked.includes('0755') ? ' checked' : ''} onchange="_slotCardRefreshSummary()"> Weekday 7:55 AM huddle — 7:55 AM is blocked Mon–Fri${sh === 'Noc' ? ' (the morning after the shift starts)' : ''}</label>` : '';
     return `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
       <div style="font-weight:700;margin-bottom:6px">${sh === 'Day' ? '☀️ Day' : '🌙 Noc'}</div>
       <div style="display:flex;flex-wrap:wrap;gap:8px 16px;align-items:center;font-size:.85rem">
@@ -1659,8 +1663,8 @@ function initSlotCard(cfgIn){
         <label>Early ends ${sel(sh, 'earlyEnd', slots, c.earlyEnd)}</label>
         <label>Prime ends ${sel(sh, 'primeEnd', slots, c.primeEnd)}</label>
       </div>
-      <div style="font-size:.78rem;color:var(--muted);margin:8px 0 4px">Blocked slots — tap: open → blocked → weekdays only</div>
-      <div class="slotchips">${slots.map(chip).join('')}</div>
+      <div style="font-size:.78rem;color:var(--muted);margin:8px 0 4px">Blocked slots — tap to block or open</div>
+      <div class="slotchips">${slots.map(chip).join('')}</div>${huddle}
       <div class="slotsum" data-sh="${sh}" style="font-size:.78rem;color:var(--muted);margin-top:6px">${_slotCardSummary(sh, c, cfg.primeBlock)}</div>
     </div>`;
   };
@@ -1671,7 +1675,7 @@ function initSlotCard(cfgIn){
   body.dataset.sig = JSON.stringify(cfg);
   const m = document.getElementById('slotCfgMsg'); if(m) m.style.display = 'none';
 }
-function _slotChipTap(el){ const next = { o: 'b', b: 'w', w: 'o' }[el.dataset.st] || 'b'; el.dataset.st = next; el.classList.toggle('blk', next === 'b'); el.classList.toggle('wk', next === 'w'); el.title = next === 'b' ? 'blocked — tap for weekdays only' : next === 'w' ? 'blocked on weekdays — tap to open' : 'open — tap to block'; _slotCardRefreshSummary(); }
+function _slotChipTap(el){ const next = el.dataset.st === 'b' ? 'o' : 'b'; el.dataset.st = next; el.classList.toggle('blk', next === 'b'); el.title = next === 'b' ? 'blocked — tap to open' : 'open — tap to block'; _slotCardRefreshSummary(); }
 function _slotSetPb(n){ document.querySelectorAll('#slotCfgBody .toggle-opt[data-pb]').forEach(el => el.classList.toggle('active', Number(el.dataset.pb) === n)); _slotCardRefreshSummary(); }
 function _slotCardChanged(sh, k){
   if(k === 'first'){ // the slot list moved: re-render that shift from the draft, keeping boundaries/blocks where they still exist
@@ -2507,7 +2511,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-26-669'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-26-670'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
