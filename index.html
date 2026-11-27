@@ -1652,7 +1652,9 @@ function _slotCardSummary(sh, c, pb, days){
   const nE = open.filter(t => sortKey(t, sh) <= sortKey(c.earlyEnd, sh)).length, nP = open.filter(t => sortKey(t, sh) > sortKey(c.earlyEnd, sh) && sortKey(t, sh) <= sortKey(c.primeEnd, sh)).length, nL = open.length - nE - nP;
   const stub = nP % pb;
   const wk = c.weekdayBlocked.filter(t => slots.includes(t)); // only slots that exist in this list
-  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wk.length ? ` · huddle blocks ${wk.map(fmt12).join(', ')} ${_huddleDaysText(days || _slotCfg().huddleDays)}` : ''}`;
+  // Build 675: a huddle slot that is ALSO blocked every day (Tomas's 07:55 chip, Nov 27) — say so instead of promising a weekday rule
+  const wkEff = wk.filter(t => !c.blocked.includes(t)), wkMoot = wk.filter(t => c.blocked.includes(t));
+  return `Early ${nE} · Prime ${nP} (${Math.floor(nP / pb)} × ${pb}${stub ? ` + ${stub}` : ''}) · Late ${nL} · ${fmt12(slots[0])}–${fmt12(slots[slots.length - 1])}${wkEff.length ? ` · huddle blocks ${wkEff.map(fmt12).join(', ')} ${_huddleDaysText(days || _slotCfg().huddleDays)}` : ''}${wkMoot.length ? ` · ${wkMoot.map(fmt12).join(', ')} is blocked every day — open its chip for the huddle mornings to apply` : ''}`;
 }
 function initSlotCard(cfgIn){
   const body = document.getElementById('slotCfgBody'); if(!body) return;
@@ -2028,10 +2030,10 @@ async function applyCoverageLimitsToUpcoming(){
     // the horizon, the records in chunks of 50 (623's batched follow); a failure here is non-fatal (the next rotation
     // rebuild follows them) and is named in the toast.
     let _followed624 = 0, _followFail624 = '';
+    let _bk624 = null; const _byKey624 = {}; // Build 672: hoisted — the rotation deal below reads the same horizon
     try {
       showBusy('Applying — moving break rows to the new units…');
-      const _bk624 = await _tmo(spGet(LISTS.bookings, `SlotDate ge '${t}'`), 60000, 'reading the break rows');
-      const _byKey624 = {};
+      _bk624 = await _tmo(spGet(LISTS.bookings, `SlotDate ge '${t}'`), 60000, 'reading the break rows');
       _bk624.forEach(b => { if(!isBNBreak(b)) return; const k = `${b.NurseName}|${String(b.SlotDate || '').slice(0, 10)}|${b.ShiftType}`; (_byKey624[k] = _byKey624[k] || []).push(b); });
       const _recs624 = [];
       for(const c of _creates){
@@ -2047,19 +2049,44 @@ async function applyCoverageLimitsToUpcoming(){
         _followed624 = _recs624.length;
       }
     } catch(e){ _followFail624 = (e && e.message) || String(e); console.warn('[re-deal] break-row follow failed (non-fatal):', _followFail624); }
-    showBusy('Applying — retiring stale rotations…');
+    // Build 672 (Tomas, Nov 27 2:07 AM — redeal_check.js after the first 671 sweep: "NO saved rotation" on all 169 re-dealt
+    // shifts): since 329/497 the sweep RETIRED every re-dealt rotation to null and left the rebuild to "the next recalc".
+    // Until that recalc, Sign Up derived a rotation on the fly from the row (loadRotationWithFallback) WITHOUT the BN's
+    // break rows — a break slot could be offered to staff for days — and the log painted no units. Now the sweep deals
+    // and saves the rotations itself: rows-based breaks and staff pins, the same recipe as bulkSaveUnitsAndRotations and
+    // recalculateAllRotations (669), one setMany. The horizon's bookings were read above; if that read failed, the old
+    // retire runs instead so no stale rotation survives, and the toast says to run ↺ Recalculate.
+    let _rotDealt672 = 0, _rotFail672 = '';
     try {
-      // Build 497: setMany takes an ARRAY of {key, value}. Since Build 329 this passed an object map, so
-      // setMany saw no .length and returned at once — the stale rotations were never retired on the
-      // backend. Every other device kept serving the OLD units' rotation; a unit that had moved to a new
-      // nurse found no slots of its own in it, and Sign Up's filter fell open: every slot claimable.
-      if(_rotKeys.length && typeof syncedLS.setMany === 'function'){
-        await _tmo(syncedLS.setMany(_rotKeys.map(k => ({ key: k, value: null }))), 60000, 'retiring rotations');
+      const _entries672 = [];
+      if(_bk624){
+        showBusy(`Applying — dealing ${_creates.length} rotation${_creates.length === 1 ? '' : 's'}…`);
+        const _pins672 = {};
+        _bk624.forEach(b => { if(!isStaffBooking(b) || String(b.IsCancelled) === '1') return; const k = `${pinOwner(b)}|${String(b.SlotDate || '').slice(0, 10)}|${b.ShiftType}`; (_pins672[k] = _pins672[k] || []).push(b); });
+        for(const c of _creates){
+          let units = []; try { units = JSON.parse(c.Units || '[]'); } catch(e){}
+          const flt = filterClosedUnits(expandCPair(units, c.ShiftDate, c.ShiftType), c.ShiftDate, c.ShiftType);
+          const key = rotationKey(c.BreakNurseName, c.ShiftDate, c.ShiftType);
+          if(!flt.length){ _entries672.push({ key, value: null }); try { localStorage.removeItem(key); } catch(e){} continue; } // no open unit — retire, as before
+          const k = `${c.BreakNurseName}|${c.ShiftDate}|${c.ShiftType}`;
+          const brk = new Set((_byKey624[k] || []).map(b => normSlot(b.SlotTime)));
+          const dateSeed = c.ShiftDate.split('-').reduce((a, b) => a + parseInt(b), 0) + c.BreakNurseName.charCodeAt(0);
+          const rot = constrainedRotation(flt, brk, c.ShiftType, dateSeed, { bookings: _pins672[k] || [], date: c.ShiftDate });
+          const normalized = {}; Object.entries(rot).forEach(([sl, u]) => { normalized[normSlot(sl)] = u; });
+          try { localStorage.setItem(key, JSON.stringify(normalized)); } catch(e){}
+          _entries672.push({ key, value: normalized });
+        }
       }
-      // …then drop the local copies (setMany leaves the string "null" behind, which warm() reads as
-      // "already have it" and would never re-fetch — hiding a rotation another device saves later).
-      _rotKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e){} });
-    } catch(e){ console.warn('[re-deal] retiring rotations failed:', e && e.message); }
+      if(_entries672.length){
+        await _tmo(syncedLS.setMany(_entries672), 60000, 'saving the rotations');
+        _entries672.forEach(e => { if(e.value === null){ try { localStorage.removeItem(e.key); } catch(x){} } }); // setMany leaves the string "null" behind
+        _rotDealt672 = _entries672.filter(e => e.value !== null).length;
+      } else if(_rotKeys.length && typeof syncedLS.setMany === 'function'){
+        showBusy('Applying — retiring stale rotations…');
+        await _tmo(syncedLS.setMany(_rotKeys.map(k => ({ key: k, value: null }))), 60000, 'retiring rotations');
+        _rotKeys.forEach(k => { try { localStorage.removeItem(k); } catch(e){} }); // setMany leaves the string "null" behind, which warm() reads as "already have it"
+      }
+    } catch(e){ _rotFail672 = (e && e.message) || String(e); console.warn('[re-deal] dealing the rotations failed:', _rotFail672); }
     // Build 329: ONE flush for every nurse's history the sweep touched.
     try {
       if(Object.keys(_whb).length){
@@ -2071,7 +2098,7 @@ async function applyCoverageLimitsToUpcoming(){
     } catch(e){ console.warn('[re-deal] wing-history flush failed:', e && e.message); }
     clearCoverageCountsCache(); // the sweep's writes make any cache stale
     hideBusy();
-    toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}${_followed624 ? ` · ${_followed624} break row${_followed624 === 1 ? '' : 's'} moved to the new units` : ''}${_followFail624 ? ` · break rows not moved (${_followFail624}) — ↺ Recalculate rotations will` : ''}`); // Build 624
+    toast(`✓ Re-dealt ${done} upcoming shift${done === 1 ? '' : 's'} under the new limits${_rotDealt672 ? ` · ${_rotDealt672} rotation${_rotDealt672 === 1 ? '' : 's'} dealt` : ''}${_rotFail672 ? ` · rotations NOT dealt (${_rotFail672}) — run ↺ Recalculate rotations` : (!_bk624 ? ' · rotations not dealt (the bookings read failed) — run ↺ Recalculate rotations' : '')}${skipped ? ` · ${skipped} left as-is (partials or restructured)` : ''}${_followed624 ? ` · ${_followed624} break row${_followed624 === 1 ? '' : 's'} moved to the new units` : ''}${_followFail624 ? ` · break rows not moved (${_followFail624}) — ↺ Recalculate rotations will` : ''}`); // Build 624
     loadAssignments();
     try { if(_wgWeek){ _lastSchedRev = null; wgSetWeek(_wgWeek); } } catch(e){} // Build 584: the grid re-reads so the ⚖ badges reflect the new deal
   } catch(e){
@@ -2522,7 +2549,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-27-671'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-27-675'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -3793,15 +3820,8 @@ function generateSlots(shift){
 // `slotConfig` through getDayHardBlocked / getNocHardBlocked below.
 
 // Slots the BN themselves cannot take as a break (separate from staff hard-blocks)
-function getBNHardBlocked(shift){
-  // BNs can technically take a break at any staff-blocked slot except:
-  //   - 0755 weekday Noc: BN must be at huddle
-  // 0815 and 2015 are blocked for staff (no one to cover) but a BN on
-  // their own break doesn't need coverage, so those aren't BN-blocked.
-  const dow = new Date().getDay();
-  const isWeekday = dow >= 1 && dow <= 5;
-  return (shift === 'Noc' && isWeekday) ? ['0755'] : [];
-}
+// Build 675: getBNHardBlocked (the BN-side "no own break at 07:55 on a weekday") sat here with no callers since the
+// Prod Log took over own-break placement — removed rather than left looking like a rule that is enforced.
 
 // Returns the weekday (0–6) for the slot at a given shift+date. Noc post-midnight
 // slots (0000–0759) belong to the NEXT calendar day after the shift's start date.
@@ -3930,10 +3950,10 @@ function getSlotOwnerShift(slotTime, viewingShift){
 // (the retired thirdLow is folded into Late, as 05-22 did). Noc compares in shift order (sortKey rolls past midnight).
 // Defaults reproduce the old table exactly: Day Early 0835–0935 / Prime 0955–1735 / Late 1755–1955; Noc Early
 // 2035–2135 / Prime 2155–0535 / Late 0555–0755 (0815 blocked).
-function getSlotTier(slot, shift){
+function getSlotTier(slot, shift, dateStr){ // Build 673: dateStr = the shift's date, so the huddle is judged on ITS morning (absent → today's, for display-only callers)
   const sh = shift === 'Noc' ? 'Noc' : 'Day';
   const t = normSlot(slot);
-  if(_hardBlockedFor(sh).includes(t)) return 'hardBlocked';
+  if(_hardBlockedFor(sh, dateStr).includes(t)) return 'hardBlocked';
   const c = _slotCfg()[sh], k = sortKey(t, sh);
   if(k <= sortKey(c.earlyEnd, sh)) return 'earlyLow';
   if(k <= sortKey(c.primeEnd, sh)) return 'prime';
@@ -3941,8 +3961,8 @@ function getSlotTier(slot, shift){
 }
 
 // Filter out hard-blocked slots from generation
-function getAvailableSlots(shift){
-  return generateSlots(shift).filter(s => getSlotTier(s, shift) !== 'hardBlocked');
+function getAvailableSlots(shift, dateStr){ // Build 673: pass the shift's date wherever a rotation is dealt
+  return generateSlots(shift).filter(s => getSlotTier(s, shift, dateStr) !== 'hardBlocked');
 }
 
 function isPast(hhmm, shift){
@@ -7044,14 +7064,14 @@ async function applyDefaultToAll(){
       const bnBreakSet = new Set(def);
       const dateSeed = sched.ShiftDate.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
       const rotation = constrainedRotation(expandedUnits, bnBreakSet, sched.ShiftType, dateSeed, {
-        startTime: sched.StartTime, hours: sched.Hours,
+        startTime: sched.StartTime, hours: sched.Hours, date: sched.ShiftDate.slice(0,10),
         bookings: _pinsADA[`${sched.ShiftDate.slice(0,10)}|${sched.ShiftType}`] || []
       }); // Build 244: window (F9) + pins (F4)
       // Fill rotation includes break slots — used only to attribute a sensible
       // Unit on BN-break records so they interleave with rotation pattern.
       // Without this every break slot gets expandedUnits[0] (since `rotation`
       // excludes break slots), and all breaks cluster on the first unit.
-      const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(sched.ShiftType), dateSeed, sched.ShiftType);
+      const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(sched.ShiftType, sched.ShiftDate.slice(0,10)), dateSeed, sched.ShiftType, sched.ShiftDate.slice(0,10));
 
       for(const slotTime of def){
         const unit = fillRotation[slotTime] || expandedUnits[0] || units[0];
@@ -7203,7 +7223,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     // unit instead of always falling back to expandedUnits[0]. Display rotation
     // (above) is left untouched.
     const _fillDateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
-    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(shift), _fillDateSeed, shift);
+    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), getAvailableSlots(shift, date), _fillDateSeed, shift, date);
     const rows = [];
     for(const slotTime of defaultSlots){
       // Prefer saved rotation if it has a value (rare for break slots),
@@ -7236,7 +7256,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     const expandedUnits = filterClosedUnits(expandCPair(units, date, shift), date, shift);
     const bnBreakSet = new Set(defaultSlots);
     const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
-    const allSlots = getAvailableSlots(shift);
+    const allSlots = getAvailableSlots(shift, date);
     // Build 244 (closes 226's documented residual): the SEED rotation goes
     // through the constraint-aware deal — window from the row, pins from
     // this BN's live staff bookings. saveRotation below still guards past.
@@ -7248,7 +7268,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
         : await spGet(LISTS.bookings, `SlotDate ge '${date}' and SlotDate le '${date}T23' and ShiftType eq '${shift}'`)).filter(b => pinsFor(b, name));
     } catch(e){ /* degrade to unconstrained (pre-244) */ }
     const rotation = constrainedRotation(expandedUnits, bnBreakSet, shift, dateSeed,
-      { startTime: _seedRow.StartTime, hours: _seedRow.Hours, bookings: _seedPins });
+      { startTime: _seedRow.StartTime, hours: _seedRow.Hours, bookings: _seedPins, date });
     // Build 135: await so saveAssign's overlay-write that follows can
     // guarantee its BNState write lands after this one (else polling
     // refreshMany would clobber the overlay).
@@ -7260,7 +7280,7 @@ async function applyDefaultToShift(name, date, shift, defaultSlots, force=false,
     // slot's unit falls back to expandedUnits[0] (since `rotation` has no
     // entries for break slots), causing all breaks to cluster on the first
     // unit. Display still uses `rotation` (with exclusion) for unclaimed rows.
-    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), allSlots, dateSeed, shift);
+    const fillRotation = calculateBlockRotation(expandedUnits, new Set(), allSlots, dateSeed, shift, date);
 
     // Save breaks using fill rotation for own-break unit attribution
     const rows = [];
@@ -7357,12 +7377,15 @@ async function resetAllToDefault(){
 //   Algorithm change must be verified across 1-unit, 2-unit, and 3-unit
 //   BN coverage scenarios for both Day and Noc shifts.
 
-function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='Day'){
+function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='Day', dateStr){
+  // Build 673 (Tomas, Nov 27 3:28 AM "let's fix them"; found by the 672 bed): the tiers and the hard-blocked test used to be
+  // judged on TODAY's morning — a horizon dealt on a Thursday blocked 07:55 on every Noc shift, one dealt on a Saturday dealt
+  // 07:55 on huddle mornings. `dateStr` is the shift's date; every dealer path passes it (constrainedRotation opts.date).
   if(!units || !units.length) return {};
 
   // Separate slots into tiers (excluding hard-blocked and BN breaks)
   const available = allSlots.filter(s =>
-    !bnBreakSlots.has(s) && getSlotTier(s, shift) !== 'hardBlocked'
+    !bnBreakSlots.has(s) && getSlotTier(s, shift, dateStr) !== 'hardBlocked'
   );
 
   if(units.length === 1){
@@ -7376,10 +7399,10 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
 
   // Separate slots by tier — each tier pool rotated independently
   const tierPools = {
-    earlyLow: available.filter(s => getSlotTier(s, shift) === 'earlyLow'),
-    prime:    available.filter(s => getSlotTier(s, shift) === 'prime'),
-    lateLow:  available.filter(s => getSlotTier(s, shift) === 'lateLow'),
-    thirdLow: available.filter(s => getSlotTier(s, shift) === 'thirdLow')
+    earlyLow: available.filter(s => getSlotTier(s, shift, dateStr) === 'earlyLow'),
+    prime:    available.filter(s => getSlotTier(s, shift, dateStr) === 'prime'),
+    lateLow:  available.filter(s => getSlotTier(s, shift, dateStr) === 'lateLow'),
+    thirdLow: available.filter(s => getSlotTier(s, shift, dateStr) === 'thirdLow')
   };
 
   // Tier block sizes:
@@ -7489,7 +7512,7 @@ function calculateBlockRotation(units, bnBreakSlots, allSlots, dateSeed, shift='
 //            adjudicated Keep (Build 226 / the D1 2026-07-07 lesson) and
 //            must survive every recompute; skipping would silently revert it.
 function constrainedRotation(units, bnBreakSet, shift, dateSeed, opts = {}){
-  let slots = opts.allSlots || getAvailableSlots(shift);
+  let slots = opts.allSlots || getAvailableSlots(shift, opts.date); // Build 673: opts.date = the shift's date
   const hrs = Number(opts.hours || 0);
   if(opts.startTime && hrs > 0 && hrs < 12){
     const st = String(opts.startTime).replace(/[:.]/g, '').padStart(4, '0');
@@ -7497,7 +7520,7 @@ function constrainedRotation(units, bnBreakSet, shift, dateSeed, opts = {}){
     const endK = startK + Math.round(hrs * 60);
     slots = slots.filter(s => { const k = sortKey(normSlot(s), shift); return k >= startK && k < endK; });
   }
-  const rot = calculateBlockRotation(units, bnBreakSet || new Set(), slots, dateSeed, shift);
+  const rot = calculateBlockRotation(units, bnBreakSet || new Set(), slots, dateSeed, shift, opts.date);
   // Build 242: pin semantics aligned to Build 226 — ALL non-cancelled staff
   // bookings pin, including units outside current coverage (adjudicated
   // Keeps). Over-honoring is visible and benign; stranding is silent harm.
@@ -7587,7 +7610,7 @@ function loadRotationWithFallback(bnName, date, shift, schedRow, bnBreakSet){
   // window — without this, a windowed BN whose saved rotation is missing
   // would render (and OFFER, on Sign Up) full-shift coverage.
   return constrainedRotation(expandedUnits, bnBreakSet || new Set(), shift, dateSeed,
-    { startTime: schedRow.StartTime, hours: schedRow.Hours });
+    { startTime: schedRow.StartTime, hours: schedRow.Hours, date });
 }
 
 // Warm rotation cache from backend for a BN — call once at shift start.
@@ -7679,7 +7702,7 @@ function _followBreakRecords(bnName, date, shift, units, breaks, dateSeed){
   if(!units || !units.length) return [];
   const off = (breaks || []).filter(b => isBNBreak(b) && !units.includes(b.Unit) && _slotIsAhead(date, b.SlotTime, shift));
   if(!off.length) return [];
-  const fill = calculateBlockRotation(units, new Set(), getAvailableSlots(shift), dateSeed, shift);
+  const fill = calculateBlockRotation(units, new Set(), getAvailableSlots(shift, date), dateSeed, shift, date);
   return off.map(b => {
     const slot = normSlot(b.SlotTime), unit = fill[slot] || units[0];
     b.Unit = unit; // callers that read the row again this pass see the new unit
@@ -7746,7 +7769,7 @@ async function recalculateRotation(bnName, date, shift, asOf=null, preloads=null
   // overlay below, unchanged.
   const _mainRow = scheds.find(s => String(s.IsSupplemental) !== '1' && (s.Status || '') !== 'inactive') || {};
   const rotation = constrainedRotation(units, bnBreakSlots, shift, dateSeed,
-    { startTime: _mainRow.StartTime, hours: _mainRow.Hours });
+    { startTime: _mainRow.StartTime, hours: _mainRow.Hours, date });
   // Build 226: re-overlay PIN-BACKED slots after every recompute — kept or
   // transferred bookings (CreatedBy = this BN, unit deliberately outside
   // Units) must survive any repair/redeal/recompute, or the Keep/Transfer
@@ -9350,7 +9373,7 @@ async function silentRefreshSlots(){
 
     // Use getAvailableSlots (excludes hard-blocked) to match loadSlots exactly
     // Only filter by rotation if we actually have rotation slots for this unit
-    const slots = getAvailableSlots(shift).filter(s => {
+    const slots = getAvailableSlots(shift, dt).filter(s => { // Build 673: the shift's own morning
       if(isPast(s, shift)) return false;
       if(hasAnyRotation && unitRotationSlots.size > 0 && !unitRotationSlots.has(s)) return false;
       return true;
@@ -11610,7 +11633,7 @@ async function bulkSaveUnitsAndRotations(updates){
       const dateSeed = u.date.split('-').reduce((a,b) => a + parseInt(b), 0) + u.bn.charCodeAt(0);
       const _rowBS = _schedByIdBS[String(u.schedId)] || {};
       const rotation = constrainedRotation(filteredUnits, bnBreakSet, u.shift, dateSeed, {
-        startTime: _rowBS.StartTime, hours: _rowBS.Hours,
+        startTime: _rowBS.StartTime, hours: _rowBS.Hours, date: u.date,
         bookings: _pinsByKeyBS[`${u.bn}|${u.date}|${u.shift}`] || []
       }); // Build 244: window (F9) + pins (F4)
 
@@ -14901,7 +14924,7 @@ async function recalculateAllRotations(opts = {}){
       // rotation on its own. Same rows `_followBreakRows` just moved, keyed name|date|shift.
       const bnBreakSet = new Set((_breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || []).map(b => normSlot(b.SlotTime)));
       const rotation = constrainedRotation(units, bnBreakSet, s.ShiftType, dateSeed, {
-        startTime: s.StartTime, hours: s.Hours,
+        startTime: s.StartTime, hours: s.Hours, date: String(s.ShiftDate).slice(0,10),
         bookings: _pinsByKey[`${s.BreakNurseName}|${(s.ShiftDate || '').slice(0,10)}|${s.ShiftType}`] || []
       }); // Build 242: window (F9) + pins (F4)
       // Normalize slot keys to 4 digits — matches saveRotation's contract.
@@ -15444,7 +15467,7 @@ function customConfirm(msg, okLabel, cancelLabel){
 // orphaned supp row (see cleanupEmptyFrozenSupps).
 function confirmReactivation(bnName, absorberNames, shift, dt, outageStartMs){
   return new Promise(resolve => {
-    const allSlots = getAvailableSlots(shift);
+    const allSlots = getAvailableSlots(shift, dt);
     const nowMs = Date.now();
     const sortedSlots = [...allSlots].sort((a,b) => sortKey(a, shift) - sortKey(b, shift));
     // Past slots during outage (slot event time within [outageStart, now])
@@ -17116,7 +17139,7 @@ async function acceptAllAndSave(fromGate){ // Build 491: true only from the reco
         // No default — calculate rotation with empty break set
         const dateSeed = date.split('-').reduce((a,b) => a + parseInt(b), 0) + name.charCodeAt(0);
         const rotation = constrainedRotation(units, new Set(), shift, dateSeed,
-          { startTime, hours, bookings: _pinsByKey[`${name}|${date}|${shift}`] || [] }); // Build 241: window + pins
+          { startTime, hours, bookings: _pinsByKey[`${name}|${date}|${shift}`] || [], date }); // Build 241: window + pins
         const key = `bnRotation_${name}_${date}_${shift}`;
         // LS write is below in syncedLS.setMany. Just collect entries here so
         // the batch flushes in one round trip (vs N parallel set calls).
@@ -18749,6 +18772,36 @@ async function submitStagedActions(){
     toast(`${okCount} of ${total} saved. ${failCount} failed: ${errors.join('; ')}`, true);
     console.warn('Staged action failures:', errors);
   }
+  // Build 375 (rotate-around contract, Tomas Thu 8/20): a self-added or
+  // self-removed break on a NON-ACTIVE (future) shift must reach the dealer —
+  // the flush was the one break-creating path that never recomputed, so a
+  // future rotation kept dealing units onto fresh breaks. Current shifts stay
+  // pure overlay per the design contract (no reshuffle mid-shift), matching
+  // the 3826 isActive idiom exactly.
+  // Build 674 (Tomas, Nov 27 3:28 AM "let's fix them"; filed under 669): this rebuild used to run AFTER the overlay dropped,
+  // un-awaited, its error swallowed — a reload, a tab switch on the phone or a timed-out read inside its ~11 s lost it
+  // silently, and since 663 the saved rotation IS what Sign Up offers, so a lost rebuild left holes nobody could claim.
+  // Now it is the Submit's last phase, under the overlay, on the name / date / shift captured at Submit (not live BNS.*),
+  // and a failure is named: the break rows are saved either way; ↺ Recalculate rotations is the cure.
+  if(_hadBreakEdit){
+    const _isActive = (typeof shiftDate === 'function') && shiftDate(_bnShift) === _bnDate
+      && (typeof staffWindowOpen === 'function') && staffWindowOpen(_bnShift);
+    const _md674 = d => `${Number(d.slice(5, 7))}/${Number(d.slice(8, 10))}`;
+    try {
+      if(!_isActive){
+        showBusy('Rebuilding the rotation…');
+        await recalculateRotation(_bnName, _bnDate, _bnShift);
+      } else if(_removedSlots663.length){
+        // Build 663: on the current shift the freed slots are written into the saved rotation (holes only — no reshuffle)
+        showBusy('Filling the freed slots…');
+        const _rows663 = (_bnConfirmCache && _bnConfirmCache.scheds) || [];
+        const res = await fillFreedRotationSlots(_bnName, _bnDate, _bnShift, _removedSlots663, _rows663);
+        const t = _fillFreedText663(res); if(t) toast(t.trim(), !!res.error);
+      }
+    } catch(e){
+      toast(`Saved, but the rotation for ${_md674(_bnDate)} ${_bnShift} wasn't rebuilt (${(e && e.message) || 'network error'}) — Settings → ↺ Recalculate rotations fixes it.`, true);
+    }
+  }
   if(submit){
     submit.textContent = 'Submit';
     submit.disabled = false;
@@ -18760,25 +18813,6 @@ async function submitStagedActions(){
   loadBNConfirm();
   loadSummary();
   if(S.unit) loadSlots(true);
-  // Build 375 (rotate-around contract, Tomas Thu 8/20): a self-added or
-  // self-removed break on a NON-ACTIVE (future) shift must reach the dealer —
-  // the flush was the one break-creating path that never recomputed, so a
-  // future rotation kept dealing units onto fresh breaks. Current shifts stay
-  // pure overlay per the design contract (no reshuffle mid-shift), matching
-  // the 3826 isActive idiom exactly.
-  if(_hadBreakEdit){
-    const _bDt = BNS.date || today();
-    const _isActive = (typeof shiftDate === 'function') && shiftDate(BNS.shift) === _bDt
-      && (typeof staffWindowOpen === 'function') && staffWindowOpen(BNS.shift);
-    if(!_isActive) recalculateRotation(BNS.name, _bDt, BNS.shift).catch(() => {});
-    else if(_removedSlots663.length){
-      // Build 663: on the current shift the freed slots are written into the saved rotation (holes only — no reshuffle)
-      const _rows663 = (_bnConfirmCache && _bnConfirmCache.scheds) || [];
-      fillFreedRotationSlots(BNS.name, _bDt, BNS.shift, _removedSlots663, _rows663).then(res => {
-        const t = _fillFreedText663(res); if(t){ toast(t.trim(), !!res.error); loadBNConfirm(); if(S.unit) loadSlots(true); }
-      }).catch(() => {});
-    }
-  }
 }
 
 // Check queued actions against current backend state. For any queue entry
