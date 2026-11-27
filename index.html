@@ -2507,7 +2507,7 @@ const DEV_MODE = true; // Build 660 (Tomas, Nov 24 11:55 AM: "disable the passwo
 // _3CTick compares their loaded APP_VERSION to BNState; if different, a
 // non-dismissable banner appears prompting refresh. Tapping refresh
 // reloads, fetches the new HTML from GitHub Pages, and the banner clears.
-const APP_VERSION = '2026-11-26-668'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
+const APP_VERSION = '2026-11-26-669'; // date = build day (re-anchored per Tomas, Aug 9); counter stays monotonic forever
 // 159: Removed delAssign(id) — dead code (defined, never wired to any UI). It did
 //      a permanent single-shift assignment delete with AUTO-absorption via a text
 //      confirm, inconsistent with the choice-modal-everywhere direction. Tombstone
@@ -14833,9 +14833,7 @@ async function recalculateAllRotations(opts = {}){
 
   toast(`Recalculating ${active.length} rotation${active.length!==1?'s':''}...`);
 
-  // Warm BN defaults from BNState before calculating — coordinator device may not have them
-  const pairs = active.map(s => ({ name: s.BreakNurseName, shift: s.ShiftType }));
-  await warmAllBNDefaults(pairs);
+  // Build 669: the default-template warm that fed the deal is gone with it — the deal reads break ROWS (below).
 
   // Compute all rotations client-side, then batch-save to BNState in one call
   const rotationEntries = [];
@@ -14861,7 +14859,13 @@ async function recalculateAllRotations(opts = {}){
         (_pinsByKey[k] = _pinsByKey[k] || []).push(b);
       });
     }
-  } catch(e){ console.warn('[recalcAll] pins pre-fetch failed:', e.message); }
+  } catch(e){
+    // Build 669: the rows are the only source of a BN's breaks here now, so a failed read may not become "no breaks"
+    // and get SAVED to every shift (660's rule — same as bulkSaveUnitsAndRotations). Nothing has been written yet.
+    hideBusy();
+    toast(`Rotations NOT recalculated — the bookings read failed (${(e && e.message) || 'network error'}). Nothing was written; try again.`, true);
+    return;
+  }
 
   for(const s of active){
     try {
@@ -14875,9 +14879,12 @@ async function recalculateAllRotations(opts = {}){
         try { followed += await _followBreakRows(s.BreakNurseName, String(s.ShiftDate).slice(0,10), s.ShiftType, units, _breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || [], dateSeed, _followRecsRA); } // Build 623: collected
         catch(e){ console.warn('[recalcAll] followBreakRows failed (non-fatal):', e && e.message); }
       }
-      // Use existing BN default breaks if available
-      const bnDef = getDefaultTemplate(s.BreakNurseName, s.ShiftType);
-      const bnBreakSet = bnDef && bnDef.length ? new Set(bnDef) : new Set();
+      // Build 669 (Tomas, Nov 26 11:01 PM: ↺ Recalculate dealt Erik's 11/27 Noc around his default TEMPLATE — three holes
+      // at template times where no break existed, and his two real breaks dealt to 7N/8S and offered to staff): the BN's
+      // breaks are her break ROWS, and only those — the 640 rule every other dealer already follows (recalculateRotation,
+      // bulkSaveUnitsAndRotations). A template is applied by WRITING rows (applyDefaultToShift); it never carves the
+      // rotation on its own. Same rows `_followBreakRows` just moved, keyed name|date|shift.
+      const bnBreakSet = new Set((_breaksByKey[`${s.BreakNurseName}|${String(s.ShiftDate).slice(0,10)}|${s.ShiftType}`] || []).map(b => normSlot(b.SlotTime)));
       const rotation = constrainedRotation(units, bnBreakSet, s.ShiftType, dateSeed, {
         startTime: s.StartTime, hours: s.Hours,
         bookings: _pinsByKey[`${s.BreakNurseName}|${(s.ShiftDate || '').slice(0,10)}|${s.ShiftType}`] || []
